@@ -1,0 +1,145 @@
+# ─────────────────────────────────────────────────────
+# BotParty – Docker Compose (Development)
+# ─────────────────────────────────────────────────────
+# Usage:
+#   docker compose up -d           # Start all services
+#   docker compose logs -f api     # Follow API logs
+#   docker compose down -v         # Stop & remove volumes
+# ─────────────────────────────────────────────────────
+
+services:
+  # ═══════════════════════════════════════════════════
+  # PostgreSQL
+  # ═══════════════════════════════════════════════════
+  postgres:
+    image: postgres:16-alpine
+    container_name: botparty-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: botparty
+      POSTGRES_USER: botparty
+      POSTGRES_PASSWORD: botparty_secret
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U botparty"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ═══════════════════════════════════════════════════
+  # Redis
+  # ═══════════════════════════════════════════════════
+  redis:
+    image: redis:7-alpine
+    container_name: botparty-redis
+    restart: unless-stopped
+    command: redis-server --requirepass botparty_redis_secret --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "botparty_redis_secret", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ═══════════════════════════════════════════════════
+  # LiveKit Server (SFU)
+  # ═══════════════════════════════════════════════════
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: botparty-livekit
+    restart: unless-stopped
+    command: --config /etc/livekit.yaml
+    ports:
+      - "7880:7880"   # HTTP/WS
+      - "7881:7881"   # RTC/TCP
+      - "7882:7882"   # TURN/TLS
+      - "50000-50100:50000-50100/udp"  # WebRTC UDP
+    volumes:
+      - ./docker/livekit/livekit.yaml:/etc/livekit.yaml:ro
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:7880"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ═══════════════════════════════════════════════════
+  # BotParty API (NestJS)
+  # ═══════════════════════════════════════════════════
+  api:
+    build:
+      context: .
+      dockerfile: docker/api/Dockerfile
+    container_name: botparty-api
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_URL: postgresql://botparty:botparty_secret@postgres:5432/botparty?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: botparty_redis_secret
+      JWT_SECRET: change_me_in_production_min_32_chars_long!!
+      JWT_REFRESH_SECRET: change_me_refresh_secret_min_32_chars!!
+      JWT_EXPIRES_IN: 15m
+      JWT_REFRESH_EXPIRES_IN: 7d
+      LIVEKIT_API_KEY: devkey
+      LIVEKIT_API_SECRET: secret_that_is_at_least_32_characters_long
+      LIVEKIT_URL: ws://livekit:7880
+      CORS_ORIGIN: http://localhost:3000
+      THROTTLE_TTL: 60000
+      THROTTLE_LIMIT: 100
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      livekit:
+        condition: service_healthy
+
+  # ═══════════════════════════════════════════════════
+  # BotParty Web (Next.js)
+  # ═══════════════════════════════════════════════════
+  web:
+    build:
+      context: .
+      dockerfile: docker/web/Dockerfile
+    container_name: botparty-web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+      NEXT_PUBLIC_WS_URL: ws://localhost:4000
+      NEXT_PUBLIC_LIVEKIT_URL: ws://localhost:7880
+    depends_on:
+      - api
+
+  # ═══════════════════════════════════════════════════
+  # NGINX Reverse Proxy
+  # ═══════════════════════════════════════════════════
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: botparty-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./docker/nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - web
+      - api
+      - livekit
+
+volumes:
+  postgres_data:
+  redis_data:

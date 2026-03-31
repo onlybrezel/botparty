@@ -1,0 +1,30 @@
+{
+  "name": "botparty",
+  "version": "0.1.0",
+  "private": true,
+  "description": "BotParty – Real-time robot teleoperation platform",
+  "license": "MIT",
+  "packageManager": "pnpm@9.15.4",
+  "engines": {
+    "node": ">=24.0.0",
+    "pnpm": ">=9.15.0"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "db:generate": "turbo run db:generate",
+    "db:push": "turbo run db:push",
+    "db:migrate": "turbo run db:migrate",
+    "db:studio": "pnpm --filter @botparty/prisma db:studio",
+    "clean": "turbo run clean && rm -rf node_modules",
+    "typecheck": "turbo run typecheck"
+  },
+  "devDependencies": {
+    "@botparty/eslint-config": "workspace:*",
+    "@botparty/tsconfig": "workspace:*",
+    "prettier": "^3.5.3",
+    "turbo": "^2.5.0"
+  }
+}

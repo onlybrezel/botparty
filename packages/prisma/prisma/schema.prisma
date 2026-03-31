@@ -1,0 +1,311 @@
+// ─────────────────────────────────────────────────────
+// BotParty – Prisma Schema
+// ─────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ═════════════════════════════════════════════════════
+// ENUMS
+// ═════════════════════════════════════════════════════
+
+enum Role {
+  ADMIN
+  MODERATOR
+  CREATOR
+  USER
+}
+
+enum RobotVisibility {
+  PUBLIC
+  UNLISTED
+  PRIVATE
+}
+
+enum RobotAccessMode {
+  OPEN
+  PASSWORD
+  LINK_ONLY
+  ALLOWED_USERS
+}
+
+enum QueueMode {
+  FIRST_COME
+  VOTING
+  DISABLED
+}
+
+enum RobotStatus {
+  ONLINE
+  OFFLINE
+  BUSY
+  MAINTENANCE
+}
+
+enum TransactionType {
+  DEPOSIT
+  WITHDRAWAL
+  PRIORITY_QUEUE
+  FEATURED_ROBOT
+  BATTLE_ENTRY
+  REWARD
+}
+
+enum SessionStatus {
+  ACTIVE
+  ENDED
+  RECORDING
+}
+
+// ═════════════════════════════════════════════════════
+// USER
+// ═════════════════════════════════════════════════════
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  username     String   @unique @db.VarChar(32)
+  email        String   @unique @db.VarChar(255)
+  passwordHash String   @db.VarChar(255)
+  displayName  String?  @db.VarChar(64)
+  avatarUrl    String?  @db.VarChar(512)
+  role         Role     @default(USER)
+  balance      Int      @default(0) // Virtual currency balance
+  credits      Int      @default(0) // Earned credits
+  tokenVersion Int      @default(0) // For refresh token invalidation
+  isActive     Boolean  @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  robots            Robot[]
+  transactions      Transaction[]
+  sessions          Session[]         @relation("SessionUser")
+  queueEntries      QueueEntry[]
+  chatMessages      ChatMessage[]
+  allowedRobots     RobotAllowedUser[]
+  analyticsEvents   AnalyticsEvent[]
+
+  @@index([email])
+  @@index([username])
+  @@map("users")
+}
+
+// ═════════════════════════════════════════════════════
+// ROBOT
+// ═════════════════════════════════════════════════════
+
+model Robot {
+  id              String          @id @default(uuid()) @db.Uuid
+  name            String          @db.VarChar(64)
+  slug            String          @unique @db.VarChar(80)
+  description     String?         @db.VarChar(2000)
+  thumbnailUrl    String?         @db.VarChar(512)
+  status          RobotStatus     @default(OFFLINE)
+
+  // ─── Access & Visibility ───────────────────────────
+  visibility      RobotVisibility @default(PUBLIC)
+  accessMode      RobotAccessMode @default(OPEN)
+  accessPassword  String?         @db.VarChar(255) // Hashed
+  inviteCode      String?         @unique @db.VarChar(32)
+
+  // ─── Queue Settings ────────────────────────────────
+  queueMode       QueueMode       @default(FIRST_COME)
+  maxTurnTime     Int             @default(60000)  // ms
+  maxViewers      Int             @default(1000)
+  maxControllers  Int             @default(10)
+
+  // ─── Streaming ─────────────────────────────────────
+  streamKey       String          @unique @db.VarChar(64)
+  claimToken      String          @unique @db.VarChar(64)
+  livekitRoom     String?         @db.VarChar(128)
+
+  // ─── Schedule ──────────────────────────────────────
+  scheduleStart   DateTime?       // Zeitfenster Start
+  scheduleEnd     DateTime?       // Zeitfenster Ende
+  timezone        String          @default("UTC") @db.VarChar(64)
+
+  // ─── Features ──────────────────────────────────────
+  isFeatured      Boolean         @default(false)
+  recordSessions  Boolean         @default(false)
+  aiAssistEnabled Boolean         @default(false)
+  ros2Enabled     Boolean         @default(false)
+  swarmGroupId    String?         @db.Uuid
+
+  // ─── Stats (denormalized for performance) ──────────
+  viewerCount     Int             @default(0)
+  totalSessions   Int             @default(0)
+  totalViewers    Int             @default(0)
+
+  // ─── Meta ──────────────────────────────────────────
+  tags            String[]        @default([])
+  metadata        Json?           // Flexible extra config
+  lastOnlineAt    DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  // ─── Owner ─────────────────────────────────────────
+  ownerId         String          @db.Uuid
+  owner           User            @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  // ─── Swarm Group ───────────────────────────────────
+  swarmGroup      SwarmGroup?     @relation(fields: [swarmGroupId], references: [id])
+
+  // Relations
+  sessions        Session[]
+  queueEntries    QueueEntry[]
+  chatMessages    ChatMessage[]
+  allowedUsers    RobotAllowedUser[]
+  analyticsEvents AnalyticsEvent[]
+
+  @@index([ownerId])
+  @@index([status])
+  @@index([visibility, status])
+  @@index([slug])
+  @@map("robots")
+}
+
+// ═════════════════════════════════════════════════════
+// ROBOT ALLOWED USERS (for ALLOWED_USERS access mode)
+// ═════════════════════════════════════════════════════
+
+model RobotAllowedUser {
+  id        String   @id @default(uuid()) @db.Uuid
+  robotId   String   @db.Uuid
+  userId    String   @db.Uuid
+  robot     Robot    @relation(fields: [robotId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([robotId, userId])
+  @@map("robot_allowed_users")
+}
+
+// ═════════════════════════════════════════════════════
+// TRANSACTION (Virtual Currency)
+// ═════════════════════════════════════════════════════
+
+model Transaction {
+  id          String          @id @default(uuid()) @db.Uuid
+  userId      String          @db.Uuid
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        TransactionType
+  amount      Int             // Positive = credit, Negative = debit
+  balanceAfter Int            // Balance snapshot after transaction
+  description String?         @db.VarChar(255)
+  metadata    Json?
+  createdAt   DateTime        @default(now())
+
+  @@index([userId])
+  @@index([type])
+  @@index([createdAt])
+  @@map("transactions")
+}
+
+// ═════════════════════════════════════════════════════
+// SESSION
+// ═════════════════════════════════════════════════════
+
+model Session {
+  id            String        @id @default(uuid()) @db.Uuid
+  robotId       String        @db.Uuid
+  robot         Robot         @relation(fields: [robotId], references: [id], onDelete: Cascade)
+  userId        String        @db.Uuid
+  user          User          @relation("SessionUser", fields: [userId], references: [id], onDelete: Cascade)
+  status        SessionStatus @default(ACTIVE)
+  startedAt     DateTime      @default(now())
+  endedAt       DateTime?
+  durationMs    Int?
+  recordingUrl  String?       @db.VarChar(512)
+  peakViewers   Int           @default(0)
+  totalCommands Int           @default(0)
+  avgLatencyMs  Float?
+  metadata      Json?
+  createdAt     DateTime      @default(now())
+
+  @@index([robotId])
+  @@index([userId])
+  @@index([startedAt])
+  @@map("sessions")
+}
+
+// ═════════════════════════════════════════════════════
+// QUEUE
+// ═════════════════════════════════════════════════════
+
+model QueueEntry {
+  id         String   @id @default(uuid()) @db.Uuid
+  robotId    String   @db.Uuid
+  robot      Robot    @relation(fields: [robotId], references: [id], onDelete: Cascade)
+  userId     String   @db.Uuid
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  position   Int
+  isPriority Boolean  @default(false)
+  votes      Int      @default(0)
+  joinedAt   DateTime @default(now())
+  expiresAt  DateTime?
+
+  @@unique([robotId, userId])
+  @@index([robotId, position])
+  @@map("queue_entries")
+}
+
+// ═════════════════════════════════════════════════════
+// CHAT
+// ═════════════════════════════════════════════════════
+
+model ChatMessage {
+  id        String   @id @default(uuid()) @db.Uuid
+  robotId   String   @db.Uuid
+  robot     Robot    @relation(fields: [robotId], references: [id], onDelete: Cascade)
+  userId    String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content   String   @db.VarChar(500)
+  isSystem  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([robotId, createdAt])
+  @@map("chat_messages")
+}
+
+// ═════════════════════════════════════════════════════
+// SWARM GROUP (Multi-Robot Control)
+// ═════════════════════════════════════════════════════
+
+model SwarmGroup {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @db.VarChar(64)
+  description String?  @db.VarChar(500)
+  robots      Robot[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("swarm_groups")
+}
+
+// ═════════════════════════════════════════════════════
+// ANALYTICS
+// ═════════════════════════════════════════════════════
+
+model AnalyticsEvent {
+  id        String   @id @default(uuid()) @db.Uuid
+  robotId   String?  @db.Uuid
+  robot     Robot?   @relation(fields: [robotId], references: [id], onDelete: SetNull)
+  userId    String?  @db.Uuid
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  event     String   @db.VarChar(64)  // e.g. "view", "control", "session_start"
+  payload   Json?
+  createdAt DateTime @default(now())
+
+  @@index([robotId, event, createdAt])
+  @@index([userId, event, createdAt])
+  @@index([createdAt])
+  @@map("analytics_events")
+}
