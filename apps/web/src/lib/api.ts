@@ -24,7 +24,34 @@ export interface RobotMutationInput {
   tags?: string[];
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+function resolveApiUrl() {
+  const configured = process.env.NEXT_PUBLIC_API_URL;
+
+  if (typeof window === 'undefined') {
+    return configured ?? 'http://localhost:4000';
+  }
+
+  if (!configured) {
+    return window.location.origin;
+  }
+
+  try {
+    const url = new URL(configured);
+    const isConfiguredLocalhost = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+    const isCurrentHostLocalhost =
+      window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+
+    if (isConfiguredLocalhost && !isCurrentHostLocalhost) {
+      return window.location.origin;
+    }
+  } catch {
+    return window.location.origin;
+  }
+
+  return configured;
+}
+
+const API_URL = resolveApiUrl();
 
 class ApiClient {
   private baseUrl: string;
