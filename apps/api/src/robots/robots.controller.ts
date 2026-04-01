@@ -12,6 +12,7 @@ import {
   HttpStatus,
   BadRequestException,
   UnauthorizedException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { RobotsService } from './robots.service';
@@ -132,5 +133,74 @@ export class RobotsController {
 
     await this.robotsService.touchHeartbeat(robotId);
     return { ok: true };
+  }
+
+  @Post(':id/actions')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Enqueue remote robot action (owner only)' })
+  async enqueueAction(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @Body()
+    body: {
+      type?: 'restart_video' | 'restart_control' | 'restart_chat' | 'set_log_stream';
+      durationSec?: number;
+    },
+  ) {
+    if (!body.type) {
+      throw new BadRequestException('type is required');
+    }
+    if (
+      body.type === 'set_log_stream' &&
+      body.durationSec !== undefined &&
+      (body.durationSec < 10 || body.durationSec > 900)
+    ) {
+      throw new BadRequestException('durationSec must be between 10 and 900');
+    }
+
+    return this.robotsService.enqueueAction(id, user.sub, {
+      type: body.type,
+      durationSec: body.durationSec,
+    });
+  }
+
+  @Post('actions/poll')
+  @ApiOperation({ summary: 'Robot polls pending remote actions using claim token' })
+  async pollActions(@Body() body: { claimToken?: string }) {
+    const claimToken = body.claimToken?.trim();
+    if (!claimToken) {
+      throw new BadRequestException('claimToken is required');
+    }
+    return this.robotsService.consumeActionsByClaimToken(claimToken);
+  }
+
+  @Post('logs')
+  @ApiOperation({ summary: 'Robot uploads temporary diagnostics logs using claim token' })
+  async pushLogs(@Body() body: { claimToken?: string; lines?: string[] }) {
+    const claimToken = body.claimToken?.trim();
+    if (!claimToken) {
+      throw new BadRequestException('claimToken is required');
+    }
+    if (!Array.isArray(body.lines)) {
+      throw new BadRequestException('lines must be an array');
+    }
+    return this.robotsService.ingestRobotLogs(claimToken, body.lines);
+  }
+
+  @Get(':id/logs')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get recent temporary robot logs (owner only)' })
+  async getLogs(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    try {
+      const logs = await this.robotsService.getRobotLogs(id, user.sub);
+      return { logs };
+    } catch (err) {
+      if (err instanceof ForbiddenException) {
+        throw err;
+      }
+      throw err;
+    }
   }
 }

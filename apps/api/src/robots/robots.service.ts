@@ -5,6 +5,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { RedisService } from '../redis/redis.service';
 import { createRobotSchema, updateRobotSchema } from '@botparty/shared';
 import { randomBytes } from 'crypto';
 import type { z } from 'zod';
@@ -20,6 +21,17 @@ export interface RobotAccessPolicy {
 
 export interface RobotStreamPolicy {
   targetBitrateKbps: number | null;
+}
+
+export type RobotActionType =
+  | 'restart_video'
+  | 'restart_control'
+  | 'restart_chat'
+  | 'set_log_stream';
+
+export interface RobotActionPayload {
+  type: RobotActionType;
+  durationSec?: number;
 }
 
 const DEFAULT_ACCESS_POLICY: RobotAccessPolicy = {
@@ -43,7 +55,10 @@ export class RobotsService {
   private readonly logger = new Logger(RobotsService.name);
   private readonly policyCache = new Map<string, PolicyCacheEntry>();
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
+  ) {}
 
   async create(ownerId: string, input: z.infer<typeof createRobotSchema>) {
     const data = createRobotSchema.parse(input);
@@ -190,6 +205,107 @@ export class RobotsService {
 
   async findByClaimToken(claimToken: string) {
     return this.prisma.robot.findUnique({ where: { claimToken } });
+  }
+
+  async enqueueAction(robotId: string, ownerId: string, payload: RobotActionPayload) {
+    const robot = await this.findById(robotId);
+    if (robot.ownerId !== ownerId) {
+      throw new ForbiddenException('Not your robot');
+    }
+
+    const action = {
+      id: randomBytes(8).toString('hex'),
+      type: payload.type,
+      durationSec: payload.durationSec,
+      createdAt: Date.now(),
+    };
+
+    const key = `robot:actions:${robotId}`;
+    await this.redis.rpush(key, JSON.stringify(action));
+    await this.redis.ltrim(key, -50, -1);
+    await this.redis.expire(key, 900);
+    return action;
+  }
+
+  async consumeActionsByClaimToken(claimToken: string) {
+    const robot = await this.findByClaimToken(claimToken);
+    if (!robot) {
+      throw new ForbiddenException('Invalid claim token');
+    }
+
+    const key = `robot:actions:${robot.id}`;
+    const raw = await this.redis.lrange(key, 0, -1);
+    if (raw.length === 0) {
+      return { robotId: robot.id, actions: [] as Array<Record<string, unknown>> };
+    }
+
+    await this.redis.del(key);
+    const actions = raw
+      .map((entry) => {
+        try {
+          const parsed = JSON.parse(entry) as Record<string, unknown>;
+          return parsed;
+        } catch {
+          return null;
+        }
+      })
+      .filter((entry): entry is Record<string, unknown> => entry !== null);
+
+    return { robotId: robot.id, actions };
+  }
+
+  async ingestRobotLogs(claimToken: string, lines: string[]) {
+    const robot = await this.findByClaimToken(claimToken);
+    if (!robot) {
+      throw new ForbiddenException('Invalid claim token');
+    }
+
+    if (lines.length === 0) {
+      return { ok: true };
+    }
+
+    const key = `robot:logs:${robot.id}`;
+    const now = Date.now();
+    const pipeline = this.redis.pipeline();
+
+    for (const line of lines.slice(-100)) {
+      pipeline.rpush(
+        key,
+        JSON.stringify({
+          ts: now,
+          line: line.slice(0, 1000),
+        }),
+      );
+    }
+
+    pipeline.ltrim(key, -400, -1);
+    pipeline.expire(key, 1800);
+    await pipeline.exec();
+    return { ok: true };
+  }
+
+  async getRobotLogs(robotId: string, ownerId: string) {
+    const robot = await this.findById(robotId);
+    if (robot.ownerId !== ownerId) {
+      throw new ForbiddenException('Not your robot');
+    }
+
+    const key = `robot:logs:${robotId}`;
+    const raw = await this.redis.lrange(key, 0, -1);
+    return raw
+      .map((entry) => {
+        try {
+          const parsed = JSON.parse(entry) as { ts?: number; line?: string };
+          if (!parsed.line) return null;
+          return {
+            ts: typeof parsed.ts === 'number' ? parsed.ts : Date.now(),
+            line: parsed.line,
+          };
+        } catch {
+          return null;
+        }
+      })
+      .filter((entry): entry is { ts: number; line: string } => entry !== null);
   }
 
   async getAccessPolicy(robotId: string): Promise<RobotAccessPolicy> {

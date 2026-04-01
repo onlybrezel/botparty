@@ -197,6 +197,20 @@ class ApiClient {
     );
   }
 
+  async enqueueRobotAction(
+    robotId: string,
+    data: { type: 'restart_video' | 'restart_control' | 'restart_chat' | 'set_log_stream'; durationSec?: number },
+  ) {
+    return this.request<{ id: string; type: string; createdAt: number }>(`/robots/${robotId}/actions`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getRobotLogs(robotId: string) {
+    return this.request<{ logs: Array<{ ts: number; line: string }> }>(`/robots/${robotId}/logs`);
+  }
+
   // ─── Queue ─────────────────────────────────────────────────────────────────
 
   async getQueue(robotId: string) {

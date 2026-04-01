@@ -111,6 +111,9 @@ export default function DashboardPage() {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+  const [opLoading, setOpLoading] = useState<string | null>(null);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [diagLogs, setDiagLogs] = useState<Array<{ ts: number; line: string }>>([]);
   const [preview, setPreview] = useState<{ token: string; url: string } | null>(null);
 
   useEffect(() => {
@@ -163,6 +166,36 @@ export default function DashboardPage() {
       .then(({ token, livekitUrl }) => setPreview({ token, url: livekitUrl }))
       .catch(() => {});
   }, [selectedRobot?.id, selectedRobot?.status, accessToken]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!accessToken || !selectedRobot) {
+      setDiagLogs([]);
+      return;
+    }
+
+    let active = true;
+    const poll = async () => {
+      try {
+        api.setToken(accessToken);
+        const result = await api.getRobotLogs(selectedRobot.id);
+        if (active) {
+          setDiagLogs(result.logs.slice(-150));
+        }
+      } catch {
+        // ignore polling errors
+      }
+    };
+
+    poll().catch(() => {});
+    const interval = setInterval(() => {
+      poll().catch(() => {});
+    }, 3000);
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [selectedRobot?.id, accessToken]);
 
   const handleCreate = async (event: FormEvent) => {
     event.preventDefault();
@@ -265,6 +298,43 @@ export default function DashboardPage() {
       setStatus('Claim token copied to clipboard.');
     } catch {
       setError('Clipboard permission denied. Copy token manually.');
+    }
+  };
+
+  const runRobotAction = async (
+    type: 'restart_video' | 'restart_control' | 'restart_chat' | 'set_log_stream',
+    durationSec?: number,
+  ) => {
+    if (!accessToken || !selectedRobot) return;
+    setOpLoading(type);
+    setStatus(null);
+    setError(null);
+    try {
+      api.setToken(accessToken);
+      await api.enqueueRobotAction(selectedRobot.id, { type, durationSec });
+      if (type === 'set_log_stream') {
+        setStatus(`Temporary diagnostics enabled for ${durationSec ?? 120}s.`);
+      } else {
+        setStatus(`Action queued: ${type}`);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to queue action');
+    } finally {
+      setOpLoading(null);
+    }
+  };
+
+  const refreshLogs = async () => {
+    if (!accessToken || !selectedRobot) return;
+    setLogsLoading(true);
+    try {
+      api.setToken(accessToken);
+      const result = await api.getRobotLogs(selectedRobot.id);
+      setDiagLogs(result.logs.slice(-150));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load logs');
+    } finally {
+      setLogsLoading(false);
     }
   };
 
@@ -563,6 +633,73 @@ export default function DashboardPage() {
                         <RefreshCcw className="h-3.5 w-3.5" />
                         {regenerating ? 'Regenerating...' : 'Regenerate token'}
                       </button>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
+                    <p className="mb-2 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Remote Operations (Pi)</p>
+                    <p className="mb-3 text-xs text-[var(--muted-foreground)]">
+                      Run maintenance actions on the robot client without SSH. Commands are queued and picked up on the next poll cycle.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => runRobotAction('restart_video')}
+                        disabled={opLoading !== null}
+                        className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs disabled:opacity-60"
+                      >
+                        {opLoading === 'restart_video' ? 'Queueing...' : 'Restart Video'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => runRobotAction('restart_control')}
+                        disabled={opLoading !== null}
+                        className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs disabled:opacity-60"
+                      >
+                        {opLoading === 'restart_control' ? 'Queueing...' : 'Restart Control'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => runRobotAction('restart_chat')}
+                        disabled={opLoading !== null}
+                        className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs disabled:opacity-60"
+                      >
+                        {opLoading === 'restart_chat' ? 'Queueing...' : 'Restart Chat Bridge'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => runRobotAction('set_log_stream', 120)}
+                        disabled={opLoading !== null}
+                        className="inline-flex items-center gap-2 rounded-lg border border-amber-500/40 px-3 py-1.5 text-xs text-amber-300 disabled:opacity-60"
+                      >
+                        {opLoading === 'set_log_stream' ? 'Queueing...' : 'Enable 2min Diagnostics'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
+                    <div className="mb-2 flex items-center justify-between">
+                      <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Temporary Diagnostics</p>
+                      <button
+                        type="button"
+                        onClick={refreshLogs}
+                        disabled={logsLoading}
+                        className="rounded border border-[var(--border)] px-2 py-1 text-[10px] text-[var(--muted-foreground)] disabled:opacity-60"
+                      >
+                        {logsLoading ? 'Loading...' : 'Refresh'}
+                      </button>
+                    </div>
+                    <p className="mb-2 text-xs text-[var(--muted-foreground)]">
+                      Ephemeral logs from Pi (auto-expire, no long-term storage). Last {diagLogs.length} lines shown.
+                    </p>
+                    <div className="max-h-56 overflow-auto rounded border border-[var(--border)] bg-black/70 p-2 font-mono text-[11px] leading-5 text-emerald-300">
+                      {diagLogs.length === 0 ? (
+                        <p className="text-[var(--muted-foreground)]">No diagnostics logs yet. Trigger "Enable 2min Diagnostics".</p>
+                      ) : (
+                        diagLogs.map((row, idx) => (
+                          <p key={`${row.ts}-${idx}`}>[{new Date(row.ts).toLocaleTimeString()}] {row.line}</p>
+                        ))
+                      )}
                     </div>
                   </div>
 
