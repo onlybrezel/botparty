@@ -25,7 +25,7 @@ export default async function HomePage() {
   return (
     <>
       {/* Hero */}
-      <section className="relative overflow-hidden">
+      <section className="relative overflow-hidden border-b border-[var(--border)]/60">
         {/* Background gradient */}
         <div
           className="pointer-events-none absolute inset-0 -z-10"
@@ -35,7 +35,7 @@ export default async function HomePage() {
           }}
         />
 
-        <div className="mx-auto max-w-5xl px-4 py-20 text-center sm:py-28">
+        <div className="mx-auto flex min-h-[calc(100vh-12rem)] max-w-5xl flex-col justify-center px-4 py-16 text-center sm:py-20">
           <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-violet-500/30 bg-violet-500/10 px-3 py-1 text-sm text-violet-300">
             <span className="h-1.5 w-1.5 rounded-full bg-[var(--online)] animate-pulse-dot" />
             {onlineCount > 0
@@ -83,7 +83,7 @@ export default async function HomePage() {
 
       {/* Featured robots */}
       {featured.length > 0 && (
-        <section className="mx-auto max-w-7xl px-4 pb-20">
+        <section className="mx-auto max-w-7xl px-4 py-16 sm:py-20">
           <div className="mb-6 flex items-center justify-between">
             <h2 className="text-xl font-semibold">Live now</h2>
             <Link
@@ -103,7 +103,7 @@ export default async function HomePage() {
 
       {/* How it works */}
       <section className="border-t border-[var(--border)]">
-        <div className="mx-auto max-w-5xl px-4 py-16">
+        <div className="mx-auto max-w-5xl px-4 py-16 sm:py-20">
           <h2 className="mb-10 text-center text-xl font-semibold text-[var(--muted-foreground)]">
             How it works
           </h2>
@@ -140,7 +140,7 @@ export default async function HomePage() {
         </div>
       </section>
 
-      <section className="mx-auto max-w-7xl px-4 pb-20">
+      <section className="mx-auto max-w-7xl px-4 pb-16 sm:pb-20">
         <div className="grid grid-cols-1 gap-4 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6 sm:grid-cols-3">
           <div className="rounded-xl bg-[var(--background)] p-4">
             <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Control latency target</p>

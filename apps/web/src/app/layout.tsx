@@ -23,9 +23,9 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className="dark">
-      <body className={`${inter.variable} min-h-screen bg-[var(--background)] text-[var(--foreground)] antialiased`}>
+      <body className={`${inter.variable} flex min-h-screen flex-col bg-[var(--background)] text-[var(--foreground)] antialiased`}>
         <Nav />
-        <main>{children}</main>
+        <main className="flex-1">{children}</main>
         <footer className="border-t border-[var(--border)] py-6 text-center text-sm text-[var(--muted-foreground)]">
           BotParty &mdash; MIT license &mdash;{' '}
           <a

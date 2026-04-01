@@ -19,8 +19,8 @@ export default function Nav() {
   const isActive = (href: string) => pathname === href || pathname.startsWith(href + '/');
 
   return (
-    <header className="sticky top-0 z-50 border-b border-[var(--border)] bg-[var(--background)]/90 backdrop-blur-md">
-      <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4">
+    <header className="sticky top-0 z-50 border-b border-[var(--border)] bg-[var(--background)]/92 backdrop-blur-md">
+      <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         {/* Logo */}
         <Link href="/" className="flex items-center gap-2 font-bold text-lg tracking-tight">
           <span
@@ -35,10 +35,10 @@ export default function Nav() {
         </Link>
 
         {/* Nav links */}
-        <nav className="hidden items-center gap-1 sm:flex">
+        <nav className="hidden items-center gap-2 sm:flex">
           <Link
             href="/explore"
-            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+            className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
               isActive('/explore')
                 ? 'bg-[var(--muted)] text-[var(--foreground)]'
                 : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
@@ -48,7 +48,7 @@ export default function Nav() {
           </Link>
           <Link
             href="/leaderboard"
-            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+            className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
               isActive('/leaderboard')
                 ? 'bg-[var(--muted)] text-[var(--foreground)]'
                 : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
