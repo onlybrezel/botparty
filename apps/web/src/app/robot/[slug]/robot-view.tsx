@@ -3,6 +3,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import Link from 'next/link';
 import type { RobotPublic } from '@botparty/shared';
+import { AlertTriangle, Bot, Radio, Video, Gamepad2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/store';
 import { LiveKitPlayer } from '@/components/livekit-player';
@@ -304,7 +305,9 @@ export default function RobotView({ robot }: Props) {
               <div className="flex h-full flex-col items-center justify-center gap-3 text-[var(--muted-foreground)]">
                 {isOnline ? (
                   <>
-                    <div className="text-3xl opacity-30">📡</div>
+                    <div className="rounded-xl border border-[var(--border)] bg-[var(--muted)] p-3">
+                      <Radio className="h-7 w-7 text-violet-300" />
+                    </div>
                     {accessToken ? (
                       <p className="text-sm">Connecting to video stream...</p>
                     ) : (
@@ -321,7 +324,9 @@ export default function RobotView({ robot }: Props) {
                   </>
                 ) : (
                   <>
-                    <div className="text-3xl opacity-20">🤖</div>
+                    <div className="rounded-xl border border-[var(--border)] bg-[var(--muted)] p-3">
+                      <Bot className="h-7 w-7 text-[var(--muted-foreground)]" />
+                    </div>
                     <p className="text-sm">Robot is offline</p>
                   </>
                 )}
@@ -347,7 +352,10 @@ export default function RobotView({ robot }: Props) {
                   : 'border border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
               }`}
             >
-              Controls
+              <span className="inline-flex items-center gap-1">
+                <Gamepad2 className="h-3.5 w-3.5" />
+                Controls
+              </span>
             </button>
             <button
               onClick={() => { setFocusMode('chat'); setTimeout(() => chatInputRef.current?.focus(), 50); }}
@@ -450,7 +458,7 @@ export default function RobotView({ robot }: Props) {
                 onMouseDown={triggerEStop}
                 className="flex h-14 w-24 flex-col items-center justify-center rounded-xl bg-[var(--destructive)] text-xs font-black text-white shadow-lg shadow-red-500/20 transition hover:brightness-110 active:scale-95 select-none"
               >
-                <span className="text-lg leading-none">⬛</span>
+                  <AlertTriangle className="h-4 w-4" />
                 E-STOP
               </button>
             </div>
@@ -493,6 +501,21 @@ export default function RobotView({ robot }: Props) {
                 {robot.description}
               </p>
             )}
+
+            <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+              <div className="rounded-lg bg-[var(--background)] px-2 py-1.5 text-[var(--muted-foreground)]">
+                <span className="inline-flex items-center gap-1 text-[var(--foreground)]">
+                  <Video className="h-3.5 w-3.5 text-violet-300" />
+                  Live stream
+                </span>
+              </div>
+              <div className="rounded-lg bg-[var(--background)] px-2 py-1.5 text-[var(--muted-foreground)]">
+                <span className="inline-flex items-center gap-1 text-[var(--foreground)]">
+                  <Gamepad2 className="h-3.5 w-3.5 text-violet-300" />
+                  Queue control
+                </span>
+              </div>
+            </div>
 
             {robot.tags.length > 0 && (
               <div className="mt-3 flex flex-wrap gap-1">

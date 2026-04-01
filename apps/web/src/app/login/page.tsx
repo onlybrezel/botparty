@@ -5,6 +5,10 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/store';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 type Mode = 'login' | 'register';
 
@@ -68,129 +72,182 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-[calc(100vh-8rem)] items-center justify-center px-4 py-12">
-      <div className="w-full max-w-sm">
-        {/* Header */}
-        <div className="mb-7 text-center">
-          <Link href="/" className="mb-4 inline-flex items-center gap-2 text-lg font-bold">
-            <span
-              className="flex h-8 w-8 items-center justify-center rounded-lg text-sm"
-              style={{ background: 'var(--primary)' }}
-            >
-              ⚡
-            </span>
-            <span className="bg-gradient-to-r from-violet-400 to-purple-300 bg-clip-text text-transparent">
-              BotParty
-            </span>
-          </Link>
-          <h1 className="mt-4 text-2xl font-bold">
-            {mode === 'login' ? 'Welcome back' : 'Create your account'}
-          </h1>
-          <p className="mt-1.5 text-sm text-[var(--muted-foreground)]">
-            {mode === 'login'
-              ? 'Sign in to start driving robots'
-              : 'Join BotParty — it only takes a minute'}
+    <div className="relative min-h-[calc(100vh-8rem)] overflow-hidden px-4 py-12 sm:px-6 lg:px-8">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            'radial-gradient(48rem 32rem at 12% 12%, rgba(124,58,237,0.18), transparent 60%), radial-gradient(32rem 24rem at 88% 78%, rgba(14,165,233,0.16), transparent 60%)',
+        }}
+      />
+
+      <div className="relative mx-auto grid w-full max-w-6xl gap-8 lg:grid-cols-2">
+        <section className="hidden rounded-2xl border border-[var(--border)] bg-[var(--card)]/70 p-8 backdrop-blur-sm lg:block">
+          <p className="mb-4 inline-flex items-center rounded-full border border-violet-500/30 bg-violet-500/10 px-3 py-1 text-xs font-semibold text-violet-300">
+            LIVE ROBOT TELEOPERATION
           </p>
-        </div>
+          <h1 className="text-4xl font-black leading-tight tracking-tight text-[var(--foreground)]">
+            Human-to-human control.
+            <br />
+            Real robots.
+            <br />
+            Zero fluff.
+          </h1>
+          <p className="mt-4 max-w-md text-sm leading-relaxed text-[var(--muted-foreground)]">
+            Join active rooms, take your queue turn, and control bots in real time with low-latency
+            video and responsive inputs.
+          </p>
 
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {mode === 'register' && (
-            <div>
-              <label className="mb-1.5 block text-sm font-medium" htmlFor="username">
-                Username
-              </label>
-              <input
-                ref={usernameRef}
-                id="username"
-                type="text"
-                required
-                minLength={3}
-                maxLength={32}
-                pattern="[a-zA-Z0-9_-]+"
-                autoComplete="username"
-                className="w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-4 py-2.5 text-sm outline-none transition-colors focus:border-[var(--primary)]"
-                placeholder="cool_maker_42"
-              />
+          <div className="mt-8 grid gap-3">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--background)]/70 p-4">
+              <p className="text-xs uppercase tracking-wider text-[var(--muted-foreground)]">Realtime stack</p>
+              <p className="mt-1 text-sm font-semibold">LiveKit + WebSocket + Queue fairness</p>
             </div>
-          )}
-
-          <div>
-            <label className="mb-1.5 block text-sm font-medium" htmlFor="email">
-              Email
-            </label>
-            <input
-              ref={emailRef}
-              id="email"
-              type="email"
-              required
-              autoComplete={mode === 'login' ? 'email' : 'new-email'}
-              className="w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-4 py-2.5 text-sm outline-none transition-colors focus:border-[var(--primary)]"
-              placeholder="you@example.com"
-            />
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--background)]/70 p-4">
+              <p className="text-xs uppercase tracking-wider text-[var(--muted-foreground)]">Control safety</p>
+              <p className="mt-1 text-sm font-semibold">Global emergency stop and rate limits</p>
+            </div>
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--background)]/70 p-4">
+              <p className="text-xs uppercase tracking-wider text-[var(--muted-foreground)]">Access model</p>
+              <p className="mt-1 text-sm font-semibold">Open, password or allowlist per robot</p>
+            </div>
           </div>
+        </section>
 
-          <div>
-            <div className="mb-1.5 flex items-center justify-between">
-              <label className="text-sm font-medium" htmlFor="password">
-                Password
-              </label>
-              {mode === 'login' && (
-                <Link href="/forgot-password" className="text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors">
-                  Forgot password?
-                </Link>
+        <Card className="w-full rounded-2xl border-[var(--border)] bg-[var(--card)]/95 shadow-2xl shadow-black/30">
+          <CardContent className="p-6 sm:p-8">
+            <div className="mb-6 text-center">
+              <Link href="/" className="inline-flex items-center gap-2 text-lg font-bold">
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--primary)] text-sm font-black text-white">
+                  BP
+                </span>
+                <span className="bg-gradient-to-r from-violet-300 via-violet-400 to-cyan-300 bg-clip-text text-transparent">
+                  BotParty
+                </span>
+              </Link>
+              <h2 className="mt-4 text-2xl font-extrabold tracking-tight">
+                {mode === 'login' ? 'Willkommen zurueck' : 'Konto erstellen'}
+              </h2>
+              <p className="mt-1 text-sm text-[var(--muted-foreground)]">
+                {mode === 'login'
+                  ? 'Melde dich an und fahr direkt los.'
+                  : 'Registriere dich und tritt aktiven Sessions bei.'}
+              </p>
+            </div>
+
+            <div className="mb-6 grid grid-cols-2 rounded-xl border border-[var(--border)] bg-[var(--background)] p-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('login');
+                  setError(null);
+                }}
+                className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
+                  mode === 'login'
+                    ? 'bg-[var(--primary)] text-white'
+                    : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+                }`}
+              >
+                Sign in
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('register');
+                  setError(null);
+                }}
+                className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
+                  mode === 'register'
+                    ? 'bg-[var(--primary)] text-white'
+                    : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+                }`}
+              >
+                Create account
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {mode === 'register' && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="username">Username</Label>
+                  <Input
+                    ref={usernameRef}
+                    id="username"
+                    type="text"
+                    required
+                    minLength={3}
+                    maxLength={32}
+                    pattern="[a-zA-Z0-9_-]+"
+                    autoComplete="username"
+                    placeholder="cool_maker_42"
+                  />
+                </div>
               )}
-            </div>
-            <input
-              ref={passwordRef}
-              id="password"
-              type="password"
-              required
-              minLength={8}
-              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-              className="w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-4 py-2.5 text-sm outline-none transition-colors focus:border-[var(--primary)]"
-              placeholder="••••••••"
-            />
-          </div>
 
-          {error && (
-            <div className="rounded-lg border border-[var(--destructive)]/30 bg-[var(--destructive)]/10 px-4 py-2.5 text-sm text-[var(--destructive)]">
-              {error}
-            </div>
-          )}
+              <div className="space-y-1.5">
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  ref={emailRef}
+                  id="email"
+                  type="email"
+                  required
+                  autoComplete={mode === 'login' ? 'email' : 'new-email'}
+                  placeholder="you@example.com"
+                />
+              </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="mt-1 w-full rounded-lg bg-[var(--primary)] py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--primary-hover)] disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            {loading ? (
-              <span className="flex items-center justify-center gap-2">
-                <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-                {mode === 'login' ? 'Signing in...' : 'Creating account...'}
-              </span>
-            ) : mode === 'login' ? (
-              'Sign in'
-            ) : (
-              'Create account'
-            )}
-          </button>
-        </form>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="password">Password</Label>
+                  {mode === 'login' && (
+                    <Link
+                      href="/forgot-password"
+                      className="text-xs text-[var(--muted-foreground)] transition hover:text-[var(--foreground)]"
+                    >
+                      Forgot password?
+                    </Link>
+                  )}
+                </div>
+                <Input
+                  ref={passwordRef}
+                  id="password"
+                  type="password"
+                  required
+                  minLength={8}
+                  autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                  placeholder="********"
+                />
+              </div>
 
-        {/* Toggle */}
-        <p className="mt-6 text-center text-sm text-[var(--muted-foreground)]">
-          {mode === 'login' ? "Don't have an account?" : 'Already have an account?'}{' '}
-          <button
-            type="button"
-            onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(null); }}
-            className="font-medium text-violet-400 hover:text-violet-300 transition-colors"
-          >
-            {mode === 'login' ? 'Sign up' : 'Sign in'}
-          </button>
-        </p>
+              {error && (
+                <div className="rounded-lg border border-[var(--destructive)]/40 bg-[var(--destructive)]/10 px-3 py-2 text-sm text-[var(--destructive)]">
+                  {error}
+                </div>
+              )}
+
+              <Button type="submit" disabled={loading} className="mt-2 h-11 w-full text-sm">
+                {loading ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    {mode === 'login' ? 'Signing in...' : 'Creating account...'}
+                  </span>
+                ) : mode === 'login' ? (
+                  'Weiter zu den Robots'
+                ) : (
+                  'Account erstellen'
+                )}
+              </Button>
+            </form>
+
+            <p className="mt-6 text-center text-xs text-[var(--muted-foreground)]">
+              Mit dem Login stimmst du unseren Plattformregeln zu. Sei fair in Queue und Chat.
+            </p>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
