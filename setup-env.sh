@@ -278,6 +278,7 @@ if [[ "${USE_SSL:-n}" == "y" ]]; then
   if [[ -f "$NGINX_TEMPLATE" ]]; then
     sed "s/__DOMAIN__/${DOMAIN}/g" "$NGINX_TEMPLATE" > docker/nginx/nginx.ssl.conf
     success "Generated docker/nginx/nginx.ssl.conf for ${DOMAIN}."
+    info "LiveKit signaling will be proxied on /rtc and /twirp via nginx."
   else
     warn "Template $NGINX_TEMPLATE not found — nginx will use the default HTTP config."
   fi
