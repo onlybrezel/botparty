@@ -69,6 +69,8 @@ export class LivekitService {
   }
 
   getLivekitUrl(): string {
-    return this.livekitUrl;
+    // LIVEKIT_PUBLIC_URL is the URL returned to browser clients.
+    // Falls back to LIVEKIT_URL if not set.
+    return this.config.get<string>('LIVEKIT_PUBLIC_URL') ?? this.livekitUrl;
   }
 }

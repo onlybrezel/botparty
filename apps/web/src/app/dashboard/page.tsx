@@ -2,9 +2,10 @@
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Bot, Copy, RefreshCcw, Save, Trash2, Plus } from 'lucide-react';
+import { Bot, Copy, ExternalLink, RefreshCcw, Save, Trash2, Plus } from 'lucide-react';
 import { api, type RobotManaged } from '@/lib/api';
 import { useAuth } from '@/lib/store';
+import { LiveKitPlayer } from '@/components/livekit-player';
 
 type RobotFormState = {
   name: string;
@@ -83,6 +84,7 @@ export default function DashboardPage() {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+  const [preview, setPreview] = useState<{ token: string; url: string } | null>(null);
 
   useEffect(() => {
     if (!accessToken) {
@@ -122,6 +124,18 @@ export default function DashboardPage() {
     if (!selectedRobot) return;
     setEditForm(formFromRobot(selectedRobot));
   }, [selectedRobot]);
+
+  useEffect(() => {
+    if (!selectedRobot || !accessToken || selectedRobot.status !== 'ONLINE') {
+      setPreview(null);
+      return;
+    }
+    setPreview(null);
+    api.setToken(accessToken);
+    api.getViewerToken(selectedRobot.id, false)
+      .then(({ token, livekitUrl }) => setPreview({ token, url: livekitUrl }))
+      .catch(() => {});
+  }, [selectedRobot?.id, selectedRobot?.status, accessToken]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleCreate = async (event: FormEvent) => {
     event.preventDefault();
@@ -325,6 +339,41 @@ export default function DashboardPage() {
 
             <div className="lg:col-span-8">
               {selectedRobot ? (
+                <>
+                  {/* Live preview */}
+                  <div className="mb-4 overflow-hidden rounded-xl border border-[var(--border)] bg-black">
+                    <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border)]">
+                      <div className="flex items-center gap-2">
+                        {selectedRobot.status === 'ONLINE' ? (
+                          <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse-dot" />
+                            LIVE
+                          </span>
+                        ) : (
+                          <span className="text-xs text-[var(--muted-foreground)]">Offline</span>
+                        )}
+                      </div>
+                      <a
+                        href={`/robot/${selectedRobot.slug}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition"
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                        Open
+                      </a>
+                    </div>
+                    <div className="relative aspect-video w-full bg-zinc-950">
+                      {preview ? (
+                        <LiveKitPlayer token={preview.token} livekitUrl={preview.url} />
+                      ) : (
+                        <div className="flex h-full items-center justify-center text-xs text-[var(--muted-foreground)]">
+                          {selectedRobot.status === 'ONLINE' ? 'Connecting...' : 'Robot is offline'}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
                 <form onSubmit={handleSave} className="space-y-3">
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <input
@@ -452,6 +501,7 @@ export default function DashboardPage() {
                     </button>
                   </div>
                 </form>
+                </>
               ) : null}
             </div>
           </div>

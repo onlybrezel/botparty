@@ -67,9 +67,12 @@ class ApiClient {
 
   private async request<T>(path: string, options: RequestInit = {}): Promise<T> {
     const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
       ...((options.headers as Record<string, string>) ?? {}),
     };
+
+    if (options.body !== undefined && !('Content-Type' in headers)) {
+      headers['Content-Type'] = 'application/json';
+    }
 
     if (this.accessToken) {
       headers['Authorization'] = `Bearer ${this.accessToken}`;
@@ -165,7 +168,7 @@ class ApiClient {
   async getViewerToken(robotId: string, control = false) {
     return this.request<{ token: string; livekitUrl: string }>(
       `/livekit/token/viewer/${robotId}?control=${control}`,
-      { method: 'POST' },
+      { method: 'POST', body: '{}' },
     );
   }
 
