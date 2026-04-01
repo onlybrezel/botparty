@@ -137,6 +137,10 @@ export class RobotsService {
     });
   }
 
+  async findByClaimToken(claimToken: string) {
+    return this.prisma.robot.findUnique({ where: { claimToken } });
+  }
+
   async getFeatured() {
     return this.prisma.robot.findMany({
       where: { isFeatured: true, visibility: 'PUBLIC' },

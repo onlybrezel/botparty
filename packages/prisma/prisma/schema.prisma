@@ -64,6 +64,21 @@ enum SessionStatus {
   RECORDING
 }
 
+enum ControlButtonAccess {
+  EVERYONE
+  QUEUE_TURN  // Only the active controller
+  MODERATOR
+  OWNER
+}
+
+enum ModerationActionType {
+  TIMEOUT
+  KICK
+  BAN
+  UNBAN
+  WARN
+}
+
 // ═════════════════════════════════════════════════════
 // USER
 // ═════════════════════════════════════════════════════
@@ -92,6 +107,8 @@ model User {
   chatMessages      ChatMessage[]
   allowedRobots     RobotAllowedUser[]
   analyticsEvents   AnalyticsEvent[]
+  moderationEntries RobotModerationEntry[]
+  givenModerations  RobotModerationEntry[] @relation("ModeratorActions")
 
   @@index([email])
   @@index([username])
@@ -164,6 +181,8 @@ model Robot {
   chatMessages    ChatMessage[]
   allowedUsers    RobotAllowedUser[]
   analyticsEvents AnalyticsEvent[]
+  controlButtons  ControlButton[]
+  moderationEntries RobotModerationEntry[]
 
   @@index([ownerId])
   @@index([status])
@@ -308,4 +327,59 @@ model AnalyticsEvent {
   @@index([userId, event, createdAt])
   @@index([createdAt])
   @@map("analytics_events")
+}
+
+// ═════════════════════════════════════════════════════
+// CONTROL BUTTONS (Dynamic button config per robot)
+// ═════════════════════════════════════════════════════
+
+model ControlButton {
+  id          String              @id @default(uuid()) @db.Uuid
+  robotId     String              @db.Uuid
+  robot       Robot               @relation(fields: [robotId], references: [id], onDelete: Cascade)
+
+  label       String              @db.VarChar(32)    // Display text on button
+  command     String              @db.VarChar(64)    // Command string sent to robot
+  hotKey      String?             @db.VarChar(8)     // Keyboard shortcut (e.g. "w", "ArrowUp")
+  icon        String?             @db.VarChar(64)    // Optional emoji or icon name
+  cooldownMs  Int                 @default(200)      // Minimum time between presses
+  access      ControlButtonAccess @default(QUEUE_TURN)
+  position    Int                 @default(0)        // Sort order
+  isEnabled   Boolean             @default(true)
+  color       String?             @db.VarChar(16)    // Optional CSS color hint
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  @@index([robotId, position])
+  @@index([robotId, isEnabled])
+  @@map("control_buttons")
+}
+
+// ═════════════════════════════════════════════════════
+// ROBOT MODERATION (Per-robot user restrictions)
+// ═════════════════════════════════════════════════════
+
+model RobotModerationEntry {
+  id          String               @id @default(uuid()) @db.Uuid
+  robotId     String               @db.Uuid
+  robot       Robot                @relation(fields: [robotId], references: [id], onDelete: Cascade)
+  userId      String               @db.Uuid
+  user        User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  action      ModerationActionType
+  reason      String?              @db.VarChar(500)
+  expiresAt   DateTime?            // null = permanent (for bans)
+  isActive    Boolean              @default(true)
+
+  // Who issued the moderation action
+  moderatorId String?              @db.Uuid
+  moderator   User?                @relation("ModeratorActions", fields: [moderatorId], references: [id], onDelete: SetNull)
+
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  @@index([robotId, userId, isActive])
+  @@index([robotId, action, isActive])
+  @@index([expiresAt])
+  @@map("robot_moderation_entries")
 }

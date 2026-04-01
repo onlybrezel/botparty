@@ -62,17 +62,41 @@ export enum ControlInputType {
   CUSTOM = 'CUSTOM',
 }
 
+// ─── Control Button Access Levels ────────────────────
+export enum ControlButtonAccess {
+  EVERYONE = 'EVERYONE',
+  QUEUE_TURN = 'QUEUE_TURN', // Only the current controller
+  MODERATOR = 'MODERATOR',
+  OWNER = 'OWNER',
+}
+
+// ─── Moderation Action Types ─────────────────────────
+export enum ModerationActionType {
+  TIMEOUT = 'TIMEOUT',
+  KICK = 'KICK',
+  BAN = 'BAN',
+  UNBAN = 'UNBAN',
+  WARN = 'WARN',
+}
+
 // ─── WebSocket Events ────────────────────────────────
 export const WS_EVENTS = {
-  // Robot
+  // Robot lifecycle
   ROBOT_STATUS: 'robot:status',
   ROBOT_CLAIM: 'robot:claim',
   ROBOT_HEARTBEAT: 'robot:heartbeat',
+  ROBOT_CONTROLS_UPDATED: 'robot:controls-updated',
 
   // Control
   CONTROL_COMMAND: 'control:command',
   CONTROL_EMERGENCY_STOP: 'control:emergency-stop',
   CONTROL_LATENCY_WARNING: 'control:latency-warning',
+
+  // Crowd presence (broadcast to all viewers)
+  PRESENCE_JOIN: 'presence:join',       // User entered the room
+  PRESENCE_LEAVE: 'presence:leave',     // User left the room
+  PRESENCE_UPDATE: 'presence:update',   // Full viewer list snapshot
+  CROWD_INPUT: 'crowd:input',           // Someone pressed a button (visual echo)
 
   // Queue
   QUEUE_JOIN: 'queue:join',
@@ -86,9 +110,20 @@ export const WS_EVENTS = {
   CHAT_MESSAGE: 'chat:message',
   CHAT_SYSTEM: 'chat:system',
 
+  // Moderation
+  MOD_TIMEOUT: 'mod:timeout',           // Temporarily mute a user
+  MOD_KICK: 'mod:kick',                 // Remove from queue + timeout
+  MOD_BAN: 'mod:ban',                   // Permanent robot-level ban
+  MOD_UNBAN: 'mod:unban',               // Lift ban
+  MOD_ACTION_BROADCAST: 'mod:action',   // Notify room of mod action
+
   // Session
   SESSION_START: 'session:start',
   SESSION_END: 'session:end',
+
+  // Internal event bus (server-side only, not exposed to clients)
+  INTERNAL_MOD_ACTION: 'internal:mod-action',
+  INTERNAL_ALERT: 'internal:alert',
 
   // Signaling
   SIGNAL_OFFER: 'signal:offer',
@@ -113,16 +148,23 @@ export const CONTROL_COMMANDS = {
 
 // ─── Limits ──────────────────────────────────────────
 export const LIMITS = {
-  MAX_TURN_TIME_MS: 300_000, // 5 min
-  MIN_TURN_TIME_MS: 10_000,  // 10 sec
+  MAX_TURN_TIME_MS: 300_000,    // 5 min
+  MIN_TURN_TIME_MS: 10_000,     // 10 sec
   DEFAULT_TURN_TIME_MS: 60_000, // 1 min
   MAX_VIEWERS: 10_000,
   MAX_CONTROLLERS: 50,
   LATENCY_WARNING_MS: 200,
   LATENCY_EMERGENCY_STOP_MS: 300,
-  MAX_CHAT_MESSAGE_LENGTH: 500,
+  MAX_CHAT_MESSAGE_LENGTH: 300,  // Matching Remo convention
   MAX_ROBOT_NAME_LENGTH: 64,
   MAX_ROBOT_DESCRIPTION_LENGTH: 2000,
   MAX_TAGS: 10,
   MAX_TAG_LENGTH: 32,
+  MAX_CONTROL_BUTTONS: 24,
+  MIN_CONTROL_COOLDOWN_MS: 50,
+  DEFAULT_CONTROL_COOLDOWN_MS: 200,
+  CHAT_RATE_LIMIT_MS: 900,       // Minimum ms between chat messages (normal users)
+  CHAT_RATE_LIMIT_ADMIN_MS: 250, // Admins & moderators
+  CHAT_HISTORY_ON_JOIN: 25,      // Messages loaded on room join
+  MOD_TIMEOUT_MAX_SEC: 3600,     // Max 1-hour timeout
 } as const;

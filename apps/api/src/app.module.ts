@@ -12,6 +12,8 @@ import { QueueModule } from './queue/queue.module';
 import { LivekitModule } from './livekit/livekit.module';
 import { GatewayModule } from './gateway/gateway.module';
 import { HealthModule } from './health/health.module';
+import { ControlsModule } from './controls/controls.module';
+import { ModerationModule } from './moderation/moderation.module';
 
 @Module({
   imports: [
@@ -42,6 +44,8 @@ import { HealthModule } from './health/health.module';
     LivekitModule,
     GatewayModule,
     HealthModule,
+    ControlsModule,
+    ModerationModule,
   ],
   providers: [
     {
