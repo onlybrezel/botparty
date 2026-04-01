@@ -23,6 +23,7 @@ out/
 *.swo
 *~
 .github/
+design-system/
 
 # OS
 .DS_Store

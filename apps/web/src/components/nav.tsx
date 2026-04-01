@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import { Zap } from 'lucide-react';
 import { useAuth } from '@/lib/store';
 
 export default function Nav() {
@@ -26,7 +27,7 @@ export default function Nav() {
             className="flex h-7 w-7 items-center justify-center rounded-lg text-sm"
             style={{ background: 'var(--primary)' }}
           >
-            ⚡
+            <Zap className="h-4 w-4 text-white" />
           </span>
           <span className="bg-gradient-to-r from-violet-400 to-purple-300 bg-clip-text text-transparent">
             BotParty

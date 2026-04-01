@@ -3,6 +3,7 @@
 import { LiveKitRoom, VideoTrack, useTracks } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 import type { TrackReference } from '@livekit/components-core';
+import { Radio } from 'lucide-react';
 
 function VideoRenderer() {
   const tracks = useTracks([{ source: Track.Source.Camera, withPlaceholder: false }]);
@@ -12,7 +13,7 @@ function VideoRenderer() {
   if (!robotTrack) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 text-[var(--muted-foreground)]">
-        <div className="text-3xl opacity-30">📡</div>
+        <Radio className="h-8 w-8 text-violet-300/60" />
         <p className="text-sm">Waiting for robot video stream...</p>
       </div>
     );

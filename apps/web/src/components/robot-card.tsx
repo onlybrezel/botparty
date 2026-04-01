@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import Image from 'next/image';
+import { Bot } from 'lucide-react';
 import type { RobotPublic } from '@botparty/shared';
 
 function StatusBadge({ status }: { status: RobotPublic['status'] }) {
@@ -55,7 +56,7 @@ export default function RobotCard({ robot }: Props) {
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center">
-            <div className="text-4xl opacity-20">🤖</div>
+            <Bot className="h-10 w-10 text-[var(--muted-foreground)]/40" />
           </div>
         )}
 
