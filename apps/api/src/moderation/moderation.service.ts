@@ -8,7 +8,6 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { ModerateUserDto } from './moderation.dto';
 import { ModerationActionType, WS_EVENTS } from '@botparty/shared';
-import { Role } from '@botparty/prisma';
 
 @Injectable()
 export class ModerationService {
@@ -32,13 +31,13 @@ export class ModerationService {
     if (!moderator) throw new NotFoundException('Moderator not found');
     if (!target) throw new NotFoundException('Target user not found');
 
-    const isSiteStaff = moderator.role === Role.ADMIN || moderator.role === Role.MODERATOR;
+    const isSiteStaff = this._isStaffRole(moderator.role);
     if (robot.ownerId !== moderatorId && !isSiteStaff) {
       throw new ForbiddenException('Only the robot owner or site staff can moderate');
     }
 
     // Prevent moderating site admins
-    if (target.role === Role.ADMIN && !isSiteStaff) {
+    if (target.role === 'ADMIN' && !isSiteStaff) {
       throw new ForbiddenException('Cannot moderate a site admin');
     }
 
@@ -158,9 +157,13 @@ export class ModerationService {
     ]);
     if (!robot) throw new NotFoundException('Robot not found');
     if (!user) throw new NotFoundException('User not found');
-    const isStaff = user.role === Role.ADMIN || user.role === Role.MODERATOR;
+    const isStaff = this._isStaffRole(user.role);
     if (robot.ownerId !== userId && !isStaff) {
       throw new ForbiddenException('Access denied');
     }
+  }
+
+  private _isStaffRole(role: string): boolean {
+    return role === 'ADMIN' || role === 'MOD' || role === 'MODERATOR';
   }
 }

@@ -1,5 +1,29 @@
 import type { RobotPublic, UserPublic } from '@botparty/shared';
 
+export interface RobotManaged extends RobotPublic {
+  claimToken: string;
+  streamKey: string;
+  accessPassword: string | null;
+  livekitRoom: string | null;
+  isFeatured: boolean;
+  recordSessions: boolean;
+  aiAssistEnabled: boolean;
+  ros2Enabled: boolean;
+  updatedAt: string;
+}
+
+export interface RobotMutationInput {
+  name?: string;
+  description?: string;
+  visibility?: 'PUBLIC' | 'UNLISTED' | 'PRIVATE';
+  accessMode?: 'OPEN' | 'PASSWORD' | 'LINK_ONLY' | 'ALLOWED_USERS';
+  queueMode?: 'FIRST_COME' | 'VOTING' | 'DISABLED';
+  maxTurnTime?: number;
+  maxViewers?: number;
+  maxControllers?: number;
+  tags?: string[];
+}
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
 class ApiClient {
@@ -80,13 +104,32 @@ class ApiClient {
   }
 
   async getMyRobots() {
-    return this.request<RobotPublic[]>('/robots/my');
+    return this.request<RobotManaged[]>('/robots/my');
   }
 
-  async createRobot(data: Record<string, unknown>) {
-    return this.request<RobotPublic>('/robots', {
+  async createRobot(data: RobotMutationInput) {
+    return this.request<RobotManaged>('/robots', {
       method: 'POST',
       body: JSON.stringify(data),
+    });
+  }
+
+  async updateRobot(id: string, data: RobotMutationInput) {
+    return this.request<RobotManaged>(`/robots/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteRobot(id: string) {
+    return this.request<void>(`/robots/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async regenerateRobotToken(id: string) {
+    return this.request<{ id: string; claimToken: string }>(`/robots/${id}/regenerate-token`, {
+      method: 'POST',
     });
   }
 

@@ -10,20 +10,23 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  BadRequestException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { RobotsService } from './robots.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { Role } from '@botparty/shared';
+import { LivekitService } from '../livekit/livekit.service';
 import type { JwtPayload } from '@botparty/shared';
 
 @ApiTags('robots')
 @Controller('robots')
 export class RobotsController {
-  constructor(private readonly robotsService: RobotsService) {}
+  constructor(
+    private readonly robotsService: RobotsService,
+    private readonly livekitService: LivekitService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'List all public robots' })
@@ -55,8 +58,7 @@ export class RobotsController {
   }
 
   @Post()
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.CREATOR, Role.ADMIN)
+  @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create a new robot' })
   async create(
@@ -93,5 +95,40 @@ export class RobotsController {
   @ApiOperation({ summary: 'Regenerate claim token' })
   async regenerateToken(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.robotsService.regenerateClaimToken(id, user.sub);
+  }
+
+  @Post('claim')
+  @ApiOperation({ summary: 'Claim a robot and get LiveKit token for hardware client' })
+  async claim(@Body() body: { claimToken?: string }) {
+    const claimToken = body.claimToken?.trim();
+    if (!claimToken) {
+      throw new BadRequestException('claimToken is required');
+    }
+
+    const robot = await this.robotsService.findByClaimToken(claimToken);
+    if (!robot) {
+      throw new UnauthorizedException('Invalid claim token');
+    }
+
+    const token = await this.livekitService.generateRobotToken(robot.id, robot.name);
+    await this.robotsService.updateStatus(robot.id, 'ONLINE');
+
+    return {
+      robotId: robot.id,
+      token,
+      livekitUrl: this.livekitService.getLivekitUrl(),
+    };
+  }
+
+  @Post('heartbeat')
+  @ApiOperation({ summary: 'Heartbeat from robot hardware client' })
+  async heartbeat(@Body() body: { robotId?: string }) {
+    const robotId = body.robotId?.trim();
+    if (!robotId) {
+      throw new BadRequestException('robotId is required');
+    }
+
+    await this.robotsService.touchHeartbeat(robotId);
+    return { ok: true };
   }
 }

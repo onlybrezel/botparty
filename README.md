@@ -14,7 +14,7 @@ Spiritually inspired by LetsRobot.tv and Remo.tv. Built from scratch with a mode
 - **Chat** — in-room messaging between the driver and viewers
 - **Crowd echo** — everyone sees button presses as they happen
 - **Configurable control buttons** — label, hotkey, icon, cooldown, per-robot
-- **RBAC** — Admin, Moderator, Creator, User roles
+- **RBAC** — Admin, Mod, User roles
 - **Emergency stop** — ESC key or automatic at >300ms latency
 - **Robot dashboard** — visibility, access mode, queue settings
 - **Python robot client** — runs on Pi, Jetson, anything with a camera and serial port
@@ -225,7 +225,7 @@ Copy `fullchain.pem` and `privkey.pem` into `docker/nginx/ssl/`, then run `bash 
 ## Security notes
 
 - JWT access tokens (15 min) + refresh tokens (7d), Argon2id password hashing
-- RBAC: Admin → Moderator → Creator → User
+- RBAC: Admin → Mod → User
 - Rate limiting on both nginx and NestJS sides (auth tighter than general API)
 - Strict CORS origin list
 - Security headers via nginx (X-Frame-Options, CSP, etc.)

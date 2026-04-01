@@ -137,6 +137,17 @@ export class RobotsService {
     });
   }
 
+  async touchHeartbeat(id: string) {
+    return this.prisma.robot.update({
+      where: { id },
+      data: {
+        status: 'ONLINE',
+        lastOnlineAt: new Date(),
+      },
+      select: { id: true },
+    });
+  }
+
   async findByClaimToken(claimToken: string) {
     return this.prisma.robot.findUnique({ where: { claimToken } });
   }

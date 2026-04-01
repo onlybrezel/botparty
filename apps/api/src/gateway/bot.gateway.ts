@@ -245,7 +245,7 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
     // Chat rate limiting
     const now = Date.now();
     const rateMs =
-      client.role === 'ADMIN' || client.role === 'MODERATOR'
+      client.role === 'ADMIN' || client.role === 'MOD' || client.role === 'MODERATOR'
         ? LIMITS.CHAT_RATE_LIMIT_ADMIN_MS
         : LIMITS.CHAT_RATE_LIMIT_MS;
     if (client.lastChatAt && now - client.lastChatAt < rateMs) return;

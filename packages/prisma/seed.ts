@@ -25,23 +25,23 @@ async function main() {
   console.log(`  ✅ Admin user: ${admin.username} (${admin.email})`);
   console.log(`     Password: admin123456`);
 
-  // Create demo creator
-  const creatorPassword = await hash('creator123456');
-  const creator = await prisma.user.upsert({
-    where: { email: 'creator@botparty.io' },
+  // Create demo user
+  const userPassword = await hash('user123456');
+  const user = await prisma.user.upsert({
+    where: { email: 'user@botparty.io' },
     update: {},
     create: {
-      username: 'demo_creator',
-      email: 'creator@botparty.io',
-      passwordHash: creatorPassword,
-      displayName: 'Demo Creator',
-      role: 'CREATOR',
+      username: 'demo_user',
+      email: 'user@botparty.io',
+      passwordHash: userPassword,
+      displayName: 'Demo User',
+      role: 'USER',
       balance: 500,
       credits: 500,
     },
   });
-  console.log(`  ✅ Creator user: ${creator.username}`);
-  console.log(`     Password: creator123456`);
+  console.log(`  ✅ User: ${user.username}`);
+  console.log(`     Password: user123456`);
 
   // Create demo robot
   const robot = await prisma.robot.upsert({
@@ -51,7 +51,7 @@ async function main() {
       name: 'Demo Bot',
       slug: 'demo-bot',
       description: 'A demo robot to test the BotParty platform. Connect your own robot to replace this!',
-      ownerId: creator.id,
+      ownerId: user.id,
       streamKey: randomBytes(32).toString('hex'),
       claimToken: randomBytes(32).toString('hex'),
       visibility: 'PUBLIC',
@@ -92,7 +92,7 @@ async function main() {
   console.log('\n🎉 Seed complete!');
   console.log('\n📋 Login credentials:');
   console.log('   Admin:   admin@botparty.io   / admin123456');
-  console.log('   Creator: creator@botparty.io / creator123456');
+  console.log('   User:    user@botparty.io    / user123456');
   console.log('   Web:     http://localhost:3000');
 }
 

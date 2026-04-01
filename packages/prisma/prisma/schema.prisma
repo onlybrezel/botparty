@@ -18,8 +18,7 @@ datasource db {
 
 enum Role {
   ADMIN
-  MODERATOR
-  CREATOR
+  MOD
   USER
 }
 
