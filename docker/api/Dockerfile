@@ -1,50 +1,84 @@
-# ─── Stage 1: Build ───────────────────────────────────
-FROM node:24-alpine AS builder
+# syntax=docker/dockerfile:1
+# ----------------------------------------------
+# BotParty API Dockerfile (multi-stage, BuildKit)
+# Cache mounts keep pnpm store between rebuilds so
+# only changed packages are re-fetched.
+# ----------------------------------------------
 
+# ─── base: pnpm enabled ───────────────────────
+FROM node:24-alpine AS base
 RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
 
+# ─── deps: install ALL workspace deps ─────────
+# python3/make/g++ compile native modules (argon2)
+FROM base AS deps
 WORKDIR /app
-
-# Copy workspace config
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* turbo.json ./
-COPY packages/tsconfig/ packages/tsconfig/
+RUN apk add --no-cache python3 make g++
+COPY .npmrc pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY packages/tsconfig/      packages/tsconfig/
 COPY packages/eslint-config/ packages/eslint-config/
+COPY packages/shared/package.json   packages/shared/package.json
+COPY packages/prisma/package.json   packages/prisma/package.json
+COPY apps/api/package.json          apps/api/package.json
+# Cache mount: pnpm downloads are reused across builds.
+RUN --mount=type=cache,id=pnpm-store-api,target=/pnpm/store \
+    pnpm install --frozen-lockfile --store-dir=/pnpm/store
+
+# ─── build-shared: compile @botparty/shared ───
+FROM deps AS build-shared
 COPY packages/shared/ packages/shared/
-COPY packages/prisma/ packages/prisma/
-COPY apps/api/ apps/api/
-
-# Install dependencies
-RUN pnpm install --frozen-lockfile || pnpm install
-
-# Generate Prisma client
-RUN pnpm --filter @botparty/prisma db:generate
-
-# Build shared packages first, then API
 RUN pnpm --filter @botparty/shared build
-RUN pnpm --filter @botparty/api build
 
-# ─── Stage 2: Production ─────────────────────────────
-FROM node:24-alpine AS runner
+# ─── build-api: generate Prisma + compile API ─
+FROM deps AS build-api
+COPY packages/prisma/ packages/prisma/
+COPY apps/api/        apps/api/
+COPY --from=build-shared /app/packages/shared/dist packages/shared/dist
+RUN pnpm --filter @botparty/prisma db:generate
+# Persist NestJS webpack/tsc cache between Docker builds.
+RUN --mount=type=cache,id=nest-build-cache,target=/app/node_modules/.cache \
+    pnpm --filter @botparty/api build
 
-RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
-
+# ─── prod-deps: production-only node_modules ──
+FROM base AS prod-deps
 WORKDIR /app
+RUN apk add --no-cache python3 make g++
+COPY .npmrc pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY packages/tsconfig/      packages/tsconfig/
+COPY packages/eslint-config/ packages/eslint-config/
+COPY packages/shared/package.json   packages/shared/package.json
+COPY packages/prisma/package.json   packages/prisma/package.json
+COPY apps/api/package.json          apps/api/package.json
+RUN --mount=type=cache,id=pnpm-store-api-prod,target=/pnpm/store \
+    pnpm install --frozen-lockfile --prod --store-dir=/pnpm/store
 
+# ─── runner: minimal production image ─────────
+FROM node:24-alpine AS runner
+WORKDIR /app
 ENV NODE_ENV=production
 
-# Copy built artifacts
-COPY --from=builder /app/package.json /app/pnpm-workspace.yaml ./
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/packages/prisma/generated ./packages/prisma/generated
-COPY --from=builder /app/packages/prisma/package.json ./packages/prisma/package.json
-COPY --from=builder /app/packages/prisma/prisma ./packages/prisma/prisma
-COPY --from=builder /app/packages/shared/dist ./packages/shared/dist
-COPY --from=builder /app/packages/shared/package.json ./packages/shared/package.json
-COPY --from=builder /app/apps/api/dist ./apps/api/dist
-COPY --from=builder /app/apps/api/package.json ./apps/api/package.json
-COPY --from=builder /app/apps/api/node_modules ./apps/api/node_modules
+RUN addgroup -g 1001 botparty && adduser -u 1001 -G botparty -D -s /bin/sh botparty
 
-# Run prisma migrations on startup, then start API
+# Production node_modules (no devDeps)
+COPY --from=prod-deps --chown=botparty:botparty /app/node_modules          ./node_modules
+COPY --from=prod-deps --chown=botparty:botparty /app/package.json          ./
+COPY --from=prod-deps --chown=botparty:botparty /app/pnpm-workspace.yaml   ./
+COPY --from=prod-deps --chown=botparty:botparty /app/packages/shared/package.json  ./packages/shared/package.json
+COPY --from=prod-deps --chown=botparty:botparty /app/packages/prisma/package.json  ./packages/prisma/package.json
+COPY --from=prod-deps --chown=botparty:botparty /app/apps/api/package.json         ./apps/api/package.json
+
+# Prisma: schema, generated client, seed script
+COPY --from=build-api --chown=botparty:botparty /app/packages/prisma/generated  ./packages/prisma/generated
+COPY --from=build-api --chown=botparty:botparty /app/packages/prisma/prisma     ./packages/prisma/prisma
+COPY --from=build-api --chown=botparty:botparty /app/packages/prisma/seed.ts    ./packages/prisma/seed.ts
+
+# Shared + API compiled output
+COPY --from=build-shared --chown=botparty:botparty /app/packages/shared/dist   ./packages/shared/dist
+COPY --from=build-api    --chown=botparty:botparty /app/apps/api/dist           ./apps/api/dist
+
+COPY --chown=botparty:botparty docker/api/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+USER botparty
 EXPOSE 4000
-
-CMD ["node", "apps/api/dist/main.js"]
+ENTRYPOINT ["/entrypoint.sh"]

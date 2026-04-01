@@ -9,6 +9,7 @@
     "jsx": "preserve",
     "plugins": [{ "name": "next" }],
     "allowJs": true,
-    "noEmit": true
+    "noEmit": true,
+    "noPropertyAccessFromIndexSignature": false
   }
 }

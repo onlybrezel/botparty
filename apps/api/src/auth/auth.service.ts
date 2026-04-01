@@ -121,7 +121,8 @@ export class AuthService {
     const accessToken = this.jwt.sign(jwtPayload);
     const refreshTokenValue = this.jwt.sign(refreshPayload, {
       secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
-      expiresIn: this.config.get<string>('JWT_REFRESH_EXPIRES_IN', '7d'),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expiresIn: this.config.get<string>('JWT_REFRESH_EXPIRES_IN', '7d') as any,
     });
 
     return {

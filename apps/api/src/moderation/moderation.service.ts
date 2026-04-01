@@ -8,7 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { ModerateUserDto } from './moderation.dto';
 import { ModerationActionType, WS_EVENTS } from '@botparty/shared';
-import { Role } from '@prisma/client';
+import { Role } from '@botparty/prisma';
 
 @Injectable()
 export class ModerationService {

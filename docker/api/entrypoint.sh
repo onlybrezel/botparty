@@ -1,0 +1,30 @@
+#!/bin/sh
+# BotParty API Entrypoint
+# Runs schema push + seed on every start (idempotent), then starts the API.
+set -e
+
+echo "════════════════════════════════════════"
+echo "  BotParty API  –  startup"
+echo "════════════════════════════════════════"
+
+SCHEMA="packages/prisma/prisma/schema.prisma"
+
+# 1. Push schema to database (idempotent, safe for dev/demo)
+echo "🔄 Pushing database schema..."
+./node_modules/.bin/prisma db push \
+  --schema="$SCHEMA" \
+  --skip-generate \
+  --accept-data-loss \
+  2>&1 | sed 's/^/  /'
+echo "✅ Schema up to date"
+
+# 2. Seed demo data (upsert = idempotent)
+echo "🌱 Seeding demo data..."
+./node_modules/.bin/tsx packages/prisma/seed.ts \
+  2>&1 | sed 's/^/  /'
+
+echo "════════════════════════════════════════"
+echo "  Starting NestJS API..."
+echo "════════════════════════════════════════"
+
+exec node apps/api/dist/main.js
