@@ -1,6 +1,7 @@
-import { Injectable, ConflictException, Logger } from '@nestjs/common';
+import { Injectable, ConflictException, ForbiddenException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
+import { RobotsService } from '../robots/robots.service';
 
 @Injectable()
 export class QueueService {
@@ -9,9 +10,15 @@ export class QueueService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
+    private readonly robotsService: RobotsService,
   ) {}
 
   async join(robotId: string, userId: string, isPriority = false) {
+    const access = await this.robotsService.getAccessPolicy(robotId);
+    if (access.control === 'DISABLED') {
+      throw new ForbiddenException('Control is disabled for this robot');
+    }
+
     // Check if already in queue
     const existing = await this.prisma.queueEntry.findUnique({
       where: { robotId_userId: { robotId, userId } },

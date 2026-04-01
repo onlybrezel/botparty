@@ -13,6 +13,10 @@ type RobotFormState = {
   visibility: 'PUBLIC' | 'UNLISTED' | 'PRIVATE';
   accessMode: 'OPEN' | 'PASSWORD' | 'LINK_ONLY' | 'ALLOWED_USERS';
   queueMode: 'FIRST_COME' | 'VOTING' | 'DISABLED';
+  aclVideo: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
+  aclControl: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
+  aclChat: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
+  targetBitrateKbps: string;
   maxTurnTime: number;
   maxViewers: number;
   maxControllers: number;
@@ -25,6 +29,10 @@ const DEFAULT_CREATE_FORM: RobotFormState = {
   visibility: 'PUBLIC',
   accessMode: 'OPEN',
   queueMode: 'FIRST_COME',
+  aclVideo: 'AUTHENTICATED',
+  aclControl: 'AUTHENTICATED',
+  aclChat: 'AUTHENTICATED',
+  targetBitrateKbps: '',
   maxTurnTime: 60000,
   maxViewers: 1000,
   maxControllers: 10,
@@ -32,12 +40,23 @@ const DEFAULT_CREATE_FORM: RobotFormState = {
 };
 
 function toUpdatePayload(form: RobotFormState) {
+  const bitrate = Number(form.targetBitrateKbps);
+  const hasBitrate = Number.isFinite(bitrate) && bitrate >= 150 && bitrate <= 8000;
+
   return {
     name: form.name.trim(),
     description: form.description.trim() || undefined,
     visibility: form.visibility,
     accessMode: form.accessMode,
     queueMode: form.queueMode,
+    acl: {
+      video: form.aclVideo,
+      control: form.aclControl,
+      chat: form.aclChat,
+    },
+    stream: {
+      targetBitrateKbps: hasBitrate ? Math.round(bitrate) : undefined,
+    },
     maxTurnTime: Number(form.maxTurnTime),
     maxViewers: Number(form.maxViewers),
     maxControllers: Number(form.maxControllers),
@@ -49,12 +68,20 @@ function toUpdatePayload(form: RobotFormState) {
 }
 
 function formFromRobot(robot: RobotManaged): RobotFormState {
+  const access = robot.metadata?.access;
+  const stream = robot.metadata?.stream;
+
   return {
     name: robot.name,
     description: robot.description ?? '',
     visibility: robot.visibility,
     accessMode: robot.accessMode,
     queueMode: robot.queueMode,
+    aclVideo: access?.video ?? 'AUTHENTICATED',
+    aclControl: access?.control ?? 'AUTHENTICATED',
+    aclChat: access?.chat ?? 'AUTHENTICATED',
+    targetBitrateKbps:
+      typeof stream?.targetBitrateKbps === 'number' ? String(stream.targetBitrateKbps) : '',
     maxTurnTime: robot.maxTurnTime,
     maxViewers: robot.maxViewers,
     maxControllers: robot.maxControllers,
@@ -314,6 +341,15 @@ export default function DashboardPage() {
       <section className="mt-6 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 sm:p-5">
         <h2 className="mb-4 text-lg font-bold">My Robots</h2>
 
+        <div className="mb-4 rounded-lg border border-[var(--border)] bg-[var(--background)] p-3 text-xs text-[var(--muted-foreground)]">
+          <p className="font-semibold text-[var(--foreground)]">Settings guide</p>
+          <p className="mt-1">Visibility: who can discover this robot in Explore.</p>
+          <p>Access Mode: entry model for the room itself (open/password/invite/allowlist).</p>
+          <p>Queue Mode: how control turns are assigned.</p>
+          <p>Guest ACL: what non-logged-in visitors are allowed to do.</p>
+          <p>Target Bitrate: desired stream quality for the robot uplink (150-8000 kbps).</p>
+        </div>
+
         {loading ? (
           <p className="text-sm text-[var(--muted-foreground)]">Loading robots...</p>
         ) : robots.length === 0 ? (
@@ -416,6 +452,55 @@ export default function DashboardPage() {
                       <option value="VOTING">VOTING</option>
                       <option value="DISABLED">DISABLED</option>
                     </select>
+
+                    <select
+                      className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                      value={editForm.aclVideo}
+                      onChange={(event) =>
+                        setEditForm((prev) => ({ ...prev, aclVideo: event.target.value as RobotFormState['aclVideo'] }))
+                      }
+                    >
+                      <option value="ALL">Guest Video: ALL</option>
+                      <option value="AUTHENTICATED">Guest Video: AUTHENTICATED</option>
+                      <option value="DISABLED">Guest Video: DISABLED</option>
+                    </select>
+
+                    <select
+                      className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                      value={editForm.aclControl}
+                      onChange={(event) =>
+                        setEditForm((prev) => ({ ...prev, aclControl: event.target.value as RobotFormState['aclControl'] }))
+                      }
+                    >
+                      <option value="ALL">Guest Control: ALL</option>
+                      <option value="AUTHENTICATED">Guest Control: AUTHENTICATED</option>
+                      <option value="DISABLED">Guest Control: DISABLED</option>
+                    </select>
+
+                    <select
+                      className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                      value={editForm.aclChat}
+                      onChange={(event) =>
+                        setEditForm((prev) => ({ ...prev, aclChat: event.target.value as RobotFormState['aclChat'] }))
+                      }
+                    >
+                      <option value="ALL">Guest Chat: ALL</option>
+                      <option value="AUTHENTICATED">Guest Chat: AUTHENTICATED</option>
+                      <option value="DISABLED">Guest Chat: DISABLED</option>
+                    </select>
+
+                    <input
+                      type="number"
+                      min={150}
+                      max={8000}
+                      className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                      value={editForm.targetBitrateKbps}
+                      onChange={(event) =>
+                        setEditForm((prev) => ({ ...prev, targetBitrateKbps: event.target.value }))
+                      }
+                      placeholder="Target bitrate (kbps), e.g. 1800"
+                    />
+
                     <input
                       type="number"
                       className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"

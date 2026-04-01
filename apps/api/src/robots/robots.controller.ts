@@ -111,12 +111,14 @@ export class RobotsController {
     }
 
     const token = await this.livekitService.generateRobotToken(robot.id, robot.name);
+    const stream = await this.robotsService.getStreamPolicy(robot.id);
     await this.robotsService.updateStatus(robot.id, 'ONLINE');
 
     return {
       robotId: robot.id,
       token,
       livekitUrl: this.livekitService.getLivekitUrl(),
+      stream,
     };
   }
 

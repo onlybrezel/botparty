@@ -44,6 +44,29 @@ interface QueueEntry {
 
 type FocusMode = 'controls' | 'chat';
 
+function resolveWsUrl(): string {
+  const configured = process.env.NEXT_PUBLIC_API_URL;
+
+  if (!configured) {
+    return `${window.location.origin.replace(/^https?/, (m) => (m === 'https' ? 'wss' : 'ws'))}/ws`;
+  }
+
+  try {
+    const url = new URL(configured);
+    const isConfiguredLocalhost = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+    const isCurrentHostLocalhost =
+      window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+
+    const base = isConfiguredLocalhost && !isCurrentHostLocalhost
+      ? window.location.origin
+      : configured;
+
+    return `${base.replace(/^https?/, (m) => (m === 'https' ? 'wss' : 'ws'))}/ws`;
+  } catch {
+    return `${window.location.origin.replace(/^https?/, (m) => (m === 'https' ? 'wss' : 'ws'))}/ws`;
+  }
+}
+
 // ─── WASD Keys ────────────────────────────────────────────────────────────────
 
 const WASD: Record<string, string> = {
@@ -60,7 +83,7 @@ interface Props {
 }
 
 export default function RobotView({ robot }: Props) {
-  const { accessToken, username } = useAuth();
+  const { accessToken, username, userId } = useAuth();
 
   const [focusMode, setFocusMode] = useState<FocusMode>('controls');
   const [controlButtons, setControlButtons] = useState<ControlButton[]>([]);
@@ -90,12 +113,24 @@ export default function RobotView({ robot }: Props) {
   // ─── Fetch LiveKit token (auth required) ──────────────────────────────────
 
   useEffect(() => {
-    if (!accessToken) return;
     api.setToken(accessToken);
-    api
-      .getViewerToken(robot.id, false)
-      .then(({ token, livekitUrl }) => setLivekitCreds({ token, url: livekitUrl }))
-      .catch(() => {});
+
+    const loadToken = async () => {
+      try {
+        if (accessToken) {
+          const { token, livekitUrl } = await api.getViewerToken(robot.id, false);
+          setLivekitCreds({ token, url: livekitUrl });
+          return;
+        }
+
+        const { token, livekitUrl } = await api.getPublicViewerToken(robot.id);
+        setLivekitCreds({ token, url: livekitUrl });
+      } catch {
+        setLivekitCreds(null);
+      }
+    };
+
+    loadToken().catch(() => {});
   }, [accessToken, robot.id]);
 
   // ─── Fetch queue ──────────────────────────────────────────────────────────
@@ -107,29 +142,57 @@ export default function RobotView({ robot }: Props) {
   // ─── WebSocket ────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
-    const wsUrl = apiUrl.replace(/^https?/, (m) => (m === 'https' ? 'wss' : 'ws')) + '/ws';
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
+    let active = true;
+    let reconnectDelayMs = 1000;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-    ws.onopen = () => {
-      setConnected(true);
-      ws.send(JSON.stringify({ event: 'room:join', data: { robotId: robot.id } }));
+    const connect = () => {
+      if (!active) return;
+
+      const ws = new WebSocket(resolveWsUrl());
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        if (!active) return;
+        reconnectDelayMs = 1000;
+        setConnected(true);
+        ws.send(
+          JSON.stringify({
+            event: 'room:join',
+            data: {
+              robotId: robot.id,
+              userId: userId ?? undefined,
+              username: username ?? undefined,
+            },
+          }),
+        );
+      };
+
+      ws.onclose = () => {
+        if (!active) return;
+        setConnected(false);
+        reconnectTimer = setTimeout(connect, reconnectDelayMs);
+        reconnectDelayMs = Math.min(reconnectDelayMs * 2, 8000);
+      };
+
+      ws.onmessage = (e) => {
+        try {
+          const { event, data } = JSON.parse(e.data as string) as { event: string; data: Record<string, unknown> };
+          handleWsEvent(event, data);
+        } catch {
+          //
+        }
+      };
     };
 
-    ws.onclose = () => setConnected(false);
+    connect();
 
-    ws.onmessage = (e) => {
-      try {
-        const { event, data } = JSON.parse(e.data as string) as { event: string; data: Record<string, unknown> };
-        handleWsEvent(event, data);
-      } catch {
-        //
-      }
+    return () => {
+      active = false;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      wsRef.current?.close();
     };
-
-    return () => ws.close();
-  }, [robot.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [robot.id, userId, username]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleWsEvent = useCallback((event: string, data: Record<string, unknown>) => {
     switch (event) {

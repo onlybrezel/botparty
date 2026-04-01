@@ -38,6 +38,18 @@ export const createRobotSchema = z.object({
     .array(z.string().max(LIMITS.MAX_TAG_LENGTH))
     .max(LIMITS.MAX_TAGS)
     .default([]),
+  acl: z
+    .object({
+      video: z.enum(['ALL', 'AUTHENTICATED', 'DISABLED']).default('AUTHENTICATED'),
+      control: z.enum(['ALL', 'AUTHENTICATED', 'DISABLED']).default('AUTHENTICATED'),
+      chat: z.enum(['ALL', 'AUTHENTICATED', 'DISABLED']).default('AUTHENTICATED'),
+    })
+    .optional(),
+  stream: z
+    .object({
+      targetBitrateKbps: z.number().int().min(150).max(8000).optional(),
+    })
+    .optional(),
 });
 
 export const updateRobotSchema = createRobotSchema.partial();

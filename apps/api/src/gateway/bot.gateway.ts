@@ -180,6 +180,20 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody()
     data: { robotId: string; command: string; value?: unknown; timestamp: number },
   ) {
+    const access = await this.robotsService.getAccessPolicy(data.robotId);
+    if (access.control === 'DISABLED') {
+      client.send(
+        JSON.stringify({ event: 'error', data: { message: 'Control is disabled for this robot' } }),
+      );
+      return;
+    }
+    if (access.control === 'AUTHENTICATED' && !client.userId) {
+      client.send(
+        JSON.stringify({ event: 'error', data: { message: 'Please sign in to control this robot' } }),
+      );
+      return;
+    }
+
     // Moderation check
     if (client.userId) {
       const restriction = await this.moderationService.getActiveRestriction(
@@ -239,7 +253,19 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: WsClient,
     @MessageBody() data: { robotId: string; content: string },
   ) {
-    if (!client.userId) return;
+    const access = await this.robotsService.getAccessPolicy(data.robotId);
+    if (access.chat === 'DISABLED') {
+      return;
+    }
+    if (access.chat === 'AUTHENTICATED' && !client.userId) {
+      return;
+    }
+
+    if (!client.userId) {
+      client.userId = `guest-${client.id}`;
+      client.username = client.username ?? 'Guest';
+    }
+
     if (!data.content?.trim() || data.content.length > LIMITS.MAX_CHAT_MESSAGE_LENGTH) return;
 
     // Chat rate limiting

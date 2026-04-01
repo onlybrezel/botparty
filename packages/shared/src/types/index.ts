@@ -55,6 +55,16 @@ export interface RobotPublic {
   maxTurnTime: number;
   maxViewers: number;
   maxControllers: number;
+  metadata?: {
+    access?: {
+      video?: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
+      control?: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
+      chat?: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
+    };
+    stream?: {
+      targetBitrateKbps?: number;
+    };
+  } | null;
   tags: string[];
   viewerCount: number;
   owner: UserPublic;

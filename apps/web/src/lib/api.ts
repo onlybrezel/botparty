@@ -3,6 +3,16 @@ import type { RobotPublic, UserPublic } from '@botparty/shared';
 export interface RobotManaged extends RobotPublic {
   claimToken: string;
   streamKey: string;
+  metadata: {
+    access?: {
+      video?: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
+      control?: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
+      chat?: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
+    };
+    stream?: {
+      targetBitrateKbps?: number;
+    };
+  } | null;
   accessPassword: string | null;
   livekitRoom: string | null;
   isFeatured: boolean;
@@ -22,6 +32,14 @@ export interface RobotMutationInput {
   maxViewers?: number;
   maxControllers?: number;
   tags?: string[];
+  acl?: {
+    video: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
+    control: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
+    chat: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
+  };
+  stream?: {
+    targetBitrateKbps?: number;
+  };
 }
 
 function resolveApiUrl() {
@@ -168,6 +186,13 @@ class ApiClient {
   async getViewerToken(robotId: string, control = false) {
     return this.request<{ token: string; livekitUrl: string }>(
       `/livekit/token/viewer/${robotId}?control=${control}`,
+      { method: 'POST', body: '{}' },
+    );
+  }
+
+  async getPublicViewerToken(robotId: string) {
+    return this.request<{ token: string; livekitUrl: string }>(
+      `/livekit/token/viewer-public/${robotId}`,
       { method: 'POST', body: '{}' },
     );
   }
