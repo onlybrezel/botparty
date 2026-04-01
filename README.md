@@ -1,29 +1,24 @@
-# 🤖 BotParty
+# BotParty
 
-**The modern real-time robot teleoperation platform.**
-Connect your robot. Share it with the world. Let anyone drive it live.
+Self-hosted robot teleoperation platform. Plug in a Raspberry Pi (or anything that runs Python), register it, and people can drive it from a browser.
 
-> The fully open-source successor to LetsRobot.tv, Remo.tv, and Vigibot — built with state-of-the-art 2026 technology for ultra-low latency, massive scalability, and an incredible user experience.
+Spiritually inspired by LetsRobot.tv and Remo.tv. Built from scratch with a modern stack because it was time.
 
 ---
 
-## ✨ Features
+## What works right now
 
-- **Ultra-Low Latency**: <150ms video, <50ms control via WebRTC DataChannel
-- **LiveKit SFU**: State-of-the-art media server for scalable video streaming
-- **Queue System**: First-come-first-serve, voting, or priority (with credits)
-- **Virtual Currency**: Credits system for priority queue, featured robots, battles
-- **RBAC**: Admin, Moderator, Creator, User roles
-- **Robot Dashboard**: Full control panel for robot hosts (visibility, access, schedule, analytics)
-- **Emergency Stop**: Auto-E-STOP at >300ms latency, latency warnings at >200ms
-- **Session Recording**: Record and replay sessions via LiveKit
-- **Chat**: In-session messaging between controller and viewers
-- **Mobile/PWA**: Touch controls, responsive design
-- **Swarm Control**: Multi-robot coordinated commands
-- **AI Assistance**: Placeholder for vision, auto-stop, suggest-move
-- **ROS2 Support**: For advanced robotics setups
-- **Analytics**: Viewer counts, command heatmaps, session stats
-- **Community**: Featured robots, leaderboard, battles
+- **Live video** via LiveKit SFU (WebRTC) — ~150ms end-to-end on a decent connection
+- **Control commands** over WebSocket DataChannel — ~50ms round-trip locally
+- **Queue system** — first-come-first-serve, configurable turn time
+- **Chat** — in-room messaging between the driver and viewers
+- **Crowd echo** — everyone sees button presses as they happen
+- **Configurable control buttons** — label, hotkey, icon, cooldown, per-robot
+- **RBAC** — Admin, Moderator, Creator, User roles
+- **Emergency stop** — ESC key or automatic at >300ms latency
+- **Robot dashboard** — visibility, access mode, queue settings
+- **Python robot client** — runs on Pi, Jetson, anything with a camera and serial port
+- **Docker deployment** — single `docker compose up -d`
 
 ---
 
@@ -102,227 +97,174 @@ botparty/
 
 ---
 
-## 🚀 Quick Start (Local Development)
+## Quick Start
 
 ### Prerequisites
-- **Node.js 24** (LTS)
-- **pnpm 9.15+**
-- **Docker** & **Docker Compose**
-- **Python 3.11+** (for robot client only)
+- Node.js 24, pnpm 9.15+
+- Docker & Docker Compose
+- Python 3.11+ (robot client only)
 
-### 1. Clone & Install
+### Local development
 
 ```bash
 git clone https://github.com/your-org/botparty.git
 cd botparty
-
-# Install dependencies
 pnpm install
 ```
 
-### 2. Start Infrastructure (Postgres, Redis, LiveKit)
+Start the database, cache and LiveKit:
 
 ```bash
-# Start database, cache, and LiveKit
 docker compose up -d postgres redis livekit
 ```
 
-### 3. Setup Environment
+Set up the environment (defaults work for local dev):
 
 ```bash
 cp .env.example .env
-# Edit .env if needed (defaults work for local dev)
 ```
 
-### 4. Setup Database
+Generate the Prisma client, push the schema and seed demo data:
 
 ```bash
-# Generate Prisma client
 pnpm db:generate
-
-# Push schema to database
 pnpm db:push
-
-# (Optional) Seed with demo data
 pnpm --filter @botparty/prisma db:seed
 ```
 
-### 5. Start Development Servers
+Start everything with hot reload:
 
 ```bash
-# Start all services (API + Web) with hot reload
 pnpm dev
 ```
 
-- **Frontend**: http://localhost:3000
-- **API**: http://localhost:4000
-- **API Docs (Swagger)**: http://localhost:4000/docs
-- **LiveKit**: ws://localhost:7880
+- Frontend: http://localhost:3000
+- API: http://localhost:4000
+- Swagger: http://localhost:4000/docs (dev only)
+- LiveKit: ws://localhost:7880
 
 ---
 
-## 🤖 Robot Client Setup (Raspberry Pi)
-
-### On your Raspberry Pi:
+## Robot client (Raspberry Pi)
 
 ```bash
-# 1. Clone the robot client
 git clone https://github.com/your-org/botparty.git
 cd botparty/apps/robot-client
 
-# 2. Create virtual environment
 python3 -m venv venv
 source venv/bin/activate
-
-# 3. Install dependencies
 pip install -r requirements.txt
 
-# 4. Configure
 cp config.example.yaml config.yaml
 nano config.yaml
-# Set your claim_token from the BotParty dashboard
-# Set api_url and livekit_url to your server address
+# claim_token  → copy from the robot's dashboard page
+# api_url      → same as APP_URL from .env  (e.g. https://botparty.example.com)
+# livekit_url  → same as NEXT_PUBLIC_LIVEKIT_URL from .env
 
-# 5. Run
 python -m botparty_robot
 ```
 
-### Camera Setup
+**USB camera**: works out of the box (`device: "/dev/video0"`)
 
-**USB Camera**: Works out of the box (`device: "/dev/video0"`)
-
-**Raspberry Pi Camera Module**:
+**Pi Camera Module**:
 ```bash
-# Enable camera in raspi-config
 sudo raspi-config  # Interface Options → Camera → Enable
-
-# For picamera2 (Pi Camera v2/v3):
 pip install picamera2
 # Set device: "picamera2" in config.yaml
 ```
 
-### Custom Robot Hardware
-
-Create a custom handler for your specific robot:
+**Custom hardware** — subclass `BaseHandler`:
 
 ```python
-# my_handler.py
 from botparty_robot.handlers import BaseHandler
 
-class MyRobotHandler(BaseHandler):
+class MyRobot(BaseHandler):
     def on_command(self, command, value=None):
         if command == "forward":
-            # Your motor control code
+            # your motor code
             pass
-        elif command == "stop":
-            self.emergency_stop()
 
     def emergency_stop(self):
-        # Stop all motors immediately
+        # stop everything immediately
         pass
 ```
 
 ---
 
-## 🐳 Production Deployment
+## Production Deployment
 
-### Full Docker Deployment
+Run the setup wizard first — it generates `.env`, sets up URLs and secrets, and optionally configures HTTPS:
 
 ```bash
-# 1. Configure production environment
-cp .env.example .env
-# Edit .env with production secrets (CHANGE ALL SECRETS!)
+bash setup-env.sh
+```
 
-# 2. Build and start everything
+Then:
+
+```bash
 docker compose up -d --build
-
-# 3. Run database migrations
-docker compose exec api npx prisma migrate deploy
-
-# 4. (Optional) Seed database
-docker compose exec api npx prisma db seed
 ```
 
-### Scaling
+The API container runs `prisma db push` and seeds the database on first start. Check logs with `docker compose logs -f api`.
 
-```bash
-# Scale API horizontally
-docker compose up -d --scale api=3
+### SSL with Let's Encrypt
 
-# LiveKit scales via its own cluster mode
-# See: https://docs.livekit.io/deploy/distributed/
-```
+The setup wizard walks through this, but the short version:
 
-### SSL/TLS
+1. Point your domain's A record at the server.
+2. Run `bash setup-env.sh` and choose "Let's Encrypt" when asked.
+3. The script sets up the nginx config and tells you the certbot command to run.
+4. Certificates go in `docker/nginx/ssl/` — nginx picks them up automatically.
 
-Place your certificates in `docker/nginx/ssl/`:
-- `fullchain.pem`
-- `privkey.pem`
+### SSL with your own certs
 
-Then enable HTTPS in `docker/nginx/nginx.conf`.
+Copy `fullchain.pem` and `privkey.pem` into `docker/nginx/ssl/`, then run `bash setup-env.sh` and choose "Own certificates".
 
 ---
 
-## 🔒 Security
+## Security notes
 
-- **Authentication**: JWT access tokens (15min) + refresh tokens (7d) with Argon2id hashing
-- **Authorization**: Full RBAC (Admin, Moderator, Creator, User)
-- **Rate Limiting**: NGINX + NestJS Throttler (auth endpoints: 5/min, API: 30/s)
-- **CORS**: Strict origin whitelist
-- **Headers**: Helmet security headers (X-Frame-Options, CSP, etc.)
-- **Input Validation**: Zod schemas on all inputs
-- **Emergency Stop**: Automatic at >300ms latency
-
----
-
-## 🗄 Database Schema
-
-Key models:
-- **User**: Roles, credits/balance, auth tokens
-- **Robot**: All settings (visibility, access, queue, schedule, streaming)
-- **Session**: Active/ended sessions with recording support
-- **Transaction**: Virtual currency ledger
-- **QueueEntry**: Control queue with priority + voting
-- **ChatMessage**: In-session messages
-- **SwarmGroup**: Multi-robot coordination
-- **AnalyticsEvent**: Flexible event tracking
+- JWT access tokens (15 min) + refresh tokens (7d), Argon2id password hashing
+- RBAC: Admin → Moderator → Creator → User
+- Rate limiting on both nginx and NestJS sides (auth tighter than general API)
+- Strict CORS origin list
+- Security headers via nginx (X-Frame-Options, CSP, etc.)
+- Zod validation on all API inputs
+- Emergency stop fires automatically at >300ms latency
 
 ---
 
-## 🛣 Roadmap
+## Database models
 
-- [x] Core platform (auth, robots, streaming, controls)
-- [x] Queue system (FCFS, voting)
-- [x] Chat system
-- [x] Docker deployment
+- **User** — roles, credits, refresh tokens
+- **Robot** — all settings: visibility, access, queue mode, streaming config
+- **Session** — active/ended control sessions
+- **QueueEntry** — control queue
+- **ChatMessage** — in-room messages
+- **ControlButton** — per-robot configurable controls
+- **RobotModerationEntry** — bans and timeouts per robot
+- **Transaction** — credit ledger (for future priority queue / features)
+
+---
+
+## What's missing / planned
+
 - [ ] Session recording & replay
-- [ ] AI assistance (object detection, auto-stop)
+- [ ] Analytics dashboard for robot hosts
+- [ ] Voting queue (schema is there, logic not wired)
 - [ ] Full ROS2 integration
-- [ ] Analytics dashboard for creators
-- [ ] Mobile app (React Native)
-- [ ] Swarm control UI
-- [ ] Community features (battles, leaderboard)
-- [ ] Payment integration for credits
+- [ ] Mobile touch controls
+- [ ] Leaderboard / community features
+- [ ] Credit/priority system beyond the schema
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
-1. Fork the repo
-2. Create a feature branch: `git checkout -b feature/amazing-feature`
-3. Commit changes: `git commit -m 'Add amazing feature'`
-4. Push: `git push origin feature/amazing-feature`
-5. Open a Pull Request
+PRs welcome. Open an issue first if it's a bigger change.
 
 ---
 
-## 📄 License
+## License
 
-MIT © BotParty Contributors
-
----
-
-<p align="center">
-  Built with ❤️ for the maker community<br>
-  <strong>🤖 Let the robots party! 🎉</strong>
-</p>
+MIT

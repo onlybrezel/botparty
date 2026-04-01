@@ -38,26 +38,18 @@ export default function HomePage() {
       {/* Hero */}
       <main className="flex flex-1 flex-col items-center justify-center px-4 text-center">
         <div className="mx-auto max-w-4xl">
-          <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-purple-500/30 bg-purple-500/10 px-4 py-1.5 text-sm text-purple-300">
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-purple-400 opacity-75" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-purple-500" />
-            </span>
-            Live robots online now
-          </div>
-
           <h1 className="mb-6 text-5xl font-extrabold leading-tight tracking-tight sm:text-7xl">
-            Control{' '}
+            Drive{' '}
             <span className="bg-gradient-to-r from-purple-400 via-pink-400 to-amber-400 bg-clip-text text-transparent">
-              Real Robots
+              real robots
             </span>
             <br />
-            From Your Browser
+            from your browser
           </h1>
 
           <p className="mx-auto mb-10 max-w-2xl text-lg text-[var(--muted-foreground)] sm:text-xl">
-            BotParty is the modern teleoperation platform. Connect your Raspberry Pi, Jetson, or any
-            robot – and let the world drive it live with ultra-low latency WebRTC streaming.
+            Plug in a Raspberry Pi, register it here, and anyone with the link can get behind the wheel.
+            Video over WebRTC, controls over WebSocket.
           </p>
 
           <div className="flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
@@ -76,26 +68,26 @@ export default function HomePage() {
           </div>
         </div>
 
-        {/* Stats */}
+        {/* Quick facts */}
         <div className="mt-20 grid grid-cols-3 gap-8 text-center">
           <div>
-            <div className="text-3xl font-bold text-purple-400">{'<'}150ms</div>
-            <div className="text-sm text-[var(--muted-foreground)]">Video Latency</div>
+            <div className="text-3xl font-bold text-purple-400">WebRTC</div>
+            <div className="text-sm text-[var(--muted-foreground)]">Video via LiveKit</div>
           </div>
           <div>
-            <div className="text-3xl font-bold text-amber-400">{'<'}50ms</div>
-            <div className="text-sm text-[var(--muted-foreground)]">Control Latency</div>
+            <div className="text-3xl font-bold text-amber-400">WS</div>
+            <div className="text-sm text-[var(--muted-foreground)]">Controls over WebSocket</div>
           </div>
           <div>
-            <div className="text-3xl font-bold text-pink-400">∞</div>
-            <div className="text-sm text-[var(--muted-foreground)]">Viewers per Robot</div>
+            <div className="text-3xl font-bold text-pink-400">MIT</div>
+            <div className="text-sm text-[var(--muted-foreground)]">Open source</div>
           </div>
         </div>
       </main>
 
       {/* Footer */}
       <footer className="border-t border-[var(--border)] py-8 text-center text-sm text-[var(--muted-foreground)]">
-        <p>© 2026 BotParty. Open-source robot teleoperation platform.</p>
+        <p>BotParty — MIT license</p>
       </footer>
     </div>
   );

@@ -2,10 +2,9 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'BotParty – Control Robots Live',
-  description:
-    'The modern teleoperation platform. Connect your robot, share it with the world, and let anyone control it in real-time with ultra-low latency.',
-  keywords: ['robot', 'teleoperation', 'webrtc', 'livekit', 'remote control', 'live streaming'],
+  title: 'BotParty',
+  description: 'Self-hosted robot teleoperation. Connect a Raspberry Pi and let people drive it from a browser.',
+  keywords: ['robot', 'teleoperation', 'webrtc', 'livekit', 'remote control'],
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
