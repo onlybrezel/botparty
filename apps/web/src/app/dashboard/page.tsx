@@ -2,7 +2,8 @@
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Bot, Copy, ExternalLink, RefreshCcw, Save, Trash2, Plus } from 'lucide-react';
+import Link from 'next/link';
+import { BookOpen, Bot, Cable, CircuitBoard, Copy, ExternalLink, RefreshCcw, Save, Trash2, Plus } from 'lucide-react';
 import { api, type RobotManaged } from '@/lib/api';
 import { useAuth } from '@/lib/store';
 import { LiveKitPlayer } from '@/components/livekit-player';
@@ -405,7 +406,65 @@ export default function DashboardPage() {
             <li>4. Paste your claim token and set api_url/livekit_url to your server URLs.</li>
             <li>5. Start with: python -m botparty_robot</li>
           </ol>
+          <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--background)] p-3">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <Cable className="h-4 w-4 text-violet-300" />
+              Controller schema
+            </div>
+            <p className="mt-2 text-sm text-[var(--muted-foreground)]">
+              Browser UI → BotParty API + LiveKit → Python robot client → hardware adapter
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2 text-xs text-[var(--muted-foreground)]">
+              {['L298N', 'Serial bridge', 'MQTT', 'GoPiGo', 'ThunderBorg', 'OWI arm', 'MAX7219'].map((item) => (
+                <span key={item} className="rounded-full border border-[var(--border)] px-2.5 py-1">
+                  {item}
+                </span>
+              ))}
+            </div>
+            <Link
+              href="/docs/getting-started"
+              className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-violet-300 transition hover:text-violet-200"
+            >
+              <BookOpen className="h-4 w-4" />
+              Open full hardware guide
+            </Link>
+          </div>
         </div>
+      </section>
+
+      <section className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <article className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 sm:p-5">
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <Cable className="h-4 w-4 text-violet-300" />
+            Controller flow
+          </div>
+          <p className="mt-3 text-sm leading-6 text-[var(--muted-foreground)]">
+            Keep the browser layer generic and understandable. Board-specific behavior belongs in
+            the robot client adapter, not in the UI.
+          </p>
+        </article>
+
+        <article className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 sm:p-5">
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <CircuitBoard className="h-4 w-4 text-amber-300" />
+            Hardware families
+          </div>
+          <p className="mt-3 text-sm leading-6 text-[var(--muted-foreground)]">
+            We now document direct motor drivers, serial bridges, MQTT targets, and robot-specific
+            profiles in one shared structure inspired by RemoTV.
+          </p>
+        </article>
+
+        <article className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 sm:p-5">
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <BookOpen className="h-4 w-4 text-sky-300" />
+            Docs-first onboarding
+          </div>
+          <p className="mt-3 text-sm leading-6 text-[var(--muted-foreground)]">
+            The homepage link to `/docs/getting-started` now works and explains the BotParty
+            controller schema in plain language.
+          </p>
+        </article>
       </section>
 
       <section className="mt-6 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 sm:p-5">

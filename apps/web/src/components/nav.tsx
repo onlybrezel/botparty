@@ -37,6 +37,16 @@ export default function Nav() {
         {/* Nav links */}
         <nav className="hidden items-center gap-2 sm:flex">
           <Link
+            href="/docs/getting-started"
+            className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+              isActive('/docs')
+                ? 'bg-[var(--muted)] text-[var(--foreground)]'
+                : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+            }`}
+          >
+            Docs
+          </Link>
+          <Link
             href="/explore"
             className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
               isActive('/explore')
