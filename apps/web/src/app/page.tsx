@@ -1,94 +1,141 @@
 import Link from 'next/link';
+import type { RobotPublic } from '@botparty/shared';
+import RobotCard from '@/components/robot-card';
 
-export default function HomePage() {
+async function getPublicRobots(): Promise<RobotPublic[]> {
+  const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
+  try {
+    const res = await fetch(`${apiUrl}/api/v1/robots`, {
+      next: { revalidate: 30 },
+    });
+    if (!res.ok) return [];
+    return res.json() as Promise<RobotPublic[]>;
+  } catch {
+    return [];
+  }
+}
+
+export default async function HomePage() {
+  const robots = await getPublicRobots();
+  const onlineCount = robots.filter((r) => r.status === 'ONLINE').length;
+  const viewerTotal = robots.reduce((sum, r) => sum + r.viewerCount, 0);
+  const featured = robots.slice(0, 3);
+
   return (
-    <div className="flex min-h-screen flex-col">
-      {/* Header */}
-      <header className="sticky top-0 z-50 border-b border-[var(--border)] bg-[var(--background)]/80 backdrop-blur-xl">
-        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4">
-          <Link href="/" className="flex items-center gap-2 text-xl font-bold">
-            <span className="text-2xl">🤖</span>
-            <span className="bg-gradient-to-r from-purple-400 to-amber-400 bg-clip-text text-transparent">
-              BotParty
-            </span>
-          </Link>
-          <nav className="flex items-center gap-4">
-            <Link
-              href="/explore"
-              className="text-sm text-[var(--muted-foreground)] transition hover:text-[var(--foreground)]"
-            >
-              Explore
-            </Link>
-            <Link
-              href="/leaderboard"
-              className="text-sm text-[var(--muted-foreground)] transition hover:text-[var(--foreground)]"
-            >
-              Leaderboard
-            </Link>
-            <Link
-              href="/login"
-              className="rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
-            >
-              Sign In
-            </Link>
-          </nav>
-        </div>
-      </header>
-
+    <>
       {/* Hero */}
-      <main className="flex flex-1 flex-col items-center justify-center px-4 text-center">
-        <div className="mx-auto max-w-4xl">
-          <h1 className="mb-6 text-5xl font-extrabold leading-tight tracking-tight sm:text-7xl">
-            Drive{' '}
-            <span className="bg-gradient-to-r from-purple-400 via-pink-400 to-amber-400 bg-clip-text text-transparent">
-              real robots
+      <section className="relative overflow-hidden">
+        {/* Background gradient */}
+        <div
+          className="pointer-events-none absolute inset-0 -z-10"
+          style={{
+            background:
+              'radial-gradient(ellipse 80% 50% at 50% -10%, rgba(124,58,237,0.12) 0%, transparent 70%)',
+          }}
+        />
+
+        <div className="mx-auto max-w-5xl px-4 py-20 text-center sm:py-28">
+          <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-violet-500/30 bg-violet-500/10 px-3 py-1 text-sm text-violet-300">
+            <span className="h-1.5 w-1.5 rounded-full bg-[var(--online)] animate-pulse-dot" />
+            {onlineCount > 0
+              ? `${onlineCount} robot${onlineCount !== 1 ? 's' : ''} online right now`
+              : 'Open platform — connect your own robot'}
+          </div>
+
+          <h1 className="mb-5 text-5xl font-extrabold leading-[1.1] tracking-tight text-[var(--foreground)] sm:text-6xl lg:text-7xl">
+            Drive real robots{' '}
+            <span className="bg-gradient-to-r from-violet-400 via-purple-400 to-fuchsia-400 bg-clip-text text-transparent">
+              from your browser
             </span>
-            <br />
-            from your browser
           </h1>
 
-          <p className="mx-auto mb-10 max-w-2xl text-lg text-[var(--muted-foreground)] sm:text-xl">
-            Plug in a Raspberry Pi, register it here, and anyone with the link can get behind the wheel.
-            Video over WebRTC, controls over WebSocket.
+          <p className="mx-auto mb-9 max-w-xl text-lg text-[var(--muted-foreground)] sm:text-xl">
+            Plug in a Raspberry Pi, click connect — and anyone with the link can take the wheel.
+            Live video via WebRTC, controls over WebSocket.
           </p>
 
-          <div className="flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
+          <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
             <Link
               href="/explore"
-              className="rounded-xl bg-[var(--primary)] px-8 py-3.5 text-lg font-semibold text-white shadow-lg shadow-purple-500/25 transition hover:shadow-purple-500/40"
+              className="rounded-xl bg-[var(--primary)] px-7 py-3 text-base font-semibold text-white shadow-lg shadow-violet-500/25 transition hover:bg-[var(--primary-hover)] hover:shadow-violet-500/40"
             >
-              Explore Robots →
+              Explore robots
             </Link>
             <Link
               href="/docs/getting-started"
-              className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-8 py-3.5 text-lg font-semibold text-[var(--foreground)] transition hover:border-[var(--muted-foreground)]"
+              className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-7 py-3 text-base font-semibold text-[var(--foreground)] transition hover:border-[var(--muted-foreground)]"
             >
-              Connect Your Robot
+              Connect your robot
             </Link>
           </div>
-        </div>
 
-        {/* Quick facts */}
-        <div className="mt-20 grid grid-cols-3 gap-8 text-center">
-          <div>
-            <div className="text-3xl font-bold text-purple-400">WebRTC</div>
-            <div className="text-sm text-[var(--muted-foreground)]">Video via LiveKit</div>
+          {/* Live stats */}
+          {(robots.length > 0 || viewerTotal > 0) && (
+            <p className="mt-7 text-sm text-[var(--muted-foreground)]">
+              {robots.length} robot{robots.length !== 1 ? 's' : ''} registered
+              {viewerTotal > 0 && ` · ${viewerTotal} viewer${viewerTotal !== 1 ? 's' : ''} watching`}
+            </p>
+          )}
+        </div>
+      </section>
+
+      {/* Featured robots */}
+      {featured.length > 0 && (
+        <section className="mx-auto max-w-7xl px-4 pb-20">
+          <div className="mb-6 flex items-center justify-between">
+            <h2 className="text-xl font-semibold">Live now</h2>
+            <Link
+              href="/explore"
+              className="text-sm text-[var(--muted-foreground)] transition hover:text-[var(--foreground)]"
+            >
+              View all &rarr;
+            </Link>
           </div>
-          <div>
-            <div className="text-3xl font-bold text-amber-400">WS</div>
-            <div className="text-sm text-[var(--muted-foreground)]">Controls over WebSocket</div>
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {featured.map((robot) => (
+              <RobotCard key={robot.id} robot={robot} />
+            ))}
           </div>
-          <div>
-            <div className="text-3xl font-bold text-pink-400">MIT</div>
-            <div className="text-sm text-[var(--muted-foreground)]">Open source</div>
+        </section>
+      )}
+
+      {/* How it works */}
+      <section className="border-t border-[var(--border)]">
+        <div className="mx-auto max-w-5xl px-4 py-16">
+          <h2 className="mb-10 text-center text-xl font-semibold text-[var(--muted-foreground)]">
+            How it works
+          </h2>
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
+            {[
+              {
+                icon: '🤖',
+                title: 'Connect a robot',
+                desc: 'Run the Python client on any Raspberry Pi or Linux machine. One command.',
+              },
+              {
+                icon: '🎮',
+                title: 'Share the link',
+                desc: 'Your robot gets a public URL. Anyone can click and start driving immediately.',
+              },
+              {
+                icon: '📡',
+                title: 'Live video + controls',
+                desc: 'Sub-150ms video via LiveKit WebRTC. WASD controls over WebSocket in real time.',
+              },
+            ].map((item) => (
+              <div
+                key={item.title}
+                className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-6"
+              >
+                <div className="mb-3 text-2xl">{item.icon}</div>
+                <h3 className="mb-1 font-semibold">{item.title}</h3>
+                <p className="text-sm leading-relaxed text-[var(--muted-foreground)]">{item.desc}</p>
+              </div>
+            ))}
           </div>
         </div>
-      </main>
-
-      {/* Footer */}
-      <footer className="border-t border-[var(--border)] py-8 text-center text-sm text-[var(--muted-foreground)]">
-        <p>BotParty — MIT license</p>
-      </footer>
-    </div>
+      </section>
+    </>
   );
 }
+

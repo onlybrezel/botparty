@@ -1,3 +1,5 @@
+import type { RobotPublic, UserPublic } from '@botparty/shared';
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
 class ApiClient {
@@ -22,22 +24,20 @@ class ApiClient {
       headers['Authorization'] = `Bearer ${this.accessToken}`;
     }
 
-    const res = await fetch(`${this.baseUrl}${path}`, {
-      ...options,
-      headers,
-    });
+    const res = await fetch(`${this.baseUrl}${path}`, { ...options, headers });
 
     if (!res.ok) {
       const error = await res.json().catch(() => ({ message: res.statusText }));
-      throw new Error(error.message ?? `API error: ${res.status}`);
+      throw new Error((error as { message?: string }).message ?? `API error: ${res.status}`);
     }
 
     if (res.status === 204) return undefined as T;
-    return res.json();
+    return res.json() as Promise<T>;
   }
 
-  // Auth
-  async register(data: { username: string; email: string; password: string }) {
+  // ─── Auth ──────────────────────────────────────────────────────────────────
+
+  async register(data: { username: string; email: string; password: string; displayName?: string }) {
     return this.request<{ accessToken: string; refreshToken: string }>('/auth/register', {
       method: 'POST',
       body: JSON.stringify(data),
@@ -58,33 +58,40 @@ class ApiClient {
     });
   }
 
-  // Users
+  // ─── Users ─────────────────────────────────────────────────────────────────
+
   async getMe() {
-    return this.request<Record<string, unknown>>('/users/me');
+    return this.request<UserPublic>('/users/me');
   }
 
-  // Robots
+  // ─── Robots ────────────────────────────────────────────────────────────────
+
   async getRobots(params?: { status?: string; tag?: string }) {
     const qs = new URLSearchParams(params as Record<string, string>).toString();
-    return this.request<Record<string, unknown>[]>(`/robots${qs ? `?${qs}` : ''}`);
+    return this.request<RobotPublic[]>(`/robots${qs ? `?${qs}` : ''}`);
   }
 
   async getRobot(slug: string) {
-    return this.request<Record<string, unknown>>(`/robots/${slug}`);
+    return this.request<RobotPublic>(`/robots/${slug}`);
+  }
+
+  async getFeaturedRobots() {
+    return this.request<RobotPublic[]>('/robots/featured');
   }
 
   async getMyRobots() {
-    return this.request<Record<string, unknown>[]>('/robots/my');
+    return this.request<RobotPublic[]>('/robots/my');
   }
 
   async createRobot(data: Record<string, unknown>) {
-    return this.request<Record<string, unknown>>('/robots', {
+    return this.request<RobotPublic>('/robots', {
       method: 'POST',
       body: JSON.stringify(data),
     });
   }
 
-  // LiveKit
+  // ─── LiveKit ───────────────────────────────────────────────────────────────
+
   async getViewerToken(robotId: string, control = false) {
     return this.request<{ token: string; livekitUrl: string }>(
       `/livekit/token/viewer/${robotId}?control=${control}`,
@@ -92,23 +99,46 @@ class ApiClient {
     );
   }
 
-  // Queue
+  // ─── Queue ─────────────────────────────────────────────────────────────────
+
   async getQueue(robotId: string) {
-    return this.request<Record<string, unknown>[]>(`/queue/${robotId}`);
+    return this.request<Array<{ userId: string; username: string; position: number; joinedAt: string }>>(
+      `/queue/${robotId}`,
+    );
   }
 
   async joinQueue(robotId: string) {
-    return this.request<Record<string, unknown>>(`/queue/${robotId}/join`, { method: 'POST' });
+    return this.request<{ position: number }>(`/queue/${robotId}/join`, { method: 'POST' });
   }
 
   async leaveQueue(robotId: string) {
     return this.request(`/queue/${robotId}/leave`, { method: 'DELETE' });
   }
 
-  // Health
+  // ─── Controls ──────────────────────────────────────────────────────────────
+
+  async getControls(robotId: string) {
+    return this.request<
+      Array<{
+        id: string;
+        label: string;
+        command: string;
+        hotKey: string | null;
+        icon: string | null;
+        cooldownMs: number;
+        access: string;
+        position: number;
+        color: string | null;
+      }>
+    >(`/controls/robot/${robotId}`);
+  }
+
+  // ─── Health ────────────────────────────────────────────────────────────────
+
   async health() {
     return this.request<{ status: string }>('/health');
   }
 }
 
 export const api = new ApiClient(API_URL);
+

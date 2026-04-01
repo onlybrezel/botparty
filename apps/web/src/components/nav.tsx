@@ -1,0 +1,123 @@
+'use client';
+
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { useAuth } from '@/lib/store';
+
+export default function Nav() {
+  const pathname = usePathname();
+  const { accessToken, username, logout } = useAuth();
+  const [mounted, setMounted] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const isActive = (href: string) => pathname === href || pathname.startsWith(href + '/');
+
+  return (
+    <header className="sticky top-0 z-50 border-b border-[var(--border)] bg-[var(--background)]/90 backdrop-blur-md">
+      <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4">
+        {/* Logo */}
+        <Link href="/" className="flex items-center gap-2 font-bold text-lg tracking-tight">
+          <span
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-sm"
+            style={{ background: 'var(--primary)' }}
+          >
+            ⚡
+          </span>
+          <span className="bg-gradient-to-r from-violet-400 to-purple-300 bg-clip-text text-transparent">
+            BotParty
+          </span>
+        </Link>
+
+        {/* Nav links */}
+        <nav className="hidden items-center gap-1 sm:flex">
+          <Link
+            href="/explore"
+            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+              isActive('/explore')
+                ? 'bg-[var(--muted)] text-[var(--foreground)]'
+                : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+            }`}
+          >
+            Explore
+          </Link>
+          <Link
+            href="/leaderboard"
+            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+              isActive('/leaderboard')
+                ? 'bg-[var(--muted)] text-[var(--foreground)]'
+                : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+            }`}
+          >
+            Leaderboard
+          </Link>
+        </nav>
+
+        {/* Auth */}
+        <div className="flex items-center gap-3">
+          {!mounted ? (
+            <div className="h-8 w-20 rounded-lg bg-[var(--muted)] animate-pulse" />
+          ) : accessToken && username ? (
+            <div className="relative">
+              <button
+                onClick={() => setMenuOpen((o) => !o)}
+                className="flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-sm font-medium transition hover:border-[var(--muted-foreground)]"
+              >
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[var(--primary)] text-xs text-white font-bold uppercase">
+                  {username[0]}
+                </span>
+                <span>{username}</span>
+                <svg className="h-3 w-3 text-[var(--muted-foreground)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+
+              {menuOpen && (
+                <div
+                  className="absolute right-0 top-full mt-1 w-44 rounded-xl border border-[var(--border)] bg-[var(--card)] py-1 shadow-lg shadow-black/40 animate-fade-in"
+                  onBlur={() => setMenuOpen(false)}
+                >
+                  <Link
+                    href="/dashboard"
+                    onClick={() => setMenuOpen(false)}
+                    className="block px-4 py-2 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition"
+                  >
+                    My Robots
+                  </Link>
+                  <Link
+                    href="/settings"
+                    onClick={() => setMenuOpen(false)}
+                    className="block px-4 py-2 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition"
+                  >
+                    Settings
+                  </Link>
+                  <div className="my-1 border-t border-[var(--border)]" />
+                  <button
+                    onClick={() => {
+                      logout();
+                      setMenuOpen(false);
+                    }}
+                    className="block w-full px-4 py-2 text-left text-sm text-red-400 hover:bg-[var(--muted)] transition"
+                  >
+                    Sign out
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <Link
+              href="/login"
+              className="rounded-lg bg-[var(--primary)] px-4 py-1.5 text-sm font-semibold text-white transition hover:bg-[var(--primary-hover)]"
+            >
+              Sign in
+            </Link>
+          )}
+        </div>
+      </div>
+    </header>
+  );
+}
