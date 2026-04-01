@@ -40,6 +40,9 @@ venv/
 # Docker
 docker-compose.override.yml
 
+# nginx: generated SSL config (created by setup-env.sh, never committed)
+docker/nginx/nginx.ssl.conf
+
 # Prisma
 packages/prisma/generated/
 

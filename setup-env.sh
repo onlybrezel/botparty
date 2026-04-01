@@ -105,6 +105,7 @@ if [[ "$IS_LOCAL" == "y" ]]; then
   APP_URL="http://localhost:3000"
   CORS_ORIGIN="http://localhost:3000"
   success "Using localhost defaults."
+  NGINX_CONF_VALUE=./docker/nginx/nginx.conf
 else
   ask DOMAIN "Your domain (e.g. botparty.example.com)"
   [[ -z "$DOMAIN" ]] && die "Domain is required for server deployment."
@@ -124,6 +125,7 @@ else
     2|3) PROTO="https"; WS_PROTO="wss"; USE_SSL="y" ;;
     *)   PROTO="http";  WS_PROTO="ws";  USE_SSL="n" ;;
   esac
+  [[ "$USE_SSL" == "y" ]] && NGINX_CONF_VALUE=./docker/nginx/nginx.ssl.conf || NGINX_CONF_VALUE=./docker/nginx/nginx.conf
 
   API_URL="${PROTO}://${DOMAIN}/api"
   WS_URL="${WS_PROTO}://${DOMAIN}"
@@ -210,6 +212,11 @@ THROTTLE_LIMIT=100
 
 # ─── Seeding ──────────────────────────────────────────
 SEED_ADMIN_PASSWORD=${SEED_ADMIN_PASSWORD}
+
+# ─── nginx ────────────────────────────────────────────
+# For HTTPS production: ./docker/nginx/nginx.ssl.conf (generated below, gitignored)
+# For local dev:        ./docker/nginx/nginx.conf
+NGINX_CONF=${NGINX_CONF_VALUE}
 EOF
 
 success ".env written."
@@ -265,29 +272,14 @@ if [[ "${USE_SSL:-n}" == "y" ]]; then
       ;;
   esac
 
-  # Enable the HTTPS server block in nginx.conf
-  NGINX_CONF="docker/nginx/nginx.conf"
-  if grep -q "# ##HTTPS_BLOCK_START##" "$NGINX_CONF" 2>/dev/null; then
-    sed -i 's/# ##HTTPS_BLOCK_START##//' "$NGINX_CONF"
-    sed -i 's/# ##HTTPS_BLOCK_END##//'   "$NGINX_CONF"
-    # Uncomment every line between the markers (they're already removed, just strip leading "# ")
-    # Actually the markers are single-line; the block lines start with "#HTTPS# "
-    sed -i 's/^#HTTPS# //' "$NGINX_CONF"
-    # Update the server_name
-    sed -i "s|server_name BOTPARTY_DOMAIN;|server_name ${DOMAIN};|g" "$NGINX_CONF"
-    success "nginx.conf updated with HTTPS server block for ${DOMAIN}."
+  # Generate nginx.ssl.conf from the template (this file is gitignored).
+  # git pull never touches it, so production config survives deploys.
+  NGINX_TEMPLATE="docker/nginx/nginx.ssl.conf.template"
+  if [[ -f "$NGINX_TEMPLATE" ]]; then
+    sed "s/__DOMAIN__/${DOMAIN}/g" "$NGINX_TEMPLATE" > docker/nginx/nginx.ssl.conf
+    success "Generated docker/nginx/nginx.ssl.conf for ${DOMAIN}."
   else
-    warn "nginx.conf does not contain an HTTPS block template."
-    warn "Add the HTTPS server block to docker/nginx/nginx.conf manually,"
-    warn "or run:  bash setup-env.sh  after updating the nginx config."
-  fi
-
-  # Switch the HTTP block to redirect instead of proxy
-  if grep -q "# For development, proxy directly" "$NGINX_CONF" 2>/dev/null; then
-    sed -i 's|        # For development, proxy directly\n.*||' "$NGINX_CONF" || true
-    sed -i "s|        # For production, uncomment:|        # Redirecting to HTTPS:|" "$NGINX_CONF" || true
-    sed -i "s|        # return 301 https://\$host\$request_uri;|        return 301 https://\$host\$request_uri;|" "$NGINX_CONF" || true
-    success "nginx HTTP → HTTPS redirect enabled."
+    warn "Template $NGINX_TEMPLATE not found — nginx will use the default HTTP config."
   fi
 fi
 
