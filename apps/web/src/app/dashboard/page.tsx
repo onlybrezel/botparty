@@ -289,7 +289,7 @@ export default function DashboardPage() {
           <h2 className="mb-4 text-lg font-bold">Raspberry Pi Quickstart</h2>
           <ol className="space-y-2 text-sm text-[var(--muted-foreground)]">
             <li>1. Create a robot and copy the claim token.</li>
-            <li>2. On your Pi: clone the repository and open apps/robot-client.</li>
+            <li>2. On your Pi: clone the botparty-client repository.</li>
             <li>3. Create a venv, install requirements, and copy config.example.yaml to config.yaml.</li>
             <li>4. Paste your claim token and set api_url/livekit_url to your server URLs.</li>
             <li>5. Start with: python -m botparty_robot</li>

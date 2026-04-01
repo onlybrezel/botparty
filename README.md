@@ -74,11 +74,7 @@ botparty/
 │   │   └── src/
 │   │       ├── app/        # App Router pages
 │   │       └── lib/        # API client, utils
-│   └── robot-client/       # Python robot client
-│       └── botparty_robot/
-│           ├── client.py   # Main LiveKit client
-│           ├── config.py   # Configuration models
-│           └── handlers/   # Command handlers
+│   └── robot-client/       # Python robot client (moved to botparty-client repo)
 ├── packages/
 │   ├── shared/             # Shared types, Zod schemas, constants
 │   ├── prisma/             # Prisma schema + client
@@ -147,9 +143,11 @@ pnpm dev
 
 ## Robot client (Raspberry Pi)
 
+The robot client lives in its own repository: **botparty-client**.
+
 ```bash
-git clone https://github.com/your-org/botparty.git
-cd botparty/apps/robot-client
+git clone https://github.com/your-org/botparty-client.git
+cd botparty-client
 
 python3 -m venv venv
 source venv/bin/activate
