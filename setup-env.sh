@@ -176,8 +176,9 @@ NODE_ENV=production
 PORT=4000
 
 # ─── Database ─────────────────────────────────────────
+# DB_PASSWORD is read directly by docker-compose for the postgres container.
+DB_PASSWORD=${DB_PASSWORD}
 DATABASE_URL=postgresql://botparty:${DB_PASSWORD}@postgres:5432/botparty?schema=public
-# (Also update docker-compose.yml POSTGRES_PASSWORD if you change this)
 
 # ─── Redis ────────────────────────────────────────────
 REDIS_HOST=redis
@@ -212,18 +213,6 @@ SEED_ADMIN_PASSWORD=${SEED_ADMIN_PASSWORD}
 EOF
 
 success ".env written."
-
-# ─── docker-compose.yml: update db/redis passwords ────────────────────────────
-
-if command -v sed &>/dev/null; then
-  # Sync compose credentials to match .env (expects the default placeholder values
-  # from a fresh clone; will silently skip if they've already been changed).
-  sed -i "s|POSTGRES_PASSWORD: botparty_secret|POSTGRES_PASSWORD: ${DB_PASSWORD}|g"    docker-compose.yml 2>/dev/null || true
-  sed -i "s|botparty_secret@postgres|${DB_PASSWORD}@postgres|g"                         docker-compose.yml 2>/dev/null || true
-  sed -i "s|botparty_redis_secret|${REDIS_PASSWORD}|g"                                  docker-compose.yml 2>/dev/null || true
-  sed -i "s|SEED_ADMIN_PASSWORD: admin123456|SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD}|g" docker-compose.yml 2>/dev/null || true
-  info "docker-compose.yml credentials synced."
-fi
 
 # ─── nginx: HTTPS setup ───────────────────────────────────────────────────────
 
