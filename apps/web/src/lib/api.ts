@@ -243,6 +243,30 @@ class ApiClient {
     return this.request<UserPublic>('/users/me');
   }
 
+  async updateMe(data: { displayName?: string; avatarUrl?: string }) {
+    return this.request<UserPublic>('/users/me', {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getAdminUsers(params?: { q?: string; limit?: number }) {
+    const qs = new URLSearchParams();
+    if (params?.q) qs.set('q', params.q);
+    if (params?.limit) qs.set('limit', String(params.limit));
+    return this.request<
+      Array<
+        UserPublic & {
+          email: string;
+          isActive: boolean;
+          credits: number;
+          balance: number;
+          lastLoginAt: string | null;
+        }
+      >
+    >(`/users/admin/list${qs.toString() ? `?${qs.toString()}` : ''}`);
+  }
+
   // ─── Robots ────────────────────────────────────────────────────────────────
 
   async getRobots(params?: { status?: string; tag?: string }) {
@@ -276,8 +300,21 @@ class ApiClient {
     });
   }
 
+  async updateRobotAsStaff(id: string, data: RobotMutationInput) {
+    return this.request<RobotManaged>(`/robots/admin/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
   async deleteRobot(id: string) {
     return this.request<void>(`/robots/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async deleteRobotAsStaff(id: string) {
+    return this.request<void>(`/robots/admin/${id}`, {
       method: 'DELETE',
     });
   }
@@ -317,6 +354,48 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify(data),
     });
+  }
+
+  async getModerationOverview(robotId?: string) {
+    const qs = robotId ? `?robotId=${encodeURIComponent(robotId)}` : '';
+    return this.request<{
+      recentActions: Array<{
+        id: string;
+        action: 'TIMEOUT' | 'KICK' | 'BAN' | 'UNBAN' | 'WARN';
+        reason: string | null;
+        isActive: boolean;
+        expiresAt: string | null;
+        createdAt: string;
+        robot: { id: string; name: string; slug: string };
+        user: { id: string; username: string; displayName: string | null };
+        moderator: { id: string; username: string } | null;
+      }>;
+      activeRestrictions: Array<{
+        id: string;
+        action: 'TIMEOUT' | 'KICK' | 'BAN' | 'UNBAN' | 'WARN';
+        reason: string | null;
+        expiresAt: string | null;
+        robot: { id: string; name: string; slug: string };
+        user: { id: string; username: string; displayName: string | null };
+        moderator: { id: string; username: string } | null;
+      }>;
+      robots: Array<{
+        id: string;
+        name: string;
+        slug: string;
+        status: 'ONLINE' | 'OFFLINE' | 'BUSY' | 'MAINTENANCE';
+        owner: { id: string; username: string; displayName: string | null };
+      }>;
+      counts: { bans: number; timeouts: number; kicks: number };
+    }>(`/moderation/admin/overview${qs}`);
+  }
+
+  async getRobotProfanityOverview(robotId: string) {
+    return this.request<{
+      total: number;
+      byUser: Array<{ userId: string; count: number }>;
+      events: Array<{ ts: number; userId: string; username: string; content: string }>;
+    }>(`/moderation/robot/${robotId}/profanity`);
   }
 
   async enqueueRobotAction(

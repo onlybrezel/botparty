@@ -6,12 +6,15 @@ import {
   Param,
   ParseUUIDPipe,
   UseGuards,
+  Query,
+  ForbiddenException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ModerationService } from './moderation.service';
 import { ModerateUserDto } from './moderation.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import type { JwtPayload } from '@botparty/shared';
 
 @ApiTags('moderation')
 @ApiBearerAuth()
@@ -37,5 +40,30 @@ export class ModerationController {
     @CurrentUser('sub') requesterId: string,
   ) {
     return this.moderationService.getLog(robotId, requesterId);
+  }
+
+  @Get('admin/overview')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Get moderation overview for admin/mod dashboard' })
+  getAdminOverview(
+    @CurrentUser() user: JwtPayload,
+    @CurrentUser('sub') requesterId: string,
+    @Query('robotId') robotId?: string,
+  ) {
+    const role = String(user.role);
+    if (!['ADMIN', 'MOD', 'MODERATOR', 'CREATOR'].includes(role)) {
+      throw new ForbiddenException('Access denied');
+    }
+
+    return this.moderationService.getAdminOverview(requesterId, robotId);
+  }
+
+  @Get('robot/:robotId/profanity')
+  @ApiOperation({ summary: 'Get profanity counters and recent events for a robot' })
+  getProfanityOverview(
+    @Param('robotId', ParseUUIDPipe) robotId: string,
+    @CurrentUser('sub') requesterId: string,
+  ) {
+    return this.moderationService.getProfanityOverview(requesterId, robotId);
   }
 }

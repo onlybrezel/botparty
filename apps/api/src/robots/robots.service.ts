@@ -92,6 +92,8 @@ export class RobotsService {
   }
 
   async findAll(filters?: { visibility?: string; status?: string; tag?: string }) {
+    await this.refreshStaleStatus();
+
     return this.prisma.robot.findMany({
       where: {
         visibility: 'PUBLIC',
@@ -108,6 +110,8 @@ export class RobotsService {
   }
 
   async findBySlug(slug: string) {
+    await this.refreshStaleStatus();
+
     const robot = await this.prisma.robot.findUnique({
       where: { slug },
       include: {
@@ -134,6 +138,8 @@ export class RobotsService {
   }
 
   async findByOwner(ownerId: string) {
+    await this.refreshStaleStatus();
+
     return this.prisma.robot.findMany({
       where: { ownerId },
       orderBy: { createdAt: 'desc' },
@@ -160,6 +166,28 @@ export class RobotsService {
     });
   }
 
+  async updateByStaff(id: string, input: z.infer<typeof updateRobotSchema>) {
+    await this.findById(id);
+    const data = updateRobotSchema.parse(input);
+
+    const current = await this.prisma.robot.findUnique({
+      where: { id },
+      select: { metadata: true },
+    });
+
+    const metadata = this.mergeMetadata(current?.metadata, data.acl, data.stream);
+    const { acl: _acl, stream: _stream, ...baseData } = data;
+    this.policyCache.delete(id);
+
+    return this.prisma.robot.update({
+      where: { id },
+      data: {
+        ...baseData,
+        metadata: metadata as Prisma.InputJsonValue,
+      },
+    });
+  }
+
   async delete(id: string, ownerId: string) {
     const robot = await this.findById(id);
     if (robot.ownerId !== ownerId) {
@@ -168,6 +196,12 @@ export class RobotsService {
 
     await this.prisma.robot.delete({ where: { id } });
     this.logger.log(`Robot deleted: ${robot.name}`);
+  }
+
+  async deleteByStaff(id: string) {
+    const robot = await this.findById(id);
+    await this.prisma.robot.delete({ where: { id } });
+    this.logger.log(`Robot deleted by staff: ${robot.name}`);
   }
 
   async regenerateClaimToken(id: string, ownerId: string) {
@@ -223,6 +257,9 @@ export class RobotsService {
     };
 
     const key = `robot:actions:${robotId}`;
+    if (payload.type === 'set_log_stream') {
+      await this.redis.del(`robot:logs:${robotId}`);
+    }
     await this.redis.rpush(key, JSON.stringify(action));
     await this.redis.ltrim(key, -50, -1);
     await this.redis.expire(key, 900);
@@ -237,8 +274,14 @@ export class RobotsService {
 
     const key = `robot:actions:${robot.id}`;
     const raw = await this.redis.lrange(key, 0, -1);
+    const stream = await this.getStreamPolicy(robot.id);
+
     if (raw.length === 0) {
-      return { robotId: robot.id, actions: [] as Array<Record<string, unknown>> };
+      return {
+        robotId: robot.id,
+        stream,
+        actions: [] as Array<Record<string, unknown>>,
+      };
     }
 
     await this.redis.del(key);
@@ -253,7 +296,7 @@ export class RobotsService {
       })
       .filter((entry): entry is Record<string, unknown> => entry !== null);
 
-    return { robotId: robot.id, actions };
+    return { robotId: robot.id, stream, actions };
   }
 
   async ingestRobotLogs(claimToken: string, lines: string[]) {
@@ -359,12 +402,38 @@ export class RobotsService {
   }
 
   async getFeatured() {
+    await this.refreshStaleStatus();
+
     return this.prisma.robot.findMany({
       where: { isFeatured: true, visibility: 'PUBLIC' },
       include: {
         owner: {
           select: { id: true, username: true, displayName: true, avatarUrl: true },
         },
+      },
+    });
+  }
+
+  async setViewerCount(robotId: string, viewerCount: number) {
+    await this.prisma.robot.update({
+      where: { id: robotId },
+      data: {
+        viewerCount: Math.max(0, viewerCount),
+      },
+      select: { id: true },
+    });
+  }
+
+  private async refreshStaleStatus() {
+    const staleBefore = new Date(Date.now() - 45_000);
+    await this.prisma.robot.updateMany({
+      where: {
+        status: { in: ['ONLINE', 'BUSY'] },
+        OR: [{ lastOnlineAt: null }, { lastOnlineAt: { lt: staleBefore } }],
+      },
+      data: {
+        status: 'OFFLINE',
+        viewerCount: 0,
       },
     });
   }

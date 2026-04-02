@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { UpdateMeDto } from './users.dto';
 
 @Injectable()
 export class UsersService {
@@ -49,6 +50,67 @@ export class UsersService {
         displayName: true,
         avatarUrl: true,
         credits: true,
+      },
+    });
+  }
+
+  async updateMe(userId: string, dto: UpdateMeDto) {
+    const updates: { displayName?: string | null; avatarUrl?: string | null } = {};
+
+    if (dto.displayName !== undefined) {
+      const cleaned = dto.displayName.trim();
+      updates.displayName = cleaned.length > 0 ? cleaned : null;
+    }
+
+    if (dto.avatarUrl !== undefined) {
+      const cleaned = dto.avatarUrl.trim();
+      updates.avatarUrl = cleaned.length > 0 ? cleaned : null;
+    }
+
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: updates,
+      select: {
+        id: true,
+        username: true,
+        displayName: true,
+        avatarUrl: true,
+        role: true,
+        balance: true,
+        credits: true,
+        createdAt: true,
+      },
+    });
+  }
+
+  async listUsersForStaff(input?: { q?: string; limit?: number }) {
+    const limit = Math.max(1, Math.min(input?.limit ?? 100, 250));
+    const query = input?.q?.trim();
+
+    return this.prisma.user.findMany({
+      where: query
+        ? {
+            OR: [
+              { username: { contains: query, mode: 'insensitive' } },
+              { email: { contains: query, mode: 'insensitive' } },
+              { displayName: { contains: query, mode: 'insensitive' } },
+            ],
+          }
+        : undefined,
+      take: limit,
+      orderBy: [{ createdAt: 'desc' }],
+      select: {
+        id: true,
+        username: true,
+        displayName: true,
+        avatarUrl: true,
+        email: true,
+        role: true,
+        isActive: true,
+        credits: true,
+        balance: true,
+        lastLoginAt: true,
+        createdAt: true,
       },
     });
   }

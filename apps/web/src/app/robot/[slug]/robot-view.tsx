@@ -7,6 +7,7 @@ import { AlertTriangle, Bot, Radio, Video, Gamepad2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/store';
 import { LiveKitPlayer } from '@/components/livekit-player';
+import { pushToast } from '@/lib/toast';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -100,6 +101,9 @@ export default function RobotView({ robot }: Props) {
   const [livekitCreds, setLivekitCreds] = useState<{ token: string; url: string } | null>(null);
   const [videoState, setVideoState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [moderatingUserId, setModeratingUserId] = useState<string | null>(null);
+  const [robotStatus, setRobotStatus] = useState(robot.status);
+  const [chatRestriction, setChatRestriction] = useState<string | null>(null);
+  const [tabSwitchOnlyWhenEmpty, setTabSwitchOnlyWhenEmpty] = useState(true);
 
   const wsRef = useRef<WebSocket | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -164,6 +168,21 @@ export default function RobotView({ robot }: Props) {
   useEffect(() => {
     api.getQueue(robot.id).then(setQueue).catch(() => {});
   }, [robot.id]);
+
+  useEffect(() => {
+    setRobotStatus(robot.status);
+  }, [robot.status]);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem('botparty.settings.v1');
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as { keyboardTabSwitchOnlyWhenEmpty?: boolean };
+      setTabSwitchOnlyWhenEmpty(parsed.keyboardTabSwitchOnlyWhenEmpty !== false);
+    } catch {
+      setTabSwitchOnlyWhenEmpty(true);
+    }
+  }, []);
 
   // ─── WebSocket ────────────────────────────────────────────────────────────
 
@@ -252,6 +271,28 @@ export default function RobotView({ robot }: Props) {
       case 'queue:update':
         setQueue((data.queue as QueueEntry[]) ?? []);
         break;
+      case 'robot:status': {
+        const status = typeof data.status === 'string' ? data.status : robot.status;
+        setRobotStatus(status as RobotPublic['status']);
+        if (status === 'OFFLINE') {
+          setLivekitCreds(null);
+          setVideoState('idle');
+        }
+        break;
+      }
+      case 'error': {
+        const message = typeof data.message === 'string' ? data.message : 'Unknown websocket error';
+        if (message.includes('restricted')) {
+          const restriction = (data.restriction as { action?: string; expiresAt?: string | null } | undefined) ?? {};
+          const text = restriction.action
+            ? `Du bist aktuell eingeschraenkt (${restriction.action}).`
+            : 'Du bist aktuell eingeschraenkt.';
+          setChatRestriction(text);
+        } else {
+          pushToast(message, 'error');
+        }
+        break;
+      }
     }
   }, []);
 
@@ -285,6 +326,13 @@ export default function RobotView({ robot }: Props) {
       const inInput = ['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName);
 
       if (e.key === 'Tab') {
+        if (inInput) {
+          const value =
+            (e.target as HTMLInputElement | HTMLTextAreaElement | null)?.value?.trim() ?? '';
+          if (tabSwitchOnlyWhenEmpty && value.length > 0) {
+            return;
+          }
+        }
         e.preventDefault();
         setFocusMode((m) => {
           const next = m === 'controls' ? 'chat' : 'controls';
@@ -320,7 +368,7 @@ export default function RobotView({ robot }: Props) {
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); };
-  }, [focusMode, controlButtons, sendCommand, triggerEStop, canUseEStop]);
+  }, [focusMode, controlButtons, sendCommand, triggerEStop, canUseEStop, tabSwitchOnlyWhenEmpty]);
 
   // ─── Chat ─────────────────────────────────────────────────────────────────
 
@@ -334,7 +382,7 @@ export default function RobotView({ robot }: Props) {
   }, [chatInput, robot.id]);
 
   const moderateChatUser = useCallback(
-    async (targetUserId: string, action: 'TIMEOUT' | 'BAN') => {
+    async (targetUserId: string, action: 'TIMEOUT' | 'BAN' | 'UNBAN') => {
       if (!canModerate || !accessToken) return;
       setModeratingUserId(targetUserId);
 
@@ -355,11 +403,21 @@ export default function RobotView({ robot }: Props) {
             content:
               action === 'TIMEOUT'
                 ? `User ${targetUserId.slice(0, 8)} timed out for 5 minutes.`
-                : `User ${targetUserId.slice(0, 8)} has been banned from this room.`,
+                : action === 'BAN'
+                  ? `User ${targetUserId.slice(0, 8)} has been banned from this room.`
+                  : `User ${targetUserId.slice(0, 8)} has been unbanned.`,
             timestamp: Date.now(),
             isSystem: true,
           },
         ]);
+        pushToast(
+          action === 'TIMEOUT'
+            ? 'Timeout wurde gesetzt.'
+            : action === 'BAN'
+              ? 'User wurde gebannt.'
+              : 'User wurde entsperrt.',
+          'success',
+        );
       } catch {
         setMessages((prev) => [
           ...prev.slice(-200),
@@ -371,6 +429,7 @@ export default function RobotView({ robot }: Props) {
             isSystem: true,
           },
         ]);
+        pushToast('Moderation action failed.', 'error');
       } finally {
         setModeratingUserId(null);
       }
@@ -387,9 +446,11 @@ export default function RobotView({ robot }: Props) {
       if (inQueue) {
         await api.leaveQueue(robot.id);
         setInQueue(false);
+        pushToast('Queue verlassen.', 'info');
       } else {
         await api.joinQueue(robot.id);
         setInQueue(true);
+        pushToast('Queue beigetreten.', 'success');
       }
       const updated = await api.getQueue(robot.id);
       setQueue(updated);
@@ -410,7 +471,7 @@ export default function RobotView({ robot }: Props) {
   ];
   const buttons = controlButtons.length > 0 ? controlButtons : defaultButtons;
 
-  const isOnline = robot.status === 'ONLINE' || robot.status === 'BUSY';
+  const isOnline = robotStatus === 'ONLINE' || robotStatus === 'BUSY';
 
   // ─── UI ───────────────────────────────────────────────────────────────────
 
@@ -434,7 +495,7 @@ export default function RobotView({ robot }: Props) {
         <div className="lg:col-span-2 space-y-4">
           {/* Video */}
           <div className="relative aspect-video overflow-hidden rounded-xl border border-[var(--border)] bg-black">
-            {livekitCreds ? (
+            {isOnline && livekitCreds ? (
               <LiveKitPlayer token={livekitCreds.token} livekitUrl={livekitCreds.url} />
             ) : (
               <div className="flex h-full flex-col items-center justify-center gap-3 text-[var(--muted-foreground)]">
@@ -784,6 +845,14 @@ export default function RobotView({ robot }: Props) {
                             >
                               Ban
                             </button>
+                            <button
+                              type="button"
+                              onClick={() => void moderateChatUser(msg.userId, 'UNBAN')}
+                              disabled={moderatingUserId === msg.userId}
+                              className="rounded border border-emerald-500/40 px-1.5 py-0.5 text-[10px] text-emerald-300 disabled:opacity-50"
+                            >
+                              Unban
+                            </button>
                           </span>
                         )}
                     </span>
@@ -801,7 +870,12 @@ export default function RobotView({ robot }: Props) {
                 onChange={(e) => setChatInput(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') { e.preventDefault(); sendChat(); }
-                  if (e.key === 'Tab') { e.preventDefault(); setFocusMode('controls'); }
+                  if (e.key === 'Tab') {
+                    if (!tabSwitchOnlyWhenEmpty || chatInput.trim().length === 0) {
+                      e.preventDefault();
+                      setFocusMode('controls');
+                    }
+                  }
                 }}
                 placeholder={focusMode === 'chat' ? 'Say something...' : 'Tab to chat...'}
                 maxLength={300}
@@ -818,6 +892,11 @@ export default function RobotView({ robot }: Props) {
             <p className="mt-1 text-right text-xs text-[var(--muted-foreground)]">
               {chatInput.length}/300
             </p>
+            {chatRestriction && (
+              <p className="mt-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-300">
+                {chatRestriction}
+              </p>
+            )}
           </div>
         </div>
       </div>

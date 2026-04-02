@@ -54,6 +54,16 @@ export default function Nav() {
         {/* Nav links */}
         <nav className="hidden items-center gap-2 sm:flex">
           <Link
+            href="/"
+            className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+              pathname === '/'
+                ? 'bg-[var(--muted)] text-[var(--foreground)]'
+                : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+            }`}
+          >
+            Home
+          </Link>
+          <Link
             href="/explore"
             className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
               isActive('/explore')
@@ -104,7 +114,14 @@ export default function Nav() {
                     onClick={() => setMenuOpen(false)}
                     className="block px-4 py-2 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition"
                   >
-                    My Robots
+                    Robots Dashboard
+                  </Link>
+                  <Link
+                    href="/mod"
+                    onClick={() => setMenuOpen(false)}
+                    className="block px-4 py-2 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition"
+                  >
+                    Mod Dashboard
                   </Link>
                   <Link
                     href="/settings"

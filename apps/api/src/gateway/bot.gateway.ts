@@ -120,6 +120,10 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
       joinedAt: Date.now(),
     });
 
+    this.robotsService
+      .setViewerCount(data.robotId, this.rooms.get(data.robotId)?.size ?? 0)
+      .catch(() => {});
+
     // Announce presence to room
     this._broadcastToRoom(data.robotId, WS_EVENTS.PRESENCE_JOIN, {
       userId: client.userId,
@@ -302,6 +306,16 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     if (this.moderationService.containsProfanity(sanitized)) {
+      if (client.userId) {
+        this.moderationService
+          .recordProfanityEvent({
+            robotId: data.robotId,
+            userId: client.userId,
+            username: client.username ?? 'unknown',
+            content: sanitized,
+          })
+          .catch(() => {});
+      }
       client.send(
         JSON.stringify({ event: 'error', data: { message: 'Message blocked by profanity filter' } }),
       );
@@ -378,6 +392,10 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
         username: client.username,
       });
     }
+
+    this.robotsService
+      .setViewerCount(robotId, this.rooms.get(robotId)?.size ?? 0)
+      .catch(() => {});
 
     client.watchingRobotId = undefined;
   }

@@ -81,6 +81,23 @@ export class RobotsController {
     return this.robotsService.update(id, user.sub, body as never);
   }
 
+  @Put('admin/:id')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update robot settings as staff' })
+  async updateAsStaff(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @Body() body: Record<string, unknown>,
+  ) {
+    const role = String(user.role);
+    if (!['ADMIN', 'MOD', 'MODERATOR', 'CREATOR'].includes(role)) {
+      throw new ForbiddenException('Access denied');
+    }
+
+    return this.robotsService.updateByStaff(id, body as never);
+  }
+
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @UseGuards(JwtAuthGuard)
@@ -88,6 +105,20 @@ export class RobotsController {
   @ApiOperation({ summary: 'Delete a robot' })
   async delete(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     await this.robotsService.delete(id, user.sub);
+  }
+
+  @Delete('admin/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Delete robot as staff' })
+  async deleteAsStaff(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    const role = String(user.role);
+    if (!['ADMIN', 'MOD', 'MODERATOR', 'CREATOR'].includes(role)) {
+      throw new ForbiddenException('Access denied');
+    }
+
+    await this.robotsService.deleteByStaff(id);
   }
 
   @Post(':id/regenerate-token')

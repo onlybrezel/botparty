@@ -3,10 +3,24 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Bot, Cable, CircuitBoard, Copy, ExternalLink, RefreshCcw, Save, Trash2, Plus } from 'lucide-react';
+import {
+  Bot,
+  Cable,
+  CircuitBoard,
+  Copy,
+  ExternalLink,
+  RefreshCcw,
+  Save,
+  Trash2,
+  Plus,
+  Check,
+  Eye,
+  EyeOff,
+} from 'lucide-react';
 import { api, type RobotManaged } from '@/lib/api';
 import { useAuth } from '@/lib/store';
 import { LiveKitPlayer } from '@/components/livekit-player';
+import { pushToast } from '@/lib/toast';
 
 type RobotFormState = {
   name: string;
@@ -41,6 +55,22 @@ const DEFAULT_CREATE_FORM: RobotFormState = {
   maxControllers: 10,
   tags: '',
 };
+
+const LOCAL_SETTINGS_KEY = 'botparty.settings.v1';
+
+const accessModeOptions: Array<{
+  value: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
+  title: string;
+  description: string;
+}> = [
+  { value: 'ALL', title: 'Alle', description: 'Auch ohne Login erlaubt' },
+  {
+    value: 'AUTHENTICATED',
+    title: 'Nur angemeldet',
+    description: 'Erfordert Login',
+  },
+  { value: 'DISABLED', title: 'Aus', description: 'Funktion ist deaktiviert' },
+];
 
 function toUpdatePayload(form: RobotFormState) {
   const bitrate = Number(form.targetBitrateKbps);
@@ -120,6 +150,7 @@ export default function DashboardPage() {
   const [logsLoading, setLogsLoading] = useState(false);
   const [diagLogs, setDiagLogs] = useState<Array<{ ts: number; line: string }>>([]);
   const [preview, setPreview] = useState<{ token: string; url: string } | null>(null);
+  const [showToken, setShowToken] = useState(false);
 
   useEffect(() => {
     if (!accessToken) {
@@ -136,14 +167,6 @@ export default function DashboardPage() {
         api.setToken(accessToken);
         const data = await api.getMyRobots();
         setRobots(data);
-
-        if (data.length > 0) {
-          const firstRobot = data[0];
-          if (firstRobot) {
-            setSelectedId((prev) => prev ?? firstRobot.id);
-            setEditForm(formFromRobot(firstRobot));
-          }
-        }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to load robots';
         setError(message);
@@ -153,6 +176,16 @@ export default function DashboardPage() {
     };
 
     load().catch(() => {});
+
+    try {
+      const raw = window.localStorage.getItem(LOCAL_SETTINGS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as { dashboardMaskToken?: boolean };
+        setShowToken(parsed.dashboardMaskToken === false);
+      }
+    } catch {
+      setShowToken(false);
+    }
   }, [accessToken, router]);
 
   useEffect(() => {
@@ -219,9 +252,11 @@ export default function DashboardPage() {
       setEditForm(formFromRobot(created));
       setCreateForm(DEFAULT_CREATE_FORM);
       setStatus('Robot created. You can now copy the claim token to your Raspberry Pi config.');
+      pushToast('Robot erstellt.', 'success', 3000);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create robot';
       setError(message);
+      pushToast(message, 'error', 3500);
     } finally {
       setCreating(false);
     }
@@ -237,12 +272,22 @@ export default function DashboardPage() {
 
     try {
       api.setToken(accessToken);
+      const previousBitrate = selectedRobot.metadata?.stream?.targetBitrateKbps ?? null;
       const updated = await api.updateRobot(selectedRobot.id, toUpdatePayload(editForm));
       setRobots((prev) => prev.map((robot) => (robot.id === updated.id ? updated : robot)));
       setStatus('Robot settings saved.');
+
+      const nextBitrate = updated.metadata?.stream?.targetBitrateKbps ?? null;
+      if (previousBitrate !== nextBitrate) {
+        await api.enqueueRobotAction(updated.id, { type: 'restart_video' });
+        pushToast('Bitrate aktualisiert. Video-Neustart wurde angestoßen.', 'info', 3600);
+      } else {
+        pushToast('Einstellungen gespeichert.', 'success', 2800);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to save robot';
       setError(message);
+      pushToast(message, 'error', 3500);
     } finally {
       setSaving(false);
     }
@@ -274,6 +319,10 @@ export default function DashboardPage() {
 
   const handleRegenerate = async () => {
     if (!accessToken || !selectedRobot) return;
+    const confirmed = window.confirm(
+      `Claim Token fuer ${selectedRobot.name} wirklich neu erzeugen? Der alte Token ist sofort ungueltig.`,
+    );
+    if (!confirmed) return;
 
     setRegenerating(true);
     setError(null);
@@ -288,9 +337,11 @@ export default function DashboardPage() {
         ),
       );
       setStatus('Claim token regenerated. Update config.yaml on your Pi before restarting the client.');
+      pushToast('Neuer Claim Token erzeugt.', 'success', 3200);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to regenerate token';
       setError(message);
+      pushToast(message, 'error', 3500);
     } finally {
       setRegenerating(false);
     }
@@ -301,8 +352,10 @@ export default function DashboardPage() {
     try {
       await navigator.clipboard.writeText(selectedRobot.claimToken);
       setStatus('Claim token copied to clipboard.');
+      pushToast('Claim Token kopiert.', 'success');
     } catch {
       setError('Clipboard permission denied. Copy token manually.');
+      pushToast('Clipboard verweigert - bitte manuell kopieren.', 'error');
     }
   };
 
@@ -318,12 +371,16 @@ export default function DashboardPage() {
       api.setToken(accessToken);
       await api.enqueueRobotAction(selectedRobot.id, { type, durationSec });
       if (type === 'set_log_stream') {
+        setDiagLogs([]);
         setStatus(`Temporary diagnostics enabled for ${durationSec ?? 120}s.`);
+        pushToast(`Diagnostik fuer ${durationSec ?? 120}s aktiviert.`, 'info', 3000);
       } else {
         setStatus(`Action queued: ${type}`);
+        pushToast(`Aktion eingeplant: ${type}`, 'success', 2600);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to queue action');
+      pushToast(err instanceof Error ? err.message : 'Aktion konnte nicht eingeplant werden.', 'error');
     } finally {
       setOpLoading(null);
     }
@@ -540,9 +597,9 @@ export default function DashboardPage() {
                         setEditForm((prev) => ({ ...prev, visibility: event.target.value as RobotFormState['visibility'] }))
                       }
                     >
-                      <option value="PUBLIC">PUBLIC</option>
-                      <option value="UNLISTED">UNLISTED</option>
-                      <option value="PRIVATE">PRIVATE</option>
+                      <option value="PUBLIC">Sichtbarkeit: Oeffentlich</option>
+                      <option value="UNLISTED">Sichtbarkeit: Nicht gelistet (nur mit Link)</option>
+                      <option value="PRIVATE">Sichtbarkeit: Privat</option>
                     </select>
                     <select
                       className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
@@ -551,10 +608,10 @@ export default function DashboardPage() {
                         setEditForm((prev) => ({ ...prev, accessMode: event.target.value as RobotFormState['accessMode'] }))
                       }
                     >
-                      <option value="OPEN">OPEN</option>
-                      <option value="PASSWORD">PASSWORD</option>
-                      <option value="LINK_ONLY">LINK_ONLY</option>
-                      <option value="ALLOWED_USERS">ALLOWED_USERS</option>
+                      <option value="OPEN">Raumzugang: Offen</option>
+                      <option value="PASSWORD">Raumzugang: Passwort</option>
+                      <option value="LINK_ONLY">Raumzugang: Nur Link</option>
+                      <option value="ALLOWED_USERS">Raumzugang: Nur erlaubte User</option>
                     </select>
                     <select
                       className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
@@ -563,58 +620,34 @@ export default function DashboardPage() {
                         setEditForm((prev) => ({ ...prev, queueMode: event.target.value as RobotFormState['queueMode'] }))
                       }
                     >
-                      <option value="FIRST_COME">FIRST_COME</option>
-                      <option value="VOTING">VOTING</option>
-                      <option value="DISABLED">DISABLED</option>
+                      <option value="FIRST_COME">Queue: Reihenfolge nach Eintritt</option>
+                      <option value="VOTING">Queue: Voting</option>
+                      <option value="DISABLED">Queue: Aus</option>
                     </select>
 
-                    <select
-                      className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                    <AclPicker
+                      title="Video Zugriff"
                       value={editForm.aclVideo}
-                      onChange={(event) =>
-                        setEditForm((prev) => ({ ...prev, aclVideo: event.target.value as RobotFormState['aclVideo'] }))
-                      }
-                    >
-                      <option value="ALL">Guest Video: ALL</option>
-                      <option value="AUTHENTICATED">Guest Video: AUTHENTICATED</option>
-                      <option value="DISABLED">Guest Video: DISABLED</option>
-                    </select>
+                      onChange={(value) => setEditForm((prev) => ({ ...prev, aclVideo: value }))}
+                    />
 
-                    <select
-                      className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                    <AclPicker
+                      title="Steuerung Zugriff"
                       value={editForm.aclControl}
-                      onChange={(event) =>
-                        setEditForm((prev) => ({ ...prev, aclControl: event.target.value as RobotFormState['aclControl'] }))
-                      }
-                    >
-                      <option value="ALL">Guest Control: ALL</option>
-                      <option value="AUTHENTICATED">Guest Control: AUTHENTICATED</option>
-                      <option value="DISABLED">Guest Control: DISABLED</option>
-                    </select>
+                      onChange={(value) => setEditForm((prev) => ({ ...prev, aclControl: value }))}
+                    />
 
-                    <select
-                      className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                    <AclPicker
+                      title="Chat Zugriff"
                       value={editForm.aclChat}
-                      onChange={(event) =>
-                        setEditForm((prev) => ({ ...prev, aclChat: event.target.value as RobotFormState['aclChat'] }))
-                      }
-                    >
-                      <option value="ALL">Guest Chat: ALL</option>
-                      <option value="AUTHENTICATED">Guest Chat: AUTHENTICATED</option>
-                      <option value="DISABLED">Guest Chat: DISABLED</option>
-                    </select>
+                      onChange={(value) => setEditForm((prev) => ({ ...prev, aclChat: value }))}
+                    />
 
-                    <select
-                      className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                    <AclPicker
+                      title="E-STOP Zugriff"
                       value={editForm.aclEStop}
-                      onChange={(event) =>
-                        setEditForm((prev) => ({ ...prev, aclEStop: event.target.value as RobotFormState['aclEStop'] }))
-                      }
-                    >
-                      <option value="ALL">Guest E-STOP: ALL</option>
-                      <option value="AUTHENTICATED">Guest E-STOP: AUTHENTICATED</option>
-                      <option value="DISABLED">Guest E-STOP: DISABLED</option>
-                    </select>
+                      onChange={(value) => setEditForm((prev) => ({ ...prev, aclEStop: value }))}
+                    />
 
                     <input
                       type="number"
@@ -635,6 +668,7 @@ export default function DashboardPage() {
                       onChange={(event) =>
                         setEditForm((prev) => ({ ...prev, maxTurnTime: Number(event.target.value) }))
                       }
+                      placeholder="Max Turn Time in ms (z.B. 60000)"
                     />
                     <input
                       type="number"
@@ -643,6 +677,7 @@ export default function DashboardPage() {
                       onChange={(event) =>
                         setEditForm((prev) => ({ ...prev, maxViewers: Number(event.target.value) }))
                       }
+                      placeholder="Maximale Zuschauer"
                     />
                     <input
                       type="number"
@@ -651,6 +686,7 @@ export default function DashboardPage() {
                       onChange={(event) =>
                         setEditForm((prev) => ({ ...prev, maxControllers: Number(event.target.value) }))
                       }
+                      placeholder="Maximale Controller"
                     />
                   </div>
 
@@ -671,7 +707,19 @@ export default function DashboardPage() {
 
                   <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
                     <p className="mb-2 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Claim Token</p>
-                    <code className="block break-all text-xs text-[var(--foreground)]">{selectedRobot.claimToken}</code>
+                    <div className="flex items-center gap-2">
+                      <code className="block min-h-5 flex-1 break-all text-xs text-[var(--foreground)]">
+                        {showToken ? selectedRobot.claimToken : `${selectedRobot.claimToken.slice(0, 6)}••••••••••••••••••••`}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={() => setShowToken((prev) => !prev)}
+                        className="rounded border border-[var(--border)] p-1.5"
+                        aria-label="Toggle token visibility"
+                      >
+                        {showToken ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                      </button>
+                    </div>
                     <div className="mt-3 flex flex-wrap gap-2">
                       <button
                         type="button"
@@ -781,11 +829,52 @@ export default function DashboardPage() {
                   </div>
                 </form>
                 </>
-              ) : null}
+              ) : (
+                <div className="rounded-xl border border-dashed border-[var(--border)] bg-[var(--background)] p-6 text-sm text-[var(--muted-foreground)]">
+                  Waehle links einen Roboter aus, um die Einstellungen zu bearbeiten.
+                </div>
+              )}
             </div>
           </div>
         )}
       </section>
+    </div>
+  );
+}
+
+function AclPicker({
+  title,
+  value,
+  onChange,
+}: {
+  title: string;
+  value: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
+  onChange: (value: 'ALL' | 'AUTHENTICATED' | 'DISABLED') => void;
+}) {
+  return (
+    <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-2">
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">{title}</p>
+      <div className="flex flex-wrap gap-2">
+        {accessModeOptions.map((option) => {
+          const active = option.value === value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => onChange(option.value)}
+              className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition ${
+                active
+                  ? 'border-[var(--primary)] bg-[var(--primary)]/15 text-[var(--foreground)]'
+                  : 'border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+              }`}
+              title={option.description}
+            >
+              {active && <Check className="h-3 w-3" />}
+              {option.title}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import type { RobotPublic } from '@botparty/shared';
 import RobotCard from '@/components/robot-card';
-import { ArrowRight, Bot, Gamepad2, Radio } from 'lucide-react';
+import { ArrowRight, Bot, Gamepad2, Radio, Sparkles } from 'lucide-react';
 
 async function getPublicRobots(): Promise<RobotPublic[]> {
   const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
@@ -26,17 +26,16 @@ export default async function HomePage() {
     <>
       {/* Hero */}
       <section className="relative overflow-hidden border-b border-[var(--border)]/60">
-        {/* Background gradient */}
         <div
           className="pointer-events-none absolute inset-0 -z-10"
           style={{
             background:
-              'radial-gradient(ellipse 80% 50% at 50% -10%, rgba(124,58,237,0.12) 0%, transparent 70%)',
+              'radial-gradient(ellipse 85% 60% at 10% -10%, rgba(56,189,248,0.14) 0%, transparent 62%), radial-gradient(ellipse 70% 55% at 90% 5%, rgba(16,185,129,0.11) 0%, transparent 60%)',
           }}
         />
 
         <div className="mx-auto flex min-h-[calc(100vh-12rem)] max-w-5xl flex-col justify-center px-4 py-16 text-center sm:py-20">
-          <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-violet-500/30 bg-violet-500/10 px-3 py-1 text-sm text-violet-300">
+          <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-sky-400/30 bg-sky-500/10 px-3 py-1 text-sm text-sky-200">
             <span className="h-1.5 w-1.5 rounded-full bg-[var(--online)] animate-pulse-dot" />
             {onlineCount > 0
               ? `${onlineCount} robot${onlineCount !== 1 ? 's' : ''} online right now`
@@ -45,19 +44,19 @@ export default async function HomePage() {
 
           <h1 className="mb-5 text-5xl font-extrabold leading-[1.1] tracking-tight text-[var(--foreground)] sm:text-6xl lg:text-7xl">
             Drive real robots{' '}
-            <span className="bg-gradient-to-r from-violet-400 via-purple-400 to-fuchsia-400 bg-clip-text text-transparent">
+            <span className="bg-gradient-to-r from-sky-300 via-teal-300 to-emerald-300 bg-clip-text text-transparent">
               from your browser
             </span>
           </h1>
 
-          <p className="mx-auto mb-9 max-w-xl text-lg text-[var(--muted-foreground)] sm:text-xl">
-            Connect a Raspberry Pi, share the link, and let people drive.
+          <p className="mx-auto mb-9 max-w-2xl text-lg text-[var(--muted-foreground)] sm:text-xl">
+            Kein Simulationskram: echte Hardware, echte Latenz, echte Community-Sessions.
           </p>
 
           <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
             <Link
               href="/explore"
-              className="inline-flex items-center gap-2 rounded-xl bg-[var(--primary)] px-7 py-3 text-base font-semibold text-white shadow-lg shadow-violet-500/25 transition hover:bg-[var(--primary-hover)] hover:shadow-violet-500/40"
+              className="inline-flex items-center gap-2 rounded-xl bg-[var(--primary)] px-7 py-3 text-base font-semibold text-white shadow-lg shadow-sky-500/25 transition hover:bg-[var(--primary-hover)] hover:shadow-sky-500/40"
             >
               Explore robots
               <ArrowRight className="h-4 w-4" />
@@ -77,6 +76,21 @@ export default async function HomePage() {
               {viewerTotal > 0 && ` · ${viewerTotal} viewer${viewerTotal !== 1 ? 's' : ''} watching`}
             </p>
           )}
+
+          <div className="mx-auto mt-8 grid w-full max-w-3xl grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)]/70 px-4 py-3 text-left">
+              <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Live robots</p>
+              <p className="mt-1 text-2xl font-black">{onlineCount}</p>
+            </div>
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)]/70 px-4 py-3 text-left">
+              <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Live viewers</p>
+              <p className="mt-1 text-2xl font-black">{viewerTotal}</p>
+            </div>
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)]/70 px-4 py-3 text-left">
+              <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Sessions heute</p>
+              <p className="mt-1 text-2xl font-black">{Math.max(robots.length, onlineCount)}</p>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -119,9 +133,9 @@ export default async function HomePage() {
                 desc: 'Each robot gets its own page with video, chat, and queue controls.',
               },
               {
-                icon: Radio,
-                title: 'Live video + controls',
-                desc: 'Watch the stream, join the queue, and control the robot from the browser.',
+                icon: Sparkles,
+                title: 'Moderate and scale',
+                desc: 'Use dashboard and moderation tools to run fair sessions and keep control safe.',
               },
             ].map((item) => (
               <div

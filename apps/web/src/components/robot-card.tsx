@@ -39,6 +39,12 @@ interface Props {
 }
 
 export default function RobotCard({ robot }: Props) {
+  const seed = robot.slug
+    .split('')
+    .reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
+  const hue = seed % 360;
+  const initial = robot.name.trim().charAt(0).toUpperCase() || 'R';
+
   return (
     <Link
       href={`/robot/${robot.slug}`}
@@ -55,8 +61,17 @@ export default function RobotCard({ robot }: Props) {
             sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
           />
         ) : (
-          <div className="flex h-full w-full items-center justify-center">
-            <Bot className="h-10 w-10 text-[var(--muted-foreground)]/40" />
+          <div
+            className="relative flex h-full w-full items-center justify-center"
+            style={{
+              background: `linear-gradient(135deg, hsla(${hue}, 75%, 55%, 0.25), hsla(${(hue + 50) % 360}, 80%, 50%, 0.08))`,
+            }}
+          >
+            <div className="absolute inset-0 opacity-30" style={{ backgroundImage: 'radial-gradient(circle at 20% 20%, rgba(255,255,255,0.25), transparent 45%)' }} />
+            <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl border border-white/20 bg-black/25 text-xl font-black text-white">
+              {initial}
+            </div>
+            <Bot className="absolute bottom-2 right-2 h-5 w-5 text-white/45" />
           </div>
         )}
 

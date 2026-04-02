@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import './globals.css';
 import Nav from '@/components/nav';
+import { ToastStack } from '@/components/ui/toast-stack';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -25,6 +26,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" className="dark">
       <body className={`${inter.variable} flex min-h-screen flex-col bg-[var(--background)] text-[var(--foreground)] antialiased`}>
         <Nav />
+        <ToastStack />
         <main className="flex-1">{children}</main>
         <footer className="border-t border-[var(--border)] py-6 text-center text-sm text-[var(--muted-foreground)]">
           BotParty

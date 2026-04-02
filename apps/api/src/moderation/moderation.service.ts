@@ -203,6 +203,71 @@ export class ModerationService {
     });
   }
 
+  async recordProfanityEvent(input: {
+    robotId: string;
+    userId: string;
+    username: string;
+    content: string;
+  }) {
+    const totalKey = `moderation:profanity:robot:${input.robotId}:total`;
+    const byUserKey = `moderation:profanity:robot:${input.robotId}:by-user`;
+    const listKey = `moderation:profanity:robot:${input.robotId}:events`;
+
+    const event = {
+      ts: Date.now(),
+      userId: input.userId,
+      username: input.username,
+      content: input.content.slice(0, 400),
+    };
+
+    const pipeline = this.redis.pipeline();
+    pipeline.incr(totalKey);
+    pipeline.hincrby(byUserKey, input.userId, 1);
+    pipeline.lpush(listKey, JSON.stringify(event));
+    pipeline.ltrim(listKey, 0, 199);
+    pipeline.expire(totalKey, 60 * 60 * 24 * 30);
+    pipeline.expire(byUserKey, 60 * 60 * 24 * 30);
+    pipeline.expire(listKey, 60 * 60 * 24 * 30);
+    await pipeline.exec();
+  }
+
+  async getProfanityOverview(requesterId: string, robotId: string) {
+    await this._assertStaffOrOwner(robotId, requesterId);
+
+    const totalKey = `moderation:profanity:robot:${robotId}:total`;
+    const byUserKey = `moderation:profanity:robot:${robotId}:by-user`;
+    const listKey = `moderation:profanity:robot:${robotId}:events`;
+
+    const [totalRaw, byUserRaw, eventsRaw] = await Promise.all([
+      this.redis.get(totalKey),
+      this.redis.hgetall(byUserKey),
+      this.redis.lrange(listKey, 0, 99),
+    ]);
+
+    const events = eventsRaw
+      .map((row) => {
+        try {
+          return JSON.parse(row) as {
+            ts: number;
+            userId: string;
+            username: string;
+            content: string;
+          };
+        } catch {
+          return null;
+        }
+      })
+      .filter((row): row is { ts: number; userId: string; username: string; content: string } => row !== null);
+
+    return {
+      total: totalRaw ? Number(totalRaw) : 0,
+      byUser: Object.entries(byUserRaw)
+        .map(([userId, count]) => ({ userId, count: Number(count) || 0 }))
+        .sort((a, b) => b.count - a.count),
+      events,
+    };
+  }
+
   /** Get moderation log for a robot (owner / site staff only). */
   async getLog(robotId: string, requesterId: string) {
     await this._assertStaffOrOwner(robotId, requesterId);
@@ -215,6 +280,65 @@ export class ModerationService {
         moderator: { select: { id: true, username: true } },
       },
     });
+  }
+
+  async getAdminOverview(requesterId: string, robotId?: string) {
+    const requester = await this.prisma.user.findUnique({ where: { id: requesterId } });
+    if (!requester || !this._isStaffRole(requester.role)) {
+      throw new ForbiddenException('Access denied');
+    }
+
+    const activeWhere = {
+      isActive: true,
+      ...(robotId ? { robotId } : {}),
+      OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+    };
+
+    const [recentActions, activeRestrictions, robots] = await Promise.all([
+      this.prisma.robotModerationEntry.findMany({
+        where: robotId ? { robotId } : undefined,
+        orderBy: { createdAt: 'desc' },
+        take: 150,
+        include: {
+          robot: { select: { id: true, name: true, slug: true } },
+          user: { select: { id: true, username: true, displayName: true } },
+          moderator: { select: { id: true, username: true } },
+        },
+      }),
+      this.prisma.robotModerationEntry.findMany({
+        where: activeWhere,
+        orderBy: { createdAt: 'desc' },
+        take: 150,
+        include: {
+          robot: { select: { id: true, name: true, slug: true } },
+          user: { select: { id: true, username: true, displayName: true } },
+          moderator: { select: { id: true, username: true } },
+        },
+      }),
+      this.prisma.robot.findMany({
+        where: robotId ? { id: robotId } : undefined,
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          status: true,
+          owner: { select: { id: true, username: true, displayName: true } },
+        },
+      }),
+    ]);
+
+    return {
+      recentActions,
+      activeRestrictions,
+      robots,
+      counts: {
+        bans: activeRestrictions.filter((entry: { action: string }) => entry.action === 'BAN').length,
+        timeouts: activeRestrictions.filter((entry: { action: string }) => entry.action === 'TIMEOUT').length,
+        kicks: activeRestrictions.filter((entry: { action: string }) => entry.action === 'KICK').length,
+      },
+    };
   }
 
   // ─── Helpers ────────────────────────────────────────────────────────────────
