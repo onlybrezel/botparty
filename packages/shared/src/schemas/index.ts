@@ -43,6 +43,7 @@ export const createRobotSchema = z.object({
       video: z.enum(['ALL', 'AUTHENTICATED', 'DISABLED']).default('AUTHENTICATED'),
       control: z.enum(['ALL', 'AUTHENTICATED', 'DISABLED']).default('AUTHENTICATED'),
       chat: z.enum(['ALL', 'AUTHENTICATED', 'DISABLED']).default('AUTHENTICATED'),
+      estop: z.enum(['ALL', 'AUTHENTICATED', 'DISABLED']).default('AUTHENTICATED'),
     })
     .optional(),
   stream: z

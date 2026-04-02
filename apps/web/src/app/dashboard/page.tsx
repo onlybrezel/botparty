@@ -17,6 +17,7 @@ type RobotFormState = {
   aclVideo: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
   aclControl: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
   aclChat: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
+  aclEStop: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
   targetBitrateKbps: string;
   maxTurnTime: number;
   maxViewers: number;
@@ -33,6 +34,7 @@ const DEFAULT_CREATE_FORM: RobotFormState = {
   aclVideo: 'AUTHENTICATED',
   aclControl: 'AUTHENTICATED',
   aclChat: 'AUTHENTICATED',
+  aclEStop: 'AUTHENTICATED',
   targetBitrateKbps: '',
   maxTurnTime: 60000,
   maxViewers: 1000,
@@ -54,6 +56,7 @@ function toUpdatePayload(form: RobotFormState) {
       video: form.aclVideo,
       control: form.aclControl,
       chat: form.aclChat,
+      estop: form.aclEStop,
     },
     stream: {
       targetBitrateKbps: hasBitrate ? Math.round(bitrate) : undefined,
@@ -81,6 +84,7 @@ function formFromRobot(robot: RobotManaged): RobotFormState {
     aclVideo: access?.video ?? 'AUTHENTICATED',
     aclControl: access?.control ?? 'AUTHENTICATED',
     aclChat: access?.chat ?? 'AUTHENTICATED',
+    aclEStop: access?.estop ?? 'AUTHENTICATED',
     targetBitrateKbps:
       typeof stream?.targetBitrateKbps === 'number' ? String(stream.targetBitrateKbps) : '',
     maxTurnTime: robot.maxTurnTime,
@@ -457,6 +461,7 @@ export default function DashboardPage() {
           <p>Access Mode: entry model for the room itself (open/password/invite/allowlist).</p>
           <p>Queue Mode: how control turns are assigned.</p>
           <p>Guest ACL: what non-logged-in visitors are allowed to do.</p>
+          <p>Guest E-STOP: who can see and trigger emergency stop.</p>
           <p>Target Bitrate: desired stream quality for the robot uplink (150-8000 kbps).</p>
         </div>
 
@@ -597,6 +602,18 @@ export default function DashboardPage() {
                       <option value="ALL">Guest Chat: ALL</option>
                       <option value="AUTHENTICATED">Guest Chat: AUTHENTICATED</option>
                       <option value="DISABLED">Guest Chat: DISABLED</option>
+                    </select>
+
+                    <select
+                      className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                      value={editForm.aclEStop}
+                      onChange={(event) =>
+                        setEditForm((prev) => ({ ...prev, aclEStop: event.target.value as RobotFormState['aclEStop'] }))
+                      }
+                    >
+                      <option value="ALL">Guest E-STOP: ALL</option>
+                      <option value="AUTHENTICATED">Guest E-STOP: AUTHENTICATED</option>
+                      <option value="DISABLED">Guest E-STOP: DISABLED</option>
                     </select>
 
                     <input

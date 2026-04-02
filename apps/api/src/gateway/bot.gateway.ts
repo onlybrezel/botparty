@@ -20,6 +20,7 @@ interface WsClient extends WebSocket {
   id: string;
   userId?: string;
   username?: string;
+  isGuest?: boolean;
   /** Which robot room this client is subscribed to */
   watchingRobotId?: string;
   /** True if this socket is the robot hardware client */
@@ -105,27 +106,25 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     client.watchingRobotId = data.robotId;
-    client.userId = data.userId;
-    client.username = data.username;
+    client.isGuest = !data.userId;
+    client.userId = data.userId?.trim() || `guest:${client.id}`;
+    client.username = data.username?.trim() || `Guest-${client.id.slice(0, 4)}`;
 
     if (!this.rooms.has(data.robotId)) this.rooms.set(data.robotId, new Set());
     this.rooms.get(data.robotId)!.add(client.id);
 
-    // Add to presence if authenticated
-    if (data.userId && data.username) {
-      if (!this.presence.has(data.robotId)) this.presence.set(data.robotId, new Map());
-      this.presence.get(data.robotId)!.set(data.userId, {
-        userId: data.userId,
-        username: data.username,
-        joinedAt: Date.now(),
-      });
+    if (!this.presence.has(data.robotId)) this.presence.set(data.robotId, new Map());
+    this.presence.get(data.robotId)!.set(client.userId, {
+      userId: client.userId,
+      username: client.username,
+      joinedAt: Date.now(),
+    });
 
-      // Announce presence to room
-      this._broadcastToRoom(data.robotId, WS_EVENTS.PRESENCE_JOIN, {
-        userId: data.userId,
-        username: data.username,
-      }, client.id);
-    }
+    // Announce presence to room
+    this._broadcastToRoom(data.robotId, WS_EVENTS.PRESENCE_JOIN, {
+      userId: client.userId,
+      username: client.username,
+    }, client.id);
 
     // Send full presence snapshot to the joining client
     const presenceList = Array.from(this.presence.get(data.robotId)?.values() ?? []);
@@ -187,7 +186,7 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
       );
       return;
     }
-    if (access.control === 'AUTHENTICATED' && !client.userId) {
+    if (access.control === 'AUTHENTICATED' && client.isGuest) {
       client.send(
         JSON.stringify({ event: 'error', data: { message: 'Please sign in to control this robot' } }),
       );
@@ -195,7 +194,7 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     // Moderation check
-    if (client.userId) {
+    if (client.userId && !client.isGuest) {
       const restriction = await this.moderationService.getActiveRestriction(
         data.robotId,
         client.userId,
@@ -208,8 +207,21 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
     }
 
+    // Crowd input echo: broadcast to all viewers so they see button presses
+    this._broadcastToRoom(
+      data.robotId,
+      WS_EVENTS.CROWD_INPUT,
+      { userId: client.userId, username: client.username, command: data.command },
+      client.id, // exclude sender
+    );
+
     const robotClient = this.robotClients.get(data.robotId);
-    if (!robotClient) return;
+    if (!robotClient) {
+      client.send(
+        JSON.stringify({ event: 'error', data: { message: 'Robot is not connected' } }),
+      );
+      return;
+    }
 
     // Forward command to the robot hardware (ultra-low-latency path)
     robotClient.send(
@@ -217,14 +229,6 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
         event: WS_EVENTS.CONTROL_COMMAND,
         data: { command: data.command, value: data.value, userId: client.userId, timestamp: data.timestamp },
       }),
-    );
-
-    // Crowd input echo: broadcast to all viewers so they see button presses
-    this._broadcastToRoom(
-      data.robotId,
-      WS_EVENTS.CROWD_INPUT,
-      { userId: client.userId, username: client.username, command: data.command },
-      client.id, // exclude sender
     );
 
     // Latency guard
@@ -243,7 +247,25 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: WsClient,
     @MessageBody() data: { robotId: string },
   ) {
-    this._triggerEmergencyStop(data.robotId, `Manual E-STOP by ${client.userId ?? 'anonymous'}`);
+    this.robotsService
+      .getAccessPolicy(data.robotId)
+      .then((access) => {
+        if (access.estop === 'DISABLED') {
+          client.send(JSON.stringify({ event: 'error', data: { message: 'E-STOP is disabled for this room' } }));
+          return;
+        }
+        if (access.estop === 'AUTHENTICATED' && client.isGuest) {
+          client.send(
+            JSON.stringify({ event: 'error', data: { message: 'Please sign in to use E-STOP' } }),
+          );
+          return;
+        }
+
+        this._triggerEmergencyStop(data.robotId, `Manual E-STOP by ${client.userId ?? 'anonymous'}`);
+      })
+      .catch(() => {
+        client.send(JSON.stringify({ event: 'error', data: { message: 'Failed to validate E-STOP access' } }));
+      });
   }
 
   // ─── Chat ───────────────────────────────────────────────────────────────────
@@ -257,16 +279,34 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (access.chat === 'DISABLED') {
       return;
     }
-    if (access.chat === 'AUTHENTICATED' && !client.userId) {
+    if (access.chat === 'AUTHENTICATED' && client.isGuest) {
       return;
     }
 
-    if (!client.userId) {
-      client.userId = `guest-${client.id}`;
-      client.username = client.username ?? 'Guest';
+    if (!data.content?.trim() || data.content.length > LIMITS.MAX_CHAT_MESSAGE_LENGTH) {
+      client.send(
+        JSON.stringify({ event: 'error', data: { message: `Chat messages must be 1-${LIMITS.MAX_CHAT_MESSAGE_LENGTH} chars` } }),
+      );
+      return;
     }
 
-    if (!data.content?.trim() || data.content.length > LIMITS.MAX_CHAT_MESSAGE_LENGTH) return;
+    const { sanitized, hasIllegalChars } = this.moderationService.sanitizeChatContent(data.content);
+    if (!sanitized) {
+      return;
+    }
+    if (hasIllegalChars) {
+      client.send(
+        JSON.stringify({ event: 'error', data: { message: 'Message contains invalid characters' } }),
+      );
+      return;
+    }
+
+    if (this.moderationService.containsProfanity(sanitized)) {
+      client.send(
+        JSON.stringify({ event: 'error', data: { message: 'Message blocked by profanity filter' } }),
+      );
+      return;
+    }
 
     // Chat rate limiting
     const now = Date.now();
@@ -278,16 +318,13 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
     client.lastChatAt = now;
 
     // Moderation check
-    const restriction = await this.moderationService.getActiveRestriction(
-      data.robotId,
-      client.userId,
-    );
+    const restriction = await this.moderationService.getActiveRestriction(data.robotId, client.userId ?? '');
     if (restriction) return; // silently drop – client already notified via control event
 
     this._broadcastToRoom(data.robotId, WS_EVENTS.CHAT_MESSAGE, {
       userId: client.userId,
       username: client.username,
-      content: data.content.trim(),
+      content: sanitized,
       timestamp: now,
     });
   }

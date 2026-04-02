@@ -192,15 +192,9 @@ function VideoRenderer() {
 
   const openPanel = (event: ReactMouseEvent<HTMLDivElement>) => {
     event.preventDefault();
-    const rect = containerRef.current?.getBoundingClientRect();
-    if (!rect) {
-      setPanelPosition({ x: 16, y: 16 });
-      return;
-    }
-
     setPanelPosition({
-      x: Math.min(event.clientX - rect.left, rect.width - 20),
-      y: Math.min(event.clientY - rect.top, rect.height - 20),
+      x: Math.min(event.clientX, window.innerWidth - 20),
+      y: Math.min(event.clientY, window.innerHeight - 20),
     });
   };
 
@@ -231,10 +225,10 @@ function VideoRenderer() {
 
       {panelPosition && (
         <div
-          className="absolute z-20 w-[min(22rem,calc(100%-1rem))] overflow-hidden rounded-2xl border border-cyan-400/30 bg-slate-950/92 text-[11px] text-slate-100 shadow-2xl backdrop-blur-xl"
+          className="fixed z-[70] w-[min(24rem,calc(100vw-1rem))] overflow-hidden rounded-2xl border border-cyan-400/30 bg-slate-950/92 text-[11px] text-slate-100 shadow-2xl backdrop-blur-xl"
           style={{
-            left: Math.max(8, Math.min(panelPosition.x, (containerRef.current?.clientWidth ?? 0) - 360)),
-            top: Math.max(8, Math.min(panelPosition.y, (containerRef.current?.clientHeight ?? 0) - 260)),
+            left: Math.max(8, Math.min(panelPosition.x, window.innerWidth - 392)),
+            top: Math.max(8, Math.min(panelPosition.y, window.innerHeight - 320)),
           }}
           onClick={(event) => event.stopPropagation()}
         >
@@ -315,6 +309,7 @@ export function LiveKitPlayer({ token, livekitUrl }: Props) {
     <LiveKitRoom
       token={token}
       serverUrl={livekitUrl}
+      options={{ adaptiveStream: false }}
       video={false}
       audio={false}
       className="relative h-full w-full"

@@ -9,6 +9,48 @@ import { RedisService } from '../redis/redis.service';
 import { ModerateUserDto } from './moderation.dto';
 import { ModerationActionType, WS_EVENTS } from '@botparty/shared';
 
+const PROFANITY_TERMS = [
+  // English
+  'fuck',
+  'fucking',
+  'shit',
+  'bitch',
+  'asshole',
+  'motherfucker',
+  'cunt',
+  'bastard',
+  'nigger',
+  'nigga',
+  'fag',
+  'faggot',
+  'retard',
+  // German
+  'hurensohn',
+  'hure',
+  'fotze',
+  'fick',
+  'ficken',
+  'wichser',
+  'arschloch',
+  'missgeburt',
+  'spast',
+  'schlampe',
+  'schwuchtel',
+  'kanake',
+  // Common obfuscated forms
+  'fck',
+  'f*ck',
+  'sh1t',
+  'b1tch',
+];
+
+const PROFANITY_REGEX = new RegExp(
+  `(?:^|[^\\p{L}\\p{N}])(${PROFANITY_TERMS
+    .map((term) => term.replace(/[.*+?^${}()|[\\]\\]/g, '\\\\$&'))
+    .join('|')})(?=$|[^\\p{L}\\p{N}])`,
+  'giu',
+);
+
 @Injectable()
 export class ModerationService {
   constructor(
@@ -132,6 +174,33 @@ export class ModerationService {
     }
 
     return entry;
+  }
+
+  sanitizeChatContent(raw: string): { sanitized: string; hasIllegalChars: boolean } {
+    const normalized = raw.normalize('NFKC');
+    // Remove control/non-printable chars and collapse whitespace.
+    const cleaned = normalized
+      .replace(/[\u0000-\u001F\u007F\u0080-\u009F]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    return {
+      sanitized: cleaned,
+      hasIllegalChars: cleaned !== normalized.trim(),
+    };
+  }
+
+  containsProfanity(content: string): boolean {
+    PROFANITY_REGEX.lastIndex = 0;
+    return PROFANITY_REGEX.test(content);
+  }
+
+  maskProfanity(content: string): string {
+    PROFANITY_REGEX.lastIndex = 0;
+    return content.replace(PROFANITY_REGEX, (full, term: string) => {
+      const replacement = `${term[0] ?? '*'}${'*'.repeat(Math.max(term.length - 1, 1))}`;
+      return full.replace(term, replacement);
+    });
   }
 
   /** Get moderation log for a robot (owner / site staff only). */

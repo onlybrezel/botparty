@@ -99,6 +99,7 @@ export default function RobotView({ robot }: Props) {
   const [inQueue, setInQueue] = useState(false);
   const [livekitCreds, setLivekitCreds] = useState<{ token: string; url: string } | null>(null);
   const [videoState, setVideoState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [moderatingUserId, setModeratingUserId] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -106,6 +107,19 @@ export default function RobotView({ robot }: Props) {
   const cooldownMap = useRef<Map<string, number>>(new Map());
 
   // ─── Fetch controls ────────────────────────────────────────────────────────
+
+  const isAuthenticated = Boolean(accessToken && userId);
+  const robotAccess = (robot as RobotPublic & {
+    metadata?: { access?: { estop?: 'ALL' | 'AUTHENTICATED' | 'DISABLED' } };
+  }).metadata?.access;
+  const canUseAccess = (mode: 'ALL' | 'AUTHENTICATED' | 'DISABLED' | undefined) => {
+    if (mode === 'DISABLED') return false;
+    if (mode === 'ALL') return true;
+    return isAuthenticated;
+  };
+  const estopAccess = robotAccess?.estop;
+  const canUseEStop = canUseAccess(estopAccess);
+  const canModerate = Boolean(userId && userId === robot.owner.id);
 
   useEffect(() => {
     api.getControls(robot.id).then(setControlButtons).catch(() => {});
@@ -255,9 +269,10 @@ export default function RobotView({ robot }: Props) {
   );
 
   const triggerEStop = useCallback(() => {
+    if (!canUseEStop) return;
     if (wsRef.current?.readyState !== WebSocket.OPEN) return;
     wsRef.current.send(JSON.stringify({ event: 'control:emergency-stop', data: { robotId: robot.id } }));
-  }, [robot.id]);
+  }, [canUseEStop, robot.id]);
 
   // ─── Keyboard ─────────────────────────────────────────────────────────────
 
@@ -279,7 +294,7 @@ export default function RobotView({ robot }: Props) {
         return;
       }
 
-      if (e.key === 'Escape') { triggerEStop(); return; }
+      if (e.key === 'Escape' && canUseEStop) { triggerEStop(); return; }
       if (inInput || focusMode === 'chat') return;
 
       const key = e.key.toLowerCase();
@@ -305,7 +320,7 @@ export default function RobotView({ robot }: Props) {
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); };
-  }, [focusMode, controlButtons, sendCommand, triggerEStop]);
+  }, [focusMode, controlButtons, sendCommand, triggerEStop, canUseEStop]);
 
   // ─── Chat ─────────────────────────────────────────────────────────────────
 
@@ -317,6 +332,51 @@ export default function RobotView({ robot }: Props) {
     wsRef.current.send(JSON.stringify({ event: 'chat:message', data: { robotId: robot.id, content: text } }));
     setChatInput('');
   }, [chatInput, robot.id]);
+
+  const moderateChatUser = useCallback(
+    async (targetUserId: string, action: 'TIMEOUT' | 'BAN') => {
+      if (!canModerate || !accessToken) return;
+      setModeratingUserId(targetUserId);
+
+      try {
+        api.setToken(accessToken);
+        await api.moderateRobotUser(robot.id, {
+          targetUserId,
+          action,
+          reason: 'Chat moderation',
+          durationSec: action === 'TIMEOUT' ? 300 : undefined,
+        });
+
+        setMessages((prev) => [
+          ...prev.slice(-200),
+          {
+            userId: 'system',
+            username: 'system',
+            content:
+              action === 'TIMEOUT'
+                ? `User ${targetUserId.slice(0, 8)} timed out for 5 minutes.`
+                : `User ${targetUserId.slice(0, 8)} has been banned from this room.`,
+            timestamp: Date.now(),
+            isSystem: true,
+          },
+        ]);
+      } catch {
+        setMessages((prev) => [
+          ...prev.slice(-200),
+          {
+            userId: 'system',
+            username: 'system',
+            content: 'Moderation action failed.',
+            timestamp: Date.now(),
+            isSystem: true,
+          },
+        ]);
+      } finally {
+        setModeratingUserId(null);
+      }
+    },
+    [accessToken, canModerate, robot.id],
+  );
 
   // ─── Queue ─────────────────────────────────────────────────────────────────
 
@@ -529,17 +589,20 @@ export default function RobotView({ robot }: Props) {
               <div className="h-11 w-px self-center bg-[var(--border)]" />
 
               {/* E-STOP */}
-              <button
-                onMouseDown={triggerEStop}
-                className="flex h-14 w-24 flex-col items-center justify-center rounded-xl bg-[var(--destructive)] text-xs font-black text-white shadow-lg shadow-red-500/20 transition hover:brightness-110 active:scale-95 select-none"
-              >
-                  <AlertTriangle className="h-4 w-4" />
-                E-STOP
-              </button>
+              {canUseEStop && (
+                <button
+                  onMouseDown={triggerEStop}
+                  className="flex h-14 w-24 flex-col items-center justify-center rounded-xl bg-[var(--destructive)] text-xs font-black text-white shadow-lg shadow-red-500/20 transition hover:brightness-110 active:scale-95 select-none"
+                >
+                    <AlertTriangle className="h-4 w-4" />
+                  E-STOP
+                </button>
+              )}
             </div>
 
             <p className="mt-3 text-center text-xs text-[var(--muted-foreground)]">
-              WASD or arrow keys &middot; <span className="text-amber-400">amber</span> = another player just pressed &middot; ESC = emergency stop
+              WASD or arrow keys &middot; <span className="text-amber-400">amber</span> = another player just pressed
+              {canUseEStop ? ' · ESC = emergency stop' : ''}
             </p>
           </div>
         </div>
@@ -697,10 +760,33 @@ export default function RobotView({ robot }: Props) {
                   {msg.isSystem ? (
                     <span className="italic text-[var(--muted-foreground)]">{msg.content}</span>
                   ) : (
-                    <>
+                    <span className="inline-flex items-center gap-2">
                       <span className="font-semibold text-violet-400">{msg.username}: </span>
                       <span className="text-[var(--foreground)]/90">{msg.content}</span>
-                    </>
+                      {canModerate &&
+                        msg.userId !== 'system' &&
+                        msg.userId !== userId &&
+                        /^[0-9a-f-]{36}$/i.test(msg.userId) && (
+                          <span className="inline-flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => void moderateChatUser(msg.userId, 'TIMEOUT')}
+                              disabled={moderatingUserId === msg.userId}
+                              className="rounded border border-amber-500/40 px-1.5 py-0.5 text-[10px] text-amber-300 disabled:opacity-50"
+                            >
+                              Timeout
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void moderateChatUser(msg.userId, 'BAN')}
+                              disabled={moderatingUserId === msg.userId}
+                              className="rounded border border-red-500/40 px-1.5 py-0.5 text-[10px] text-red-300 disabled:opacity-50"
+                            >
+                              Ban
+                            </button>
+                          </span>
+                        )}
+                    </span>
                   )}
                 </p>
               ))}

@@ -17,6 +17,7 @@ export interface RobotAccessPolicy {
   video: GuestAccess;
   control: GuestAccess;
   chat: GuestAccess;
+  estop: GuestAccess;
 }
 
 export interface RobotStreamPolicy {
@@ -38,6 +39,7 @@ const DEFAULT_ACCESS_POLICY: RobotAccessPolicy = {
   video: 'AUTHENTICATED',
   control: 'AUTHENTICATED',
   chat: 'AUTHENTICATED',
+  estop: 'AUTHENTICATED',
 };
 
 const DEFAULT_STREAM_POLICY: RobotStreamPolicy = {
@@ -378,7 +380,7 @@ export class RobotsService {
 
   private mergeMetadata(
     current: unknown,
-    acl?: { video?: GuestAccess; control?: GuestAccess; chat?: GuestAccess },
+    acl?: { video?: GuestAccess; control?: GuestAccess; chat?: GuestAccess; estop?: GuestAccess },
     stream?: { targetBitrateKbps?: number },
   ): Record<string, unknown> {
     const existing =
@@ -419,6 +421,7 @@ export class RobotsService {
       video: this.readAccessValue(access.video),
       control: this.readAccessValue(access.control),
       chat: this.readAccessValue(access.chat),
+      estop: this.readAccessValue(access.estop),
     };
   }
 

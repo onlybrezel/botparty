@@ -60,6 +60,7 @@ export interface RobotPublic {
       video?: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
       control?: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
       chat?: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
+      estop?: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
     };
     stream?: {
       targetBitrateKbps?: number;

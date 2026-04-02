@@ -96,6 +96,16 @@ export class QueueService {
     });
   }
 
+  async getCurrentControllerUserId(robotId: string): Promise<string | null> {
+    const next = await this.prisma.queueEntry.findFirst({
+      where: { robotId },
+      orderBy: [{ isPriority: 'desc' }, { position: 'asc' }],
+      select: { userId: true },
+    });
+
+    return next?.userId ?? null;
+  }
+
   async vote(robotId: string, targetUserId: string) {
     const entry = await this.prisma.queueEntry.findUnique({
       where: { robotId_userId: { robotId, userId: targetUserId } },

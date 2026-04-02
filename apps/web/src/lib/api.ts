@@ -19,6 +19,7 @@ export interface RobotManaged extends RobotPublic {
       video?: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
       control?: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
       chat?: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
+      estop?: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
     };
     stream?: {
       targetBitrateKbps?: number;
@@ -47,6 +48,7 @@ export interface RobotMutationInput {
     video: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
     control: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
     chat: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
+    estop: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
   };
   stream?: {
     targetBitrateKbps?: number;
@@ -300,6 +302,21 @@ class ApiClient {
       `/livekit/token/viewer-public/${robotId}`,
       { method: 'POST', body: '{}' },
     );
+  }
+
+  async moderateRobotUser(
+    robotId: string,
+    data: {
+      targetUserId: string;
+      action: 'TIMEOUT' | 'KICK' | 'BAN' | 'UNBAN' | 'WARN';
+      reason?: string;
+      durationSec?: number;
+    },
+  ) {
+    return this.request<{ id?: string; action?: string; userId?: string }>(`/moderation/robot/${robotId}`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
   }
 
   async enqueueRobotAction(
