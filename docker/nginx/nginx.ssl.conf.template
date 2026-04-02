@@ -45,7 +45,7 @@ http {
     }
 
     upstream livekit {
-        server livekit:7880;
+        server host.docker.internal:7880;
     }
 
     # ─── HTTP → HTTPS redirect ───────────────────────

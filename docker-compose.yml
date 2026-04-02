@@ -155,6 +155,8 @@ services:
     image: nginx:1.27-alpine
     container_name: botparty-nginx
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "80:80"
       - "443:443"
@@ -182,4 +184,3 @@ networks:
   # frontend: nginx, web, and the API (which bridges both networks)
   frontend:
     driver: bridge
-
