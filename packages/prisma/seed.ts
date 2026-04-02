@@ -4,6 +4,77 @@ import { randomBytes } from 'crypto';
 
 const prisma = new PrismaClient();
 
+function slugBase(name: string) {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
+async function createUniqueSlug(base: string) {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const candidate = `${base}-${randomBytes(3).toString('hex')}`;
+    const exists = await prisma.robot.findUnique({
+      where: { slug: candidate },
+      select: { id: true },
+    });
+    if (!exists) {
+      return candidate;
+    }
+  }
+  throw new Error(`Could not generate unique slug for base ${base}`);
+}
+
+async function ensureSeedRobot(input: {
+  ownerId: string;
+  name: string;
+  description: string;
+  tags: string[];
+}) {
+  const base = slugBase(input.name);
+
+  const existing = await prisma.robot.findFirst({
+    where: {
+      ownerId: input.ownerId,
+      OR: [{ name: input.name }, { slug: { startsWith: `${base}-` } }],
+    },
+    orderBy: { createdAt: 'asc' },
+  });
+
+  if (existing) {
+    return prisma.robot.update({
+      where: { id: existing.id },
+      data: {
+        name: input.name,
+        description: input.description,
+        ownerId: input.ownerId,
+        visibility: 'PUBLIC',
+        accessMode: 'OPEN',
+        queueMode: 'FIRST_COME',
+        maxTurnTime: 60000,
+        tags: input.tags,
+      },
+    });
+  }
+
+  const slug = await createUniqueSlug(base);
+  return prisma.robot.create({
+    data: {
+      name: input.name,
+      slug,
+      description: input.description,
+      ownerId: input.ownerId,
+      streamKey: randomBytes(32).toString('hex'),
+      claimToken: randomBytes(32).toString('hex'),
+      visibility: 'PUBLIC',
+      accessMode: 'OPEN',
+      queueMode: 'FIRST_COME',
+      maxTurnTime: 60000,
+      tags: input.tags,
+    },
+  });
+}
+
 async function main() {
   console.log('🌱 Seeding BotParty database...');
 
@@ -43,25 +114,31 @@ async function main() {
   console.log(`  ✅ User: ${user.username}`);
   console.log(`     Password: user123456`);
 
-  // Create demo robot
-  const robot = await prisma.robot.upsert({
-    where: { slug: 'demo-bot' },
-    update: {},
-    create: {
-      name: 'Demo Bot',
-      slug: 'demo-bot',
-      description: 'A demo robot to test the BotParty platform. Connect your own robot to replace this!',
-      ownerId: user.id,
-      streamKey: randomBytes(32).toString('hex'),
-      claimToken: randomBytes(32).toString('hex'),
-      visibility: 'PUBLIC',
-      accessMode: 'OPEN',
-      queueMode: 'FIRST_COME',
-      maxTurnTime: 60000,
-      tags: ['demo', 'beginner-friendly'],
+  // Remove old fixed-slug demo robots from previous seed versions.
+  await prisma.robot.deleteMany({
+    where: {
+      slug: { in: ['demo-bot', 'user-bot', 'admin-bot'] },
+      ownerId: { in: [user.id, admin.id] },
     },
   });
-  console.log(`  ✅ Demo robot: ${robot.name} (${robot.slug})`);
+
+  // Create/update seed robots with production-like slug format: <name>-<6hex>
+  const userBot = await ensureSeedRobot({
+    ownerId: user.id,
+    name: 'User Bot',
+    description: 'Demo robot owned by the regular user account.',
+    tags: ['demo', 'user'],
+  });
+
+  const adminBot = await ensureSeedRobot({
+    ownerId: admin.id,
+    name: 'Admin Bot',
+    description: 'Demo robot owned by the admin account.',
+    tags: ['demo', 'admin'],
+  });
+
+  console.log(`  ✅ User robot: ${userBot.name} (${userBot.slug})`);
+  console.log(`  ✅ Admin robot: ${adminBot.name} (${adminBot.slug})`);
 
   // Default control buttons for demo robot
   const defaultButtons = [
@@ -72,27 +149,31 @@ async function main() {
     { label: 'Action',  command: 'action_1',hotKey: 'f', icon: '⚡', cooldownMs: 500, position: 4 },
   ];
 
-  // Delete and recreate so seed stays idempotent without needing UUID literals
-  await prisma.controlButton.deleteMany({ where: { robotId: robot.id } });
-  await prisma.controlButton.createMany({
-    data: defaultButtons.map((btn) => ({
-      robotId: robot.id,
-      label: btn.label,
-      command: btn.command,
-      hotKey: btn.hotKey,
-      icon: btn.icon,
-      cooldownMs: btn.cooldownMs,
-      access: 'QUEUE_TURN' as const,
-      position: btn.position,
-      isEnabled: true,
-    })),
-  });
-  console.log(`  ✅ Control buttons: ${defaultButtons.length} added for Demo Bot`);
+  // Delete and recreate buttons so seed stays idempotent.
+  for (const robot of [userBot, adminBot]) {
+    await prisma.controlButton.deleteMany({ where: { robotId: robot.id } });
+    await prisma.controlButton.createMany({
+      data: defaultButtons.map((btn) => ({
+        robotId: robot.id,
+        label: btn.label,
+        command: btn.command,
+        hotKey: btn.hotKey,
+        icon: btn.icon,
+        cooldownMs: btn.cooldownMs,
+        access: 'QUEUE_TURN' as const,
+        position: btn.position,
+        isEnabled: true,
+      })),
+    });
+  }
+  console.log(`  ✅ Control buttons: ${defaultButtons.length} added per demo robot`);
 
   console.log('\n🎉 Seed complete!');
   console.log('\n📋 Login credentials:');
   console.log('   Admin:   admin@botparty.io   / admin123456');
   console.log('   User:    user@botparty.io    / user123456');
+  console.log(`   User Bot URL:  /robot/${userBot.slug}`);
+  console.log(`   Admin Bot URL: /robot/${adminBot.slug}`);
   console.log('   Web:     http://localhost:3000');
 }
 
