@@ -1,4 +1,15 @@
 import type { RobotPublic, UserPublic } from '@botparty/shared';
+import { useAuth } from '@/lib/store';
+
+class ApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
 
 export interface RobotManaged extends RobotPublic {
   claimToken: string;
@@ -74,6 +85,7 @@ const API_URL = resolveApiUrl();
 class ApiClient {
   private baseUrl: string;
   private accessToken: string | null = null;
+  private refreshPromise: Promise<string | null> | null = null;
 
   constructor(baseUrl: string) {
     this.baseUrl = `${baseUrl}/api/v1`;
@@ -81,6 +93,85 @@ class ApiClient {
 
   setToken(token: string | null) {
     this.accessToken = token;
+  }
+
+  syncTokenFromStore() {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    this.accessToken = useAuth.getState().accessToken;
+  }
+
+  private async parseError(res: Response): Promise<ApiError> {
+    const error = await res.json().catch(() => ({ message: res.statusText }));
+    return new ApiError(
+      (error as { message?: string }).message ?? `API error: ${res.status}`,
+      res.status,
+    );
+  }
+
+  private async refreshSession(): Promise<string | null> {
+    if (typeof window === 'undefined') {
+      return null;
+    }
+
+    if (this.refreshPromise) {
+      return this.refreshPromise;
+    }
+
+    const auth = useAuth.getState();
+    if (!auth.refreshToken) {
+      auth.logout();
+      this.setToken(null);
+      return null;
+    }
+
+    this.refreshPromise = (async () => {
+      const refreshRes = await fetch(`${this.baseUrl}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken: auth.refreshToken }),
+      });
+
+      if (!refreshRes.ok) {
+        auth.logout();
+        this.setToken(null);
+        return null;
+      }
+
+      const refreshed = await refreshRes.json() as { accessToken: string; refreshToken: string };
+      this.setToken(refreshed.accessToken);
+
+      const meRes = await fetch(`${this.baseUrl}/users/me`, {
+        headers: { Authorization: `Bearer ${refreshed.accessToken}` },
+      });
+
+      if (!meRes.ok) {
+        auth.logout();
+        this.setToken(null);
+        return null;
+      }
+
+      const me = await meRes.json() as UserPublic;
+      useAuth.getState().login({
+        accessToken: refreshed.accessToken,
+        refreshToken: refreshed.refreshToken,
+        username: me.username,
+        userId: me.id,
+        displayName: me.displayName,
+      });
+
+      return refreshed.accessToken;
+    })().finally(() => {
+      this.refreshPromise = null;
+    });
+
+    return this.refreshPromise;
+  }
+
+  async restoreSession(): Promise<boolean> {
+    return Boolean(await this.refreshSession());
   }
 
   private async request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -96,11 +187,25 @@ class ApiClient {
       headers['Authorization'] = `Bearer ${this.accessToken}`;
     }
 
-    const res = await fetch(`${this.baseUrl}${path}`, { ...options, headers });
+    const makeRequest = () => fetch(`${this.baseUrl}${path}`, { ...options, headers });
+
+    let res = await makeRequest();
+
+    if (
+      res.status === 401 &&
+      path !== '/auth/login' &&
+      path !== '/auth/register' &&
+      path !== '/auth/refresh'
+    ) {
+      const refreshedToken = await this.refreshSession();
+      if (refreshedToken) {
+        headers.Authorization = `Bearer ${refreshedToken}`;
+        res = await makeRequest();
+      }
+    }
 
     if (!res.ok) {
-      const error = await res.json().catch(() => ({ message: res.statusText }));
-      throw new Error((error as { message?: string }).message ?? `API error: ${res.status}`);
+      throw await this.parseError(res);
     }
 
     if (res.status === 204) return undefined as T;

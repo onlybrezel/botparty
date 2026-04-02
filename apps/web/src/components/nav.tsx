@@ -5,16 +5,33 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { Zap } from 'lucide-react';
 import { useAuth } from '@/lib/store';
+import { api } from '@/lib/api';
 
 export default function Nav() {
   const pathname = usePathname();
-  const { accessToken, username, logout } = useAuth();
+  const { accessToken, username, refreshToken, logout } = useAuth();
   const [mounted, setMounted] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
-    setMounted(true);
-  }, []);
+    let cancelled = false;
+
+    const bootstrap = async () => {
+      api.syncTokenFromStore();
+      if (refreshToken) {
+        await api.restoreSession().catch(() => undefined);
+      }
+      if (!cancelled) {
+        setMounted(true);
+      }
+    };
+
+    void bootstrap();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshToken]);
 
   const isActive = (href: string) => pathname === href || pathname.startsWith(href + '/');
 
@@ -36,16 +53,6 @@ export default function Nav() {
 
         {/* Nav links */}
         <nav className="hidden items-center gap-2 sm:flex">
-          <Link
-            href="/docs/getting-started"
-            className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-              isActive('/docs')
-                ? 'bg-[var(--muted)] text-[var(--foreground)]'
-                : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
-            }`}
-          >
-            Docs
-          </Link>
           <Link
             href="/explore"
             className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${

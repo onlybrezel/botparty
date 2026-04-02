@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { BookOpen, Bot, Cable, CircuitBoard, Copy, ExternalLink, RefreshCcw, Save, Trash2, Plus } from 'lucide-react';
+import { Bot, Cable, CircuitBoard, Copy, ExternalLink, RefreshCcw, Save, Trash2, Plus } from 'lucide-react';
 import { api, type RobotManaged } from '@/lib/api';
 import { useAuth } from '@/lib/store';
 import { LiveKitPlayer } from '@/components/livekit-player';
@@ -421,13 +421,6 @@ export default function DashboardPage() {
                 </span>
               ))}
             </div>
-            <Link
-              href="/docs/getting-started"
-              className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-violet-300 transition hover:text-violet-200"
-            >
-              <BookOpen className="h-4 w-4" />
-              Open full hardware guide
-            </Link>
           </div>
         </div>
       </section>
@@ -439,30 +432,18 @@ export default function DashboardPage() {
             Controller flow
           </div>
           <p className="mt-3 text-sm leading-6 text-[var(--muted-foreground)]">
-            Keep the browser layer generic and understandable. Board-specific behavior belongs in
-            the robot client adapter, not in the UI.
+            Keep browser controls simple. Board-specific behavior belongs in the robot client.
           </p>
         </article>
 
         <article className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 sm:p-5">
           <div className="flex items-center gap-2 text-sm font-semibold">
             <CircuitBoard className="h-4 w-4 text-amber-300" />
-            Hardware families
+            Hardware support
           </div>
           <p className="mt-3 text-sm leading-6 text-[var(--muted-foreground)]">
-            We now document direct motor drivers, serial bridges, MQTT targets, and robot-specific
-            profiles in one shared structure inspired by RemoTV.
-          </p>
-        </article>
-
-        <article className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 sm:p-5">
-          <div className="flex items-center gap-2 text-sm font-semibold">
-            <BookOpen className="h-4 w-4 text-sky-300" />
-            Docs-first onboarding
-          </div>
-          <p className="mt-3 text-sm leading-6 text-[var(--muted-foreground)]">
-            The homepage link to `/docs/getting-started` now works and explains the BotParty
-            controller schema in plain language.
+            Direct motor drivers, serial bridges, MQTT targets, and robot-specific profiles all fit
+            into the same client structure.
           </p>
         </article>
       </section>

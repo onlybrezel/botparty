@@ -11,7 +11,6 @@ type NerdStats = {
   connectionState: string;
   participantQuality: string;
   trackSid: string;
-  codec: string;
   mimeType: string;
   source: string;
   subscription: string;
@@ -20,7 +19,6 @@ type NerdStats = {
   framesPerSecond: number | null;
   frameWidth: number | null;
   frameHeight: number | null;
-  framesDecoded: number | null;
   framesDropped: number | null;
   packetsLost: number | null;
   jitterMs: number | null;
@@ -35,11 +33,6 @@ type PanelPosition = {
   y: number;
 };
 
-type HistoryPoint = {
-  fps: number | null;
-  bitrateKbps: number | null;
-};
-
 function formatStat(value: string | number | null | undefined, suffix = '') {
   if (value === null || value === undefined || value === '') {
     return 'n/a';
@@ -47,39 +40,19 @@ function formatStat(value: string | number | null | undefined, suffix = '') {
   return `${value}${suffix}`;
 }
 
-function maskIdentifier(value: string | undefined, visible = 6) {
+function maskIdentifier(value: string | undefined, visible = 8) {
   if (!value) {
     return 'n/a';
   }
   if (value.length <= visible) {
     return value;
   }
-  return `${value.slice(0, visible)}…`;
-}
-
-function buildSparkline(values: Array<number | null | undefined>, height: number) {
-  const usable = values.map((value) => (typeof value === 'number' && Number.isFinite(value) ? value : null));
-  const numeric = usable.filter((value): value is number => value !== null);
-  if (numeric.length < 2) {
-    return '';
-  }
-
-  const min = Math.min(...numeric);
-  const max = Math.max(...numeric);
-  const range = max - min || 1;
-
-  return usable
-    .map((value, index) => {
-      const x = (index / Math.max(usable.length - 1, 1)) * 100;
-      const y = value === null ? height : height - ((value - min) / range) * height;
-      return `${x},${y}`;
-    })
-    .join(' ');
+  return `${value.slice(0, visible)}...`;
 }
 
 function statsToClipboardText(stats: NerdStats | null) {
   if (!stats) {
-    return 'Stats for Nerds: no data yet';
+    return 'Stats for nerds: no data yet';
   }
 
   return [
@@ -87,7 +60,6 @@ function statsToClipboardText(stats: NerdStats | null) {
     `Room state: ${stats.connectionState}`,
     `Connection quality: ${stats.participantQuality}`,
     `Track: ${stats.trackSid}`,
-    `Codec: ${stats.codec}`,
     `Mime: ${stats.mimeType}`,
     `Source: ${stats.source}`,
     `Subscription: ${stats.subscription}`,
@@ -96,7 +68,6 @@ function statsToClipboardText(stats: NerdStats | null) {
     `FPS: ${formatStat(stats.framesPerSecond)}`,
     `Inbound size: ${formatStat(stats.frameWidth)} x ${formatStat(stats.frameHeight)}`,
     `Rendered size: ${formatStat(stats.videoWidth)} x ${formatStat(stats.videoHeight)}`,
-    `Frames decoded: ${formatStat(stats.framesDecoded)}`,
     `Frames dropped: ${formatStat(stats.framesDropped)}`,
     `Packets lost: ${formatStat(stats.packetsLost)}`,
     `Jitter: ${formatStat(stats.jitterMs, ' ms')}`,
@@ -110,16 +81,13 @@ function VideoRenderer() {
   const room = useRoomContext();
   const containerRef = useRef<HTMLDivElement>(null);
   const [stats, setStats] = useState<NerdStats | null>(null);
-  const [history, setHistory] = useState<HistoryPoint[]>([]);
   const [panelPosition, setPanelPosition] = useState<PanelPosition | null>(null);
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
   // Filter out placeholder tracks (no publication)
   const robotTrack = tracks.find((t) => t.publication !== undefined) as TrackReference | undefined;
 
   useEffect(() => {
-    if (!robotTrack?.publication?.videoTrack) {
-      setStats(null);
-      setHistory([]);
+    if (!panelPosition || !robotTrack?.publication?.videoTrack) {
       return;
     }
 
@@ -131,12 +99,12 @@ function VideoRenderer() {
       if (!remoteVideoTrack) {
         return;
       }
+
       const videoElement = containerRef.current?.querySelector('video') ?? null;
       const report = await remoteVideoTrack.getRTCStatsReport().catch(() => undefined);
 
       let inbound: RTCInboundRtpStreamStats | undefined;
       let candidatePair: RTCIceCandidatePairStats | undefined;
-      let codecMimeType: string | undefined;
 
       report?.forEach((entry) => {
         if (entry.type === 'inbound-rtp' && (entry as RTCInboundRtpStreamStats).kind === 'video') {
@@ -148,22 +116,18 @@ function VideoRenderer() {
             candidatePair = entry as RTCIceCandidatePairStats;
           }
         }
-        if (entry.type === 'codec') {
-          codecMimeType = (entry as RTCStats & { mimeType?: string }).mimeType;
-        }
       });
 
       if (cancelled) {
         return;
       }
 
-      const nextStats = {
+      setStats({
         timestamp: new Date().toLocaleTimeString(),
         connectionState: String(room.state),
         participantQuality: String(robotTrack.participant.connectionQuality),
         trackSid: maskIdentifier(publication.trackSid),
-        codec: codecMimeType?.split('/')[1]?.toUpperCase() ?? 'n/a',
-        mimeType: publication.mimeType ?? codecMimeType ?? 'n/a',
+        mimeType: publication.mimeType ?? 'n/a',
         source: String(publication.source),
         subscription: publication.isSubscribed ? 'subscribed' : 'not-subscribed',
         streamState: String(remoteVideoTrack.streamState),
@@ -172,7 +136,6 @@ function VideoRenderer() {
           typeof inbound?.framesPerSecond === 'number' ? Math.round(inbound.framesPerSecond * 10) / 10 : null,
         frameWidth: inbound?.frameWidth ?? publication.dimensions?.width ?? null,
         frameHeight: inbound?.frameHeight ?? publication.dimensions?.height ?? null,
-        framesDecoded: inbound?.framesDecoded ?? null,
         framesDropped: inbound?.framesDropped ?? null,
         packetsLost: inbound?.packetsLost ?? null,
         jitterMs: typeof inbound?.jitter === 'number' ? Math.round(inbound.jitter * 1000) : null,
@@ -183,10 +146,7 @@ function VideoRenderer() {
         videoWidth: videoElement?.videoWidth ?? null,
         videoHeight: videoElement?.videoHeight ?? null,
         readyState: videoElement?.readyState ?? null,
-      };
-
-      setStats(nextStats);
-      setHistory((prev) => [...prev.slice(-29), { fps: nextStats.framesPerSecond, bitrateKbps: nextStats.bitrateKbps }]);
+      });
     };
 
     void collectStats();
@@ -198,21 +158,25 @@ function VideoRenderer() {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [robotTrack, room]);
+  }, [panelPosition, robotTrack, room]);
 
   useEffect(() => {
     if (!panelPosition) {
       return;
     }
 
-    const close = () => setPanelPosition(null);
+    const close = (event: MouseEvent | KeyboardEvent) => {
+      if (event instanceof KeyboardEvent && event.key !== 'Escape') {
+        return;
+      }
+      setPanelPosition(null);
+    };
+
     window.addEventListener('click', close);
-    window.addEventListener('contextmenu', close);
     window.addEventListener('keydown', close);
 
     return () => {
       window.removeEventListener('click', close);
-      window.removeEventListener('contextmenu', close);
       window.removeEventListener('keydown', close);
     };
   }, [panelPosition]);
@@ -249,15 +213,6 @@ function VideoRenderer() {
     }
   };
 
-  const fpsPath = buildSparkline(
-    history.map((point) => point.fps),
-    36,
-  );
-  const bitratePath = buildSparkline(
-    history.map((point) => point.bitrateKbps),
-    36,
-  );
-
   if (!robotTrack) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 text-[var(--muted-foreground)]">
@@ -274,22 +229,19 @@ function VideoRenderer() {
         className="h-full w-full object-cover"
       />
 
-      <div className="pointer-events-none absolute bottom-3 right-3 rounded-full border border-white/10 bg-black/40 px-2 py-1 text-[10px] font-medium uppercase tracking-[0.25em] text-white/55 backdrop-blur-md">
-        Right click for stats
-      </div>
-
       {panelPosition && (
         <div
-          className="absolute z-20 w-[min(22rem,calc(100%-1rem))] overflow-hidden rounded-2xl border border-cyan-400/30 bg-slate-950/90 text-[11px] text-slate-100 shadow-2xl backdrop-blur-xl"
+          className="absolute z-20 w-[min(22rem,calc(100%-1rem))] overflow-hidden rounded-2xl border border-cyan-400/30 bg-slate-950/92 text-[11px] text-slate-100 shadow-2xl backdrop-blur-xl"
           style={{
             left: Math.max(8, Math.min(panelPosition.x, (containerRef.current?.clientWidth ?? 0) - 360)),
-            top: Math.max(8, Math.min(panelPosition.y, (containerRef.current?.clientHeight ?? 0) - 320)),
+            top: Math.max(8, Math.min(panelPosition.y, (containerRef.current?.clientHeight ?? 0) - 260)),
           }}
+          onClick={(event) => event.stopPropagation()}
         >
           <div className="flex items-center justify-between border-b border-white/10 bg-cyan-400/10 px-3 py-2">
             <div>
-              <p className="text-[10px] uppercase tracking-[0.3em] text-cyan-200/70">Stats For Nerds</p>
-              <p className="mt-1 text-xs font-semibold text-white">Local stream diagnostics only</p>
+              <p className="text-[10px] uppercase tracking-[0.3em] text-cyan-200/70">Stats</p>
+              <p className="mt-1 text-xs font-semibold text-white">Local stream diagnostics</p>
             </div>
             <div className="flex items-center gap-1">
               <button
@@ -311,41 +263,6 @@ function VideoRenderer() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 border-b border-white/10 px-3 py-3">
-            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-2">
-              <div className="mb-1 flex items-center justify-between">
-                <p className="text-[10px] uppercase tracking-[0.25em] text-slate-400">FPS Trend</p>
-                <p className="text-[10px] text-slate-300">{formatStat(stats?.framesPerSecond)}</p>
-              </div>
-              <svg viewBox="0 0 100 36" className="h-10 w-full overflow-visible">
-                <polyline
-                  fill="none"
-                  stroke="rgba(103, 232, 249, 0.9)"
-                  strokeWidth="2"
-                  strokeLinejoin="round"
-                  strokeLinecap="round"
-                  points={fpsPath}
-                />
-              </svg>
-            </div>
-            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-2">
-              <div className="mb-1 flex items-center justify-between">
-                <p className="text-[10px] uppercase tracking-[0.25em] text-slate-400">Bitrate Trend</p>
-                <p className="text-[10px] text-slate-300">{formatStat(stats?.bitrateKbps, ' kbps')}</p>
-              </div>
-              <svg viewBox="0 0 100 36" className="h-10 w-full overflow-visible">
-                <polyline
-                  fill="none"
-                  stroke="rgba(250, 204, 21, 0.9)"
-                  strokeWidth="2"
-                  strokeLinejoin="round"
-                  strokeLinecap="round"
-                  points={bitratePath}
-                />
-              </svg>
-            </div>
-          </div>
-
           <div className="grid grid-cols-2 gap-x-4 gap-y-2 px-3 py-3">
             <p className="text-slate-400">Updated</p>
             <p>{stats?.timestamp ?? 'collecting...'}</p>
@@ -355,8 +272,6 @@ function VideoRenderer() {
             <p>{formatStat(stats?.participantQuality)}</p>
             <p className="text-slate-400">Track</p>
             <p>{formatStat(stats?.trackSid)}</p>
-            <p className="text-slate-400">Codec</p>
-            <p>{formatStat(stats?.codec)}</p>
             <p className="text-slate-400">Mime</p>
             <p className="truncate">{formatStat(stats?.mimeType)}</p>
             <p className="text-slate-400">Source</p>
@@ -370,11 +285,9 @@ function VideoRenderer() {
             <p className="text-slate-400">FPS</p>
             <p>{formatStat(stats?.framesPerSecond)}</p>
             <p className="text-slate-400">Inbound size</p>
-            <p>{formatStat(stats?.frameWidth)} × {formatStat(stats?.frameHeight)}</p>
+            <p>{formatStat(stats?.frameWidth)} x {formatStat(stats?.frameHeight)}</p>
             <p className="text-slate-400">Rendered size</p>
-            <p>{formatStat(stats?.videoWidth)} × {formatStat(stats?.videoHeight)}</p>
-            <p className="text-slate-400">Frames decoded</p>
-            <p>{formatStat(stats?.framesDecoded)}</p>
+            <p>{formatStat(stats?.videoWidth)} x {formatStat(stats?.videoHeight)}</p>
             <p className="text-slate-400">Frames dropped</p>
             <p>{formatStat(stats?.framesDropped)}</p>
             <p className="text-slate-400">Packets lost</p>
@@ -385,10 +298,6 @@ function VideoRenderer() {
             <p>{formatStat(stats?.roundTripMs, ' ms')}</p>
             <p className="text-slate-400">Video readyState</p>
             <p>{formatStat(stats?.readyState)}</p>
-          </div>
-
-          <div className="border-t border-white/10 px-3 py-2 text-[10px] text-slate-400">
-            No viewer identity, chat data, IP address, or robot secret is shown here.
           </div>
         </div>
       )}

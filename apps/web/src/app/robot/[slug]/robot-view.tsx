@@ -98,6 +98,7 @@ export default function RobotView({ robot }: Props) {
   const [connected, setConnected] = useState(false);
   const [inQueue, setInQueue] = useState(false);
   const [livekitCreds, setLivekitCreds] = useState<{ token: string; url: string } | null>(null);
+  const [videoState, setVideoState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
 
   const wsRef = useRef<WebSocket | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -116,18 +117,28 @@ export default function RobotView({ robot }: Props) {
     api.setToken(accessToken);
 
     const loadToken = async () => {
+      setVideoState('loading');
       try {
         const publicUrl = process.env.NEXT_PUBLIC_LIVEKIT_URL;
         if (accessToken) {
-          const { token, livekitUrl } = await api.getViewerToken(robot.id, false);
-          setLivekitCreds({ token, url: publicUrl ?? livekitUrl });
-          return;
+          try {
+            const { token, livekitUrl } = await api.getViewerToken(robot.id, false);
+            setLivekitCreds({ token, url: publicUrl ?? livekitUrl });
+            setVideoState('ready');
+            return;
+          } catch {
+            // Fall back to the guest token path when the local session is stale
+            // or the room also allows public viewers.
+          }
         }
 
+        api.setToken(null);
         const { token, livekitUrl } = await api.getPublicViewerToken(robot.id);
         setLivekitCreds({ token, url: publicUrl ?? livekitUrl });
+        setVideoState('ready');
       } catch {
         setLivekitCreds(null);
+        setVideoState('error');
       }
     };
 
@@ -372,11 +383,11 @@ export default function RobotView({ robot }: Props) {
                     <div className="rounded-xl border border-[var(--border)] bg-[var(--muted)] p-3">
                       <Radio className="h-7 w-7 text-violet-300" />
                     </div>
-                    {accessToken ? (
+                    {videoState === 'loading' || videoState === 'idle' ? (
                       <p className="text-sm">Connecting to video stream...</p>
                     ) : (
                       <>
-                        <p className="text-sm font-medium">Sign in to watch live video</p>
+                        <p className="text-sm font-medium">Live video is unavailable right now.</p>
                         <Link
                           href="/login"
                           className="rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-medium text-white transition hover:bg-[var(--primary-hover)]"

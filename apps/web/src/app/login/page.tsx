@@ -85,32 +85,31 @@ export default function LoginPage() {
       <div className="relative mx-auto grid w-full max-w-6xl gap-8 lg:grid-cols-2">
         <section className="hidden rounded-2xl border border-[var(--border)] bg-[var(--card)]/70 p-8 backdrop-blur-sm lg:block">
           <p className="mb-4 inline-flex items-center rounded-full border border-violet-500/30 bg-violet-500/10 px-3 py-1 text-xs font-semibold text-violet-300">
-            LIVE ROBOT TELEOPERATION
+            ROBOT ACCESS
           </p>
           <h1 className="text-4xl font-black leading-tight tracking-tight text-[var(--foreground)]">
-            Human-to-human control.
+            Manage your robots.
             <br />
-            Real robots.
+            Join live rooms.
             <br />
-            Zero fluff.
+            Keep it simple.
           </h1>
           <p className="mt-4 max-w-md text-sm leading-relaxed text-[var(--muted-foreground)]">
-            Join active rooms, take your queue turn, and control bots in real time with low-latency
-            video and responsive inputs.
+            Sign in to manage your robots, claim tokens, and access settings.
           </p>
 
           <div className="mt-8 grid gap-3">
             <div className="rounded-xl border border-[var(--border)] bg-[var(--background)]/70 p-4">
               <p className="text-xs uppercase tracking-wider text-[var(--muted-foreground)]">Realtime stack</p>
-              <p className="mt-1 text-sm font-semibold">LiveKit + WebSocket + Queue fairness</p>
+              <p className="mt-1 text-sm font-semibold">Live video, chat, and queue control</p>
             </div>
             <div className="rounded-xl border border-[var(--border)] bg-[var(--background)]/70 p-4">
-              <p className="text-xs uppercase tracking-wider text-[var(--muted-foreground)]">Control safety</p>
-              <p className="mt-1 text-sm font-semibold">Global emergency stop and rate limits</p>
+              <p className="text-xs uppercase tracking-wider text-[var(--muted-foreground)]">Robot setup</p>
+              <p className="mt-1 text-sm font-semibold">Claim tokens and access settings in one place</p>
             </div>
             <div className="rounded-xl border border-[var(--border)] bg-[var(--background)]/70 p-4">
-              <p className="text-xs uppercase tracking-wider text-[var(--muted-foreground)]">Access model</p>
-              <p className="mt-1 text-sm font-semibold">Open, password or allowlist per robot</p>
+              <p className="text-xs uppercase tracking-wider text-[var(--muted-foreground)]">Viewer access</p>
+              <p className="mt-1 text-sm font-semibold">Choose who can watch, chat, and control</p>
             </div>
           </div>
         </section>
@@ -127,12 +126,12 @@ export default function LoginPage() {
                 </span>
               </Link>
               <h2 className="mt-4 text-2xl font-extrabold tracking-tight">
-                {mode === 'login' ? 'Willkommen zurueck' : 'Konto erstellen'}
+                {mode === 'login' ? 'Welcome back' : 'Create account'}
               </h2>
               <p className="mt-1 text-sm text-[var(--muted-foreground)]">
                 {mode === 'login'
-                  ? 'Melde dich an und fahr direkt los.'
-                  : 'Registriere dich und tritt aktiven Sessions bei.'}
+                  ? 'Sign in to continue.'
+                  : 'Create an account to manage your robots.'}
               </p>
             </div>
 
@@ -236,15 +235,15 @@ export default function LoginPage() {
                     {mode === 'login' ? 'Signing in...' : 'Creating account...'}
                   </span>
                 ) : mode === 'login' ? (
-                  'Weiter zu den Robots'
+                  'Continue'
                 ) : (
-                  'Account erstellen'
+                  'Create account'
                 )}
               </Button>
             </form>
 
             <p className="mt-6 text-center text-xs text-[var(--muted-foreground)]">
-              Mit dem Login stimmst du unseren Plattformregeln zu. Sei fair in Queue und Chat.
+              By signing in, you agree to follow the platform rules and use shared robots fairly.
             </p>
           </CardContent>
         </Card>

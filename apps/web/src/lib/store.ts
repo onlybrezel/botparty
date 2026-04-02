@@ -21,6 +21,7 @@ interface AuthActions {
   }) => void;
   logout: () => void;
   setAccessToken: (token: string) => void;
+  setSession: (data: Partial<AuthState>) => void;
 }
 
 export const useAuth = create(
@@ -39,6 +40,8 @@ export const useAuth = create(
         set({ accessToken: null, refreshToken: null, username: null, userId: null, displayName: null }),
 
       setAccessToken: (token) => set({ accessToken: token }),
+
+      setSession: (data) => set((state) => ({ ...state, ...data })),
     }),
     { name: 'botparty-auth' },
   ),
