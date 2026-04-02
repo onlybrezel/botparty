@@ -63,7 +63,7 @@ export default function ModDashboardPage() {
           setProfanity(prof);
         }
       } catch (err) {
-        pushToast(err instanceof Error ? err.message : 'Mod Dashboard konnte nicht geladen werden.', 'error');
+        pushToast(err instanceof Error ? err.message : 'Failed to load mod dashboard.', 'error');
       } finally {
         setLoading(false);
       }
@@ -95,7 +95,7 @@ export default function ModDashboardPage() {
         const prof = await api.getRobotProfanityOverview(selectedRobotId);
         setProfanity(prof);
       }
-      pushToast('Mod Daten aktualisiert.', 'success');
+      pushToast('Mod data refreshed.', 'success');
     } catch (err) {
       pushToast(err instanceof Error ? err.message : 'Aktualisierung fehlgeschlagen.', 'error');
     } finally {
@@ -129,7 +129,7 @@ export default function ModDashboardPage() {
       await refresh();
       pushToast('Robot geloescht.', 'success');
     } catch (err) {
-      pushToast(err instanceof Error ? err.message : 'Robot konnte nicht geloescht werden.', 'error');
+      pushToast(err instanceof Error ? err.message : 'Failed to delete robot.', 'error');
     }
   };
 
@@ -144,14 +144,14 @@ export default function ModDashboardPage() {
       await refresh();
       pushToast(`Robot Sichtbarkeit gesetzt: ${visibility}`, 'success');
     } catch (err) {
-      pushToast(err instanceof Error ? err.message : 'Robot konnte nicht aktualisiert werden.', 'error');
+      pushToast(err instanceof Error ? err.message : 'Failed to update robot.', 'error');
     }
   };
 
   if (!accessToken || !allowed || loading) {
     return (
       <div className="mx-auto max-w-7xl px-4 py-8">
-        <p className="text-sm text-[var(--muted-foreground)]">Lade Mod Dashboard...</p>
+            <p className="text-sm text-[var(--muted-foreground)]">Loading mod dashboard...</p>
       </div>
     );
   }
@@ -213,7 +213,7 @@ export default function ModDashboardPage() {
                 const data = await api.getRobotProfanityOverview(nextRobotId);
                 setProfanity(data);
               } catch (err) {
-                pushToast(err instanceof Error ? err.message : 'Profanity-Log konnte nicht geladen werden.', 'error');
+                pushToast(err instanceof Error ? err.message : 'Failed to load profanity log.', 'error');
               }
             }}
             className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-1.5 text-sm"

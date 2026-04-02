@@ -104,11 +104,26 @@ export default function RobotView({ robot }: Props) {
   const [robotStatus, setRobotStatus] = useState(robot.status);
   const [chatRestriction, setChatRestriction] = useState<string | null>(null);
   const [tabSwitchOnlyWhenEmpty, setTabSwitchOnlyWhenEmpty] = useState(true);
+  const [debugMode, setDebugMode] = useState(false);
+  const [debugLogs, setDebugLogs] = useState<Array<{ time: string; type: string; msg: string }>>([]);
 
   const wsRef = useRef<WebSocket | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<HTMLInputElement>(null);
   const cooldownMap = useRef<Map<string, number>>(new Map());
+  const lastErrorToastRef = useRef<{ message: string; timestamp: number } | null>(null);
+
+  const addDebugLog = useCallback(
+    (type: 'command' | 'chat' | 'event' | 'error') => {
+      return (msg: string) => {
+        if (debugMode) {
+          const time = new Date().toLocaleTimeString();
+          setDebugLogs((prev) => [...prev.slice(-49), { time, type, msg }]);
+        }
+      };
+    },
+    [debugMode],
+  );
 
   // ─── Fetch controls ────────────────────────────────────────────────────────
 
@@ -127,6 +142,22 @@ export default function RobotView({ robot }: Props) {
 
   useEffect(() => {
     api.getControls(robot.id).then(setControlButtons).catch(() => {});
+    
+    // Load chat history from localStorage
+    try {
+      const key = `botparty.chat.${robot.id}`;
+      const saved = window.localStorage.getItem(key);
+      if (saved) {
+        const parsed = JSON.parse(saved) as ChatMsg[];
+        // Only restore if not older than 7 days
+        const oldest = parsed[0];
+        if (oldest && Date.now() - oldest.timestamp < 7 * 24 * 60 * 60 * 1000) {
+          setMessages(parsed);
+        }
+      }
+    } catch {
+      // Ignore localStorage errors
+    }
   }, [robot.id]);
 
   // ─── Fetch LiveKit token (auth required) ──────────────────────────────────
@@ -285,11 +316,17 @@ export default function RobotView({ robot }: Props) {
         if (message.includes('restricted')) {
           const restriction = (data.restriction as { action?: string; expiresAt?: string | null } | undefined) ?? {};
           const text = restriction.action
-            ? `Du bist aktuell eingeschraenkt (${restriction.action}).`
-            : 'Du bist aktuell eingeschraenkt.';
+            ? `You are currently restricted (${restriction.action}).`
+            : 'You are currently restricted.';
           setChatRestriction(text);
         } else {
-          pushToast(message, 'error');
+          // Debounce error toasts - only show if message changed or 5+ seconds since last error
+          const now = Date.now();
+          const lastError = lastErrorToastRef.current;
+          if (!lastError || lastError.message !== message || now - lastError.timestamp > 5000) {
+            pushToast(message, 'error');
+            lastErrorToastRef.current = { message, timestamp: now };
+          }
         }
         break;
       }
@@ -300,13 +337,24 @@ export default function RobotView({ robot }: Props) {
 
   const sendCommand = useCallback(
     (command: string, cooldownMs = 150) => {
-      if (wsRef.current?.readyState !== WebSocket.OPEN) return;
+      if (wsRef.current?.readyState !== WebSocket.OPEN) {
+        addDebugLog('error')(`Command blocked: not connected (${command})`);
+        // Show warning only once per 3 seconds if not connected
+        const now = Date.now();
+        const lastError = lastErrorToastRef.current;
+        if (!lastError || now - lastError.timestamp > 3000) {
+          pushToast('Waiting for connection to robot...', 'error', 2000);
+          lastErrorToastRef.current = { message: 'disconnected', timestamp: now };
+        }
+        return;
+      }
       const lastAt = cooldownMap.current.get(command) ?? 0;
       if (Date.now() - lastAt < cooldownMs) return;
       cooldownMap.current.set(command, Date.now());
+      addDebugLog('command')(`Sent: ${command}`);
       wsRef.current.send(JSON.stringify({ event: 'control:command', data: { robotId: robot.id, command, timestamp: Date.now() } }));
     },
-    [robot.id],
+    [robot.id, addDebugLog],
   );
 
   const triggerEStop = useCallback(() => {
@@ -323,7 +371,9 @@ export default function RobotView({ robot }: Props) {
     );
 
     const onKeyDown = (e: KeyboardEvent) => {
-      const inInput = ['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName);
+      const target = e.target as HTMLElement;
+      const inInput = ['INPUT', 'TEXTAREA'].includes(target.tagName);
+      const inChatInput = target === chatInputRef.current;
 
       if (e.key === 'Tab') {
         if (inInput) {
@@ -343,7 +393,8 @@ export default function RobotView({ robot }: Props) {
       }
 
       if (e.key === 'Escape' && canUseEStop) { triggerEStop(); return; }
-      if (inInput || focusMode === 'chat') return;
+      // Prevent controls if in ANY input field or in chat focus mode
+      if (inInput || focusMode === 'chat' || inChatInput) return;
 
       const key = e.key.toLowerCase();
       if (WASD[key] && !e.repeat) {
@@ -374,12 +425,34 @@ export default function RobotView({ robot }: Props) {
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
+  // Save chat history to localStorage
+  useEffect(() => {
+    try {
+      const key = `botparty.chat.${robot.id}`;
+      window.localStorage.setItem(key, JSON.stringify(messages));
+    } catch {
+      // Ignore localStorage errors (quota full, etc)
+    }
+  }, [messages, robot.id]);
+
   const sendChat = useCallback(() => {
     const text = chatInput.trim();
-    if (!text || wsRef.current?.readyState !== WebSocket.OPEN) return;
+    if (!text) return;
+    if (wsRef.current?.readyState !== WebSocket.OPEN) {
+      addDebugLog('error')('Chat blocked: not connected');
+      // Show warning only once per 3 seconds if not connected
+      const now = Date.now();
+      const lastError = lastErrorToastRef.current;
+      if (!lastError || now - lastError.timestamp > 3000) {
+        pushToast('Waiting for connection to robot...', 'error', 2000);
+        lastErrorToastRef.current = { message: 'disconnected', timestamp: now };
+      }
+      return;
+    }
+    addDebugLog('chat')(`Message sent: "${text}"`);
     wsRef.current.send(JSON.stringify({ event: 'chat:message', data: { robotId: robot.id, content: text } }));
     setChatInput('');
-  }, [chatInput, robot.id]);
+  }, [chatInput, robot.id, addDebugLog]);
 
   const moderateChatUser = useCallback(
     async (targetUserId: string, action: 'TIMEOUT' | 'BAN' | 'UNBAN') => {
@@ -446,11 +519,11 @@ export default function RobotView({ robot }: Props) {
       if (inQueue) {
         await api.leaveQueue(robot.id);
         setInQueue(false);
-        pushToast('Queue verlassen.', 'info');
+        pushToast('Left the queue.', 'info');
       } else {
         await api.joinQueue(robot.id);
         setInQueue(true);
-        pushToast('Queue beigetreten.', 'success');
+        pushToast('Joined the queue.', 'success');
       }
       const updated = await api.getQueue(robot.id);
       setQueue(updated);
@@ -542,10 +615,10 @@ export default function RobotView({ robot }: Props) {
           <div className="flex items-center gap-2">
             <button
               onClick={() => setFocusMode('controls')}
-              className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
+              className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-all ${
                 focusMode === 'controls'
                   ? 'bg-[var(--primary)] text-white'
-                  : 'border border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+                  : 'border border-[var(--border)] text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--primary)]/50'
               }`}
             >
               <span className="inline-flex items-center gap-1">
@@ -555,10 +628,10 @@ export default function RobotView({ robot }: Props) {
             </button>
             <button
               onClick={() => { setFocusMode('chat'); setTimeout(() => chatInputRef.current?.focus(), 50); }}
-              className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
+              className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-all ${
                 focusMode === 'chat'
                   ? 'bg-[var(--primary)] text-white'
-                  : 'border border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+                  : 'border border-[var(--border)] text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--primary)]/50'
               }`}
             >
               Chat
@@ -833,7 +906,7 @@ export default function RobotView({ robot }: Props) {
                               type="button"
                               onClick={() => void moderateChatUser(msg.userId, 'TIMEOUT')}
                               disabled={moderatingUserId === msg.userId}
-                              className="rounded border border-amber-500/40 px-1.5 py-0.5 text-[10px] text-amber-300 disabled:opacity-50"
+                              className="rounded border border-amber-500/40 px-1.5 py-0.5 text-[10px] text-amber-300 transition-all hover:border-amber-500/80 hover:bg-amber-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                               Timeout
                             </button>
@@ -841,7 +914,7 @@ export default function RobotView({ robot }: Props) {
                               type="button"
                               onClick={() => void moderateChatUser(msg.userId, 'BAN')}
                               disabled={moderatingUserId === msg.userId}
-                              className="rounded border border-red-500/40 px-1.5 py-0.5 text-[10px] text-red-300 disabled:opacity-50"
+                              className="rounded border border-red-500/40 px-1.5 py-0.5 text-[10px] text-red-300 transition-all hover:border-red-500/80 hover:bg-red-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                               Ban
                             </button>
@@ -849,7 +922,7 @@ export default function RobotView({ robot }: Props) {
                               type="button"
                               onClick={() => void moderateChatUser(msg.userId, 'UNBAN')}
                               disabled={moderatingUserId === msg.userId}
-                              className="rounded border border-emerald-500/40 px-1.5 py-0.5 text-[10px] text-emerald-300 disabled:opacity-50"
+                              className="rounded border border-emerald-500/40 px-1.5 py-0.5 text-[10px] text-emerald-300 transition-all hover:border-emerald-500/80 hover:bg-emerald-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                               Unban
                             </button>
@@ -884,7 +957,7 @@ export default function RobotView({ robot }: Props) {
               <button
                 onClick={sendChat}
                 disabled={!chatInput.trim()}
-                className="rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-medium text-white transition hover:bg-[var(--primary-hover)] disabled:opacity-50"
+                className="rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-medium text-white transition-all hover:bg-[var(--primary-hover)] hover:shadow-lg hover:shadow-[var(--primary)]/25 active:scale-95 disabled:opacity-50 disabled:hover:shadow-none"
               >
                 Send
               </button>
@@ -898,6 +971,37 @@ export default function RobotView({ robot }: Props) {
               </p>
             )}
           </div>
+        </div>
+
+        {/* Debug console */}
+        <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-xs font-semibold uppercase text-[var(--muted-foreground)]">Debug Console</h3>
+            <button
+              onClick={() => {
+                setDebugMode(!debugMode);
+                if (!debugMode) setDebugLogs([]);
+              }}
+              className={`text-xs px-2 py-1 rounded transition-all ${
+                debugMode ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/30 hover:border-emerald-500/60' : 'bg-[var(--muted)] text-[var(--muted-foreground)] border border-[var(--border)] hover:bg-[var(--muted)]/80 hover:border-emerald-500/40'
+              }`}
+            >
+              {debugMode ? 'ON' : 'OFF'}
+            </button>
+          </div>
+          {debugMode && (
+            <div className="h-32 overflow-y-auto bg-black rounded border border-[var(--border)] p-2 font-mono text-xs text-white/60">
+              {debugLogs.length === 0 ? (
+                <p className="text-[var(--muted-foreground)]">// Waiting for events...</p>
+              ) : (
+                debugLogs.map((log, i) => (
+                  <div key={i} className={log.type === 'error' ? 'text-red-400' : log.type === 'command' ? 'text-emerald-400' : 'text-white/60'}>
+                    <span className="text-white/40">{log.time}</span> {log.type === 'command' && '▶'} {log.msg}
+                  </div>
+                ))
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

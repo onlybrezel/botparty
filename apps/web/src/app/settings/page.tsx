@@ -55,7 +55,7 @@ export default function SettingsPage() {
         setAvatarUrl(me.avatarUrl ?? '');
       })
       .catch(() => {
-        pushToast('Profil konnte nicht geladen werden.', 'error');
+        pushToast('Failed to load profile.', 'error');
       })
       .finally(() => setLoading(false));
   }, [accessToken, router]);
@@ -63,7 +63,7 @@ export default function SettingsPage() {
   const savePrefs = (next: LocalSettings) => {
     setPrefs(next);
     window.localStorage.setItem(PREF_KEY, JSON.stringify(next));
-    pushToast('Lokale Einstellungen gespeichert.', 'success');
+    pushToast('Local settings saved.', 'success');
   };
 
   const handleSaveProfile = async (event: FormEvent) => {
@@ -79,9 +79,9 @@ export default function SettingsPage() {
       });
 
       auth.setSession({ displayName: me.displayName ?? null });
-      pushToast('Profil aktualisiert.', 'success');
+      pushToast('Profile updated.', 'success');
     } catch (err) {
-      pushToast(err instanceof Error ? err.message : 'Profil konnte nicht gespeichert werden.', 'error');
+      pushToast(err instanceof Error ? err.message : 'Failed to save profile.', 'error');
     } finally {
       setSaving(false);
     }
@@ -94,7 +94,7 @@ export default function SettingsPage() {
       <section className="mb-6 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6">
         <h1 className="text-3xl font-black tracking-tight">Settings</h1>
         <p className="mt-1 text-sm text-[var(--muted-foreground)]">
-          Profil und lokale Dashboard-Praeferenzen.
+          Manage your profile and local dashboard preferences.
         </p>
       </section>
 
@@ -106,7 +106,7 @@ export default function SettingsPage() {
           </h2>
 
           {loading ? (
-            <p className="text-sm text-[var(--muted-foreground)]">Lade Profil...</p>
+            <p className="text-sm text-[var(--muted-foreground)]">Loading profile...</p>
           ) : (
             <>
               <label className="mb-2 block text-sm font-medium">Display Name</label>
@@ -130,7 +130,7 @@ export default function SettingsPage() {
                   type="button"
                   onClick={() => setShowAvatar((prev) => !prev)}
                   className="rounded-lg border border-[var(--border)] px-3"
-                  aria-label="Avatar URL anzeigen"
+                aria-label="Toggle avatar URL visibility"
                 >
                   {showAvatar ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
@@ -142,18 +142,18 @@ export default function SettingsPage() {
                 className="inline-flex items-center gap-2 rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
               >
                 <Save className="h-4 w-4" />
-                {saving ? 'Speichern...' : 'Profil speichern'}
+                {saving ? 'Saving...' : 'Save Profile'}
               </button>
             </>
           )}
         </form>
 
         <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-5">
-          <h2 className="mb-4 text-lg font-bold">Lokale Dashboard-Optionen</h2>
+          <h2 className="mb-4 text-lg font-bold">Local Dashboard Options</h2>
 
           <div className="space-y-3 text-sm">
             <label className="flex cursor-pointer items-center justify-between rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2">
-              <span>Claim Token standardmaessig ausblenden</span>
+              <span>Hide claim token by default</span>
               <input
                 type="checkbox"
                 checked={prefs.dashboardMaskToken}
@@ -167,7 +167,7 @@ export default function SettingsPage() {
             </label>
 
             <label className="flex cursor-pointer items-center justify-between rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2">
-              <span>TAB im Chat wechselt nur bei leerem Feld</span>
+              <span>TAB in chat only switches focus when field is empty</span>
               <input
                 type="checkbox"
                 checked={prefs.keyboardTabSwitchOnlyWhenEmpty}

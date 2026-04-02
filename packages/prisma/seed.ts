@@ -114,15 +114,7 @@ async function main() {
   console.log(`  ✅ User: ${user.username}`);
   console.log(`     Password: user123456`);
 
-  // Remove old fixed-slug demo robots from previous seed versions.
-  await prisma.robot.deleteMany({
-    where: {
-      slug: { in: ['demo-bot', 'user-bot', 'admin-bot'] },
-      ownerId: { in: [user.id, admin.id] },
-    },
-  });
-
-  // Create/update seed robots with production-like slug format: <name>-<6hex>
+  // Create seed robots
   const userBot = await ensureSeedRobot({
     ownerId: user.id,
     name: 'User Bot',

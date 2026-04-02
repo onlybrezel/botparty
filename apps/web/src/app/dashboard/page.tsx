@@ -49,7 +49,7 @@ const DEFAULT_CREATE_FORM: RobotFormState = {
   aclControl: 'AUTHENTICATED',
   aclChat: 'AUTHENTICATED',
   aclEStop: 'AUTHENTICATED',
-  targetBitrateKbps: '',
+  targetBitrateKbps: '1800',
   maxTurnTime: 60000,
   maxViewers: 1000,
   maxControllers: 10,
@@ -63,13 +63,13 @@ const accessModeOptions: Array<{
   title: string;
   description: string;
 }> = [
-  { value: 'ALL', title: 'Alle', description: 'Auch ohne Login erlaubt' },
+  { value: 'ALL', title: 'Everyone', description: 'Also allowed without login' },
   {
     value: 'AUTHENTICATED',
-    title: 'Nur angemeldet',
-    description: 'Erfordert Login',
+    title: 'Authenticated only',
+    description: 'Requires login',
   },
-  { value: 'DISABLED', title: 'Aus', description: 'Funktion ist deaktiviert' },
+  { value: 'DISABLED', title: 'Disabled', description: 'Function is disabled' },
 ];
 
 function toUpdatePayload(form: RobotFormState) {
@@ -252,7 +252,7 @@ export default function DashboardPage() {
       setEditForm(formFromRobot(created));
       setCreateForm(DEFAULT_CREATE_FORM);
       setStatus('Robot created. You can now copy the claim token to your Raspberry Pi config.');
-      pushToast('Robot erstellt.', 'success', 3000);
+      pushToast('Robot created.', 'success', 3000);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create robot';
       setError(message);
@@ -280,9 +280,9 @@ export default function DashboardPage() {
       const nextBitrate = updated.metadata?.stream?.targetBitrateKbps ?? null;
       if (previousBitrate !== nextBitrate) {
         await api.enqueueRobotAction(updated.id, { type: 'restart_video' });
-        pushToast('Bitrate aktualisiert. Video-Neustart wurde angestoßen.', 'info', 3600);
+        pushToast('Bitrate updated. Video stream restarting.', 'info', 3600);
       } else {
-        pushToast('Einstellungen gespeichert.', 'success', 2800);
+        pushToast('Settings saved.', 'success', 2800);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to save robot';
@@ -320,7 +320,7 @@ export default function DashboardPage() {
   const handleRegenerate = async () => {
     if (!accessToken || !selectedRobot) return;
     const confirmed = window.confirm(
-      `Claim Token fuer ${selectedRobot.name} wirklich neu erzeugen? Der alte Token ist sofort ungueltig.`,
+      `Generate a new claim token for ${selectedRobot.name}? The old token will be invalidated immediately.`,
     );
     if (!confirmed) return;
 
@@ -337,7 +337,7 @@ export default function DashboardPage() {
         ),
       );
       setStatus('Claim token regenerated. Update config.yaml on your Pi before restarting the client.');
-      pushToast('Neuer Claim Token erzeugt.', 'success', 3200);
+      pushToast('New claim token generated.', 'success', 3200);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to regenerate token';
       setError(message);
@@ -352,10 +352,10 @@ export default function DashboardPage() {
     try {
       await navigator.clipboard.writeText(selectedRobot.claimToken);
       setStatus('Claim token copied to clipboard.');
-      pushToast('Claim Token kopiert.', 'success');
+      pushToast('Claim token copied to clipboard.', 'success');
     } catch {
       setError('Clipboard permission denied. Copy token manually.');
-      pushToast('Clipboard verweigert - bitte manuell kopieren.', 'error');
+      pushToast('Clipboard access denied - please copy manually.', 'error');
     }
   };
 
@@ -373,14 +373,14 @@ export default function DashboardPage() {
       if (type === 'set_log_stream') {
         setDiagLogs([]);
         setStatus(`Temporary diagnostics enabled for ${durationSec ?? 120}s.`);
-        pushToast(`Diagnostik fuer ${durationSec ?? 120}s aktiviert.`, 'info', 3000);
+        pushToast(`Diagnostics enabled for ${durationSec ?? 120}s.`, 'info', 3000);
       } else {
         setStatus(`Action queued: ${type}`);
-        pushToast(`Aktion eingeplant: ${type}`, 'success', 2600);
+        pushToast(`Action queued: ${type}`, 'success', 2600);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to queue action');
-      pushToast(err instanceof Error ? err.message : 'Aktion konnte nicht eingeplant werden.', 'error');
+      pushToast(err instanceof Error ? err.message : 'Failed to queue action.', 'error');
     } finally {
       setOpLoading(null);
     }
@@ -597,9 +597,9 @@ export default function DashboardPage() {
                         setEditForm((prev) => ({ ...prev, visibility: event.target.value as RobotFormState['visibility'] }))
                       }
                     >
-                      <option value="PUBLIC">Sichtbarkeit: Oeffentlich</option>
-                      <option value="UNLISTED">Sichtbarkeit: Nicht gelistet (nur mit Link)</option>
-                      <option value="PRIVATE">Sichtbarkeit: Privat</option>
+                      <option value="PUBLIC">Visibility: Public</option>
+                      <option value="UNLISTED">Visibility: Unlisted (link only)</option>
+                      <option value="PRIVATE">Visibility: Private</option>
                     </select>
                     <select
                       className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
@@ -608,10 +608,10 @@ export default function DashboardPage() {
                         setEditForm((prev) => ({ ...prev, accessMode: event.target.value as RobotFormState['accessMode'] }))
                       }
                     >
-                      <option value="OPEN">Raumzugang: Offen</option>
-                      <option value="PASSWORD">Raumzugang: Passwort</option>
-                      <option value="LINK_ONLY">Raumzugang: Nur Link</option>
-                      <option value="ALLOWED_USERS">Raumzugang: Nur erlaubte User</option>
+                      <option value="OPEN">Room Access: Open</option>
+                      <option value="PASSWORD">Room Access: Password</option>
+                      <option value="LINK_ONLY">Room Access: Link only</option>
+                      <option value="ALLOWED_USERS">Room Access: Allow list only</option>
                     </select>
                     <select
                       className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
@@ -620,31 +620,31 @@ export default function DashboardPage() {
                         setEditForm((prev) => ({ ...prev, queueMode: event.target.value as RobotFormState['queueMode'] }))
                       }
                     >
-                      <option value="FIRST_COME">Queue: Reihenfolge nach Eintritt</option>
+                      <option value="FIRST_COME">Queue: First come, first served</option>
                       <option value="VOTING">Queue: Voting</option>
-                      <option value="DISABLED">Queue: Aus</option>
+                      <option value="DISABLED">Queue: Disabled</option>
                     </select>
 
                     <AclPicker
-                      title="Video Zugriff"
+                      title="Video Access"
                       value={editForm.aclVideo}
                       onChange={(value) => setEditForm((prev) => ({ ...prev, aclVideo: value }))}
                     />
 
                     <AclPicker
-                      title="Steuerung Zugriff"
+                      title="Control Access"
                       value={editForm.aclControl}
                       onChange={(value) => setEditForm((prev) => ({ ...prev, aclControl: value }))}
                     />
 
                     <AclPicker
-                      title="Chat Zugriff"
+                      title="Chat Access"
                       value={editForm.aclChat}
                       onChange={(value) => setEditForm((prev) => ({ ...prev, aclChat: value }))}
                     />
 
                     <AclPicker
-                      title="E-STOP Zugriff"
+                      title="E-STOP Access"
                       value={editForm.aclEStop}
                       onChange={(value) => setEditForm((prev) => ({ ...prev, aclEStop: value }))}
                     />
@@ -668,7 +668,7 @@ export default function DashboardPage() {
                       onChange={(event) =>
                         setEditForm((prev) => ({ ...prev, maxTurnTime: Number(event.target.value) }))
                       }
-                      placeholder="Max Turn Time in ms (z.B. 60000)"
+                      placeholder="Max turn time in ms (e.g. 60000)"
                     />
                     <input
                       type="number"
@@ -677,7 +677,7 @@ export default function DashboardPage() {
                       onChange={(event) =>
                         setEditForm((prev) => ({ ...prev, maxViewers: Number(event.target.value) }))
                       }
-                      placeholder="Maximale Zuschauer"
+                      placeholder="Max viewers"
                     />
                     <input
                       type="number"
@@ -686,7 +686,7 @@ export default function DashboardPage() {
                       onChange={(event) =>
                         setEditForm((prev) => ({ ...prev, maxControllers: Number(event.target.value) }))
                       }
-                      placeholder="Maximale Controller"
+                      placeholder="Max controllers"
                     />
                   </div>
 
