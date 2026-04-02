@@ -164,7 +164,7 @@ export default function DashboardPage() {
     setPreview(null);
     api.setToken(accessToken);
     api.getViewerToken(selectedRobot.id, false)
-      .then(({ token, livekitUrl }) => setPreview({ token, url: livekitUrl }))
+      .then(({ token, livekitUrl }) => setPreview({ token, url: process.env.NEXT_PUBLIC_LIVEKIT_URL ?? livekitUrl }))
       .catch(() => {});
   }, [selectedRobot?.id, selectedRobot?.status, accessToken]); // eslint-disable-line react-hooks/exhaustive-deps
 

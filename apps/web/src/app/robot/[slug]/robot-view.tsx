@@ -117,14 +117,15 @@ export default function RobotView({ robot }: Props) {
 
     const loadToken = async () => {
       try {
+        const publicUrl = process.env.NEXT_PUBLIC_LIVEKIT_URL;
         if (accessToken) {
           const { token, livekitUrl } = await api.getViewerToken(robot.id, false);
-          setLivekitCreds({ token, url: livekitUrl });
+          setLivekitCreds({ token, url: publicUrl ?? livekitUrl });
           return;
         }
 
         const { token, livekitUrl } = await api.getPublicViewerToken(robot.id);
-        setLivekitCreds({ token, url: livekitUrl });
+        setLivekitCreds({ token, url: publicUrl ?? livekitUrl });
       } catch {
         setLivekitCreds(null);
       }
