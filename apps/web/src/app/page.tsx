@@ -50,7 +50,7 @@ export default async function HomePage() {
           </h1>
 
           <p className="mx-auto mb-9 max-w-2xl text-lg text-[var(--muted-foreground)] sm:text-xl">
-            Kein Simulationskram: echte Hardware, echte Latenz, echte Community-Sessions.
+            No simulations: real hardware, real latency, real community sessions.
           </p>
 
           <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
@@ -87,7 +87,7 @@ export default async function HomePage() {
               <p className="mt-1 text-2xl font-black">{viewerTotal}</p>
             </div>
             <div className="rounded-xl border border-[var(--border)] bg-[var(--card)]/70 px-4 py-3 text-left">
-              <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Sessions heute</p>
+              <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Sessions today</p>
               <p className="mt-1 text-2xl font-black">{Math.max(robots.length, onlineCount)}</p>
             </div>
           </div>

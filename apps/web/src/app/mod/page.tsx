@@ -45,7 +45,7 @@ export default function ModDashboardPage() {
         const role = String(me.role);
         const isStaff = ['ADMIN', 'MOD', 'MODERATOR', 'CREATOR'].includes(role);
         if (!isStaff) {
-          pushToast('Kein Zugriff auf das Mod Dashboard.', 'error');
+          pushToast('No access to mod dashboard.', 'error');
           router.replace('/dashboard');
           return;
         }
@@ -97,7 +97,7 @@ export default function ModDashboardPage() {
       }
       pushToast('Mod data refreshed.', 'success');
     } catch (err) {
-      pushToast(err instanceof Error ? err.message : 'Aktualisierung fehlgeschlagen.', 'error');
+      pushToast(err instanceof Error ? err.message : 'Update failed.', 'error');
     } finally {
       setRefreshing(false);
     }
@@ -113,21 +113,21 @@ export default function ModDashboardPage() {
         reason: 'Removed by staff dashboard',
       });
       await refresh();
-      pushToast('Nutzer entsperrt.', 'success');
+        pushToast('User unbanned.', 'success');
     } catch (err) {
-      pushToast(err instanceof Error ? err.message : 'Entsperren fehlgeschlagen.', 'error');
+      pushToast(err instanceof Error ? err.message : 'Unban failed.', 'error');
     }
   };
 
   const deleteRobotAsStaff = async (robotId: string, robotName: string) => {
     if (!accessToken) return;
-    if (!window.confirm(`Robot ${robotName} wirklich loeschen?`)) return;
+    if (!window.confirm(`Delete robot ${robotName}? This cannot be undone.`)) return;
 
     try {
       api.setToken(accessToken);
       await api.deleteRobotAsStaff(robotId);
       await refresh();
-      pushToast('Robot geloescht.', 'success');
+        pushToast('Robot deleted.', 'success');
     } catch (err) {
       pushToast(err instanceof Error ? err.message : 'Failed to delete robot.', 'error');
     }
@@ -142,7 +142,7 @@ export default function ModDashboardPage() {
       api.setToken(accessToken);
       await api.updateRobotAsStaff(robotId, { visibility });
       await refresh();
-      pushToast(`Robot Sichtbarkeit gesetzt: ${visibility}`, 'success');
+        pushToast(`Robot visibility set to: ${visibility}`, 'success');
     } catch (err) {
       pushToast(err instanceof Error ? err.message : 'Failed to update robot.', 'error');
     }
@@ -166,7 +166,7 @@ export default function ModDashboardPage() {
               Mod Dashboard
             </h1>
             <p className="mt-1 text-sm text-[var(--muted-foreground)]">
-              Nutzer, aktive Strafen, Moderationshistorie und Robot-Administration.
+              Users, active restrictions, moderation history, and robot administration.
             </p>
           </div>
           <button
@@ -176,29 +176,29 @@ export default function ModDashboardPage() {
             className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2 text-sm disabled:opacity-60"
           >
             <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-            {refreshing ? 'Aktualisieren...' : 'Aktualisieren'}
+            {refreshing ? 'Updating...' : 'Update'}
           </button>
         </div>
       </section>
 
       <section className="mb-6 grid gap-4 sm:grid-cols-3">
         <article className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-          <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Aktive Bans</p>
+          <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Active Bans</p>
           <p className="mt-2 flex items-center gap-2 text-2xl font-black"><Ban className="h-5 w-5 text-red-300" />{overview?.counts.bans ?? 0}</p>
         </article>
         <article className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-          <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Aktive Timeouts</p>
+          <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Active Timeouts</p>
           <p className="mt-2 flex items-center gap-2 text-2xl font-black"><Clock3 className="h-5 w-5 text-amber-300" />{overview?.counts.timeouts ?? 0}</p>
         </article>
         <article className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-          <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Blockierte Beleidigungen</p>
+          <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Blocked Profanities</p>
           <p className="mt-2 text-2xl font-black">{profanity?.total ?? 0}</p>
         </article>
       </section>
 
       <section className="mb-6 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <div className="mb-3 flex flex-wrap items-center gap-2">
-          <h2 className="text-lg font-bold">Beleidigungs-Log</h2>
+          <h2 className="text-lg font-bold">Profanity Log</h2>
           <select
             value={selectedRobotId ?? ''}
             onChange={async (event) => {
@@ -218,7 +218,7 @@ export default function ModDashboardPage() {
             }}
             className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-1.5 text-sm"
           >
-            <option value="">Robot waehlen</option>
+            <option value="">Select robot</option>
             {(overview?.robots ?? []).map((robot) => (
               <option key={robot.id} value={robot.id}>{robot.name}</option>
             ))}
@@ -227,9 +227,9 @@ export default function ModDashboardPage() {
 
         <div className="grid gap-3 lg:grid-cols-2">
           <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
-            <p className="mb-2 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Top Nutzer (Count)</p>
+            <p className="mb-2 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Top Users (Count)</p>
             {(profanity?.byUser ?? []).length === 0 ? (
-              <p className="text-sm text-[var(--muted-foreground)]">Noch keine Eintraege.</p>
+            <p className="text-xs text-[var(--muted-foreground)]">No entries yet.</p>
             ) : (
               profanity?.byUser.slice(0, 10).map((entry) => (
                 <p key={entry.userId} className="text-sm">{entry.userId.slice(0, 8)}...: {entry.count}</p>
@@ -237,9 +237,9 @@ export default function ModDashboardPage() {
             )}
           </div>
           <div className="max-h-56 overflow-auto rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
-            <p className="mb-2 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Letzte Events</p>
+            <p className="mb-2 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Recent Events</p>
             {(profanity?.events ?? []).length === 0 ? (
-              <p className="text-sm text-[var(--muted-foreground)]">Noch keine Events.</p>
+            <p className="text-xs text-[var(--muted-foreground)]">No events yet.</p>
             ) : (
               profanity?.events.map((event, idx) => (
                 <p key={`${event.ts}-${idx}`} className="mb-1 text-xs text-[var(--muted-foreground)]">
@@ -252,10 +252,10 @@ export default function ModDashboardPage() {
       </section>
 
       <section className="mb-6 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-        <h2 className="mb-3 text-lg font-bold">Aktive Strafen (robot-spezifisch)</h2>
+        <h2 className="mb-3 text-lg font-bold">Active Restrictions (robot-specific)</h2>
         <div className="space-y-2">
           {(overview?.activeRestrictions ?? []).length === 0 ? (
-            <p className="text-sm text-[var(--muted-foreground)]">Keine aktiven Timeouts/Bans.</p>
+            <p className="text-xs text-[var(--muted-foreground)]">No active timeouts or bans.</p>
           ) : (
             overview?.activeRestrictions.map((entry) => (
               <div key={entry.id} className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3 text-sm">
@@ -269,7 +269,7 @@ export default function ModDashboardPage() {
                     onClick={() => void unrestrict(entry.robot.id, entry.user.id)}
                     className="ml-auto rounded border border-emerald-500/40 px-2 py-0.5 text-xs text-emerald-300"
                   >
-                    Entsperren
+                    Unban
                   </button>
                 </div>
                 {entry.reason && <p className="mt-1 text-xs text-[var(--muted-foreground)]">{entry.reason}</p>}
@@ -281,14 +281,14 @@ export default function ModDashboardPage() {
 
       <section className="mb-6 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <div className="mb-3 flex items-center gap-2">
-          <h2 className="text-lg font-bold">Nutzer</h2>
+          <h2 className="text-lg font-bold">Users</h2>
           <div className="relative ml-auto w-full max-w-xs">
             <Search className="pointer-events-none absolute left-2 top-2.5 h-4 w-4 text-[var(--muted-foreground)]" />
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] py-2 pl-8 pr-3 text-sm"
-              placeholder="Suche Nutzer..."
+              placeholder="Search users..."
             />
           </div>
         </div>
@@ -306,7 +306,7 @@ export default function ModDashboardPage() {
       </section>
 
       <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-        <h2 className="mb-3 text-lg font-bold">Robots verwalten</h2>
+        <h3 className="mb-4 text-lg font-bold">Manage Robots</h3>
         <div className="space-y-2">
           {(overview?.robots ?? []).map((robot) => (
             <div key={robot.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm">
@@ -334,7 +334,7 @@ export default function ModDashboardPage() {
                 className="ml-auto inline-flex items-center gap-1 rounded border border-red-500/40 px-2 py-1 text-xs text-red-300"
               >
                 <Trash2 className="h-3.5 w-3.5" />
-                Loeschen
+                Delete
               </button>
             </div>
           ))}

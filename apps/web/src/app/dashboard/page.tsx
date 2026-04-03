@@ -831,7 +831,7 @@ export default function DashboardPage() {
                 </>
               ) : (
                 <div className="rounded-xl border border-dashed border-[var(--border)] bg-[var(--background)] p-6 text-sm text-[var(--muted-foreground)]">
-                  Waehle links einen Roboter aus, um die Einstellungen zu bearbeiten.
+                  Select a robot on the left to edit its settings.
                 </div>
               )}
             </div>
