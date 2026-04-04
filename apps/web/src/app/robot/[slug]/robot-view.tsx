@@ -77,6 +77,25 @@ const WASD: Record<string, string> = {
   d: 'right', arrowright: 'right',
 };
 
+function getOrCreateGuestSessionId(): string {
+  const fallback = Math.random().toString(36).slice(2, 14);
+  if (typeof window === 'undefined') return fallback;
+
+  try {
+    const key = 'botparty.guestSessionId.v1';
+    const stored = window.localStorage.getItem(key);
+    const normalized = (stored ?? '').trim().toLowerCase();
+    if (/^[a-z0-9_-]{6,64}$/.test(normalized)) {
+      return normalized;
+    }
+
+    window.localStorage.setItem(key, fallback);
+    return fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 interface Props {
@@ -104,7 +123,7 @@ export default function RobotView({ robot }: Props) {
   const [robotStatus, setRobotStatus] = useState(robot.status);
   const [chatRestriction, setChatRestriction] = useState<string | null>(null);
   const [tabSwitchOnlyWhenEmpty, setTabSwitchOnlyWhenEmpty] = useState(true);
-  const [guestSessionId, setGuestSessionId] = useState<string>('');
+  const [guestSessionId] = useState<string>(() => getOrCreateGuestSessionId());
 
   const wsRef = useRef<WebSocket | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -199,23 +218,6 @@ export default function RobotView({ robot }: Props) {
       setTabSwitchOnlyWhenEmpty(parsed.keyboardTabSwitchOnlyWhenEmpty !== false);
     } catch {
       setTabSwitchOnlyWhenEmpty(true);
-    }
-  }, []);
-
-  useEffect(() => {
-    try {
-      const key = 'botparty.guestSessionId.v1';
-      const stored = window.localStorage.getItem(key);
-      const normalized = (stored ?? '').trim().toLowerCase();
-      if (/^[a-z0-9_-]{6,64}$/.test(normalized)) {
-        setGuestSessionId(normalized);
-        return;
-      }
-      const generated = Math.random().toString(36).slice(2, 14);
-      window.localStorage.setItem(key, generated);
-      setGuestSessionId(generated);
-    } catch {
-      setGuestSessionId(Math.random().toString(36).slice(2, 14));
     }
   }, []);
 

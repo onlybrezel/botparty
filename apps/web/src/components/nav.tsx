@@ -12,6 +12,7 @@ export default function Nav() {
   const { accessToken, username, refreshToken, logout } = useAuth();
   const [mounted, setMounted] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [guestLabel, setGuestLabel] = useState('Guest');
 
   useEffect(() => {
     let cancelled = false;
@@ -32,6 +33,23 @@ export default function Nav() {
       cancelled = true;
     };
   }, [refreshToken]);
+
+  useEffect(() => {
+    if (!mounted || accessToken) return;
+    try {
+      const key = 'botparty.guestSessionId.v1';
+      const stored = (window.localStorage.getItem(key) ?? '').trim().toLowerCase();
+      const sessionId = /^[a-z0-9_-]{6,64}$/.test(stored)
+        ? stored
+        : Math.random().toString(36).slice(2, 14);
+      if (sessionId !== stored) {
+        window.localStorage.setItem(key, sessionId);
+      }
+      setGuestLabel(`Guest-${sessionId.slice(0, 6)}`);
+    } catch {
+      setGuestLabel('Guest');
+    }
+  }, [accessToken, mounted]);
 
   const isActive = (href: string) => pathname === href || pathname.startsWith(href + '/');
 
@@ -146,7 +164,7 @@ export default function Nav() {
           ) : (
             <div className="flex items-center gap-2">
               <span className="hidden rounded-lg border border-[var(--border)] bg-[var(--card)] px-2.5 py-1 text-xs font-medium text-[var(--muted-foreground)] sm:inline-flex">
-                Guest
+                {guestLabel}
               </span>
               <Link
                 href="/login"
