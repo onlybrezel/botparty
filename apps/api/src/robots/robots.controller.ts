@@ -34,8 +34,9 @@ export class RobotsController {
   async findAll(
     @Query('status') status?: string,
     @Query('tag') tag?: string,
+    @Query('q') q?: string,
   ) {
-    return this.robotsService.findAll({ status, tag });
+    return this.robotsService.findAll({ status, tag, q });
   }
 
   @Get('featured')

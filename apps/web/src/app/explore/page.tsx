@@ -13,25 +13,14 @@ async function getRobots(params: { status?: string; tag?: string; q?: string }):
   const qs = new URLSearchParams();
   if (params.status) qs.set('status', params.status);
   if (params.tag) qs.set('tag', params.tag);
+  if (params.q) qs.set('q', params.q);
 
   try {
     const res = await fetch(`${apiUrl}/api/v1/robots?${qs.toString()}`, {
       next: { revalidate: 10 },
     });
     if (!res.ok) return [];
-    const robots = await res.json() as RobotPublic[];
-
-    // Client-side name search (since API might not support q yet)
-    if (params.q) {
-      const q = params.q.toLowerCase();
-      return robots.filter(
-        (r) =>
-          r.name.toLowerCase().includes(q) ||
-          r.tags.some((t) => t.toLowerCase().includes(q)) ||
-          r.owner.username.toLowerCase().includes(q),
-      );
-    }
-    return robots;
+    return res.json() as Promise<RobotPublic[]>;
   } catch {
     return [];
   }

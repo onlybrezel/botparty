@@ -91,14 +91,30 @@ export class RobotsService {
     return robot;
   }
 
-  async findAll(filters?: { visibility?: string; status?: string; tag?: string }) {
+  async findAll(filters?: { visibility?: string; status?: string; tag?: string; q?: string }) {
     await this.refreshStaleStatus();
+
+    const query = filters?.q?.trim();
 
     return this.prisma.robot.findMany({
       where: {
         visibility: 'PUBLIC',
         ...(filters?.status && { status: filters.status as 'ONLINE' | 'OFFLINE' | 'BUSY' | 'MAINTENANCE' }),
         ...(filters?.tag && { tags: { has: filters.tag } }),
+        ...(query && {
+          OR: [
+            { name: { contains: query, mode: 'insensitive' } },
+            { description: { contains: query, mode: 'insensitive' } },
+            {
+              owner: {
+                OR: [
+                  { username: { contains: query, mode: 'insensitive' } },
+                  { displayName: { contains: query, mode: 'insensitive' } },
+                ],
+              },
+            },
+          ],
+        }),
       },
       orderBy: [{ isFeatured: 'desc' }, { viewerCount: 'desc' }, { createdAt: 'desc' }],
       include: {

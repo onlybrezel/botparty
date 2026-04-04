@@ -2,6 +2,14 @@ import type { Metadata } from 'next';
 import type { RobotPublic } from '@botparty/shared';
 import { Trophy, Eye, Radio, Clock3 } from 'lucide-react';
 
+type CreatorLeaderboardEntry = {
+  id: string;
+  username: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+  credits: number;
+};
+
 export const metadata: Metadata = {
   title: 'Leaderboard',
   description: 'Top robots by live viewers and activity.',
@@ -20,6 +28,19 @@ async function getRobots(): Promise<RobotPublic[]> {
   }
 }
 
+async function getTopCreators(): Promise<CreatorLeaderboardEntry[]> {
+  const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
+  try {
+    const res = await fetch(`${apiUrl}/api/v1/users/leaderboard?limit=10`, {
+      next: { revalidate: 30 },
+    });
+    if (!res.ok) return [];
+    return res.json() as Promise<CreatorLeaderboardEntry[]>;
+  } catch {
+    return [];
+  }
+}
+
 function statusColor(status: RobotPublic['status']) {
   if (status === 'ONLINE') return 'text-[var(--online)] bg-[var(--online)]/15';
   if (status === 'BUSY') return 'text-amber-400 bg-amber-500/15';
@@ -28,7 +49,7 @@ function statusColor(status: RobotPublic['status']) {
 }
 
 export default async function LeaderboardPage() {
-  const robots = await getRobots();
+  const [robots, creators] = await Promise.all([getRobots(), getTopCreators()]);
   const ranked = [...robots].sort((a, b) => b.viewerCount - a.viewerCount);
 
   return (
@@ -125,6 +146,34 @@ export default async function LeaderboardPage() {
           </p>
           <p className="mt-2 text-2xl font-black">{ranked.length}</p>
         </div>
+      </section>
+
+      <section className="mt-6 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 sm:p-5">
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <h2 className="text-lg font-bold">Top Creators (Credits)</h2>
+          <p className="text-xs text-[var(--muted-foreground)]">From user credits leaderboard</p>
+        </div>
+
+        {creators.length === 0 ? (
+          <p className="text-sm text-[var(--muted-foreground)]">No creator stats available yet.</p>
+        ) : (
+          <ul className="space-y-2">
+            {creators.map((creator, index) => (
+              <li
+                key={creator.id}
+                className="flex items-center justify-between rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2"
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="w-6 text-xs font-bold text-[var(--muted-foreground)]">{index + 1}</span>
+                  <span className="truncate text-sm font-medium">
+                    {creator.displayName ?? creator.username}
+                  </span>
+                </div>
+                <span className="text-sm font-semibold text-amber-300">{creator.credits} cr</span>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
     </div>
   );

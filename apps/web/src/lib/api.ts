@@ -293,7 +293,7 @@ class ApiClient {
 
   // ─── Robots ────────────────────────────────────────────────────────────────
 
-  async getRobots(params?: { status?: string; tag?: string }) {
+  async getRobots(params?: { status?: string; tag?: string; q?: string }) {
     const qs = new URLSearchParams(params as Record<string, string>).toString();
     return this.request<RobotPublic[]>(`/robots${qs ? `?${qs}` : ''}`);
   }
