@@ -244,18 +244,28 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
     robotClient.send(
       JSON.stringify({
         event: WS_EVENTS.CONTROL_COMMAND,
-        data: { command: data.command, value: data.value, userId: client.userId, timestamp: data.timestamp },
+        data: {
+          command: data.command,
+          value: data.value,
+          userId: client.userId,
+          // Use server timestamp for robot-side latency checks to avoid clock-skew false positives.
+          timestamp: Date.now(),
+          clientTimestamp: data.timestamp,
+        },
       }),
     );
 
-    // Latency guard
-    const latency = Date.now() - data.timestamp;
-    if (latency > LIMITS.LATENCY_EMERGENCY_STOP_MS) {
-      this._triggerEmergencyStop(data.robotId, `High latency: ${latency}ms`);
-    } else if (latency > LIMITS.LATENCY_WARNING_MS) {
-      client.send(
-        JSON.stringify({ event: WS_EVENTS.CONTROL_LATENCY_WARNING, data: { latencyMs: latency } }),
-      );
+    // Non-fatal advisory only: browser and server clocks can differ, so never E-STOP from this metric.
+    if (Number.isFinite(data.timestamp)) {
+      const clientServerDeltaMs = Date.now() - data.timestamp;
+      if (Math.abs(clientServerDeltaMs) > LIMITS.LATENCY_WARNING_MS) {
+        client.send(
+          JSON.stringify({
+            event: WS_EVENTS.CONTROL_LATENCY_WARNING,
+            data: { latencyMs: Math.max(0, clientServerDeltaMs) },
+          }),
+        );
+      }
     }
   }
 
