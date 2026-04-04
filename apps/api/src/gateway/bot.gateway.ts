@@ -188,6 +188,23 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return { event: WS_EVENTS.ROBOT_HEARTBEAT, data: { ts: Date.now() } };
   }
 
+  @SubscribeMessage('robot:actions:pull')
+  async handleRobotActionsPull(@ConnectedSocket() client: WsClient) {
+    if (!client.isRobot || !client.robotId) {
+      client.send(
+        JSON.stringify({ event: 'error', data: { message: 'Only robot clients can pull actions' } }),
+      );
+      return;
+    }
+
+    try {
+      const payload = await this.robotsService.consumeActionsByRobotId(client.robotId);
+      client.send(JSON.stringify({ event: 'robot:actions', data: payload }));
+    } catch (err) {
+      this.logger.error('Failed to pull robot actions', err);
+    }
+  }
+
   // ─── Control commands ───────────────────────────────────────────────────────
 
   @SubscribeMessage(WS_EVENTS.CONTROL_COMMAND)
@@ -211,11 +228,8 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     // Moderation check
-    if (client.userId && !client.isGuest) {
-      const restriction = await this.moderationService.getActiveRestriction(
-        data.robotId,
-        client.userId,
-      );
+    if (client.userId) {
+      const restriction = await this.moderationService.getActiveRestriction(data.robotId, client.userId);
       if (restriction) {
         client.send(
           JSON.stringify({ event: 'error', data: { message: 'You are restricted in this room', restriction } }),
@@ -361,12 +375,14 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
     client.lastChatAt = now;
 
     // Moderation check
-    const restriction = await this.moderationService.getActiveRestriction(data.robotId, client.userId ?? '');
-    if (restriction) {
-      client.send(
-        JSON.stringify({ event: 'error', data: { message: 'You are restricted in this room', restriction } }),
-      );
-      return;
+    if (client.userId) {
+      const restriction = await this.moderationService.getActiveRestriction(data.robotId, client.userId);
+      if (restriction) {
+        client.send(
+          JSON.stringify({ event: 'error', data: { message: 'You are restricted in this room', restriction } }),
+        );
+        return;
+      }
     }
 
     this._broadcastToRoom(data.robotId, WS_EVENTS.CHAT_MESSAGE, {

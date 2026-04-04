@@ -272,6 +272,12 @@ export class RobotsService {
       throw new ForbiddenException('Invalid claim token');
     }
 
+    return this.consumeActionsByRobotId(robot.id);
+  }
+
+  async consumeActionsByRobotId(robotId: string) {
+    const robot = await this.findById(robotId);
+
     const key = `robot:actions:${robot.id}`;
     const raw = await this.redis.lrange(key, 0, -1);
     const stream = await this.getStreamPolicy(robot.id);

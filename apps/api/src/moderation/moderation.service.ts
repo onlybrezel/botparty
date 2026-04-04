@@ -63,15 +63,16 @@ export class ModerationService {
    * The caller must be the robot owner OR a site moderator/admin.
    */
   async moderate(robotId: string, dto: ModerateUserDto, moderatorId: string) {
+    const isGuestTarget = this._isGuestUserId(dto.targetUserId);
     const [robot, moderator, target] = await Promise.all([
       this.prisma.robot.findUnique({ where: { id: robotId } }),
       this.prisma.user.findUnique({ where: { id: moderatorId } }),
-      this.prisma.user.findUnique({ where: { id: dto.targetUserId } }),
+      isGuestTarget ? Promise.resolve(null) : this.prisma.user.findUnique({ where: { id: dto.targetUserId } }),
     ]);
 
     if (!robot) throw new NotFoundException('Robot not found');
     if (!moderator) throw new NotFoundException('Moderator not found');
-    if (!target) throw new NotFoundException('Target user not found');
+    if (!isGuestTarget && !target) throw new NotFoundException('Target user not found');
 
     const isSiteStaff = this._isStaffRole(moderator.role);
     if (robot.ownerId !== moderatorId && !isSiteStaff) {
@@ -79,8 +80,12 @@ export class ModerationService {
     }
 
     // Prevent moderating site admins
-    if (target.role === 'ADMIN' && !isSiteStaff) {
+    if (!isGuestTarget && target && target.role === 'ADMIN' && !isSiteStaff) {
       throw new ForbiddenException('Cannot moderate a site admin');
+    }
+
+    if (isGuestTarget) {
+      return this._moderateGuest(robotId, dto, moderatorId);
     }
 
     // Deactivate existing active entries for same robot+user (we replace them)
@@ -153,6 +158,10 @@ export class ModerationService {
 
   /** Check whether a user is currently banned or timed-out in a robot room. */
   async getActiveRestriction(robotId: string, userId: string) {
+    if (this._isGuestUserId(userId)) {
+      return this._getGuestRestriction(robotId, userId);
+    }
+
     const entry = await this.prisma.robotModerationEntry.findFirst({
       where: {
         robotId,
@@ -174,6 +183,76 @@ export class ModerationService {
     }
 
     return entry;
+  }
+
+  private async _moderateGuest(robotId: string, dto: ModerateUserDto, moderatorId: string) {
+    const key = this._guestRestrictionKey(robotId, dto.targetUserId);
+
+    if (dto.action === ModerationActionType.UNBAN) {
+      await this.redis.del(key);
+      return { action: 'UNBAN', userId: dto.targetUserId };
+    }
+
+    let expiresAtMs: number | null = null;
+    if (dto.action === ModerationActionType.TIMEOUT) {
+      if (!dto.durationSec) throw new BadRequestException('durationSec required for TIMEOUT');
+      expiresAtMs = Date.now() + dto.durationSec * 1000;
+    }
+
+    const payload = {
+      robotId,
+      userId: dto.targetUserId,
+      action: dto.action,
+      reason: dto.reason,
+      moderatorId,
+      createdAt: new Date().toISOString(),
+      expiresAt: expiresAtMs ? new Date(expiresAtMs).toISOString() : null,
+      isActive: true,
+    };
+
+    if (expiresAtMs) {
+      const ttlSec = Math.max(1, Math.floor((expiresAtMs - Date.now()) / 1000));
+      await this.redis.set(key, JSON.stringify(payload), 'EX', ttlSec);
+    } else {
+      // Keep bans persistent but not forever to avoid unbounded stale keys.
+      await this.redis.set(key, JSON.stringify(payload), 'EX', 60 * 60 * 24 * 30);
+    }
+
+    return payload;
+  }
+
+  private async _getGuestRestriction(robotId: string, userId: string) {
+    const raw = await this.redis.get(this._guestRestrictionKey(robotId, userId));
+    if (!raw) return null;
+
+    try {
+      const parsed = JSON.parse(raw) as {
+        action?: string;
+        expiresAt?: string | null;
+        [key: string]: unknown;
+      };
+
+      if (parsed.expiresAt) {
+        const exp = Date.parse(parsed.expiresAt);
+        if (Number.isFinite(exp) && exp <= Date.now()) {
+          await this.redis.del(this._guestRestrictionKey(robotId, userId));
+          return null;
+        }
+      }
+
+      return parsed;
+    } catch {
+      await this.redis.del(this._guestRestrictionKey(robotId, userId));
+      return null;
+    }
+  }
+
+  private _isGuestUserId(userId: string): boolean {
+    return userId.startsWith('guest:');
+  }
+
+  private _guestRestrictionKey(robotId: string, userId: string): string {
+    return `moderation:guest:restriction:${robotId}:${userId}`;
   }
 
   sanitizeChatContent(raw: string): { sanitized: string; hasIllegalChars: boolean } {

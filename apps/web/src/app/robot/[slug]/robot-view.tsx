@@ -108,6 +108,7 @@ export default function RobotView({ robot }: Props) {
   const [focusMode, setFocusMode] = useState<FocusMode>('controls');
   const [controlButtons, setControlButtons] = useState<ControlButton[]>([]);
   const [activeKeys, setActiveKeys] = useState<Set<string>>(new Set());
+  const [activeCommands, setActiveCommands] = useState<Set<string>>(new Set());
   const [viewers, setViewers] = useState<Viewer[]>([]);
   const [queue, setQueue] = useState<QueueEntry[]>([]);
   const [crowdInputs, setCrowdInputs] = useState<Map<string, number>>(new Map());
@@ -130,6 +131,7 @@ export default function RobotView({ robot }: Props) {
   const chatInputRef = useRef<HTMLInputElement>(null);
   const cooldownMap = useRef<Map<string, number>>(new Map());
   const lastErrorToastRef = useRef<{ message: string; timestamp: number } | null>(null);
+  const activeMotionKeysRef = useRef<Set<string>>(new Set());
 
   // ─── Fetch controls ────────────────────────────────────────────────────────
 
@@ -409,8 +411,11 @@ export default function RobotView({ robot }: Props) {
       const key = e.key.toLowerCase();
       if (WASD[key] && !e.repeat) {
         e.preventDefault();
+        const command = WASD[key];
         setActiveKeys((s) => new Set(s).add(key));
-        sendCommand(WASD[key]);
+        setActiveCommands((s) => new Set(s).add(command));
+        activeMotionKeysRef.current.add(key);
+        sendCommand(command);
       }
       if (keyToBtn.has(key) && !e.repeat) {
         e.preventDefault();
@@ -423,12 +428,28 @@ export default function RobotView({ robot }: Props) {
     const onKeyUp = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
       setActiveKeys((s) => { const n = new Set(s); n.delete(key); return n; });
-      if (WASD[key]) sendCommand('stop', 0);
+      if (WASD[key]) {
+        const command = WASD[key];
+        setActiveCommands((s) => {
+          const n = new Set(s);
+          n.delete(command);
+          return n;
+        });
+        activeMotionKeysRef.current.delete(key);
+        if (activeMotionKeysRef.current.size === 0) {
+          sendCommand('stop', 0);
+        }
+      }
     };
 
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
-    return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); };
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      activeMotionKeysRef.current.clear();
+      setActiveCommands(new Set());
+    };
   }, [focusMode, controlButtons, sendCommand, triggerEStop, canUseEStop, tabSwitchOnlyWhenEmpty]);
 
   // ─── Chat ─────────────────────────────────────────────────────────────────
@@ -553,6 +574,7 @@ export default function RobotView({ robot }: Props) {
   const buttons = controlButtons.length > 0 ? controlButtons : defaultButtons;
 
   const isOnline = robotStatus === 'ONLINE' || robotStatus === 'BUSY';
+  const queueEnabled = robot.queueMode !== 'DISABLED';
 
   // ─── UI ───────────────────────────────────────────────────────────────────
 
@@ -672,7 +694,7 @@ export default function RobotView({ robot }: Props) {
                 {(['w'] as const).map((k) => {
                   const btn = buttons.find((b) => b.hotKey === k);
                   const cmd = btn?.command ?? 'forward';
-                  const isDown = activeKeys.has(k);
+                  const isDown = activeCommands.has(cmd);
                   return (
                     <ControlKey
                       key={k}
@@ -690,7 +712,7 @@ export default function RobotView({ robot }: Props) {
                   const btn = buttons.find((b) => b.hotKey === k);
                   const fallback = k === 'a' ? 'left' : k === 's' ? 'backward' : 'right';
                   const cmd = btn?.command ?? fallback;
-                  const isDown = activeKeys.has(k);
+                  const isDown = activeCommands.has(cmd);
                   return (
                     <ControlKey
                       key={k}
@@ -838,6 +860,7 @@ export default function RobotView({ robot }: Props) {
           )}
 
           {/* Queue */}
+          {queueEnabled && (
           <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
               Control queue
@@ -885,6 +908,7 @@ export default function RobotView({ robot }: Props) {
               </div>
             )}
           </div>
+          )}
 
           {/* Chat */}
           <div
@@ -907,8 +931,7 @@ export default function RobotView({ robot }: Props) {
                       <span className="text-[var(--foreground)]/90">{msg.content}</span>
                       {canModerate &&
                         msg.userId !== 'system' &&
-                        msg.userId !== userId &&
-                        /^[0-9a-f-]{36}$/i.test(msg.userId) && (
+                        msg.userId !== userId && (
                           <span className="inline-flex items-center gap-1">
                             <button
                               type="button"
