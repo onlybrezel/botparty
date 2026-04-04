@@ -104,7 +104,7 @@ export default function RobotView({ robot }: Props) {
   const [robotStatus, setRobotStatus] = useState(robot.status);
   const [chatRestriction, setChatRestriction] = useState<string | null>(null);
   const [tabSwitchOnlyWhenEmpty, setTabSwitchOnlyWhenEmpty] = useState(true);
-  const [guestName, setGuestName] = useState<string>('Guest');
+  const [guestSessionId, setGuestSessionId] = useState<string>('');
 
   const wsRef = useRef<WebSocket | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -204,17 +204,18 @@ export default function RobotView({ robot }: Props) {
 
   useEffect(() => {
     try {
-      const key = 'botparty.guestName.v1';
+      const key = 'botparty.guestSessionId.v1';
       const stored = window.localStorage.getItem(key);
-      if (stored && stored.trim().length > 0) {
-        setGuestName(stored.trim());
+      const normalized = (stored ?? '').trim().toLowerCase();
+      if (/^[a-z0-9_-]{6,64}$/.test(normalized)) {
+        setGuestSessionId(normalized);
         return;
       }
-      const generated = `Guest-${Math.random().toString(36).slice(2, 8)}`;
+      const generated = Math.random().toString(36).slice(2, 14);
       window.localStorage.setItem(key, generated);
-      setGuestName(generated);
+      setGuestSessionId(generated);
     } catch {
-      setGuestName(`Guest-${Math.random().toString(36).slice(2, 8)}`);
+      setGuestSessionId(Math.random().toString(36).slice(2, 14));
     }
   }, []);
 
@@ -241,7 +242,8 @@ export default function RobotView({ robot }: Props) {
             data: {
               robotId: robot.id,
               userId: userId ?? undefined,
-              username: username ?? guestName,
+              username: userId ? (username ?? undefined) : undefined,
+              guestSessionId: userId ? undefined : guestSessionId || undefined,
             },
           }),
         );
@@ -271,7 +273,7 @@ export default function RobotView({ robot }: Props) {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       wsRef.current?.close();
     };
-  }, [guestName, robot.id, userId, username]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [guestSessionId, robot.id, userId, username]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleWsEvent = useCallback((event: string, data: Record<string, unknown>) => {
     switch (event) {

@@ -99,16 +99,29 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('room:join')
   async handleRoomJoin(
     @ConnectedSocket() client: WsClient,
-    @MessageBody() data: { robotId: string; userId?: string; username?: string },
+    @MessageBody() data: { robotId: string; userId?: string; username?: string; guestSessionId?: string },
   ) {
     if (client.watchingRobotId) {
       this._leaveRoom(client);
     }
 
     client.watchingRobotId = data.robotId;
-    client.isGuest = !data.userId;
-    client.userId = data.userId?.trim() || `guest:${client.id}`;
-    client.username = data.username?.trim() || `Guest-${client.id.slice(0, 4)}`;
+
+    const authUserId = data.userId?.trim();
+    const isGuest = !authUserId;
+    client.isGuest = isGuest;
+
+    if (isGuest) {
+      const rawSessionId = data.guestSessionId?.trim().toLowerCase() ?? '';
+      const safeSessionId = /^[a-z0-9_-]{6,64}$/.test(rawSessionId)
+        ? rawSessionId
+        : client.id.replace(/-/g, '').slice(0, 16);
+      client.userId = `guest:${safeSessionId}`;
+      client.username = `Guest-${safeSessionId.slice(0, 6)}`;
+    } else {
+      client.userId = authUserId;
+      client.username = data.username?.trim() || `User-${authUserId!.slice(0, 6)}`;
+    }
 
     if (!this.rooms.has(data.robotId)) this.rooms.set(data.robotId, new Set());
     this.rooms.get(data.robotId)!.add(client.id);
