@@ -222,7 +222,7 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const robotClient = this.robotClients.get(data.robotId);
     if (!robotClient) {
       client.send(
-        JSON.stringify({ event: 'error', data: { message: 'Robot is not connected' } }),
+        JSON.stringify({ event: 'error', data: { message: 'Robot realtime control channel is offline' } }),
       );
       return;
     }
@@ -281,9 +281,15 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) {
     const access = await this.robotsService.getAccessPolicy(data.robotId);
     if (access.chat === 'DISABLED') {
+      client.send(
+        JSON.stringify({ event: 'error', data: { message: 'Chat is disabled for this robot' } }),
+      );
       return;
     }
     if (access.chat === 'AUTHENTICATED' && client.isGuest) {
+      client.send(
+        JSON.stringify({ event: 'error', data: { message: 'Please sign in to chat in this room' } }),
+      );
       return;
     }
 
@@ -333,7 +339,12 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     // Moderation check
     const restriction = await this.moderationService.getActiveRestriction(data.robotId, client.userId ?? '');
-    if (restriction) return; // silently drop – client already notified via control event
+    if (restriction) {
+      client.send(
+        JSON.stringify({ event: 'error', data: { message: 'You are restricted in this room', restriction } }),
+      );
+      return;
+    }
 
     this._broadcastToRoom(data.robotId, WS_EVENTS.CHAT_MESSAGE, {
       userId: client.userId,

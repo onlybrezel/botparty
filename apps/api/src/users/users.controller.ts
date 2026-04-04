@@ -56,6 +56,30 @@ export class UsersController {
     });
   }
 
+  @Patch('admin/:id')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update user profile/role as staff' })
+  async updateAdminUser(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body()
+    body: {
+      displayName?: string | null;
+      role?: 'ADMIN' | 'MOD' | 'USER';
+      isActive?: boolean;
+      credits?: number;
+      balance?: number;
+    },
+  ) {
+    const role = String(user.role);
+    if (!['ADMIN', 'MOD', 'MODERATOR', 'CREATOR'].includes(role)) {
+      throw new ForbiddenException('Access denied');
+    }
+
+    return this.usersService.updateUserByStaff(id, body);
+  }
+
   @Get('leaderboard')
   @ApiOperation({ summary: 'Get credits leaderboard' })
   async getLeaderboard(@Query('limit') limit?: string) {

@@ -267,6 +267,30 @@ class ApiClient {
     >(`/users/admin/list${qs.toString() ? `?${qs.toString()}` : ''}`);
   }
 
+  async updateAdminUser(
+    id: string,
+    data: {
+      displayName?: string | null;
+      role?: 'ADMIN' | 'MOD' | 'USER';
+      isActive?: boolean;
+      credits?: number;
+      balance?: number;
+    },
+  ) {
+    return this.request<
+      UserPublic & {
+        email: string;
+        isActive: boolean;
+        credits: number;
+        balance: number;
+        lastLoginAt: string | null;
+      }
+    >(`/users/admin/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
   // ─── Robots ────────────────────────────────────────────────────────────────
 
   async getRobots(params?: { status?: string; tag?: string }) {
@@ -384,6 +408,9 @@ class ApiClient {
         name: string;
         slug: string;
         status: 'ONLINE' | 'OFFLINE' | 'BUSY' | 'MAINTENANCE';
+        description: string | null;
+        visibility: 'PUBLIC' | 'UNLISTED' | 'PRIVATE';
+        tags: string[];
         owner: { id: string; username: string; displayName: string | null };
       }>;
       counts: { bans: number; timeouts: number; kicks: number };
@@ -396,6 +423,23 @@ class ApiClient {
       byUser: Array<{ userId: string; count: number }>;
       events: Array<{ ts: number; userId: string; username: string; content: string }>;
     }>(`/moderation/robot/${robotId}/profanity`);
+  }
+
+  async getGlobalProfanityOverview() {
+    return this.request<{
+      total: number;
+      byUser: Array<{ userId: string; count: number }>;
+      byRobot: Array<{ robotId: string; robotName: string; robotSlug: string; count: number }>;
+      events: Array<{
+        ts: number;
+        userId: string;
+        username: string;
+        content: string;
+        robotId: string;
+        robotName: string;
+        robotSlug: string;
+      }>;
+    }>('/moderation/admin/profanity-overview');
   }
 
   async enqueueRobotAction(

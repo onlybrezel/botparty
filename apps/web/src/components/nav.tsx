@@ -12,6 +12,7 @@ export default function Nav() {
   const { accessToken, username, refreshToken, logout } = useAuth();
   const [mounted, setMounted] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [guestName, setGuestName] = useState<string>('Guest');
 
   useEffect(() => {
     let cancelled = false;
@@ -32,6 +33,25 @@ export default function Nav() {
       cancelled = true;
     };
   }, [refreshToken]);
+
+  useEffect(() => {
+    if (!mounted || accessToken) {
+      return;
+    }
+    try {
+      const key = 'botparty.guestName.v1';
+      const stored = window.localStorage.getItem(key);
+      if (stored && stored.trim().length > 0) {
+        setGuestName(stored.trim());
+        return;
+      }
+      const generated = `Guest-${Math.random().toString(36).slice(2, 8)}`;
+      window.localStorage.setItem(key, generated);
+      setGuestName(generated);
+    } catch {
+      setGuestName(`Guest-${Math.random().toString(36).slice(2, 8)}`);
+    }
+  }, [accessToken, mounted]);
 
   const isActive = (href: string) => pathname === href || pathname.startsWith(href + '/');
 
@@ -144,12 +164,17 @@ export default function Nav() {
               )}
             </div>
           ) : (
-            <Link
-              href="/login"
-              className="rounded-lg bg-[var(--primary)] px-4 py-1.5 text-sm font-semibold text-white transition hover:bg-[var(--primary-hover)]"
-            >
-              Sign in
-            </Link>
+            <div className="flex items-center gap-2">
+              <span className="hidden rounded-lg border border-[var(--border)] bg-[var(--card)] px-2.5 py-1 text-xs font-medium text-[var(--muted-foreground)] sm:inline-flex">
+                {guestName}
+              </span>
+              <Link
+                href="/login"
+                className="rounded-lg bg-[var(--primary)] px-4 py-1.5 text-sm font-semibold text-white transition hover:bg-[var(--primary-hover)]"
+              >
+                Sign in
+              </Link>
+            </div>
           )}
         </div>
       </div>

@@ -114,4 +114,62 @@ export class UsersService {
       },
     });
   }
+
+  async updateUserByStaff(
+    id: string,
+    input: {
+      displayName?: string | null;
+      role?: 'ADMIN' | 'MOD' | 'USER';
+      isActive?: boolean;
+      credits?: number;
+      balance?: number;
+    },
+  ) {
+    const updates: {
+      displayName?: string | null;
+      role?: 'ADMIN' | 'MOD' | 'USER';
+      isActive?: boolean;
+      credits?: number;
+      balance?: number;
+    } = {};
+
+    if (input.displayName !== undefined) {
+      const next = typeof input.displayName === 'string' ? input.displayName.trim() : '';
+      updates.displayName = next.length > 0 ? next : null;
+    }
+
+    if (input.role === 'ADMIN' || input.role === 'MOD' || input.role === 'USER') {
+      updates.role = input.role;
+    }
+
+    if (typeof input.isActive === 'boolean') {
+      updates.isActive = input.isActive;
+    }
+
+    if (typeof input.credits === 'number' && Number.isFinite(input.credits)) {
+      updates.credits = Math.round(input.credits);
+    }
+
+    if (typeof input.balance === 'number' && Number.isFinite(input.balance)) {
+      updates.balance = Math.round(input.balance);
+    }
+
+    return this.prisma.user.update({
+      where: { id },
+      data: updates,
+      select: {
+        id: true,
+        username: true,
+        displayName: true,
+        avatarUrl: true,
+        email: true,
+        role: true,
+        isActive: true,
+        credits: true,
+        balance: true,
+        lastLoginAt: true,
+        createdAt: true,
+      },
+    });
+  }
 }

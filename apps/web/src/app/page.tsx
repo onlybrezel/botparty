@@ -18,8 +18,6 @@ async function getPublicRobots(): Promise<RobotPublic[]> {
 
 export default async function HomePage() {
   const robots = await getPublicRobots();
-  const onlineCount = robots.filter((r) => r.status === 'ONLINE').length;
-  const viewerTotal = robots.reduce((sum, r) => sum + r.viewerCount, 0);
   const featured = robots.slice(0, 3);
 
   return (
@@ -37,9 +35,7 @@ export default async function HomePage() {
         <div className="mx-auto flex min-h-[calc(100vh-12rem)] max-w-5xl flex-col justify-center px-4 py-16 text-center sm:py-20">
           <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-sky-400/30 bg-sky-500/10 px-3 py-1 text-sm text-sky-200">
             <span className="h-1.5 w-1.5 rounded-full bg-[var(--online)] animate-pulse-dot" />
-            {onlineCount > 0
-              ? `${onlineCount} robot${onlineCount !== 1 ? 's' : ''} online right now`
-                : 'Open platform - connect your own robot'}
+            Public robot teleoperation platform
           </div>
 
           <h1 className="mb-5 text-5xl font-extrabold leading-[1.1] tracking-tight text-[var(--foreground)] sm:text-6xl lg:text-7xl">
@@ -50,7 +46,7 @@ export default async function HomePage() {
           </h1>
 
           <p className="mx-auto mb-9 max-w-2xl text-lg text-[var(--muted-foreground)] sm:text-xl">
-            No simulations: real hardware, real latency, real community sessions.
+            Real robots, live queues, and moderation tools for safe shared control.
           </p>
 
           <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
@@ -69,28 +65,9 @@ export default async function HomePage() {
             </Link>
           </div>
 
-          {/* Live stats */}
-          {(robots.length > 0 || viewerTotal > 0) && (
-            <p className="mt-7 text-sm text-[var(--muted-foreground)]">
-              {robots.length} robot{robots.length !== 1 ? 's' : ''} registered
-              {viewerTotal > 0 && ` · ${viewerTotal} viewer${viewerTotal !== 1 ? 's' : ''} watching`}
-            </p>
-          )}
-
-          <div className="mx-auto mt-8 grid w-full max-w-3xl grid-cols-1 gap-3 sm:grid-cols-3">
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)]/70 px-4 py-3 text-left">
-              <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Live robots</p>
-              <p className="mt-1 text-2xl font-black">{onlineCount}</p>
-            </div>
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)]/70 px-4 py-3 text-left">
-              <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Live viewers</p>
-              <p className="mt-1 text-2xl font-black">{viewerTotal}</p>
-            </div>
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)]/70 px-4 py-3 text-left">
-              <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Sessions today</p>
-              <p className="mt-1 text-2xl font-black">{Math.max(robots.length, onlineCount)}</p>
-            </div>
-          </div>
+          <p className="mt-7 text-sm text-[var(--muted-foreground)]">
+            Built for creator-hosted robots, classrooms, and community events.
+          </p>
         </div>
       </section>
 

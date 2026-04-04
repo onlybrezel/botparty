@@ -58,6 +58,18 @@ export class ModerationController {
     return this.moderationService.getAdminOverview(requesterId, robotId);
   }
 
+  @Get('admin/profanity-overview')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Get profanity counters and events across all robots for staff' })
+  getAdminProfanityOverview(@CurrentUser() user: JwtPayload, @CurrentUser('sub') requesterId: string) {
+    const role = String(user.role);
+    if (!['ADMIN', 'MOD', 'MODERATOR', 'CREATOR'].includes(role)) {
+      throw new ForbiddenException('Access denied');
+    }
+
+    return this.moderationService.getGlobalProfanityOverview(requesterId);
+  }
+
   @Get('robot/:robotId/profanity')
   @ApiOperation({ summary: 'Get profanity counters and recent events for a robot' })
   getProfanityOverview(

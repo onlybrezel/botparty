@@ -505,7 +505,7 @@ export class RobotsService {
 
     const stream = streamRaw as Record<string, unknown>;
     const bitrate = stream.targetBitrateKbps;
-    if (typeof bitrate === 'number' && Number.isFinite(bitrate) && bitrate >= 150 && bitrate <= 8000) {
+    if (typeof bitrate === 'number' && Number.isFinite(bitrate) && bitrate >= 150 && bitrate <= 3000) {
       return { targetBitrateKbps: Math.round(bitrate) };
     }
 

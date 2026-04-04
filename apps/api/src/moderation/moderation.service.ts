@@ -268,6 +268,105 @@ export class ModerationService {
     };
   }
 
+  async getGlobalProfanityOverview(requesterId: string) {
+    const requester = await this.prisma.user.findUnique({ where: { id: requesterId } });
+    if (!requester || !this._isStaffRole(requester.role)) {
+      throw new ForbiddenException('Access denied');
+    }
+
+    const robots = await this.prisma.robot.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 250,
+      select: { id: true, name: true, slug: true },
+    });
+
+    const robotMetrics = await Promise.all(
+      robots.map(async (robot) => {
+        const totalKey = `moderation:profanity:robot:${robot.id}:total`;
+        const byUserKey = `moderation:profanity:robot:${robot.id}:by-user`;
+        const listKey = `moderation:profanity:robot:${robot.id}:events`;
+
+        const [totalRaw, byUserRaw, eventsRaw] = await Promise.all([
+          this.redis.get(totalKey),
+          this.redis.hgetall(byUserKey),
+          this.redis.lrange(listKey, 0, 20),
+        ]);
+
+        const events = eventsRaw
+          .map((row) => {
+            try {
+              const parsed = JSON.parse(row) as {
+                ts: number;
+                userId: string;
+                username: string;
+                content: string;
+              };
+              return {
+                ...parsed,
+                robotId: robot.id,
+                robotName: robot.name,
+                robotSlug: robot.slug,
+              };
+            } catch {
+              return null;
+            }
+          })
+          .filter(
+            (
+              row,
+            ): row is {
+              ts: number;
+              userId: string;
+              username: string;
+              content: string;
+              robotId: string;
+              robotName: string;
+              robotSlug: string;
+            } => row !== null,
+          );
+
+        return {
+          robot,
+          total: totalRaw ? Number(totalRaw) : 0,
+          byUserRaw,
+          events,
+        };
+      }),
+    );
+
+    const userCounts = new Map<string, number>();
+    const robotCounts = robotMetrics
+      .map((entry) => ({
+        robotId: entry.robot.id,
+        robotName: entry.robot.name,
+        robotSlug: entry.robot.slug,
+        count: entry.total,
+      }))
+      .filter((entry) => entry.count > 0)
+      .sort((a, b) => b.count - a.count);
+
+    for (const entry of robotMetrics) {
+      for (const [userId, rawCount] of Object.entries(entry.byUserRaw)) {
+        const current = userCounts.get(userId) ?? 0;
+        userCounts.set(userId, current + (Number(rawCount) || 0));
+      }
+    }
+
+    const events = robotMetrics
+      .flatMap((entry) => entry.events)
+      .sort((a, b) => b.ts - a.ts)
+      .slice(0, 150);
+
+    return {
+      total: robotCounts.reduce((sum, entry) => sum + entry.count, 0),
+      byUser: Array.from(userCounts.entries())
+        .map(([userId, count]) => ({ userId, count }))
+        .sort((a, b) => b.count - a.count),
+      byRobot: robotCounts,
+      events,
+    };
+  }
+
   /** Get moderation log for a robot (owner / site staff only). */
   async getLog(robotId: string, requesterId: string) {
     await this._assertStaffOrOwner(robotId, requesterId);
@@ -324,6 +423,9 @@ export class ModerationService {
           name: true,
           slug: true,
           status: true,
+          description: true,
+          visibility: true,
+          tags: true,
           owner: { select: { id: true, username: true, displayName: true } },
         },
       }),

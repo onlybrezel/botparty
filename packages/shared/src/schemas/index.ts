@@ -48,7 +48,7 @@ export const createRobotSchema = z.object({
     .optional(),
   stream: z
     .object({
-      targetBitrateKbps: z.number().int().min(150).max(8000).optional(),
+      targetBitrateKbps: z.number().int().min(150).max(3000).optional(),
     })
     .optional(),
 });

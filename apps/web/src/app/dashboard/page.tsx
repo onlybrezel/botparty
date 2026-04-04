@@ -74,7 +74,7 @@ const accessModeOptions: Array<{
 
 function toUpdatePayload(form: RobotFormState) {
   const bitrate = Number(form.targetBitrateKbps);
-  const hasBitrate = Number.isFinite(bitrate) && bitrate >= 150 && bitrate <= 8000;
+  const hasBitrate = Number.isFinite(bitrate) && bitrate >= 150 && bitrate <= 3000;
 
   return {
     name: form.name.trim(),
@@ -519,7 +519,7 @@ export default function DashboardPage() {
           <p>Queue Mode: how control turns are assigned.</p>
           <p>Guest ACL: what non-logged-in visitors are allowed to do.</p>
           <p>Guest E-STOP: who can see and trigger emergency stop.</p>
-          <p>Target Bitrate: desired stream quality for the robot uplink (150-8000 kbps).</p>
+          <p>Target Bitrate: desired stream quality for the robot uplink (150-3000 kbps).</p>
         </div>
 
         {loading ? (
@@ -652,7 +652,7 @@ export default function DashboardPage() {
                     <input
                       type="number"
                       min={150}
-                      max={8000}
+                      max={3000}
                       className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                       value={editForm.targetBitrateKbps}
                       onChange={(event) =>

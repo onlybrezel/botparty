@@ -104,26 +104,13 @@ export default function RobotView({ robot }: Props) {
   const [robotStatus, setRobotStatus] = useState(robot.status);
   const [chatRestriction, setChatRestriction] = useState<string | null>(null);
   const [tabSwitchOnlyWhenEmpty, setTabSwitchOnlyWhenEmpty] = useState(true);
-  const [debugMode, setDebugMode] = useState(false);
-  const [debugLogs, setDebugLogs] = useState<Array<{ time: string; type: string; msg: string }>>([]);
+  const [guestName, setGuestName] = useState<string>('Guest');
 
   const wsRef = useRef<WebSocket | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<HTMLInputElement>(null);
   const cooldownMap = useRef<Map<string, number>>(new Map());
   const lastErrorToastRef = useRef<{ message: string; timestamp: number } | null>(null);
-
-  const addDebugLog = useCallback(
-    (type: 'command' | 'chat' | 'event' | 'error') => {
-      return (msg: string) => {
-        if (debugMode) {
-          const time = new Date().toLocaleTimeString();
-          setDebugLogs((prev) => [...prev.slice(-49), { time, type, msg }]);
-        }
-      };
-    },
-    [debugMode],
-  );
 
   // ─── Fetch controls ────────────────────────────────────────────────────────
 
@@ -215,6 +202,22 @@ export default function RobotView({ robot }: Props) {
     }
   }, []);
 
+  useEffect(() => {
+    try {
+      const key = 'botparty.guestName.v1';
+      const stored = window.localStorage.getItem(key);
+      if (stored && stored.trim().length > 0) {
+        setGuestName(stored.trim());
+        return;
+      }
+      const generated = `Guest-${Math.random().toString(36).slice(2, 8)}`;
+      window.localStorage.setItem(key, generated);
+      setGuestName(generated);
+    } catch {
+      setGuestName(`Guest-${Math.random().toString(36).slice(2, 8)}`);
+    }
+  }, []);
+
   // ─── WebSocket ────────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -238,7 +241,7 @@ export default function RobotView({ robot }: Props) {
             data: {
               robotId: robot.id,
               userId: userId ?? undefined,
-              username: username ?? undefined,
+              username: username ?? guestName,
             },
           }),
         );
@@ -268,7 +271,7 @@ export default function RobotView({ robot }: Props) {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       wsRef.current?.close();
     };
-  }, [robot.id, userId, username]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [guestName, robot.id, userId, username]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleWsEvent = useCallback((event: string, data: Record<string, unknown>) => {
     switch (event) {
@@ -338,7 +341,6 @@ export default function RobotView({ robot }: Props) {
   const sendCommand = useCallback(
     (command: string, cooldownMs = 150) => {
       if (wsRef.current?.readyState !== WebSocket.OPEN) {
-        addDebugLog('error')(`Command blocked: not connected (${command})`);
         // Show warning only once per 3 seconds if not connected
         const now = Date.now();
         const lastError = lastErrorToastRef.current;
@@ -351,10 +353,9 @@ export default function RobotView({ robot }: Props) {
       const lastAt = cooldownMap.current.get(command) ?? 0;
       if (Date.now() - lastAt < cooldownMs) return;
       cooldownMap.current.set(command, Date.now());
-      addDebugLog('command')(`Sent: ${command}`);
       wsRef.current.send(JSON.stringify({ event: 'control:command', data: { robotId: robot.id, command, timestamp: Date.now() } }));
     },
-    [robot.id, addDebugLog],
+    [robot.id],
   );
 
   const triggerEStop = useCallback(() => {
@@ -373,7 +374,12 @@ export default function RobotView({ robot }: Props) {
     const onKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       const inInput = ['INPUT', 'TEXTAREA'].includes(target.tagName);
+      const inContentEditable = target.isContentEditable;
       const inChatInput = target === chatInputRef.current;
+
+      if (e.ctrlKey || e.metaKey || e.altKey) {
+        return;
+      }
 
       if (e.key === 'Tab') {
         if (inInput) {
@@ -394,7 +400,7 @@ export default function RobotView({ robot }: Props) {
 
       if (e.key === 'Escape' && canUseEStop) { triggerEStop(); return; }
       // Prevent controls if in ANY input field or in chat focus mode
-      if (inInput || focusMode === 'chat' || inChatInput) return;
+      if (inInput || inContentEditable || focusMode === 'chat' || inChatInput) return;
 
       const key = e.key.toLowerCase();
       if (WASD[key] && !e.repeat) {
@@ -439,7 +445,6 @@ export default function RobotView({ robot }: Props) {
     const text = chatInput.trim();
     if (!text) return;
     if (wsRef.current?.readyState !== WebSocket.OPEN) {
-      addDebugLog('error')('Chat blocked: not connected');
       // Show warning only once per 3 seconds if not connected
       const now = Date.now();
       const lastError = lastErrorToastRef.current;
@@ -449,10 +454,9 @@ export default function RobotView({ robot }: Props) {
       }
       return;
     }
-    addDebugLog('chat')(`Message sent: "${text}"`);
     wsRef.current.send(JSON.stringify({ event: 'chat:message', data: { robotId: robot.id, content: text } }));
     setChatInput('');
-  }, [chatInput, robot.id, addDebugLog]);
+  }, [chatInput, robot.id]);
 
   const moderateChatUser = useCallback(
     async (targetUserId: string, action: 'TIMEOUT' | 'BAN' | 'UNBAN') => {
@@ -485,10 +489,10 @@ export default function RobotView({ robot }: Props) {
         ]);
         pushToast(
           action === 'TIMEOUT'
-            ? 'Timeout wurde gesetzt.'
+            ? 'Timeout applied.'
             : action === 'BAN'
-              ? 'User wurde gebannt.'
-              : 'User wurde entsperrt.',
+              ? 'User banned.'
+              : 'User unbanned.',
           'success',
         );
       } catch {
@@ -973,36 +977,6 @@ export default function RobotView({ robot }: Props) {
           </div>
         </div>
 
-        {/* Debug console */}
-        <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-xs font-semibold uppercase text-[var(--muted-foreground)]">Debug Console</h3>
-            <button
-              onClick={() => {
-                setDebugMode(!debugMode);
-                if (!debugMode) setDebugLogs([]);
-              }}
-              className={`text-xs px-2 py-1 rounded transition-all ${
-                debugMode ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/30 hover:border-emerald-500/60' : 'bg-[var(--muted)] text-[var(--muted-foreground)] border border-[var(--border)] hover:bg-[var(--muted)]/80 hover:border-emerald-500/40'
-              }`}
-            >
-              {debugMode ? 'ON' : 'OFF'}
-            </button>
-          </div>
-          {debugMode && (
-            <div className="h-32 overflow-y-auto bg-black rounded border border-[var(--border)] p-2 font-mono text-xs text-white/60">
-              {debugLogs.length === 0 ? (
-                <p className="text-[var(--muted-foreground)]">// Waiting for events...</p>
-              ) : (
-                debugLogs.map((log, i) => (
-                  <div key={i} className={log.type === 'error' ? 'text-red-400' : log.type === 'command' ? 'text-emerald-400' : 'text-white/60'}>
-                    <span className="text-white/40">{log.time}</span> {log.type === 'command' && '▶'} {log.msg}
-                  </div>
-                ))
-              )}
-            </div>
-          )}
-        </div>
       </div>
     </div>
   );
