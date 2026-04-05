@@ -78,6 +78,132 @@ export interface RobotTelemetryPoint {
   cameraFrames: number;
 }
 
+export interface ModRuntimeOverview {
+  generatedAt: string;
+  summary: {
+    totalRobots: number;
+    onlineRobots: number;
+    busyRobots: number;
+    offlineRobots: number;
+    maintenanceRobots: number;
+    totalViewers: number;
+    queuedUsers: number;
+    activeSessions: number;
+    telemetryFreshRobots: number;
+    controlConnectedRobots: number;
+    livekitConnectedRobots: number;
+    avgCpuPercent: number | null;
+    avgMemoryPercent: number | null;
+    totalIngressKbps: number;
+    totalEgressKbps: number;
+  };
+  platform: {
+    available: boolean;
+    error: string | null;
+    host: {
+      cpuCores: number | null;
+      memoryBytes: number | null;
+      cpuPercent: number | null;
+      memoryUsageBytes: number | null;
+      memoryPercent: number | null;
+      rxKbps: number | null;
+      txKbps: number | null;
+    } | null;
+    containers: Array<{
+      service: string;
+      containerName: string | null;
+      cpuPercent: number | null;
+      memoryUsageBytes: number | null;
+      memoryLimitBytes: number | null;
+      memoryPercent: number | null;
+      rxKbps: number | null;
+      txKbps: number | null;
+    }>;
+  };
+  livekit: {
+    available: boolean;
+    error: string | null;
+    totals: {
+      rooms: number;
+      participants: number;
+      publishers: number;
+      subscribers: number;
+      estimatedIngressKbps: number;
+    };
+    rooms: Array<{
+      roomName: string;
+      robotId: string | null;
+      sid: string;
+      participants: number;
+      publishers: number;
+      subscribers: number;
+      activeRecording: boolean;
+      createdAt: string | null;
+      estimatedIngressKbps: number;
+      participantNames: string[];
+      participantDetails: Array<{
+        identity: string;
+        name: string;
+        isPublisher: boolean;
+        joinedAt: string | null;
+        trackCount: number;
+      }>;
+    }>;
+  };
+  robots: Array<{
+    id: string;
+    name: string;
+    slug: string;
+    status: 'ONLINE' | 'OFFLINE' | 'BUSY' | 'MAINTENANCE';
+    visibility: 'PUBLIC' | 'UNLISTED' | 'PRIVATE';
+    queueMode: 'FIRST_COME' | 'VOTING' | 'DISABLED';
+    viewerCount: number;
+    lastOnlineAt: string | null;
+    heartbeatAgeSec: number | null;
+    telemetryAgeSec: number | null;
+    queueLength: number;
+    queueHead: {
+      id: string;
+      username: string;
+      displayName: string | null;
+    } | null;
+    activeSession: {
+      id: string;
+      startedAt: string;
+      user: {
+        id: string;
+        username: string;
+        displayName: string | null;
+      };
+    } | null;
+    owner: {
+      id: string;
+      username: string;
+      displayName: string | null;
+    };
+    telemetry: RobotTelemetryPoint | null;
+    livekit: {
+      roomName: string;
+      robotId: string | null;
+      sid: string;
+      participants: number;
+      publishers: number;
+      subscribers: number;
+      activeRecording: boolean;
+      createdAt: string | null;
+      estimatedIngressKbps: number;
+      participantNames: string[];
+      participantDetails: Array<{
+        identity: string;
+        name: string;
+        isPublisher: boolean;
+        joinedAt: string | null;
+        trackCount: number;
+      }>;
+    } | null;
+  }>;
+}
+
 export interface ControlButtonRecord {
   id: string;
   label: string;
@@ -554,6 +680,10 @@ class ApiClient {
       }>;
       counts: { bans: number; timeouts: number; kicks: number };
     }>(`/moderation/admin/overview${qs}`);
+  }
+
+  async getModRuntimeOverview() {
+    return this.request<ModRuntimeOverview>('/moderation/admin/runtime-overview');
   }
 
   async getRobotProfanityOverview(robotId: string) {

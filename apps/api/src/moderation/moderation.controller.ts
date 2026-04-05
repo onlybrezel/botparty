@@ -54,6 +54,14 @@ export class ModerationController {
     return this.moderationService.getAdminOverview(requesterId, robotId);
   }
 
+  @Get('admin/runtime-overview')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MOD)
+  @ApiOperation({ summary: 'Get runtime, host, and LiveKit overview for staff dashboard' })
+  getAdminRuntimeOverview(@CurrentUser('sub') requesterId: string) {
+    return this.moderationService.getAdminRuntimeOverview(requesterId);
+  }
+
   @Get('admin/profanity-overview')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN, Role.MOD)

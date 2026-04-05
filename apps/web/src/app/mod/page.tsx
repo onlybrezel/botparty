@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Shield, Search, Ban, Clock3, Trash2, RefreshCw } from 'lucide-react';
+import { Shield, Search, Ban, Clock3, Trash2, RefreshCw, Activity, Server, Users } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/store';
 import { pushToast } from '@/lib/toast';
@@ -35,6 +35,55 @@ type RobotDraft = {
   visibility: 'PUBLIC' | 'UNLISTED' | 'PRIVATE';
 };
 
+const formatPercent = (value: number | null | undefined) => {
+  if (typeof value !== 'number') return '-';
+  return `${Math.round(value)}%`;
+};
+
+const formatAge = (value: number | null | undefined) => {
+  if (typeof value !== 'number') return '-';
+  if (value < 60) return `${value}s ago`;
+  if (value < 3600) return `${Math.floor(value / 60)}m ago`;
+  return `${Math.floor(value / 3600)}h ago`;
+};
+
+const formatBitrate = (value: number | null | undefined) => {
+  if (typeof value !== 'number' || value <= 0) return '-';
+  if (value >= 1000) return `${(value / 1000).toFixed(1)} Mbps`;
+  return `${value} kbps`;
+};
+
+const formatBytes = (value: number | null | undefined) => {
+  if (typeof value !== 'number' || value <= 0) return '-';
+  if (value >= 1024 ** 3) return `${(value / 1024 ** 3).toFixed(1)} GB`;
+  if (value >= 1024 ** 2) return `${(value / 1024 ** 2).toFixed(1)} MB`;
+  if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${value} B`;
+};
+
+const formatUptime = (value: number | null | undefined) => {
+  if (typeof value !== 'number' || value < 0) return '-';
+  const days = Math.floor(value / 86400);
+  const hours = Math.floor((value % 86400) / 3600);
+  const minutes = Math.floor((value % 3600) / 60);
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+};
+
+const statusClassName = (status: 'ONLINE' | 'OFFLINE' | 'BUSY' | 'MAINTENANCE') => {
+  switch (status) {
+    case 'ONLINE':
+      return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
+    case 'BUSY':
+      return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
+    case 'MAINTENANCE':
+      return 'border-sky-500/30 bg-sky-500/10 text-sky-300';
+    default:
+      return 'border-[var(--border)] bg-[var(--muted)] text-[var(--muted-foreground)]';
+  }
+};
+
 export default function ModDashboardPage() {
   const router = useRouter();
   const { accessToken } = useAuth();
@@ -44,6 +93,7 @@ export default function ModDashboardPage() {
   const [query, setQuery] = useState('');
   const [users, setUsers] = useState<StaffUser[]>([]);
   const [overview, setOverview] = useState<Awaited<ReturnType<typeof api.getModerationOverview>> | null>(null);
+  const [runtimeOverview, setRuntimeOverview] = useState<Awaited<ReturnType<typeof api.getModRuntimeOverview>> | null>(null);
   const [selectedRobotId, setSelectedRobotId] = useState<string>('ALL');
   const [profanity, setProfanity] = useState<Awaited<ReturnType<typeof api.getGlobalProfanityOverview>> | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -71,13 +121,15 @@ export default function ModDashboardPage() {
         }
 
         setAllowed(true);
-        const [staffUsers, modOverview, globalProfanity] = await Promise.all([
+        const [staffUsers, modOverview, runtime, globalProfanity] = await Promise.all([
           api.getAdminUsers({ limit: 120 }),
           api.getModerationOverview(),
+          api.getModRuntimeOverview(),
           api.getGlobalProfanityOverview(),
         ]);
         setUsers(staffUsers as StaffUser[]);
         setOverview(modOverview);
+        setRuntimeOverview(runtime);
         setProfanity(globalProfanity);
       } catch (err) {
         pushToast(err instanceof Error ? err.message : 'Failed to load mod dashboard.', 'error');
@@ -108,13 +160,15 @@ export default function ModDashboardPage() {
     setRefreshing(true);
     try {
       api.setToken(accessToken);
-      const [staffUsers, modOverview, globalProfanity] = await Promise.all([
+      const [staffUsers, modOverview, runtime, globalProfanity] = await Promise.all([
         api.getAdminUsers({ q: query || undefined, limit: 120 }),
         api.getModerationOverview(),
+        api.getModRuntimeOverview(),
         api.getGlobalProfanityOverview(),
       ]);
       setUsers(staffUsers as StaffUser[]);
       setOverview(modOverview);
+      setRuntimeOverview(runtime);
       setProfanity(globalProfanity);
       pushToast('Mod data refreshed.', 'success');
     } catch (err) {
@@ -251,7 +305,7 @@ export default function ModDashboardPage() {
         </div>
       </section>
 
-      <section className="mb-6 grid gap-4 sm:grid-cols-3">
+      <section className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <article className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
           <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Active Bans</p>
           <p className="mt-2 flex items-center gap-2 text-2xl font-black"><Ban className="h-5 w-5 text-red-300" />{overview?.counts.bans ?? 0}</p>
@@ -264,6 +318,267 @@ export default function ModDashboardPage() {
           <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Blocked Profanities</p>
           <p className="mt-2 text-2xl font-black">{profanity?.total ?? 0}</p>
         </article>
+        <article className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+          <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">LiveKit Rooms</p>
+          <p className="mt-2 flex items-center gap-2 text-2xl font-black"><Server className="h-5 w-5 text-sky-300" />{runtimeOverview?.livekit.totals.rooms ?? 0}</p>
+          <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+            {runtimeOverview?.livekit.available ? `${runtimeOverview.livekit.totals.publishers} publishers active` : 'LiveKit stats unavailable'}
+          </p>
+        </article>
+        <article className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+          <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Connected Clients</p>
+          <p className="mt-2 flex items-center gap-2 text-2xl font-black"><Users className="h-5 w-5 text-sky-300" />{runtimeOverview?.livekit.totals.participants ?? 0}</p>
+          <p className="mt-1 text-xs text-[var(--muted-foreground)]">{runtimeOverview?.summary.totalViewers ?? 0} viewers, {runtimeOverview?.summary.queuedUsers ?? 0} queued</p>
+        </article>
+        <article className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+          <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Average Host Load</p>
+          <p className="mt-2 flex items-center gap-2 text-2xl font-black"><Activity className="h-5 w-5 text-emerald-300" />{formatPercent(runtimeOverview?.summary.avgCpuPercent)}</p>
+          <p className="mt-1 text-xs text-[var(--muted-foreground)]">RAM {formatPercent(runtimeOverview?.summary.avgMemoryPercent)} across reporting robots</p>
+        </article>
+        <article className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+          <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Platform Ingress</p>
+          <p className="mt-2 flex items-center gap-2 text-2xl font-black">{formatBitrate(runtimeOverview?.summary.totalIngressKbps)}</p>
+          <p className="mt-1 text-xs text-[var(--muted-foreground)]">Aggregate receive traffic across tracked containers</p>
+        </article>
+        <article className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+          <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Platform Egress</p>
+          <p className="mt-2 flex items-center gap-2 text-2xl font-black">{formatBitrate(runtimeOverview?.summary.totalEgressKbps)}</p>
+          <p className="mt-1 text-xs text-[var(--muted-foreground)]">Aggregate transmit traffic across tracked containers</p>
+        </article>
+      </section>
+
+      <section className="mb-6 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-bold">Runtime Overview</h2>
+            <p className="text-sm text-[var(--muted-foreground)]">
+              Host load from robot telemetry plus active LiveKit rooms, publishers, clients, and queue pressure.
+            </p>
+          </div>
+          <p className="text-xs text-[var(--muted-foreground)]">
+            Snapshot {runtimeOverview ? new Date(runtimeOverview.generatedAt).toLocaleTimeString() : '-'}
+          </p>
+        </div>
+
+        <div className="mb-4 grid gap-3 lg:grid-cols-3">
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
+            <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Fleet Status</p>
+            <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
+              <p>Online: <span className="font-semibold">{runtimeOverview?.summary.onlineRobots ?? 0}</span></p>
+              <p>Busy: <span className="font-semibold">{runtimeOverview?.summary.busyRobots ?? 0}</span></p>
+              <p>Offline: <span className="font-semibold">{runtimeOverview?.summary.offlineRobots ?? 0}</span></p>
+              <p>Maint: <span className="font-semibold">{runtimeOverview?.summary.maintenanceRobots ?? 0}</span></p>
+            </div>
+          </div>
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
+            <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">LiveKit</p>
+            <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
+              <p>Rooms: <span className="font-semibold">{runtimeOverview?.livekit.totals.rooms ?? 0}</span></p>
+              <p>Publishers: <span className="font-semibold">{runtimeOverview?.livekit.totals.publishers ?? 0}</span></p>
+              <p>Subscribers: <span className="font-semibold">{runtimeOverview?.livekit.totals.subscribers ?? 0}</span></p>
+              <p>Ingress est.: <span className="font-semibold">{formatBitrate(runtimeOverview?.livekit.totals.estimatedIngressKbps)}</span></p>
+            </div>
+          </div>
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
+            <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Connectivity</p>
+            <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
+              <p>Telemetry fresh: <span className="font-semibold">{runtimeOverview?.summary.telemetryFreshRobots ?? 0}</span></p>
+              <p>Control WS: <span className="font-semibold">{runtimeOverview?.summary.controlConnectedRobots ?? 0}</span></p>
+              <p>LiveKit OK: <span className="font-semibold">{runtimeOverview?.summary.livekitConnectedRobots ?? 0}</span></p>
+              <p>Active sessions: <span className="font-semibold">{runtimeOverview?.summary.activeSessions ?? 0}</span></p>
+            </div>
+          </div>
+        </div>
+
+        {!runtimeOverview?.livekit.available && runtimeOverview?.livekit.error ? (
+          <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+            LiveKit room stats are currently unavailable: {runtimeOverview.livekit.error}
+          </div>
+        ) : null}
+
+        {!runtimeOverview?.platform.available && runtimeOverview?.platform.error ? (
+          <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+            Container and host metrics are currently unavailable: {runtimeOverview.platform.error}
+          </div>
+        ) : null}
+
+        {runtimeOverview?.platform.host ? (
+          <div className="mb-4 rounded-lg border border-[var(--border)] bg-[var(--background)] p-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-base font-bold">Docker Host</h3>
+              <p className="text-xs text-[var(--muted-foreground)]">cAdvisor snapshot</p>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
+                <p className="text-[var(--muted-foreground)]">CPU</p>
+                <p className="mt-1 text-sm font-semibold">{formatPercent(runtimeOverview.platform.host.cpuPercent)}</p>
+              </div>
+              <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
+                <p className="text-[var(--muted-foreground)]">Memory</p>
+                <p className="mt-1 text-sm font-semibold">{formatPercent(runtimeOverview.platform.host.memoryPercent)}</p>
+                <p className="mt-1 text-[10px] text-[var(--muted-foreground)]">
+                  {formatBytes(runtimeOverview.platform.host.memoryUsageBytes)} / {formatBytes(runtimeOverview.platform.host.memoryBytes)}
+                </p>
+              </div>
+              <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
+                <p className="text-[var(--muted-foreground)]">Ingress</p>
+                <p className="mt-1 text-sm font-semibold">{formatBitrate(runtimeOverview.platform.host.rxKbps)}</p>
+              </div>
+              <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
+                <p className="text-[var(--muted-foreground)]">Egress</p>
+                <p className="mt-1 text-sm font-semibold">{formatBitrate(runtimeOverview.platform.host.txKbps)}</p>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {(runtimeOverview?.platform.containers ?? []).length > 0 ? (
+          <div className="mb-4 rounded-lg border border-[var(--border)] bg-[var(--background)] p-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-base font-bold">Docker Containers</h3>
+              <p className="text-xs text-[var(--muted-foreground)]">API, web, LiveKit, nginx, redis, postgres, cAdvisor</p>
+            </div>
+            <div className="grid gap-3 xl:grid-cols-2">
+              {(runtimeOverview?.platform.containers ?? []).map((container) => (
+                <div key={container.service} className="rounded border border-[var(--border)] p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-semibold">{container.service}</p>
+                      <p className="text-[10px] text-[var(--muted-foreground)]">{container.containerName ?? 'container name unavailable'}</p>
+                    </div>
+                    <p className="text-xs text-[var(--muted-foreground)]">CPU {formatPercent(container.cpuPercent)}</p>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+                    <div className="rounded border border-[var(--border)] px-2 py-1.5">
+                      <p className="text-[var(--muted-foreground)]">CPU</p>
+                      <p className="font-semibold">{formatPercent(container.cpuPercent)}</p>
+                    </div>
+                    <div className="rounded border border-[var(--border)] px-2 py-1.5">
+                      <p className="text-[var(--muted-foreground)]">Memory</p>
+                      <p className="font-semibold">{formatPercent(container.memoryPercent)}</p>
+                    </div>
+                    <div className="rounded border border-[var(--border)] px-2 py-1.5">
+                      <p className="text-[var(--muted-foreground)]">Ingress</p>
+                      <p className="font-semibold">{formatBitrate(container.rxKbps)}</p>
+                    </div>
+                    <div className="rounded border border-[var(--border)] px-2 py-1.5">
+                      <p className="text-[var(--muted-foreground)]">Egress</p>
+                      <p className="font-semibold">{formatBitrate(container.txKbps)}</p>
+                    </div>
+                  </div>
+                  <p className="mt-2 text-[10px] text-[var(--muted-foreground)]">
+                    Memory {formatBytes(container.memoryUsageBytes)} / {formatBytes(container.memoryLimitBytes)}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        <div className="grid gap-3 xl:grid-cols-2">
+          {(runtimeOverview?.robots ?? []).map((robot) => (
+            <article key={robot.id} className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-base font-bold">{robot.name}</h3>
+                    <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${statusClassName(robot.status)}`}>
+                      {robot.status}
+                    </span>
+                    <span className="rounded-full border border-[var(--border)] px-2 py-0.5 text-[10px] font-semibold text-[var(--muted-foreground)]">
+                      {robot.visibility}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+                    /{robot.slug} · owner {robot.owner.displayName ?? robot.owner.username}
+                  </p>
+                </div>
+                <Link
+                  href={`/robot/${robot.slug}`}
+                  className="rounded border border-sky-500/40 px-2 py-1 text-xs text-sky-300"
+                >
+                  Preview
+                </Link>
+              </div>
+
+              <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
+                  <p className="text-[var(--muted-foreground)]">Viewers</p>
+                  <p className="mt-1 text-sm font-semibold">{robot.viewerCount}</p>
+                </div>
+                <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
+                  <p className="text-[var(--muted-foreground)]">Queue</p>
+                  <p className="mt-1 text-sm font-semibold">{robot.queueLength} · {robot.queueMode}</p>
+                </div>
+                <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
+                  <p className="text-[var(--muted-foreground)]">Controller</p>
+                  <p className="mt-1 text-sm font-semibold">{robot.activeSession?.user.displayName ?? robot.activeSession?.user.username ?? robot.queueHead?.displayName ?? robot.queueHead?.username ?? '-'}</p>
+                </div>
+                <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
+                  <p className="text-[var(--muted-foreground)]">Heartbeat</p>
+                  <p className="mt-1 text-sm font-semibold">{formatAge(robot.heartbeatAgeSec)}</p>
+                </div>
+                <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
+                  <p className="text-[var(--muted-foreground)]">Telemetry</p>
+                  <p className="mt-1 text-sm font-semibold">{formatAge(robot.telemetryAgeSec)}</p>
+                </div>
+                <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
+                  <p className="text-[var(--muted-foreground)]">LiveKit Room</p>
+                  <p className="mt-1 text-sm font-semibold">{robot.livekit ? `${robot.livekit.participants} clients` : '-'}</p>
+                </div>
+              </div>
+
+              <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
+                  <p className="text-[var(--muted-foreground)]">CPU</p>
+                  <p className="mt-1 text-sm font-semibold">{formatPercent(robot.telemetry?.cpuPercent)}</p>
+                </div>
+                <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
+                  <p className="text-[var(--muted-foreground)]">RAM</p>
+                  <p className="mt-1 text-sm font-semibold">{formatPercent(robot.telemetry?.memoryPercent)}</p>
+                </div>
+                <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
+                  <p className="text-[var(--muted-foreground)]">Temp</p>
+                  <p className="mt-1 text-sm font-semibold">
+                    {typeof robot.telemetry?.temperatureC === 'number' ? `${robot.telemetry.temperatureC.toFixed(1)} C` : '-'}
+                  </p>
+                </div>
+                <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
+                  <p className="text-[var(--muted-foreground)]">Uptime</p>
+                  <p className="mt-1 text-sm font-semibold">{formatUptime(robot.telemetry?.uptimeSec)}</p>
+                </div>
+              </div>
+
+              <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
+                  <p className="text-[var(--muted-foreground)]">Control WS</p>
+                  <p className="mt-1 text-sm font-semibold">{robot.telemetry?.controlConnected ? 'Connected' : 'Offline'}</p>
+                </div>
+                <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
+                  <p className="text-[var(--muted-foreground)]">LiveKit</p>
+                  <p className="mt-1 text-sm font-semibold">{robot.telemetry?.livekitConnected ? 'Connected' : 'Offline'}</p>
+                </div>
+                <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
+                  <p className="text-[var(--muted-foreground)]">Commands</p>
+                  <p className="mt-1 text-sm font-semibold">{robot.telemetry?.commandsReceived ?? '-'}</p>
+                </div>
+                <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
+                  <p className="text-[var(--muted-foreground)]">Ingress est.</p>
+                  <p className="mt-1 text-sm font-semibold">{formatBitrate(robot.livekit?.estimatedIngressKbps)}</p>
+                </div>
+              </div>
+
+              <div className="mt-3 rounded border border-[var(--border)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
+                <p>
+                  LiveKit clients: {robot.livekit?.participantNames.length ? robot.livekit.participantNames.join(', ') : 'none'}
+                </p>
+                <p className="mt-1">
+                  Publishers {robot.livekit?.publishers ?? 0} · Subscribers {robot.livekit?.subscribers ?? 0} · Recording {robot.livekit?.activeRecording ? 'on' : 'off'}
+                </p>
+              </div>
+            </article>
+          ))}
+        </div>
       </section>
 
       <section className="mb-6 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
