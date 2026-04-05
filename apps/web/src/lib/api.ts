@@ -96,6 +96,25 @@ export interface RoomAccessGrant {
   expiresAt: string;
 }
 
+export interface AllowedUserRecord {
+  id: string;
+  username: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+  addedAt: string;
+}
+
+export interface ActiveSessionRecord {
+  id: string;
+  startedAt: string;
+  endedAt?: string | null;
+  user: {
+    id: string;
+    username: string;
+    displayName: string | null;
+  };
+}
+
 function buildQueryString(params?: Record<string, string | number | boolean | null | undefined>) {
   if (!params) {
     return '';
@@ -221,6 +240,7 @@ class ApiClient {
         username: me.username,
         userId: me.id,
         displayName: me.displayName,
+        role: me.role,
       });
 
       return refreshed.accessToken;
@@ -350,6 +370,10 @@ class ApiClient {
     });
   }
 
+  async getUser(username: string) {
+    return this.request<UserPublic>(`/users/${encodeURIComponent(username)}`);
+  }
+
   // ─── Robots ────────────────────────────────────────────────────────────────
 
   async getRobots(params?: { status?: string; tag?: string; q?: string; sort?: string }) {
@@ -409,6 +433,27 @@ class ApiClient {
     return this.request<{ id: string; claimToken: string }>(`/robots/${id}/regenerate-token`, {
       method: 'POST',
     });
+  }
+
+  async getAllowedUsers(robotId: string) {
+    return this.request<AllowedUserRecord[]>(`/robots/${robotId}/allowed-users`);
+  }
+
+  async addAllowedUser(robotId: string, username: string) {
+    return this.request<AllowedUserRecord>(`/robots/${robotId}/allowed-users`, {
+      method: 'POST',
+      body: JSON.stringify({ username }),
+    });
+  }
+
+  async removeAllowedUser(robotId: string, userId: string) {
+    return this.request<void>(`/robots/${robotId}/allowed-users/${userId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getPrivateRobot(slug: string) {
+    return this.request<RobotPublic>(`/robots/private/${encodeURIComponent(slug)}`);
   }
 
   // ─── LiveKit ───────────────────────────────────────────────────────────────
@@ -544,6 +589,10 @@ class ApiClient {
     return this.request<{ latest: RobotTelemetryPoint | null; history: RobotTelemetryPoint[] }>(
       `/robots/${robotId}/telemetry`,
     );
+  }
+
+  async getActiveSession(robotId: string) {
+    return this.request<ActiveSessionRecord | null>(`/sessions/robot/${robotId}/active`);
   }
 
   // ─── Queue ─────────────────────────────────────────────────────────────────

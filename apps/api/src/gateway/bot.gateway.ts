@@ -41,6 +41,13 @@ interface PresenceRecord {
   joinedAt: number;
 }
 
+interface ActiveTurnState {
+  sessionId: string;
+  userId: string;
+  startedAt: number;
+  expiresAt: number;
+}
+
 @WebSocketGateway({
   path: '/ws',
   cors: {
@@ -67,6 +74,8 @@ export class BotGateway
 
   /** robotId → Map<userId, PresenceRecord> */
   private readonly presence = new Map<string, Map<string, PresenceRecord>>();
+  private readonly activeTurns = new Map<string, ActiveTurnState>();
+  private readonly turnTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(
     private readonly robotsService: RobotsService,
@@ -110,6 +119,7 @@ export class BotGateway
     // If this was the robot hardware, mark offline
     if (client.isRobot && client.robotId) {
       this.robotClients.delete(client.robotId);
+      void this.clearTurnState(client.robotId);
       this.robotsService.updateStatus(client.robotId, 'OFFLINE').catch(() => {});
       this._broadcastToRoom(client.robotId, WS_EVENTS.ROBOT_STATUS, { status: 'OFFLINE' });
       this.logger.log(`Robot disconnected: ${client.robotId}`);
@@ -578,6 +588,7 @@ export class BotGateway
 
       try {
         const queue = await this.queueService.getQueue(robotId);
+        await this.syncTurnLifecycle(robotId, queue);
         this._broadcastToRoomLocally(robotId, WS_EVENTS.QUEUE_UPDATE, { queue });
       } catch (err) {
         this.logger.warn(`Failed to broadcast queue update for ${robotId}: ${(err as Error).message}`);
@@ -621,6 +632,102 @@ export class BotGateway
       if (ws?.readyState === WebSocket.OPEN) {
         ws.send(message);
       }
+    }
+  }
+
+  private async syncTurnLifecycle(
+    robotId: string,
+    queue: Array<{ userId: string; user?: { username?: string; displayName?: string | null } }>,
+  ) {
+    const current = this.activeTurns.get(robotId) ?? null;
+    const nextEntry = queue[0] ?? null;
+    const robot = await this.robotsService.findById(robotId);
+
+    if (robot.queueMode === 'DISABLED') {
+      if (current) {
+        await this.clearTurnState(robotId);
+      }
+      return;
+    }
+
+    if (!nextEntry) {
+      if (current) {
+        await this.clearTurnState(robotId);
+      }
+      await this.robotsService.updateStatus(robotId, 'ONLINE').catch(() => {});
+      this._broadcastToRoomLocally(robotId, WS_EVENTS.ROBOT_STATUS, { status: 'ONLINE' });
+      return;
+    }
+
+    if (current && current.userId === nextEntry.userId) {
+      return;
+    }
+
+    if (current) {
+      await this.clearTurnState(robotId);
+    }
+
+    const session = await this.sessionsService.create(robotId, nextEntry.userId);
+    const expiresAt = Date.now() + robot.maxTurnTime;
+    this.activeTurns.set(robotId, {
+      sessionId: session.id,
+      userId: nextEntry.userId,
+      startedAt: Date.now(),
+      expiresAt,
+    });
+
+    await this.robotsService.updateStatus(robotId, 'BUSY').catch(() => {});
+    this._broadcastToRoomLocally(robotId, WS_EVENTS.ROBOT_STATUS, { status: 'BUSY' });
+    this._broadcastToRoomLocally(robotId, WS_EVENTS.SESSION_START, {
+      sessionId: session.id,
+      userId: nextEntry.userId,
+      expiresAt,
+    });
+    this._broadcastToRoomLocally(robotId, WS_EVENTS.QUEUE_TURN_START, {
+      userId: nextEntry.userId,
+      username: nextEntry.user?.displayName ?? nextEntry.user?.username ?? nextEntry.userId,
+      expiresAt,
+      durationMs: robot.maxTurnTime,
+    });
+
+    const existingTimer = this.turnTimeouts.get(robotId);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+    }
+
+    const timer = setTimeout(() => {
+      void this.handleTurnTimeout(robotId, nextEntry.userId);
+    }, robot.maxTurnTime);
+    this.turnTimeouts.set(robotId, timer);
+  }
+
+  private async handleTurnTimeout(robotId: string, userId: string) {
+    this._broadcastToRoomLocally(robotId, WS_EVENTS.QUEUE_TURN_END, {
+      userId,
+      reason: 'timeout',
+    });
+    await this.queueService.leave(robotId, userId).catch(() => {});
+  }
+
+  private async clearTurnState(robotId: string) {
+    const current = this.activeTurns.get(robotId);
+    if (current) {
+      await this.sessionsService.end(current.sessionId).catch(() => {});
+      this._broadcastToRoomLocally(robotId, WS_EVENTS.SESSION_END, {
+        sessionId: current.sessionId,
+        userId: current.userId,
+      });
+      this._broadcastToRoomLocally(robotId, WS_EVENTS.QUEUE_TURN_END, {
+        userId: current.userId,
+        reason: 'handoff',
+      });
+      this.activeTurns.delete(robotId);
+    }
+
+    const timer = this.turnTimeouts.get(robotId);
+    if (timer) {
+      clearTimeout(timer);
+      this.turnTimeouts.delete(robotId);
     }
   }
 }

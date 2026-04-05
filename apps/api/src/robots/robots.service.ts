@@ -75,6 +75,14 @@ export interface RoomAccessGrant {
   expiresAt: string;
 }
 
+export interface AllowedUserSummary {
+  id: string;
+  username: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+  addedAt: string;
+}
+
 export type RobotActionType =
   | 'restart_video'
   | 'restart_control'
@@ -322,6 +330,127 @@ export class RobotsService {
       data: { claimToken },
       select: { id: true, claimToken: true },
     });
+  }
+
+  async findPrivateBySlugForUser(slug: string, requesterId: string) {
+    const robot = await this.prisma.robot.findUnique({
+      where: { slug },
+      include: {
+        owner: {
+          select: { id: true, username: true, displayName: true, avatarUrl: true, role: true },
+        },
+      },
+    });
+
+    if (!robot) {
+      throw new NotFoundException('Robot not found');
+    }
+
+    const requester = await this.prisma.user.findUnique({
+      where: { id: requesterId },
+      select: { role: true },
+    });
+
+    const isStaff = requester?.role === 'ADMIN' || requester?.role === 'MOD';
+    if (robot.visibility !== 'PRIVATE' && !isStaff && robot.ownerId !== requesterId) {
+      throw new ForbiddenException('Robot is public');
+    }
+
+    if (robot.ownerId !== requesterId && !isStaff) {
+      throw new ForbiddenException('Not allowed to access this robot');
+    }
+
+    return robot;
+  }
+
+  async getAllowedUsers(robotId: string, ownerId: string): Promise<AllowedUserSummary[]> {
+    const robot = await this.findById(robotId);
+    if (robot.ownerId !== ownerId) {
+      throw new ForbiddenException('Not your robot');
+    }
+
+    const entries = await this.prisma.robotAllowedUser.findMany({
+      where: { robotId },
+      orderBy: { createdAt: 'asc' },
+      include: {
+        user: {
+          select: {
+            id: true,
+            username: true,
+            displayName: true,
+            avatarUrl: true,
+          },
+        },
+      },
+    });
+
+    return entries.map((entry) => ({
+      id: entry.user.id,
+      username: entry.user.username,
+      displayName: entry.user.displayName,
+      avatarUrl: entry.user.avatarUrl,
+      addedAt: entry.createdAt.toISOString(),
+    }));
+  }
+
+  async addAllowedUser(robotId: string, ownerId: string, username: string): Promise<AllowedUserSummary> {
+    const robot = await this.findById(robotId);
+    if (robot.ownerId !== ownerId) {
+      throw new ForbiddenException('Not your robot');
+    }
+
+    const normalizedUsername = username.trim();
+    if (!normalizedUsername) {
+      throw new NotFoundException('Username is required');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { username: normalizedUsername },
+      select: { id: true, username: true, displayName: true, avatarUrl: true },
+    });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const entry = await this.prisma.robotAllowedUser.upsert({
+      where: { robotId_userId: { robotId, userId: user.id } },
+      update: {},
+      create: {
+        robotId,
+        userId: user.id,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            username: true,
+            displayName: true,
+            avatarUrl: true,
+          },
+        },
+      },
+    });
+
+    return {
+      id: entry.user.id,
+      username: entry.user.username,
+      displayName: entry.user.displayName,
+      avatarUrl: entry.user.avatarUrl,
+      addedAt: entry.createdAt.toISOString(),
+    };
+  }
+
+  async removeAllowedUser(robotId: string, ownerId: string, userId: string) {
+    const robot = await this.findById(robotId);
+    if (robot.ownerId !== ownerId) {
+      throw new ForbiddenException('Not your robot');
+    }
+
+    await this.prisma.robotAllowedUser.deleteMany({
+      where: { robotId, userId },
+    });
+
+    return { ok: true };
   }
 
   async updateStatus(id: string, status: 'ONLINE' | 'OFFLINE' | 'BUSY' | 'MAINTENANCE') {

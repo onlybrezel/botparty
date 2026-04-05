@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
-import { notFound } from 'next/navigation';
 import type { RobotPublic } from '@botparty/shared';
 import RobotView from './robot-view';
+import PrivateRobotClient from './private-robot-client';
 
 async function getRobot(slug: string): Promise<RobotPublic | null> {
   const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
@@ -39,9 +39,10 @@ export default async function RobotPage({
   const { slug } = await params;
   const robot = await getRobot(slug);
 
-  if (!robot) notFound();
+  if (!robot) {
+    return <PrivateRobotClient slug={slug} />;
+  }
 
   return <RobotView robot={robot} />;
 }
-
 

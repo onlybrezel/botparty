@@ -9,6 +9,7 @@ interface AuthState {
   username: string | null;
   userId: string | null;
   displayName: string | null;
+  role: 'ADMIN' | 'MOD' | 'USER' | null;
 }
 
 interface AuthActions {
@@ -18,6 +19,7 @@ interface AuthActions {
     username: string;
     userId: string;
     displayName?: string | null;
+    role?: 'ADMIN' | 'MOD' | 'USER' | null;
   }) => void;
   logout: () => void;
   setAccessToken: (token: string) => void;
@@ -32,12 +34,27 @@ export const useAuth = create(
       username: null,
       userId: null,
       displayName: null,
+      role: null,
 
-      login: ({ accessToken, refreshToken, username, userId, displayName }) =>
-        set({ accessToken, refreshToken, username, userId, displayName: displayName ?? null }),
+      login: ({ accessToken, refreshToken, username, userId, displayName, role }) =>
+        set({
+          accessToken,
+          refreshToken,
+          username,
+          userId,
+          displayName: displayName ?? null,
+          role: role ?? null,
+        }),
 
       logout: () =>
-        set({ accessToken: null, refreshToken: null, username: null, userId: null, displayName: null }),
+        set({
+          accessToken: null,
+          refreshToken: null,
+          username: null,
+          userId: null,
+          displayName: null,
+          role: null,
+        }),
 
       setAccessToken: (token) => set({ accessToken: token }),
 

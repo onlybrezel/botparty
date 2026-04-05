@@ -45,6 +45,7 @@ export default function LoginPage() {
           username: me.username,
           userId: me.id,
           displayName: me.displayName,
+          role: me.role,
         });
 
         router.push('/explore');
@@ -60,6 +61,7 @@ export default function LoginPage() {
           username: me.username,
           userId: me.id,
           displayName: me.displayName,
+          role: me.role,
         });
 
         router.push('/explore');
@@ -251,4 +253,3 @@ export default function LoginPage() {
     </div>
   );
 }
-

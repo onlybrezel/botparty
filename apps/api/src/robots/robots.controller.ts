@@ -74,6 +74,14 @@ export class RobotsController {
     return this.robotsService.findBySlug(slug);
   }
 
+  @Get('private/:slug')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get private robot by slug for owner/staff' })
+  async findPrivateBySlug(@Param('slug') slug: string, @CurrentUser() user: JwtPayload) {
+    return this.robotsService.findPrivateBySlugForUser(slug, user.sub);
+  }
+
   @Post()
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
@@ -134,6 +142,43 @@ export class RobotsController {
   @ApiOperation({ summary: 'Regenerate claim token' })
   async regenerateToken(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.robotsService.regenerateClaimToken(id, user.sub);
+  }
+
+  @Get(':id/allowed-users')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'List allow-listed users for a robot (owner only)' })
+  async getAllowedUsers(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.robotsService.getAllowedUsers(id, user.sub);
+  }
+
+  @Post(':id/allowed-users')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Add a user to the robot allow list (owner only)' })
+  async addAllowedUser(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @Body() body: { username?: string },
+  ) {
+    const username = body.username?.trim();
+    if (!username) {
+      throw new BadRequestException('username is required');
+    }
+    return this.robotsService.addAllowedUser(id, user.sub, username);
+  }
+
+  @Delete(':id/allowed-users/:userId')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Remove a user from the robot allow list (owner only)' })
+  async removeAllowedUser(
+    @Param('id') id: string,
+    @Param('userId') targetUserId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    await this.robotsService.removeAllowedUser(id, user.sub, targetUserId);
   }
 
   @Post(':id/access/verify')

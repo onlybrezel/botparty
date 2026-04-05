@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import {
   api,
+  type AllowedUserRecord,
   type ControlButtonRecord,
   type RobotManaged,
   type RobotTelemetryPoint,
@@ -198,6 +199,10 @@ export default function DashboardPage() {
   const [controlDraft, setControlDraft] = useState<ControlButtonDraft>(DEFAULT_CONTROL_DRAFT);
   const [creatingControl, setCreatingControl] = useState(false);
   const [controlOp, setControlOp] = useState<string | null>(null);
+  const [allowedUsers, setAllowedUsers] = useState<AllowedUserRecord[]>([]);
+  const [allowlistLoading, setAllowlistLoading] = useState(false);
+  const [allowlistUsername, setAllowlistUsername] = useState('');
+  const [allowlistOp, setAllowlistOp] = useState<string | null>(null);
   const previousPendingActionTypesRef = useRef<RemoteActionType[]>([]);
   const previewRefreshInFlightRef = useRef(false);
 
@@ -275,6 +280,38 @@ export default function DashboardPage() {
       active = false;
     };
   }, [selectedRobot?.id, accessToken]);
+
+  useEffect(() => {
+    if (!accessToken || !selectedRobot || selectedRobot.accessMode !== 'ALLOWED_USERS') {
+      setAllowedUsers([]);
+      return;
+    }
+
+    let active = true;
+    setAllowlistLoading(true);
+
+    api.setToken(accessToken);
+    api.getAllowedUsers(selectedRobot.id)
+      .then((rows) => {
+        if (active) {
+          setAllowedUsers(rows);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setAllowedUsers([]);
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setAllowlistLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [selectedRobot?.id, selectedRobot?.accessMode, accessToken]);
 
   const refreshPreview = useCallback(async (forceRemount = false) => {
     if (!selectedRobot || !accessToken || selectedRobot.status !== 'ONLINE') {
@@ -700,6 +737,44 @@ export default function DashboardPage() {
     }
   };
 
+  const addAllowedUser = async () => {
+    if (!accessToken || !selectedRobot) return;
+    const username = allowlistUsername.trim();
+    if (!username) return;
+
+    setAllowlistOp('add');
+    try {
+      api.setToken(accessToken);
+      const added = await api.addAllowedUser(selectedRobot.id, username);
+      setAllowedUsers((prev) => {
+        if (prev.some((entry) => entry.id === added.id)) return prev;
+        return [...prev, added];
+      });
+      setAllowlistUsername('');
+      pushToast('User added to allow list.', 'success', 2200);
+    } catch (err) {
+      pushToast(err instanceof Error ? err.message : 'Failed to add user.', 'error');
+    } finally {
+      setAllowlistOp(null);
+    }
+  };
+
+  const removeAllowedUser = async (user: AllowedUserRecord) => {
+    if (!accessToken || !selectedRobot) return;
+
+    setAllowlistOp(user.id);
+    try {
+      api.setToken(accessToken);
+      await api.removeAllowedUser(selectedRobot.id, user.id);
+      setAllowedUsers((prev) => prev.filter((entry) => entry.id !== user.id));
+      pushToast('User removed from allow list.', 'success', 2200);
+    } catch (err) {
+      pushToast(err instanceof Error ? err.message : 'Failed to remove user.', 'error');
+    } finally {
+      setAllowlistOp(null);
+    }
+  };
+
   if (!accessToken) return null;
 
   return (
@@ -1120,6 +1195,64 @@ export default function DashboardPage() {
                       </button>
                     </div>
                   </div>
+
+                  {selectedRobot.accessMode === 'ALLOWED_USERS' && (
+                    <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
+                      <div className="mb-3">
+                        <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Allow List</p>
+                        <p className="text-xs text-[var(--muted-foreground)]">
+                          Only these signed-in users can enter the room.
+                        </p>
+                      </div>
+                      <div className="mb-3 flex gap-2">
+                        <input
+                          className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                          placeholder="Username"
+                          value={allowlistUsername}
+                          onChange={(event) => setAllowlistUsername(event.target.value)}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => void addAllowedUser()}
+                          disabled={allowlistOp === 'add'}
+                          className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm disabled:opacity-60"
+                        >
+                          {allowlistOp === 'add' ? 'Adding...' : 'Add'}
+                        </button>
+                      </div>
+                      {allowlistLoading ? (
+                        <p className="text-xs text-[var(--muted-foreground)]">Loading allow list...</p>
+                      ) : allowedUsers.length === 0 ? (
+                        <p className="text-xs text-[var(--muted-foreground)]">No users allow-listed yet.</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {allowedUsers.map((user) => (
+                            <div
+                              key={user.id}
+                              className="flex items-center justify-between rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                            >
+                              <div className="min-w-0">
+                                <p className="truncate font-medium">
+                                  {user.displayName ?? user.username}
+                                </p>
+                                <p className="truncate text-xs text-[var(--muted-foreground)]">
+                                  @{user.username}
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => void removeAllowedUser(user)}
+                                disabled={allowlistOp === user.id}
+                                className="rounded border border-red-500/40 px-2 py-1 text-xs text-red-300 disabled:opacity-50"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
                     <div className="mb-3 flex items-center justify-between gap-3">

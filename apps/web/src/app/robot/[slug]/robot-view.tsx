@@ -44,6 +44,14 @@ interface QueueEntry {
   votes?: number;
 }
 
+interface ActiveSessionState {
+  sessionId: string;
+  userId: string;
+  username: string;
+  startedAt: number;
+  expiresAt: number | null;
+}
+
 type FocusMode = 'controls' | 'chat';
 
 function resolveWsUrl(): string {
@@ -104,7 +112,7 @@ interface Props {
 }
 
 export default function RobotView({ robot }: Props) {
-  const { accessToken, username, userId } = useAuth();
+  const { accessToken, username, userId, role } = useAuth();
 
   const [focusMode, setFocusMode] = useState<FocusMode>('controls');
   const [controlButtons, setControlButtons] = useState<ControlButton[]>([]);
@@ -133,6 +141,8 @@ export default function RobotView({ robot }: Props) {
   const [accessPasswordInput, setAccessPasswordInput] = useState('');
   const [accessLoading, setAccessLoading] = useState(false);
   const [accessError, setAccessError] = useState<string | null>(null);
+  const [activeSession, setActiveSession] = useState<ActiveSessionState | null>(null);
+  const [turnCountdownMs, setTurnCountdownMs] = useState<number | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -156,7 +166,7 @@ export default function RobotView({ robot }: Props) {
   };
   const estopAccess = robotAccess?.estop;
   const canUseEStop = canUseAccess(estopAccess);
-  const canModerate = Boolean(userId && userId === robot.owner.id);
+  const canModerate = Boolean(userId && (userId === robot.owner.id || role === 'ADMIN' || role === 'MOD'));
 
   useEffect(() => {
     api.getControls(robot.id).then(setControlButtons).catch(() => {});
@@ -291,6 +301,41 @@ export default function RobotView({ robot }: Props) {
   }, [robot.id]);
 
   useEffect(() => {
+    let active = true;
+    api.getActiveSession(robot.id)
+      .then((session) => {
+        if (!active || !session) return;
+        setActiveSession({
+          sessionId: session.id,
+          userId: session.user.id,
+          username: session.user.displayName ?? session.user.username,
+          startedAt: Date.parse(session.startedAt),
+          expiresAt: null,
+        });
+      })
+      .catch(() => {});
+
+    return () => {
+      active = false;
+    };
+  }, [robot.id]);
+
+  useEffect(() => {
+    if (!activeSession?.expiresAt) {
+      setTurnCountdownMs(null);
+      return;
+    }
+
+    const tick = () => {
+      setTurnCountdownMs(Math.max(0, activeSession.expiresAt! - Date.now()));
+    };
+
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [activeSession?.expiresAt]);
+
+  useEffect(() => {
     setRobotStatus(robot.status);
   }, [robot.status]);
 
@@ -399,6 +444,38 @@ export default function RobotView({ robot }: Props) {
         break;
       case 'queue:update':
         setQueue((data.queue as QueueEntry[]) ?? []);
+        break;
+      case 'session:start':
+      case 'queue:turn-start': {
+        const targetUserId = typeof data.userId === 'string' ? data.userId : null;
+        if (!targetUserId) break;
+        const usernameValue =
+          typeof data.username === 'string' ? data.username : targetUserId.slice(0, 8);
+        const expiresAtValue =
+          typeof data.expiresAt === 'number'
+            ? data.expiresAt
+            : typeof data.expiresAt === 'string'
+              ? Date.parse(data.expiresAt)
+              : null;
+        setActiveSession({
+          sessionId:
+            typeof data.sessionId === 'string' ? data.sessionId : `session-${targetUserId}`,
+          userId: targetUserId,
+          username: usernameValue,
+          startedAt: Date.now(),
+          expiresAt: Number.isFinite(expiresAtValue) ? expiresAtValue : null,
+        });
+        break;
+      }
+      case 'session:end':
+      case 'queue:turn-end':
+        setActiveSession((prev) => {
+          const targetUserId = typeof data.userId === 'string' ? data.userId : null;
+          if (targetUserId && prev && prev.userId !== targetUserId) {
+            return prev;
+          }
+          return null;
+        });
         break;
       case 'mod:timeout':
       case 'mod:ban':
@@ -1085,6 +1162,22 @@ export default function RobotView({ robot }: Props) {
               </div>
             </div>
 
+            {activeSession && (
+              <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2">
+                <p className="text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">
+                  Current controller
+                </p>
+                <div className="mt-1 flex items-center justify-between gap-2">
+                  <p className="text-sm font-medium">{activeSession.username}</p>
+                  {turnCountdownMs !== null && (
+                    <p className="text-xs text-amber-300">
+                      {formatCountdown(turnCountdownMs)} left
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
             {robot.tags.length > 0 && (
               <div className="mt-3 flex flex-wrap gap-1">
                 {robot.tags.map((tag) => (
@@ -1328,4 +1421,11 @@ function ControlKey({
       {label}
     </button>
   );
+}
+
+function formatCountdown(valueMs: number) {
+  const totalSeconds = Math.max(0, Math.ceil(valueMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }

@@ -78,7 +78,7 @@ export default function SettingsPage() {
         avatarUrl,
       });
 
-      auth.setSession({ displayName: me.displayName ?? null });
+      auth.setSession({ displayName: me.displayName ?? null, role: me.role });
       pushToast('Profile updated.', 'success');
     } catch (err) {
       pushToast(err instanceof Error ? err.message : 'Failed to save profile.', 'error');
