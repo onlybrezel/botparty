@@ -22,6 +22,8 @@ import { useAuth } from '@/lib/store';
 import { LiveKitPlayer } from '@/components/livekit-player';
 import { pushToast } from '@/lib/toast';
 
+type RemoteActionType = 'restart_video' | 'restart_control' | 'restart_chat' | 'set_log_stream';
+
 type RobotFormState = {
   name: string;
   description: string;
@@ -147,6 +149,7 @@ export default function DashboardPage() {
   const [deleting, setDeleting] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [opLoading, setOpLoading] = useState<string | null>(null);
+  const [pendingActionTypes, setPendingActionTypes] = useState<RemoteActionType[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
   const [diagLogs, setDiagLogs] = useState<Array<{ ts: number; line: string }>>([]);
   const [telemetry, setTelemetry] = useState<{ latest: RobotTelemetryPoint | null; history: RobotTelemetryPoint[] }>({
@@ -208,6 +211,49 @@ export default function DashboardPage() {
       .then(({ token, livekitUrl }) => setPreview({ token, url: process.env.NEXT_PUBLIC_LIVEKIT_URL ?? livekitUrl }))
       .catch(() => {});
   }, [selectedRobot?.id, selectedRobot?.status, accessToken]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!accessToken || !selectedRobot) {
+      setPendingActionTypes([]);
+      return;
+    }
+
+    let active = true;
+    const poll = async () => {
+      try {
+        api.setToken(accessToken);
+        const result = await api.getPendingRobotActions(selectedRobot.id);
+        if (active) {
+          const nextTypes = Array.from(
+            new Set(
+              result.actions
+                .map((action) => action.type)
+                .filter(
+                  (type): type is RemoteActionType =>
+                    type === 'restart_video' ||
+                    type === 'restart_control' ||
+                    type === 'restart_chat' ||
+                    type === 'set_log_stream',
+                ),
+            ),
+          );
+          setPendingActionTypes(nextTypes);
+        }
+      } catch {
+        // ignore pending action polling errors
+      }
+    };
+
+    poll().catch(() => {});
+    const interval = setInterval(() => {
+      poll().catch(() => {});
+    }, 3000);
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [selectedRobot?.id, accessToken]);
 
   useEffect(() => {
     if (!accessToken || !selectedRobot) {
@@ -394,16 +440,29 @@ export default function DashboardPage() {
   };
 
   const runRobotAction = async (
-    type: 'restart_video' | 'restart_control' | 'restart_chat' | 'set_log_stream',
+    type: RemoteActionType,
     durationSec?: number,
   ) => {
     if (!accessToken || !selectedRobot) return;
+    if (pendingActionTypes.includes(type)) {
+      const message = 'Action is already queued, waiting for pickup.';
+      setStatus(message);
+      pushToast(message, 'info', 2600);
+      return;
+    }
     setOpLoading(type);
     setStatus(null);
     setError(null);
     try {
       api.setToken(accessToken);
-      await api.enqueueRobotAction(selectedRobot.id, { type, durationSec });
+      const result = await api.enqueueRobotAction(selectedRobot.id, { type, durationSec });
+      if (result.alreadyQueued) {
+        const message = 'Action is already queued, waiting for pickup.';
+        setStatus(message);
+        pushToast(message, 'info', 2600);
+        return;
+      }
+      setPendingActionTypes((prev) => (prev.includes(type) ? prev : [...prev, type]));
       if (type === 'set_log_stream') {
         setDiagLogs([]);
         setStatus(`Temporary diagnostics enabled for ${durationSec ?? 120}s.`);
@@ -784,34 +843,50 @@ export default function DashboardPage() {
                       <button
                         type="button"
                         onClick={() => runRobotAction('restart_video')}
-                        disabled={opLoading !== null}
+                        disabled={opLoading !== null || pendingActionTypes.includes('restart_video')}
                         className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs disabled:opacity-60"
                       >
-                        {opLoading === 'restart_video' ? 'Queueing...' : 'Restart Video'}
+                        {opLoading === 'restart_video'
+                          ? 'Queueing...'
+                          : pendingActionTypes.includes('restart_video')
+                            ? 'Queued, waiting for pickup'
+                            : 'Restart Video'}
                       </button>
                       <button
                         type="button"
                         onClick={() => runRobotAction('restart_control')}
-                        disabled={opLoading !== null}
+                        disabled={opLoading !== null || pendingActionTypes.includes('restart_control')}
                         className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs disabled:opacity-60"
                       >
-                        {opLoading === 'restart_control' ? 'Queueing...' : 'Restart Control'}
+                        {opLoading === 'restart_control'
+                          ? 'Queueing...'
+                          : pendingActionTypes.includes('restart_control')
+                            ? 'Queued, waiting for pickup'
+                            : 'Restart Control'}
                       </button>
                       <button
                         type="button"
                         onClick={() => runRobotAction('restart_chat')}
-                        disabled={opLoading !== null}
+                        disabled={opLoading !== null || pendingActionTypes.includes('restart_chat')}
                         className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs disabled:opacity-60"
                       >
-                        {opLoading === 'restart_chat' ? 'Queueing...' : 'Restart Chat Bridge'}
+                        {opLoading === 'restart_chat'
+                          ? 'Queueing...'
+                          : pendingActionTypes.includes('restart_chat')
+                            ? 'Queued, waiting for pickup'
+                            : 'Restart Chat Bridge'}
                       </button>
                       <button
                         type="button"
                         onClick={() => runRobotAction('set_log_stream', 120)}
-                        disabled={opLoading !== null}
+                        disabled={opLoading !== null || pendingActionTypes.includes('set_log_stream')}
                         className="inline-flex items-center gap-2 rounded-lg border border-amber-500/40 px-3 py-1.5 text-xs text-amber-300 disabled:opacity-60"
                       >
-                        {opLoading === 'set_log_stream' ? 'Queueing...' : 'Enable 2min Diagnostics'}
+                        {opLoading === 'set_log_stream'
+                          ? 'Queueing...'
+                          : pendingActionTypes.includes('set_log_stream')
+                            ? 'Queued, waiting for pickup'
+                            : 'Enable 2min Diagnostics'}
                       </button>
                     </div>
                   </div>
@@ -845,18 +920,18 @@ export default function DashboardPage() {
                   <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
                     <div className="mb-2 flex items-center justify-between">
                       <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Runtime Telemetry</p>
-                      <p className="text-[10px] text-[var(--muted-foreground)]">auto-refresh 5s</p>
+                      <p className="text-[10px] text-[var(--muted-foreground)]">dashboard refreshes 5s, client updates ~30s</p>
                     </div>
                     {telemetry.latest ? (
                       <>
                         <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
                           <div className="rounded border border-[var(--border)] px-2 py-1.5">
                             <p className="text-[var(--muted-foreground)]">CPU</p>
-                            <p className="font-semibold">{telemetry.latest.cpuPercent ?? '-'}%</p>
+                            <p className="font-semibold">{formatPercent(telemetry.latest.cpuPercent)}</p>
                           </div>
                           <div className="rounded border border-[var(--border)] px-2 py-1.5">
                             <p className="text-[var(--muted-foreground)]">Memory</p>
-                            <p className="font-semibold">{telemetry.latest.memoryPercent ?? '-'}%</p>
+                            <p className="font-semibold">{formatPercent(telemetry.latest.memoryPercent)}</p>
                           </div>
                           <div className="rounded border border-[var(--border)] px-2 py-1.5">
                             <p className="text-[var(--muted-foreground)]">Temp</p>
@@ -866,7 +941,7 @@ export default function DashboardPage() {
                           </div>
                           <div className="rounded border border-[var(--border)] px-2 py-1.5">
                             <p className="text-[var(--muted-foreground)]">Uptime</p>
-                            <p className="font-semibold">{telemetry.latest.uptimeSec ?? 0}s</p>
+                            <p className="font-semibold">{formatUptime(telemetry.latest.uptimeSec)}</p>
                           </div>
                         </div>
                         <div className="mt-2 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
@@ -979,6 +1054,28 @@ function TelemetryBars({
       )}
     </div>
   );
+}
+
+function formatPercent(value: number | null | undefined) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '-';
+  return `${value.toFixed(1)}%`;
+}
+
+function formatUptime(value: number | null | undefined) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return '-';
+
+  const totalSeconds = Math.floor(value);
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+
+  if (days > 0) {
+    return `${days}d ${hours}h ${minutes}m`;
+  }
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+  return `${minutes}m`;
 }
 
 function AclPicker({

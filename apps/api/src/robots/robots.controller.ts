@@ -198,6 +198,14 @@ export class RobotsController {
     });
   }
 
+  @Get(':id/actions/pending')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'List pending remote robot actions (owner only)' })
+  async getPendingActions(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.robotsService.getPendingActions(id, user.sub);
+  }
+
   @Post('actions/poll')
   @ApiOperation({ summary: 'Robot polls pending remote actions using claim token' })
   async pollActions(@Body() body: { claimToken?: string }) {

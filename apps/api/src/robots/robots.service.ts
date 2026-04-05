@@ -275,14 +275,35 @@ export class RobotsService {
       throw new ForbiddenException('Not your robot');
     }
 
+    const key = `robot:actions:${robotId}`;
+    const queued = await this.redis.lrange(key, 0, -1);
+    const existing = queued
+      .map((entry) => {
+        try {
+          return JSON.parse(entry) as Record<string, unknown>;
+        } catch {
+          return null;
+        }
+      })
+      .find((entry) => entry?.type === payload.type);
+
+    if (existing) {
+      return {
+        id: typeof existing.id === 'string' ? existing.id : randomBytes(8).toString('hex'),
+        type: String(existing.type),
+        createdAt: typeof existing.createdAt === 'number' ? existing.createdAt : Date.now(),
+        alreadyQueued: true,
+      };
+    }
+
     const action = {
       id: randomBytes(8).toString('hex'),
       type: payload.type,
       durationSec: payload.durationSec,
       createdAt: Date.now(),
+      alreadyQueued: false,
     };
 
-    const key = `robot:actions:${robotId}`;
     if (payload.type === 'set_log_stream') {
       await this.redis.del(`robot:logs:${robotId}`);
     }
@@ -290,6 +311,26 @@ export class RobotsService {
     await this.redis.ltrim(key, -50, -1);
     await this.redis.expire(key, 900);
     return action;
+  }
+
+  async getPendingActions(robotId: string, ownerId: string) {
+    const robot = await this.findById(robotId);
+    if (robot.ownerId !== ownerId) {
+      throw new ForbiddenException('Not your robot');
+    }
+
+    const raw = await this.redis.lrange(`robot:actions:${robotId}`, 0, -1);
+    const actions = raw
+      .map((entry) => {
+        try {
+          return JSON.parse(entry) as Record<string, unknown>;
+        } catch {
+          return null;
+        }
+      })
+      .filter((entry): entry is Record<string, unknown> => entry !== null);
+
+    return { robotId, actions };
   }
 
   async consumeActionsByClaimToken(claimToken: string) {
