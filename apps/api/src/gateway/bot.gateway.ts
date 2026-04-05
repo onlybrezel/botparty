@@ -186,6 +186,7 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
   handleHeartbeat(@ConnectedSocket() client: WsClient) {
     if (client.robotId) {
       this.redis.set(`robot:heartbeat:${client.robotId}`, Date.now().toString(), 'EX', 30);
+      this.robotsService.touchHeartbeat(client.robotId).catch(() => {});
     }
     return { event: WS_EVENTS.ROBOT_HEARTBEAT, data: { ts: Date.now() } };
   }
