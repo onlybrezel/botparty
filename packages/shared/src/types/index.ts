@@ -2,6 +2,8 @@ import type { z } from 'zod';
 import type {
   loginSchema,
   registerSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema,
   createRobotSchema,
   updateRobotSchema,
   controlCommandSchema,
@@ -13,6 +15,8 @@ import type { Role, RobotVisibility, RobotAccessMode, QueueMode, RobotStatus } f
 // ─── Auth ────────────────────────────────────────────
 export type LoginInput = z.infer<typeof loginSchema>;
 export type RegisterInput = z.infer<typeof registerSchema>;
+export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
+export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
 
 // ─── Robot ───────────────────────────────────────────
 export type CreateRobotInput = z.infer<typeof createRobotSchema>;

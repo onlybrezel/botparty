@@ -8,8 +8,10 @@ import {
   ConnectedSocket,
 } from '@nestjs/websockets';
 import { Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import { Server, WebSocket } from 'ws';
 import { WS_EVENTS, LIMITS } from '@botparty/shared';
+import type { JwtPayload } from '@botparty/shared';
 import { RobotsService } from '../robots/robots.service';
 import { SessionsService } from '../sessions/sessions.service';
 import { QueueService } from '../queue/queue.service';
@@ -83,6 +85,7 @@ export class BotGateway
     private readonly queueService: QueueService,
     private readonly redis: RedisService,
     private readonly moderationService: ModerationService,
+    private readonly jwtService: JwtService,
   ) {}
 
   async onModuleInit() {
@@ -134,8 +137,7 @@ export class BotGateway
     @MessageBody()
     data: {
       robotId: string;
-      userId?: string;
-      username?: string;
+      accessToken?: string;
       guestSessionId?: string;
       roomAccessToken?: string;
     },
@@ -144,10 +146,15 @@ export class BotGateway
       this._leaveRoom(client);
     }
 
-    client.watchingRobotId = data.robotId;
+    const providedAccessToken = data.accessToken?.trim();
+    const authPayload = this.resolveSocketUser(providedAccessToken);
+    if (providedAccessToken && !authPayload) {
+      client.send(JSON.stringify({ event: 'error', data: { message: 'Invalid session token' } }));
+      return;
+    }
 
-    const authUserId = data.userId?.trim();
-    const isGuest = !authUserId;
+    client.watchingRobotId = data.robotId;
+    const isGuest = !authPayload;
     client.isGuest = isGuest;
 
     if (isGuest) {
@@ -157,9 +164,11 @@ export class BotGateway
         : client.id.replace(/-/g, '').slice(0, 16);
       client.userId = `guest:${safeSessionId}`;
       client.username = `Guest-${safeSessionId.slice(0, 6)}`;
+      client.role = undefined;
     } else {
-      client.userId = authUserId;
-      client.username = data.username?.trim() || `User-${authUserId!.slice(0, 6)}`;
+      client.userId = authPayload.sub;
+      client.username = authPayload.username || `User-${authPayload.sub.slice(0, 6)}`;
+      client.role = authPayload.role;
     }
 
     const allowed = await this.robotsService.validateRoomAccess({
@@ -172,6 +181,7 @@ export class BotGateway
       client.userId = undefined;
       client.username = undefined;
       client.isGuest = undefined;
+      client.role = undefined;
       client.send(JSON.stringify({ event: 'error', data: { message: 'Room access verification required' } }));
       return;
     }
@@ -562,10 +572,18 @@ export class BotGateway
 
   private _leaveRoom(client: WsClient) {
     const robotId = client.watchingRobotId!;
-    this.rooms.get(robotId)?.delete(client.id);
+    const room = this.rooms.get(robotId);
+    room?.delete(client.id);
+    if (room && room.size === 0) {
+      this.rooms.delete(robotId);
+    }
 
     if (client.userId) {
-      this.presence.get(robotId)?.delete(client.userId);
+      const presence = this.presence.get(robotId);
+      presence?.delete(client.userId);
+      if (presence && presence.size === 0) {
+        this.presence.delete(robotId);
+      }
       this._broadcastToRoom(robotId, WS_EVENTS.PRESENCE_LEAVE, {
         userId: client.userId,
         username: client.username,
@@ -645,14 +663,14 @@ export class BotGateway
 
     if (robot.queueMode === 'DISABLED') {
       if (current) {
-        await this.clearTurnState(robotId);
+        await this.clearTurnState(robotId, 'clear');
       }
       return;
     }
 
     if (!nextEntry) {
       if (current) {
-        await this.clearTurnState(robotId);
+        await this.clearTurnState(robotId, 'clear');
       }
       await this.robotsService.updateStatus(robotId, 'ONLINE').catch(() => {});
       this._broadcastToRoomLocally(robotId, WS_EVENTS.ROBOT_STATUS, { status: 'ONLINE' });
@@ -702,14 +720,11 @@ export class BotGateway
   }
 
   private async handleTurnTimeout(robotId: string, userId: string) {
-    this._broadcastToRoomLocally(robotId, WS_EVENTS.QUEUE_TURN_END, {
-      userId,
-      reason: 'timeout',
-    });
+    await this.clearTurnState(robotId, 'timeout');
     await this.queueService.leave(robotId, userId).catch(() => {});
   }
 
-  private async clearTurnState(robotId: string) {
+  private async clearTurnState(robotId: string, reason: 'handoff' | 'timeout' | 'clear' = 'handoff') {
     const current = this.activeTurns.get(robotId);
     if (current) {
       await this.sessionsService.end(current.sessionId).catch(() => {});
@@ -719,7 +734,7 @@ export class BotGateway
       });
       this._broadcastToRoomLocally(robotId, WS_EVENTS.QUEUE_TURN_END, {
         userId: current.userId,
-        reason: 'handoff',
+        reason,
       });
       this.activeTurns.delete(robotId);
     }
@@ -728,6 +743,19 @@ export class BotGateway
     if (timer) {
       clearTimeout(timer);
       this.turnTimeouts.delete(robotId);
+    }
+  }
+
+  private resolveSocketUser(accessToken?: string): JwtPayload | null {
+    const token = accessToken?.trim();
+    if (!token) {
+      return null;
+    }
+
+    try {
+      return this.jwtService.verify<JwtPayload>(token);
+    } catch {
+      return null;
     }
   }
 }

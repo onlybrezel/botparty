@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -40,6 +40,8 @@ export class SessionsService {
   }
 
   async findByRobot(robotId: string, limit = 50) {
+    await this.assertCanViewRobotSessions(robotId, null);
+
     return this.prisma.session.findMany({
       where: { robotId },
       orderBy: { startedAt: 'desc' },
@@ -66,6 +68,8 @@ export class SessionsService {
   }
 
   async getActiveSession(robotId: string) {
+    await this.assertCanViewRobotSessions(robotId, null);
+
     return this.prisma.session.findFirst({
       where: { robotId, status: 'ACTIVE' },
       include: {
@@ -74,5 +78,73 @@ export class SessionsService {
         },
       },
     });
+  }
+
+  async findByRobotForRequester(robotId: string, requesterId: string | null, limit = 50) {
+    await this.assertCanViewRobotSessions(robotId, requesterId);
+    return this.findByRobotUnsafe(robotId, limit);
+  }
+
+  async getActiveSessionForRequester(robotId: string, requesterId: string | null) {
+    await this.assertCanViewRobotSessions(robotId, requesterId);
+    return this.getActiveSessionUnsafe(robotId);
+  }
+
+  private async findByRobotUnsafe(robotId: string, limit = 50) {
+    return this.prisma.session.findMany({
+      where: { robotId },
+      orderBy: { startedAt: 'desc' },
+      take: Math.min(limit, 200),
+      include: {
+        user: {
+          select: { id: true, username: true, displayName: true, avatarUrl: true },
+        },
+      },
+    });
+  }
+
+  private async getActiveSessionUnsafe(robotId: string) {
+    return this.prisma.session.findFirst({
+      where: { robotId, status: 'ACTIVE' },
+      include: {
+        user: {
+          select: { id: true, username: true, displayName: true },
+        },
+      },
+    });
+  }
+
+  private async assertCanViewRobotSessions(robotId: string, requesterId: string | null) {
+    const robot = await this.prisma.robot.findUnique({
+      where: { id: robotId },
+      select: { ownerId: true, visibility: true },
+    });
+
+    if (!robot) {
+      throw new NotFoundException('Robot not found');
+    }
+
+    if (robot.visibility === 'PUBLIC') {
+      return;
+    }
+
+    if (!requesterId) {
+      throw new ForbiddenException('Not allowed to view sessions for this robot');
+    }
+
+    if (robot.ownerId === requesterId) {
+      return;
+    }
+
+    const requester = await this.prisma.user.findUnique({
+      where: { id: requesterId },
+      select: { role: true },
+    });
+
+    if (requester?.role === 'ADMIN' || requester?.role === 'MOD') {
+      return;
+    }
+
+    throw new ForbiddenException('Not allowed to view sessions for this robot');
   }
 }

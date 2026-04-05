@@ -18,6 +18,7 @@ Spiritually inspired by LetsRobot.tv and Remo.tv. Built from scratch with a mode
 - **Emergency stop** — ESC key or automatic at >300ms latency
 - **Robot dashboard** — visibility, access mode, queue settings
 - **Python robot client** — runs on Pi, Jetson, anything with a camera and serial port
+- **Password reset via email** — expiring reset links over SMTP
 - **Docker deployment** — single `docker compose up -d`
 
 ---
@@ -108,10 +109,10 @@ cd botparty
 pnpm install
 ```
 
-Start the database, cache and LiveKit:
+Start the database, cache, LiveKit, and the local dev mail inbox:
 
 ```bash
-docker compose up -d postgres redis livekit
+docker compose up -d postgres redis livekit mailpit
 ```
 
 Set up the environment (defaults work for local dev):
@@ -138,29 +139,31 @@ pnpm dev
 - API: http://localhost:4000
 - Swagger: http://localhost:4000/docs (dev only)
 - LiveKit: ws://localhost:7880
+- Mailpit inbox: http://localhost:8025
 
 ---
 
 ## Robot client (Raspberry Pi)
 
 The robot client lives in its own repository: **botparty-client**.
+If you are working in this workspace, the current local checkout is:
+
+`/home/julien/workspace/botparty-client`
 
 ```bash
-git clone https://github.com/your-org/botparty-client.git
-cd botparty-client
-
-python3 -m venv venv
-source venv/bin/activate
+cd /home/julien/workspace/botparty-client
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-
 cp config.example.yaml config.yaml
-nano config.yaml
-# claim_token  → copy from the robot's dashboard page
-# api_url      → same as APP_URL from .env  (e.g. https://botparty.example.com)
-# livekit_url  → same as NEXT_PUBLIC_LIVEKIT_URL from .env
-
 python -m botparty_robot
 ```
+
+Important config values:
+
+- `claim_token` → copy from the robot dashboard
+- `api_url` → same base URL as `APP_URL` in `.env`
+- `livekit_url` → same value as `NEXT_PUBLIC_LIVEKIT_URL`
 
 **USB camera**: works out of the box (`device: "/dev/video0"`)
 
@@ -223,6 +226,7 @@ Copy `fullchain.pem` and `privkey.pem` into `docker/nginx/ssl/`, then run `bash 
 ## Security notes
 
 - JWT access tokens (15 min) + refresh tokens (7d), Argon2id password hashing
+- Password reset tokens are one-time, expire by TTL, and invalidate older reset emails
 - RBAC: Admin → Mod → User
 - Rate limiting on both nginx and NestJS sides (auth tighter than general API)
 - Strict CORS origin list
@@ -249,7 +253,7 @@ Copy `fullchain.pem` and `privkey.pem` into `docker/nginx/ssl/`, then run `bash 
 
 - [ ] Session recording & replay
 - [ ] Analytics dashboard for robot hosts
-- [ ] Voting queue (schema is there, logic not wired)
+- [ ] Voting queue balancing and ranking improvements
 - [ ] Full ROS2 integration
 - [ ] Mobile touch controls
 - [ ] Leaderboard / community features

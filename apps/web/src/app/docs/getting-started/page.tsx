@@ -24,7 +24,8 @@ export default function GettingStartedPage() {
           <li className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-4">
             <p className="font-semibold">2. Configure robot client</p>
             <p className="mt-1 text-[var(--muted-foreground)]">
-              On your Pi/Linux machine, set API URL, LiveKit URL, and claim token in config.yaml.
+              Use the dedicated controller-client repo on your Pi/Linux machine and set API URL,
+              LiveKit URL, and claim token in `config.yaml`.
             </p>
           </li>
           <li className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-4">
@@ -37,6 +38,13 @@ export default function GettingStartedPage() {
             <p className="font-semibold">4. Set sane defaults</p>
             <p className="mt-1 text-[var(--muted-foreground)]">
               Keep control/chat on authenticated mode first, then open gradually.
+            </p>
+          </li>
+          <li className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-4">
+            <p className="font-semibold">5. Verify email reset before going public</p>
+            <p className="mt-1 text-[var(--muted-foreground)]">
+              Configure SMTP, trigger a password reset, and confirm the reset link arrives before
+              inviting hosts or moderators.
             </p>
           </li>
         </ol>

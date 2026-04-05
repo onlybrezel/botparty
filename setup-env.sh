@@ -103,6 +103,12 @@ if [[ "$IS_LOCAL" == "y" ]]; then
   LIVEKIT_URL="ws://localhost:7880"
   LIVEKIT_EXT_URL="ws://localhost:7880"
   APP_URL="http://localhost:3000"
+  SMTP_HOST="localhost"
+  SMTP_PORT="1025"
+  SMTP_SECURE="false"
+  SMTP_USER=""
+  SMTP_PASSWORD=""
+  SMTP_FROM="BotParty <no-reply@localhost>"
   CORS_ORIGIN="http://localhost:3000"
   success "Using localhost defaults."
   NGINX_CONF_VALUE=./docker/nginx/nginx.conf
@@ -137,6 +143,14 @@ else
   ask LIVEKIT_HOST "LiveKit public host" "$DOMAIN"
   LIVEKIT_URL="${WS_PROTO}://${LIVEKIT_HOST}:7880"
   LIVEKIT_EXT_URL="${WS_PROTO}://${LIVEKIT_HOST}:7880"
+
+  echo ""
+  ask SMTP_HOST "SMTP host" "smtp.example.com"
+  ask SMTP_PORT "SMTP port" "587"
+  ask SMTP_SECURE "SMTP secure (true/false)" "false"
+  ask SMTP_USER "SMTP username" ""
+  ask SMTP_PASSWORD "SMTP password" ""
+  ask SMTP_FROM "SMTP from address" "BotParty <no-reply@${DOMAIN}>"
 fi
 
 # ─── 3. Secrets ───────────────────────────────────────────────────────────────
@@ -192,6 +206,16 @@ JWT_SECRET=${JWT_SECRET}
 JWT_EXPIRES_IN=15m
 JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
 JWT_REFRESH_EXPIRES_IN=7d
+PASSWORD_RESET_TTL_SEC=3600
+
+# ─── Email / Password Reset ───────────────────────────
+APP_URL=${APP_URL}
+SMTP_HOST=${SMTP_HOST}
+SMTP_PORT=${SMTP_PORT}
+SMTP_SECURE=${SMTP_SECURE}
+SMTP_USER=${SMTP_USER}
+SMTP_PASSWORD=${SMTP_PASSWORD}
+SMTP_FROM=${SMTP_FROM}
 
 # ─── LiveKit ──────────────────────────────────────────
 LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
@@ -295,7 +319,7 @@ echo ""
 if [[ "$IS_LOCAL" == "y" ]]; then
   echo "  Start everything:"
   echo ""
-  echo "    docker compose up -d postgres redis livekit"
+  echo "    docker compose up -d postgres redis livekit mailpit"
   echo "    pnpm dev"
   echo ""
   echo "  Or full Docker stack:"
@@ -305,6 +329,7 @@ if [[ "$IS_LOCAL" == "y" ]]; then
   echo "  Frontend:  http://localhost:3000"
   echo "  API:       http://localhost:4000"
   echo "  Swagger:   http://localhost:4000/docs"
+  echo "  Mailpit:   http://localhost:8025"
 else
   if [[ "${USE_SSL:-n}" == "y" ]]; then
     echo "  Once certificates are in place:"

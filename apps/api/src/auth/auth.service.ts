@@ -3,14 +3,18 @@ import {
   UnauthorizedException,
   ConflictException,
   Logger,
+  BadRequestException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { hash, verify } from 'argon2';
+import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
-import type { JwtPayload, RefreshTokenPayload } from '@botparty/shared';
-import { registerSchema, loginSchema } from '@botparty/shared';
+import type { JwtPayload, RefreshTokenPayload, ForgotPasswordInput, ResetPasswordInput } from '@botparty/shared';
+import { registerSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema } from '@botparty/shared';
 import type { z } from 'zod';
+import { RedisService } from '../redis/redis.service';
+import { MailService } from '../mail/mail.service';
 
 @Injectable()
 export class AuthService {
@@ -20,10 +24,16 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
+    private readonly redis: RedisService,
+    private readonly mail: MailService,
   ) {}
 
   async register(input: z.infer<typeof registerSchema>) {
-    const data = registerSchema.parse(input);
+    const data = registerSchema.parse({
+      ...input,
+      email: input.email.trim().toLowerCase(),
+      username: input.username.trim(),
+    });
 
     // Check uniqueness
     const existing = await this.prisma.user.findFirst({
@@ -54,7 +64,10 @@ export class AuthService {
   }
 
   async login(input: z.infer<typeof loginSchema>) {
-    const data = loginSchema.parse(input);
+    const data = loginSchema.parse({
+      ...input,
+      email: input.email.trim().toLowerCase(),
+    });
 
     const user = await this.prisma.user.findUnique({
       where: { email: data.email },
@@ -106,6 +119,79 @@ export class AuthService {
     });
   }
 
+  async requestPasswordReset(input: ForgotPasswordInput) {
+    const data = forgotPasswordSchema.parse({
+      ...input,
+      email: input.email.trim().toLowerCase(),
+    });
+    const user = await this.prisma.user.findUnique({
+      where: { email: data.email },
+      select: { id: true, email: true, username: true, isActive: true },
+    });
+
+    if (!user || !user.isActive) {
+      this.logger.warn(`Password reset requested for missing or inactive email: ${data.email}`);
+      return { message: 'If the account exists, a reset email has been sent.' };
+    }
+
+    const token = randomBytes(32).toString('hex');
+    const tokenHash = this.hashResetToken(token);
+    const ttlSec = Number(this.config.get<string>('PASSWORD_RESET_TTL_SEC', '3600'));
+    const payload = JSON.stringify({
+      userId: user.id,
+      email: user.email,
+      createdAt: new Date().toISOString(),
+    });
+
+    await this.redis.set(this.passwordResetKey(tokenHash), payload, 'EX', ttlSec);
+    await this.redis.set(this.passwordResetUserKey(user.id), tokenHash, 'EX', ttlSec);
+
+    try {
+      await this.mail.sendPasswordResetEmail(user.email, token);
+      this.logger.log(`Password reset email queued for ${user.username}`);
+    } catch (error) {
+      await this.redis.del(this.passwordResetKey(tokenHash));
+      await this.redis.del(this.passwordResetUserKey(user.id));
+      this.logger.error(`Failed to send password reset email to ${user.email}`, (error as Error).message);
+      throw new BadRequestException('Password reset email could not be sent');
+    }
+
+    return { message: 'If the account exists, a reset email has been sent.' };
+  }
+
+  async resetPassword(input: ResetPasswordInput) {
+    const data = resetPasswordSchema.parse(input);
+    const tokenHash = this.hashResetToken(data.token);
+    const raw = await this.redis.get(this.passwordResetKey(tokenHash));
+
+    if (!raw) {
+      throw new BadRequestException('Invalid or expired password reset token');
+    }
+
+    const payload = JSON.parse(raw) as { userId: string; email: string };
+    const latestTokenHash = await this.redis.get(this.passwordResetUserKey(payload.userId));
+
+    if (!latestTokenHash || latestTokenHash !== tokenHash) {
+      throw new BadRequestException('Invalid or expired password reset token');
+    }
+
+    const passwordHash = await hash(data.password, { type: 2 });
+
+    await this.prisma.user.update({
+      where: { id: payload.userId },
+      data: {
+        passwordHash,
+        tokenVersion: { increment: 1 },
+      },
+    });
+
+    await this.redis.del(this.passwordResetKey(tokenHash));
+    await this.redis.del(this.passwordResetUserKey(payload.userId));
+
+    this.logger.log(`Password reset completed for user ${payload.userId}`);
+    return { message: 'Password reset successful' };
+  }
+
   private generateTokens(user: { id: string; username: string; role: string; tokenVersion: number }) {
     const jwtPayload: JwtPayload = {
       sub: user.id,
@@ -119,10 +205,10 @@ export class AuthService {
     };
 
     const accessToken = this.jwt.sign(jwtPayload);
+    const refreshExpiresIn = this.config.get<string>('JWT_REFRESH_EXPIRES_IN', '7d');
     const refreshTokenValue = this.jwt.sign(refreshPayload, {
       secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      expiresIn: this.config.get<string>('JWT_REFRESH_EXPIRES_IN', '7d') as any,
+      expiresIn: refreshExpiresIn,
     });
 
     return {
@@ -134,5 +220,17 @@ export class AuthService {
         role: user.role,
       },
     };
+  }
+
+  private hashResetToken(token: string) {
+    return createHash('sha256').update(token).digest('hex');
+  }
+
+  private passwordResetKey(tokenHash: string) {
+    return `auth:password-reset:${tokenHash}`;
+  }
+
+  private passwordResetUserKey(userId: string) {
+    return `auth:password-reset:user:${userId}`;
   }
 }

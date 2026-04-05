@@ -112,7 +112,7 @@ interface Props {
 }
 
 export default function RobotView({ robot }: Props) {
-  const { accessToken, username, userId, role } = useAuth();
+  const { accessToken, userId, role } = useAuth();
 
   const [focusMode, setFocusMode] = useState<FocusMode>('controls');
   const [controlButtons, setControlButtons] = useState<ControlButton[]>([]);
@@ -378,8 +378,7 @@ export default function RobotView({ robot }: Props) {
             event: 'room:join',
             data: {
               robotId: robot.id,
-              userId: userId ?? undefined,
-              username: userId ? (username ?? undefined) : undefined,
+              accessToken: accessToken ?? undefined,
               guestSessionId: userId ? undefined : guestSessionId || undefined,
               roomAccessToken: roomAccessToken ?? undefined,
             },
@@ -411,7 +410,7 @@ export default function RobotView({ robot }: Props) {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       wsRef.current?.close();
     };
-  }, [guestSessionId, robot.accessMode, robot.id, roomAccessToken, userId, username]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [accessToken, guestSessionId, robot.accessMode, robot.id, roomAccessToken, userId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleWsEvent = useCallback((event: string, data: Record<string, unknown>) => {
     switch (event) {
@@ -519,6 +518,13 @@ export default function RobotView({ robot }: Props) {
       }
       case 'error': {
         const message = typeof data.message === 'string' ? data.message : 'Unknown websocket error';
+        if (message === 'Invalid session token') {
+          void api.restoreSession().finally(() => {
+            api.syncTokenFromStore();
+            wsRef.current?.close();
+          });
+          break;
+        }
         if (message.includes('restricted')) {
           const restriction = (data.restriction as { action?: string; expiresAt?: string | null } | undefined) ?? {};
           const text = restriction.action
@@ -793,16 +799,16 @@ export default function RobotView({ robot }: Props) {
         setInQueue(false);
         pushToast('Left the queue.', 'info');
       } else {
-        await api.joinQueue(robot.id);
+        await api.joinQueue(robot.id, roomAccessToken);
         setInQueue(true);
         pushToast('Joined the queue.', 'success');
       }
       const updated = await api.getQueue(robot.id);
       setQueue(updated);
     } catch (err) {
-      console.error('Queue error', err);
+      pushToast(err instanceof Error ? err.message : 'Queue update failed.', 'error', 2200);
     }
-  }, [accessToken, inQueue, robot.id]);
+  }, [accessToken, inQueue, robot.id, roomAccessToken]);
 
   const voteForQueueUser = useCallback(async (targetUserId: string) => {
     if (!accessToken) {
@@ -813,7 +819,7 @@ export default function RobotView({ robot }: Props) {
     setVotingForUserId(targetUserId);
     try {
       api.setToken(accessToken);
-      await api.voteQueue(robot.id, targetUserId);
+      await api.voteQueue(robot.id, targetUserId, roomAccessToken);
       const updated = await api.getQueue(robot.id);
       setQueue(updated);
       pushToast('Vote submitted.', 'success', 1400);
@@ -822,7 +828,7 @@ export default function RobotView({ robot }: Props) {
     } finally {
       setVotingForUserId(null);
     }
-  }, [accessToken, robot.id]);
+  }, [accessToken, robot.id, roomAccessToken]);
 
   // ─── Derived ──────────────────────────────────────────────────────────────
 

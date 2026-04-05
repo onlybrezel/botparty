@@ -20,10 +20,19 @@ export class QueueService {
     private readonly robotsService: RobotsService,
   ) {}
 
-  async join(robotId: string, userId: string, isPriority = false) {
+  async join(robotId: string, userId: string, roomAccessToken?: string, isPriority = false) {
     const access = await this.robotsService.getAccessPolicy(robotId);
     if (access.control === 'DISABLED') {
       throw new ForbiddenException('Control is disabled for this robot');
+    }
+
+    const allowed = await this.robotsService.validateRoomAccess({
+      robotId,
+      actorId: userId,
+      roomAccessToken,
+    });
+    if (!allowed) {
+      throw new ForbiddenException('Room access verification required');
     }
 
     // Check if already in queue
@@ -128,9 +137,18 @@ export class QueueService {
     return next?.userId ?? null;
   }
 
-  async vote(robotId: string, targetUserId: string, voterUserId: string) {
+  async vote(robotId: string, targetUserId: string, voterUserId: string, roomAccessToken?: string) {
     if (targetUserId === voterUserId) {
       throw new BadRequestException('You cannot vote for yourself');
+    }
+
+    const allowed = await this.robotsService.validateRoomAccess({
+      robotId,
+      actorId: voterUserId,
+      roomAccessToken,
+    });
+    if (!allowed) {
+      throw new ForbiddenException('Room access verification required');
     }
 
     const entry = await this.prisma.queueEntry.findUnique({
@@ -152,10 +170,13 @@ export class QueueService {
       throw new ConflictException('Voting too fast. Please wait a moment.');
     }
 
-    return this.prisma.queueEntry.update({
+    const updated = await this.prisma.queueEntry.update({
       where: { id: entry.id },
       data: { votes: { increment: 1 } },
     });
+
+    await this.redis.publish(`queue:${robotId}`, JSON.stringify({ type: 'vote', userId: targetUserId }));
+    return updated;
   }
 
   async clearQueue(robotId: string) {

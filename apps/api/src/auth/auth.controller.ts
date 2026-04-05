@@ -38,4 +38,18 @@ export class AuthController {
     await this.authService.revokeRefreshTokens(req.user.sub);
     return { message: 'Logged out successfully' };
   }
+
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Request a password reset email' })
+  async forgotPassword(@Body() body: { email: string }) {
+    return this.authService.requestPasswordReset(body);
+  }
+
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Reset password with token' })
+  async resetPassword(@Body() body: { token: string; password: string }) {
+    return this.authService.resetPassword(body);
+  }
 }

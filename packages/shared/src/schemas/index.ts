@@ -18,6 +18,15 @@ export const loginSchema = z.object({
   password: z.string().min(1),
 });
 
+export const forgotPasswordSchema = z.object({
+  email: z.string().email(),
+});
+
+export const resetPasswordSchema = z.object({
+  token: z.string().min(16).max(256),
+  password: z.string().min(8).max(128),
+});
+
 // ─── Robot Schemas ───────────────────────────────────
 export const createRobotSchema = z.object({
   name: z.string().min(1).max(LIMITS.MAX_ROBOT_NAME_LENGTH),

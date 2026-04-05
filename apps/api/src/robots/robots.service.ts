@@ -876,20 +876,7 @@ export class RobotsService {
     guestSessionId?: string;
     password?: string;
   }): Promise<RoomAccessGrant> {
-    const robot = await this.prisma.robot.findUnique({
-      where: { id: input.robotId },
-      select: {
-        id: true,
-        ownerId: true,
-        visibility: true,
-        accessMode: true,
-        accessPassword: true,
-        allowedUsers: {
-          where: input.requesterUserId ? { userId: input.requesterUserId } : { userId: '__none__' },
-          select: { userId: true },
-        },
-      },
-    });
+    const robot = await this.getRoomAccessContext(input.robotId, input.requesterUserId);
 
     if (!robot) {
       throw new NotFoundException('Robot not found');
@@ -897,10 +884,12 @@ export class RobotsService {
 
     const actorId = input.requesterUserId ?? this.buildGuestActorId(input.guestSessionId);
     const isOwner = input.requesterUserId === robot.ownerId;
+    const isStaff = robot.requesterRole === 'ADMIN' || robot.requesterRole === 'MOD';
     const isAllowedUser =
-      Boolean(input.requesterUserId) && (isOwner || robot.allowedUsers.some((entry) => entry.userId === input.requesterUserId));
+      Boolean(input.requesterUserId) &&
+      (isOwner || isStaff || robot.allowedUsers.some((entry) => entry.userId === input.requesterUserId));
 
-    if (robot.visibility === 'PRIVATE' && !isOwner) {
+    if (robot.visibility === 'PRIVATE' && !isOwner && !isStaff) {
       throw new ForbiddenException('This robot is private');
     }
 
@@ -908,7 +897,7 @@ export class RobotsService {
       throw new ForbiddenException('You are not on the allow list for this robot');
     }
 
-    if (robot.accessMode === 'PASSWORD') {
+    if (robot.accessMode === 'PASSWORD' && !isOwner && !isStaff) {
       const password = input.password?.trim() ?? '';
       if (!password) {
         throw new ForbiddenException('Password required');
@@ -947,22 +936,32 @@ export class RobotsService {
     actorId: string;
     roomAccessToken?: string;
   }): Promise<boolean> {
-    const robot = await this.prisma.robot.findUnique({
-      where: { id: input.robotId },
-      select: {
-        visibility: true,
-        accessMode: true,
-      },
-    });
+    const requesterUserId = input.actorId.startsWith('guest:') ? null : input.actorId;
+    const robot = await this.getRoomAccessContext(input.robotId, requesterUserId);
 
     if (!robot) {
       return false;
     }
 
-    const requiresGrant =
-      robot.visibility === 'PRIVATE' ||
-      robot.accessMode === 'PASSWORD' ||
-      robot.accessMode === 'ALLOWED_USERS';
+    const isOwner = requesterUserId === robot.ownerId;
+    const isStaff = robot.requesterRole === 'ADMIN' || robot.requesterRole === 'MOD';
+    const isAllowedUser =
+      Boolean(requesterUserId) &&
+      (isOwner || isStaff || robot.allowedUsers.some((entry) => entry.userId === requesterUserId));
+
+    if (robot.visibility === 'PRIVATE') {
+      return isOwner || isStaff;
+    }
+
+    if (robot.accessMode === 'ALLOWED_USERS' && isAllowedUser) {
+      return true;
+    }
+
+    if (robot.accessMode === 'PASSWORD' && (isOwner || isStaff)) {
+      return true;
+    }
+
+    const requiresGrant = robot.accessMode === 'PASSWORD' || robot.accessMode === 'ALLOWED_USERS';
 
     if (!requiresGrant) {
       return true;
@@ -1016,6 +1015,44 @@ export class RobotsService {
       .replace(/^-|-$/g, '');
     const suffix = randomBytes(3).toString('hex');
     return `${base}-${suffix}`;
+  }
+
+  private async getRoomAccessContext(robotId: string, requesterUserId: string | null) {
+    const robot = await this.prisma.robot.findUnique({
+      where: { id: robotId },
+      select: {
+        id: true,
+        ownerId: true,
+        visibility: true,
+        accessMode: true,
+        accessPassword: true,
+        allowedUsers: {
+          where: requesterUserId ? { userId: requesterUserId } : { userId: '__none__' },
+          select: { userId: true },
+        },
+      },
+    });
+
+    if (!robot) {
+      return null;
+    }
+
+    if (!requesterUserId) {
+      return {
+        ...robot,
+        requesterRole: null as 'ADMIN' | 'MOD' | 'USER' | null,
+      };
+    }
+
+    const requester = await this.prisma.user.findUnique({
+      where: { id: requesterUserId },
+      select: { role: true },
+    });
+
+    return {
+      ...robot,
+      requesterRole: requester?.role ?? null,
+    };
   }
 
   private mergeMetadata(

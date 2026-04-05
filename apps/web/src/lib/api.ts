@@ -276,7 +276,9 @@ class ApiClient {
       res.status === 401 &&
       path !== '/auth/login' &&
       path !== '/auth/register' &&
-      path !== '/auth/refresh'
+      path !== '/auth/refresh' &&
+      path !== '/auth/forgot-password' &&
+      path !== '/auth/reset-password'
     ) {
       const refreshedToken = await this.refreshSession();
       if (refreshedToken) {
@@ -313,6 +315,20 @@ class ApiClient {
     return this.request<{ accessToken: string; refreshToken: string }>('/auth/refresh', {
       method: 'POST',
       body: JSON.stringify({ refreshToken }),
+    });
+  }
+
+  async forgotPassword(email: string) {
+    return this.request<{ message: string }>('/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  }
+
+  async resetPassword(token: string, password: string) {
+    return this.request<{ message: string }>('/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({ token, password }),
     });
   }
 
@@ -617,18 +633,21 @@ class ApiClient {
     }));
   }
 
-  async joinQueue(robotId: string) {
-    return this.request<{ position: number }>(`/queue/${robotId}/join`, { method: 'POST' });
+  async joinQueue(robotId: string, roomAccessToken?: string | null) {
+    return this.request<{ position: number }>(`/queue/${robotId}/join`, {
+      method: 'POST',
+      body: JSON.stringify(roomAccessToken ? { roomAccessToken } : {}),
+    });
   }
 
   async leaveQueue(robotId: string) {
     return this.request(`/queue/${robotId}/leave`, { method: 'DELETE' });
   }
 
-  async voteQueue(robotId: string, targetUserId: string) {
+  async voteQueue(robotId: string, targetUserId: string, roomAccessToken?: string | null) {
     return this.request<{ userId: string; votes: number }>(`/queue/${robotId}/vote/${targetUserId}`, {
       method: 'POST',
-      body: '{}',
+      body: JSON.stringify(roomAccessToken ? { roomAccessToken } : {}),
     });
   }
 

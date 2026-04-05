@@ -190,6 +190,13 @@ export class ModerationService {
 
     if (dto.action === ModerationActionType.UNBAN) {
       await this.redis.del(key);
+      await this.redis.publish(
+        `ws:moderation:${robotId}`,
+        JSON.stringify({
+          event: WS_EVENTS.MOD_UNBAN,
+          data: { userId: dto.targetUserId, robotId },
+        }),
+      );
       return { action: 'UNBAN', userId: dto.targetUserId };
     }
 
@@ -217,6 +224,27 @@ export class ModerationService {
       // Keep bans persistent but not forever to avoid unbounded stale keys.
       await this.redis.set(key, JSON.stringify(payload), 'EX', 60 * 60 * 24 * 30);
     }
+
+    const wsEvent =
+      dto.action === ModerationActionType.BAN
+        ? WS_EVENTS.MOD_BAN
+        : dto.action === ModerationActionType.KICK
+          ? WS_EVENTS.MOD_KICK
+          : WS_EVENTS.MOD_TIMEOUT;
+
+    await this.redis.publish(
+      `ws:moderation:${robotId}`,
+      JSON.stringify({
+        event: wsEvent,
+        data: {
+          userId: dto.targetUserId,
+          moderatorId,
+          reason: dto.reason,
+          expiresAt: payload.expiresAt,
+          robotId,
+        },
+      }),
+    );
 
     return payload;
   }

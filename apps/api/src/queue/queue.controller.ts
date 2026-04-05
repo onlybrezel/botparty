@@ -1,4 +1,4 @@
-import { Controller, Post, Delete, Get, Param, UseGuards } from '@nestjs/common';
+import { Controller, Post, Delete, Get, Param, UseGuards, Body } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { QueueService } from './queue.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -20,8 +20,12 @@ export class QueueController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Join the control queue' })
-  async join(@Param('robotId') robotId: string, @CurrentUser() user: JwtPayload) {
-    return this.queueService.join(robotId, user.sub);
+  async join(
+    @Param('robotId') robotId: string,
+    @CurrentUser() user: JwtPayload,
+    @Body() body?: { roomAccessToken?: string },
+  ) {
+    return this.queueService.join(robotId, user.sub, body?.roomAccessToken);
   }
 
   @Delete(':robotId/leave')
@@ -41,7 +45,8 @@ export class QueueController {
     @Param('robotId') robotId: string,
     @Param('targetUserId') targetUserId: string,
     @CurrentUser() user: JwtPayload,
+    @Body() body?: { roomAccessToken?: string },
   ) {
-    return this.queueService.vote(robotId, targetUserId, user.sub);
+    return this.queueService.vote(robotId, targetUserId, user.sub, body?.roomAccessToken);
   }
 }

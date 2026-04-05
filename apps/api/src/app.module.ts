@@ -14,6 +14,7 @@ import { GatewayModule } from './gateway/gateway.module';
 import { HealthModule } from './health/health.module';
 import { ControlsModule } from './controls/controls.module';
 import { ModerationModule } from './moderation/moderation.module';
+import { MailModule } from './mail/mail.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { ModerationModule } from './moderation/moderation.module';
     // ─── Core ──────────────────────────────────────
     PrismaModule,
     RedisModule,
+    MailModule,
 
     // ─── Feature Modules ───────────────────────────
     AuthModule,

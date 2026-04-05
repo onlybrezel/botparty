@@ -5,7 +5,6 @@ export const CurrentUser = createParamDecorator(
   (data: keyof JwtPayload | undefined, ctx: ExecutionContext) => {
     const request = ctx.switchToHttp().getRequest();
     const user: JwtPayload = request.user as JwtPayload;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return data ? (user as any)[data] : user;
+    return data ? user[data] : user;
   },
 );
