@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -157,7 +157,10 @@ export default function DashboardPage() {
     history: [],
   });
   const [preview, setPreview] = useState<{ token: string; url: string } | null>(null);
+  const [previewVersion, setPreviewVersion] = useState(0);
   const [showToken, setShowToken] = useState(false);
+  const previousPendingActionTypesRef = useRef<RemoteActionType[]>([]);
+  const previewRefreshInFlightRef = useRef(false);
 
   useEffect(() => {
     if (!accessToken) {
@@ -200,17 +203,47 @@ export default function DashboardPage() {
     setEditForm(formFromRobot(selectedRobot));
   }, [selectedRobot]);
 
-  useEffect(() => {
+  const refreshPreview = useCallback(async (forceRemount = false) => {
     if (!selectedRobot || !accessToken || selectedRobot.status !== 'ONLINE') {
       setPreview(null);
       return;
     }
+    if (previewRefreshInFlightRef.current) {
+      return;
+    }
+
+    previewRefreshInFlightRef.current = true;
     setPreview(null);
-    api.setToken(accessToken);
-    api.getViewerToken(selectedRobot.id, false)
-      .then(({ token, livekitUrl }) => setPreview({ token, url: process.env.NEXT_PUBLIC_LIVEKIT_URL ?? livekitUrl }))
-      .catch(() => {});
-  }, [selectedRobot?.id, selectedRobot?.status, accessToken]); // eslint-disable-line react-hooks/exhaustive-deps
+    try {
+      api.setToken(accessToken);
+      const { token, livekitUrl } = await api.getViewerToken(selectedRobot.id, false);
+      setPreview({ token, url: process.env.NEXT_PUBLIC_LIVEKIT_URL ?? livekitUrl });
+      if (forceRemount) {
+        setPreviewVersion((value) => value + 1);
+      }
+    } catch {
+      setPreview(null);
+    } finally {
+      previewRefreshInFlightRef.current = false;
+    }
+  }, [accessToken, selectedRobot]);
+
+  useEffect(() => {
+    void refreshPreview(false);
+  }, [refreshPreview]);
+
+  useEffect(() => {
+    const previous = previousPendingActionTypesRef.current;
+    const restartVideoWasPending = previous.includes('restart_video');
+    const restartVideoIsPending = pendingActionTypes.includes('restart_video');
+    previousPendingActionTypesRef.current = pendingActionTypes;
+
+    if (!restartVideoWasPending || restartVideoIsPending || !selectedRobot || !accessToken || selectedRobot.status !== 'ONLINE') {
+      return;
+    }
+
+    void refreshPreview(true);
+  }, [pendingActionTypes, selectedRobot?.id, selectedRobot?.status, accessToken]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!accessToken || !selectedRobot) {
@@ -666,7 +699,14 @@ export default function DashboardPage() {
                     </div>
                     <div className="relative aspect-video w-full bg-zinc-950">
                       {preview ? (
-                        <LiveKitPlayer token={preview.token} livekitUrl={preview.url} />
+                        <LiveKitPlayer
+                          key={`${selectedRobot.id}-${previewVersion}`}
+                          token={preview.token}
+                          livekitUrl={preview.url}
+                          onStreamStalled={() => {
+                            void refreshPreview(true);
+                          }}
+                        />
                       ) : (
                         <div className="flex h-full items-center justify-center text-xs text-[var(--muted-foreground)]">
                           {selectedRobot.status === 'ONLINE' ? 'Connecting...' : 'Robot is offline'}

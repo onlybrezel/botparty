@@ -76,15 +76,41 @@ function statsToClipboardText(stats: NerdStats | null) {
   ].join('\n');
 }
 
-function VideoRenderer() {
+function VideoRenderer({ onStreamStalled }: { onStreamStalled?: () => void }) {
   const tracks = useTracks([{ source: Track.Source.Camera, withPlaceholder: false }]);
   const room = useRoomContext();
   const containerRef = useRef<HTMLDivElement>(null);
   const [stats, setStats] = useState<NerdStats | null>(null);
   const [panelPosition, setPanelPosition] = useState<PanelPosition | null>(null);
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
+  const hadTrackRef = useRef(false);
+  const stallNotifiedRef = useRef(false);
   // Filter out placeholder tracks (no publication)
   const robotTrack = tracks.find((t) => t.publication !== undefined) as TrackReference | undefined;
+
+  useEffect(() => {
+    const connected = String(room.state).toLowerCase() === 'connected';
+
+    if (robotTrack) {
+      hadTrackRef.current = true;
+      stallNotifiedRef.current = false;
+      return;
+    }
+
+    if (!connected || !hadTrackRef.current || stallNotifiedRef.current || !onStreamStalled) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      if (stallNotifiedRef.current) {
+        return;
+      }
+      stallNotifiedRef.current = true;
+      onStreamStalled();
+    }, 3000);
+
+    return () => window.clearTimeout(timeout);
+  }, [robotTrack, room.state, onStreamStalled]);
 
   useEffect(() => {
     if (!panelPosition || !robotTrack?.publication?.videoTrack) {
@@ -302,9 +328,10 @@ function VideoRenderer() {
 interface Props {
   token: string;
   livekitUrl: string;
+  onStreamStalled?: () => void;
 }
 
-export function LiveKitPlayer({ token, livekitUrl }: Props) {
+export function LiveKitPlayer({ token, livekitUrl, onStreamStalled }: Props) {
   return (
     <LiveKitRoom
       token={token}
@@ -314,7 +341,7 @@ export function LiveKitPlayer({ token, livekitUrl }: Props) {
       audio={false}
       className="relative h-full w-full"
     >
-      <VideoRenderer />
+      <VideoRenderer onStreamStalled={onStreamStalled} />
     </LiveKitRoom>
   );
 }

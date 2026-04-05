@@ -120,6 +120,7 @@ export default function RobotView({ robot }: Props) {
   const [connected, setConnected] = useState(false);
   const [inQueue, setInQueue] = useState(false);
   const [livekitCreds, setLivekitCreds] = useState<{ token: string; url: string } | null>(null);
+  const [livekitVersion, setLivekitVersion] = useState(0);
   const [videoState, setVideoState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [moderatingUserId, setModeratingUserId] = useState<string | null>(null);
   const [robotStatus, setRobotStatus] = useState(robot.status);
@@ -134,6 +135,7 @@ export default function RobotView({ robot }: Props) {
   const cooldownMap = useRef<Map<string, number>>(new Map());
   const lastErrorToastRef = useRef<{ message: string; timestamp: number } | null>(null);
   const activeMotionKeysRef = useRef<Set<string>>(new Set());
+  const livekitRefreshInFlightRef = useRef(false);
 
   // ─── Fetch controls ────────────────────────────────────────────────────────
 
@@ -172,37 +174,48 @@ export default function RobotView({ robot }: Props) {
 
   // ─── Fetch LiveKit token (auth required) ──────────────────────────────────
 
-  useEffect(() => {
-    api.setToken(accessToken);
+  const refreshViewerToken = useCallback(async (forceRemount = false) => {
+    if (livekitRefreshInFlightRef.current) {
+      return;
+    }
 
-    const loadToken = async () => {
-      setVideoState('loading');
-      try {
-        const publicUrl = process.env.NEXT_PUBLIC_LIVEKIT_URL;
-        if (accessToken) {
-          try {
-            const { token, livekitUrl } = await api.getViewerToken(robot.id, false);
-            setLivekitCreds({ token, url: publicUrl ?? livekitUrl });
-            setVideoState('ready');
-            return;
-          } catch {
-            // Fall back to the guest token path when the local session is stale
-            // or the room also allows public viewers.
+    livekitRefreshInFlightRef.current = true;
+    setVideoState('loading');
+    try {
+      const publicUrl = process.env.NEXT_PUBLIC_LIVEKIT_URL;
+      api.setToken(accessToken);
+      if (accessToken) {
+        try {
+          const { token, livekitUrl } = await api.getViewerToken(robot.id, false);
+          setLivekitCreds({ token, url: publicUrl ?? livekitUrl });
+          setVideoState('ready');
+          if (forceRemount) {
+            setLivekitVersion((value) => value + 1);
           }
+          return;
+        } catch {
+          // Fall back to guest viewer token.
         }
-
-        api.setToken(null);
-        const { token, livekitUrl } = await api.getPublicViewerToken(robot.id);
-        setLivekitCreds({ token, url: publicUrl ?? livekitUrl });
-        setVideoState('ready');
-      } catch {
-        setLivekitCreds(null);
-        setVideoState('error');
       }
-    };
 
-    loadToken().catch(() => {});
+      api.setToken(null);
+      const { token, livekitUrl } = await api.getPublicViewerToken(robot.id);
+      setLivekitCreds({ token, url: publicUrl ?? livekitUrl });
+      setVideoState('ready');
+      if (forceRemount) {
+        setLivekitVersion((value) => value + 1);
+      }
+    } catch {
+      setLivekitCreds(null);
+      setVideoState('error');
+    } finally {
+      livekitRefreshInFlightRef.current = false;
+    }
   }, [accessToken, robot.id]);
+
+  useEffect(() => {
+    void refreshViewerToken(false);
+  }, [refreshViewerToken]);
 
   // ─── Fetch queue ──────────────────────────────────────────────────────────
 
@@ -651,7 +664,14 @@ export default function RobotView({ robot }: Props) {
           {/* Video */}
           <div className="relative aspect-video overflow-hidden rounded-xl border border-[var(--border)] bg-black">
             {isOnline && livekitCreds ? (
-              <LiveKitPlayer token={livekitCreds.token} livekitUrl={livekitCreds.url} />
+              <LiveKitPlayer
+                key={`${robot.id}-${livekitVersion}`}
+                token={livekitCreds.token}
+                livekitUrl={livekitCreds.url}
+                onStreamStalled={() => {
+                  void refreshViewerToken(true);
+                }}
+              />
             ) : (
               <div className="flex h-full flex-col items-center justify-center gap-3 text-[var(--muted-foreground)]">
                 {isOnline ? (
