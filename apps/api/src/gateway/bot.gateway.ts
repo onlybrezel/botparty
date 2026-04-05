@@ -26,6 +26,7 @@ interface WsClient extends WebSocket {
   /** True if this socket is the robot hardware client */
   isRobot?: boolean;
   robotId?: string;
+  claimToken?: string;
   /** Timestamp of last chat message (for rate limiting) */
   lastChatAt?: number;
   /** User role (for rate-limit tier) */
@@ -166,6 +167,7 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       client.isRobot = true;
       client.robotId = robot.id;
+      client.claimToken = data.claimToken;
       client.watchingRobotId = robot.id;
       this.robotClients.set(robot.id, client);
 
@@ -186,6 +188,22 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.redis.set(`robot:heartbeat:${client.robotId}`, Date.now().toString(), 'EX', 30);
     }
     return { event: WS_EVENTS.ROBOT_HEARTBEAT, data: { ts: Date.now() } };
+  }
+
+  @SubscribeMessage(WS_EVENTS.ROBOT_TELEMETRY)
+  async handleTelemetry(
+    @ConnectedSocket() client: WsClient,
+    @MessageBody() data: Record<string, unknown>,
+  ) {
+    if (!client.isRobot || !client.claimToken) {
+      client.send(JSON.stringify({ event: 'error', data: { message: 'Only robot clients can send telemetry' } }));
+      return;
+    }
+    try {
+      await this.robotsService.ingestRobotTelemetry(client.claimToken, data);
+    } catch (err) {
+      this.logger.warn(`Telemetry ingest failed for robot ${client.robotId}: ${(err as Error).message}`);
+    }
   }
 
   @SubscribeMessage('robot:actions:pull')
@@ -410,6 +428,21 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
       content: sanitized,
       timestamp: now,
     });
+
+    // Forward chat to the robot client so it can drive TTS
+    const robotClient = this.robotClients.get(data.robotId);
+    if (robotClient) {
+      robotClient.send(
+        JSON.stringify({
+          event: WS_EVENTS.CONTROL_COMMAND,
+          data: {
+            command: 'chat',
+            value: { message: sanitized, sender: client.username, anonymous: client.isGuest },
+            timestamp: now,
+          },
+        }),
+      );
+    }
   }
 
   // ─── Private helpers ────────────────────────────────────────────────────────

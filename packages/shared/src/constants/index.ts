@@ -84,6 +84,7 @@ export const WS_EVENTS = {
   ROBOT_STATUS: 'robot:status',
   ROBOT_CLAIM: 'robot:claim',
   ROBOT_HEARTBEAT: 'robot:heartbeat',
+  ROBOT_TELEMETRY: 'robot:telemetry',
   ROBOT_CONTROLS_UPDATED: 'robot:controls-updated',
 
   // Control
