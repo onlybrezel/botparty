@@ -1,9 +1,9 @@
 'use client';
 
-import { LiveKitRoom, VideoTrack, useRoomContext, useTracks } from '@livekit/components-react';
+import { LiveKitRoom, RoomAudioRenderer, VideoTrack, useRoomContext, useTracks } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 import type { TrackReference } from '@livekit/components-core';
-import { Check, Copy, Radio, X } from 'lucide-react';
+import { Check, Copy, Radio, Volume2, VolumeX, X } from 'lucide-react';
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 
 type NerdStats = {
@@ -78,15 +78,29 @@ function statsToClipboardText(stats: NerdStats | null) {
 
 function VideoRenderer({ onStreamStalled }: { onStreamStalled?: () => void }) {
   const tracks = useTracks([{ source: Track.Source.Camera, withPlaceholder: false }]);
+  const audioTracks = useTracks([{ source: Track.Source.Microphone, withPlaceholder: false }]);
   const room = useRoomContext();
   const containerRef = useRef<HTMLDivElement>(null);
   const [stats, setStats] = useState<NerdStats | null>(null);
   const [panelPosition, setPanelPosition] = useState<PanelPosition | null>(null);
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
+  const [volume, setVolume] = useState(100);
+  const [isMuted, setIsMuted] = useState(false);
   const hadTrackRef = useRef(false);
   const stallNotifiedRef = useRef(false);
   // Filter out placeholder tracks (no publication)
   const robotTrack = tracks.find((t) => t.publication !== undefined) as TrackReference | undefined;
+  const robotAudioTracks = audioTracks.filter((t) => t.publication !== undefined) as TrackReference[];
+
+  useEffect(() => {
+    const nextVolume = isMuted ? 0 : volume / 100;
+    for (const track of robotAudioTracks) {
+      const audioTrack = track.publication?.audioTrack as { setVolume?: (value: number) => void } | undefined;
+      if (typeof audioTrack?.setVolume === 'function') {
+        audioTrack.setVolume(nextVolume);
+      }
+    }
+  }, [robotAudioTracks, volume, isMuted]);
 
   useEffect(() => {
     const connected = String(room.state).toLowerCase() === 'connected';
@@ -249,6 +263,36 @@ function VideoRenderer({ onStreamStalled }: { onStreamStalled?: () => void }) {
         className="h-full w-full object-cover"
       />
 
+      <div className="absolute bottom-3 left-3 z-10 flex items-center gap-2 rounded-full border border-white/15 bg-black/45 px-3 py-2 text-white backdrop-blur-sm">
+        <button
+          type="button"
+          onClick={() => setIsMuted((value) => !value)}
+          className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20"
+          aria-label={isMuted ? 'Unmute stream audio' : 'Mute stream audio'}
+          title={isMuted ? 'Unmute' : 'Mute'}
+        >
+          {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+        </button>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          step={1}
+          value={volume}
+          onChange={(event) => {
+            const nextValue = Number(event.target.value);
+            setVolume(nextValue);
+            if (nextValue > 0 && isMuted) {
+              setIsMuted(false);
+            }
+          }}
+          className="h-1.5 w-24 accent-cyan-300"
+          aria-label="Stream volume"
+          title={`Volume ${volume}%`}
+        />
+        <span className="min-w-10 text-right text-xs tabular-nums text-white/90">{isMuted ? 0 : volume}%</span>
+      </div>
+
       {panelPosition && (
         <div
           className="fixed z-[70] w-[min(24rem,calc(100vw-1rem))] overflow-hidden rounded-2xl border border-cyan-400/30 bg-slate-950/92 text-[11px] text-slate-100 shadow-2xl backdrop-blur-xl"
@@ -341,6 +385,8 @@ export function LiveKitPlayer({ token, livekitUrl, onStreamStalled }: Props) {
       audio={false}
       className="relative h-full w-full"
     >
+      {/* Render remote participant audio tracks into hidden audio elements. */}
+      <RoomAudioRenderer />
       <VideoRenderer onStreamStalled={onStreamStalled} />
     </LiveKitRoom>
   );
