@@ -53,6 +53,7 @@ export interface RobotMutationInput {
   stream?: {
     targetBitrateKbps?: number;
   };
+  accessPassword?: string;
 }
 
 export interface PlatformStats {
@@ -88,6 +89,11 @@ export interface ControlButtonRecord {
   position: number;
   color: string | null;
   isEnabled?: boolean;
+}
+
+export interface RoomAccessGrant {
+  token: string;
+  expiresAt: string;
 }
 
 function buildQueryString(params?: Record<string, string | number | boolean | null | undefined>) {
@@ -408,17 +414,33 @@ class ApiClient {
   // ─── LiveKit ───────────────────────────────────────────────────────────────
 
   async getViewerToken(robotId: string, control = false) {
+    const roomAccessToken =
+      typeof window !== 'undefined' ? window.sessionStorage.getItem(`botparty.room-access.${robotId}`) : null;
     return this.request<{ token: string; livekitUrl: string }>(
-      `/livekit/token/viewer/${robotId}?control=${control}`,
+      `/livekit/token/viewer/${robotId}${buildQueryString({ control, roomAccessToken })}`,
       { method: 'POST', body: '{}' },
     );
   }
 
   async getPublicViewerToken(robotId: string) {
+    const roomAccessToken =
+      typeof window !== 'undefined' ? window.sessionStorage.getItem(`botparty.room-access.${robotId}`) : null;
+    const guestSessionId =
+      typeof window !== 'undefined' ? window.localStorage.getItem('botparty.guestSessionId.v1') : null;
     return this.request<{ token: string; livekitUrl: string }>(
-      `/livekit/token/viewer-public/${robotId}`,
+      `/livekit/token/viewer-public/${robotId}${buildQueryString({ roomAccessToken, guestSessionId })}`,
       { method: 'POST', body: '{}' },
     );
+  }
+
+  async verifyRobotAccess(
+    robotId: string,
+    data?: { password?: string; guestSessionId?: string },
+  ) {
+    return this.request<RoomAccessGrant>(`/robots/${robotId}/access/verify`, {
+      method: 'POST',
+      body: JSON.stringify(data ?? {}),
+    });
   }
 
   async moderateRobotUser(

@@ -13,6 +13,7 @@ import {
   BadRequestException,
   UnauthorizedException,
   ForbiddenException,
+  Headers,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { RobotsService } from './robots.service';
@@ -23,6 +24,8 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { LivekitService } from '../livekit/livekit.service';
 import { Role } from '@botparty/shared';
 import type { JwtPayload } from '@botparty/shared';
+import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
 
 @ApiTags('robots')
 @Controller('robots')
@@ -30,6 +33,8 @@ export class RobotsController {
   constructor(
     private readonly robotsService: RobotsService,
     private readonly livekitService: LivekitService,
+    private readonly jwtService: JwtService,
+    private readonly configService: ConfigService,
   ) {}
 
   @Get()
@@ -129,6 +134,21 @@ export class RobotsController {
   @ApiOperation({ summary: 'Regenerate claim token' })
   async regenerateToken(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.robotsService.regenerateClaimToken(id, user.sub);
+  }
+
+  @Post(':id/access/verify')
+  @ApiOperation({ summary: 'Verify room access and issue a temporary room access grant' })
+  async verifyRoomAccess(
+    @Param('id') id: string,
+    @Headers('authorization') authorization?: string,
+    @Body() body?: { password?: string; guestSessionId?: string },
+  ) {
+    return this.robotsService.issueRoomAccessGrant({
+      robotId: id,
+      requesterUserId: this.resolveRequesterId(authorization),
+      password: body?.password,
+      guestSessionId: body?.guestSessionId,
+    });
   }
 
   @Post('claim')
@@ -275,5 +295,21 @@ export class RobotsController {
   @ApiOperation({ summary: 'Get recent temporary robot telemetry (owner only)' })
   async getTelemetry(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.robotsService.getRobotTelemetry(id, user.sub);
+  }
+
+  private resolveRequesterId(authorization?: string): string | null {
+    const token = authorization?.startsWith('Bearer ') ? authorization.slice('Bearer '.length).trim() : '';
+    if (!token) {
+      return null;
+    }
+
+    try {
+      const payload = this.jwtService.verify<JwtPayload>(token, {
+        secret: this.configService.getOrThrow<string>('JWT_SECRET'),
+      });
+      return payload.sub;
+    } catch {
+      return null;
+    }
   }
 }

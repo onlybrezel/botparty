@@ -4,8 +4,7 @@ import { LivekitService } from './livekit.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Public } from '../auth/decorators/public.decorator';
-import { PrismaService } from '../prisma/prisma.service';
-import { type GuestAccess } from '../robots/robots.service';
+import { RobotsService, type GuestAccess } from '../robots/robots.service';
 import type { JwtPayload } from '@botparty/shared';
 import { randomUUID } from 'crypto';
 
@@ -14,7 +13,7 @@ import { randomUUID } from 'crypto';
 export class LivekitController {
   constructor(
     private readonly livekitService: LivekitService,
-    private readonly prisma: PrismaService,
+    private readonly robotsService: RobotsService,
   ) {}
 
   @Post('token/viewer/:robotId')
@@ -25,10 +24,19 @@ export class LivekitController {
     @Param('robotId') robotId: string,
     @CurrentUser() user: JwtPayload,
     @Query('control') control?: string,
+    @Query('roomAccessToken') roomAccessToken?: string,
   ) {
     const access = await this.getVideoAccess(robotId);
     if (access.video === 'DISABLED') {
       throw new ForbiddenException('Video is disabled for this robot');
+    }
+    const allowed = await this.robotsService.validateRoomAccess({
+      robotId,
+      actorId: user.sub,
+      roomAccessToken,
+    });
+    if (!allowed) {
+      throw new ForbiddenException('Room access verification required');
     }
 
     const canControl = control === 'true';
@@ -47,10 +55,23 @@ export class LivekitController {
   @Post('token/viewer-public/:robotId')
   @Public()
   @ApiOperation({ summary: 'Get guest LiveKit viewer token (ACL-aware)' })
-  async getPublicViewerToken(@Param('robotId') robotId: string) {
+  async getPublicViewerToken(
+    @Param('robotId') robotId: string,
+    @Query('guestSessionId') guestSessionId?: string,
+    @Query('roomAccessToken') roomAccessToken?: string,
+  ) {
     const access = await this.getVideoAccess(robotId);
     if (access.video !== 'ALL') {
       throw new ForbiddenException('Guest video access is disabled');
+    }
+    const guestActorId = guestSessionId?.trim() ? `guest:${guestSessionId.trim().toLowerCase()}` : '';
+    const allowed = await this.robotsService.validateRoomAccess({
+      robotId,
+      actorId: guestActorId,
+      roomAccessToken,
+    });
+    if (!allowed) {
+      throw new ForbiddenException('Room access verification required');
     }
 
     const guestId = `guest-${randomUUID()}`;
@@ -68,12 +89,9 @@ export class LivekitController {
   }
 
   private async getVideoAccess(robotId: string): Promise<{ video: GuestAccess }> {
-    const robot = await this.prisma.robot.findUnique({
-      where: { id: robotId },
-      select: { metadata: true },
-    });
+    const robot = await this.robotsService.findById(robotId);
 
-    if (!robot?.metadata || typeof robot.metadata !== 'object' || Array.isArray(robot.metadata)) {
+    if (!robot.metadata || typeof robot.metadata !== 'object' || Array.isArray(robot.metadata)) {
       return { video: 'AUTHENTICATED' };
     }
 
@@ -98,10 +116,7 @@ export class LivekitController {
     @Param('robotId') robotId: string,
     @CurrentUser() user: JwtPayload,
   ) {
-    const robot = await this.prisma.robot.findUnique({
-      where: { id: robotId },
-      select: { id: true, name: true, ownerId: true },
-    });
+    const robot = await this.robotsService.findById(robotId);
 
     if (!robot) {
       throw new ForbiddenException('Robot not found');

@@ -128,6 +128,11 @@ export default function RobotView({ robot }: Props) {
   const [votingForUserId, setVotingForUserId] = useState<string | null>(null);
   const [tabSwitchOnlyWhenEmpty, setTabSwitchOnlyWhenEmpty] = useState(true);
   const [guestSessionId] = useState<string>(() => getOrCreateGuestSessionId());
+  const currentViewerId = userId ? userId : `guest:${guestSessionId}`;
+  const [roomAccessToken, setRoomAccessToken] = useState<string | null>(null);
+  const [accessPasswordInput, setAccessPasswordInput] = useState('');
+  const [accessLoading, setAccessLoading] = useState(false);
+  const [accessError, setAccessError] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -136,6 +141,7 @@ export default function RobotView({ robot }: Props) {
   const lastErrorToastRef = useRef<{ message: string; timestamp: number } | null>(null);
   const activeMotionKeysRef = useRef<Set<string>>(new Set());
   const livekitRefreshInFlightRef = useRef(false);
+  const allowListAccessAttemptedRef = useRef(false);
 
   // ─── Fetch controls ────────────────────────────────────────────────────────
 
@@ -172,9 +178,70 @@ export default function RobotView({ robot }: Props) {
     }
   }, [robot.id]);
 
+  useEffect(() => {
+    if (robot.accessMode === 'OPEN' || robot.accessMode === 'LINK_ONLY') {
+      setRoomAccessToken(null);
+      setAccessError(null);
+      allowListAccessAttemptedRef.current = false;
+      return;
+    }
+
+    try {
+      const stored = window.sessionStorage.getItem(`botparty.room-access.${robot.id}`);
+      setRoomAccessToken(stored);
+      allowListAccessAttemptedRef.current = Boolean(stored);
+    } catch {
+      setRoomAccessToken(null);
+      allowListAccessAttemptedRef.current = false;
+    }
+  }, [robot.accessMode, robot.id]);
+
+  useEffect(() => {
+    if (
+      robot.accessMode !== 'ALLOWED_USERS' ||
+      !accessToken ||
+      roomAccessToken ||
+      accessLoading ||
+      allowListAccessAttemptedRef.current
+    ) {
+      return;
+    }
+
+    let active = true;
+    setAccessLoading(true);
+    allowListAccessAttemptedRef.current = true;
+    api.setToken(accessToken);
+    api.verifyRobotAccess(robot.id, { guestSessionId })
+      .then((grant) => {
+        if (!active) return;
+        setRoomAccessToken(grant.token);
+        setAccessError(null);
+        window.sessionStorage.setItem(`botparty.room-access.${robot.id}`, grant.token);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setAccessError(err instanceof Error ? err.message : 'Access denied');
+      })
+      .finally(() => {
+        if (active) {
+          setAccessLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [accessLoading, accessToken, guestSessionId, robot.accessMode, robot.id, roomAccessToken]);
+
   // ─── Fetch LiveKit token (auth required) ──────────────────────────────────
 
   const refreshViewerToken = useCallback(async (forceRemount = false) => {
+    if ((robot.accessMode === 'PASSWORD' || robot.accessMode === 'ALLOWED_USERS') && !roomAccessToken) {
+      setLivekitCreds(null);
+      setVideoState('idle');
+      return;
+    }
+
     if (livekitRefreshInFlightRef.current) {
       return;
     }
@@ -211,7 +278,7 @@ export default function RobotView({ robot }: Props) {
     } finally {
       livekitRefreshInFlightRef.current = false;
     }
-  }, [accessToken, robot.id]);
+  }, [accessToken, robot.accessMode, robot.id, roomAccessToken]);
 
   useEffect(() => {
     void refreshViewerToken(false);
@@ -241,6 +308,12 @@ export default function RobotView({ robot }: Props) {
   // ─── WebSocket ────────────────────────────────────────────────────────────
 
   useEffect(() => {
+    if ((robot.accessMode === 'PASSWORD' || robot.accessMode === 'ALLOWED_USERS') && !roomAccessToken) {
+      setConnected(false);
+      wsRef.current?.close();
+      return;
+    }
+
     let active = true;
     let reconnectDelayMs = 1000;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -263,6 +336,7 @@ export default function RobotView({ robot }: Props) {
               userId: userId ?? undefined,
               username: userId ? (username ?? undefined) : undefined,
               guestSessionId: userId ? undefined : guestSessionId || undefined,
+              roomAccessToken: roomAccessToken ?? undefined,
             },
           }),
         );
@@ -292,7 +366,7 @@ export default function RobotView({ robot }: Props) {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       wsRef.current?.close();
     };
-  }, [guestSessionId, robot.id, userId, username]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [guestSessionId, robot.accessMode, robot.id, roomAccessToken, userId, username]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleWsEvent = useCallback((event: string, data: Record<string, unknown>) => {
     switch (event) {
@@ -326,6 +400,37 @@ export default function RobotView({ robot }: Props) {
       case 'queue:update':
         setQueue((data.queue as QueueEntry[]) ?? []);
         break;
+      case 'mod:timeout':
+      case 'mod:ban':
+      case 'mod:kick': {
+        const targetUserId = typeof data.userId === 'string' ? data.userId : null;
+        if (!targetUserId || targetUserId !== currentViewerId) {
+          break;
+        }
+
+        const action = event === 'mod:ban' ? 'BAN' : event === 'mod:kick' ? 'KICK' : 'TIMEOUT';
+        const expiresAt =
+          typeof data.expiresAt === 'string' && data.expiresAt.length > 0 ? data.expiresAt : null;
+        const until = expiresAt ? ` Until ${new Date(expiresAt).toLocaleTimeString()}.` : '';
+        setChatRestriction(
+          action === 'BAN'
+            ? 'You are banned from chat and control in this room.'
+            : action === 'KICK'
+              ? 'You were removed from the current turn in this room.'
+              : `You are temporarily restricted in this room.${until}`,
+        );
+        break;
+      }
+      case 'mod:unban': {
+        const targetUserId = typeof data.userId === 'string' ? data.userId : null;
+        if (!targetUserId || targetUserId !== currentViewerId) {
+          break;
+        }
+
+        setChatRestriction(null);
+        pushToast('Restriction removed. You can chat again.', 'success', 2200);
+        break;
+      }
       case 'robot:status': {
         const status = typeof data.status === 'string' ? data.status : robot.status;
         setRobotStatus(status as RobotPublic['status']);
@@ -355,7 +460,7 @@ export default function RobotView({ robot }: Props) {
         break;
       }
     }
-  }, []);
+  }, [currentViewerId]);
 
   // ─── Controls ─────────────────────────────────────────────────────────────
 
@@ -525,6 +630,25 @@ export default function RobotView({ robot }: Props) {
     setChatInput('');
   }, [chatInput, robot.id]);
 
+  const requestRoomAccess = useCallback(async () => {
+    setAccessLoading(true);
+    setAccessError(null);
+    try {
+      api.setToken(accessToken);
+      const grant = await api.verifyRobotAccess(robot.id, {
+        password: accessPasswordInput.trim() || undefined,
+        guestSessionId,
+      });
+      setRoomAccessToken(grant.token);
+      window.sessionStorage.setItem(`botparty.room-access.${robot.id}`, grant.token);
+      pushToast('Room access granted.', 'success', 1800);
+    } catch (err) {
+      setAccessError(err instanceof Error ? err.message : 'Access denied');
+    } finally {
+      setAccessLoading(false);
+    }
+  }, [accessPasswordInput, accessToken, guestSessionId, robot.id]);
+
   const moderateChatUser = useCallback(
     async (targetUserId: string, action: 'TIMEOUT' | 'BAN' | 'UNBAN') => {
       if (!canModerate || !accessToken) return;
@@ -639,6 +763,11 @@ export default function RobotView({ robot }: Props) {
   const queueEnabled = robot.queueMode !== 'DISABLED';
   const myQueuePosition = userId ? queue.findIndex((entry) => entry.userId === userId) + 1 : 0;
   const isMyTurn = !queueEnabled || (myQueuePosition > 0 && myQueuePosition === 1);
+  const canUseButton = useCallback((button: ControlButton) => {
+    if (button.access === 'EVERYONE') return true;
+    if (button.access === 'QUEUE_TURN') return isMyTurn;
+    return canModerate;
+  }, [canModerate, isMyTurn]);
 
   useEffect(() => {
     if (!userId) {
@@ -670,7 +799,55 @@ export default function RobotView({ robot }: Props) {
         <div className="lg:col-span-2 space-y-4">
           {/* Video */}
           <div className="relative aspect-video overflow-hidden rounded-xl border border-[var(--border)] bg-black">
-            {isOnline && livekitCreds ? (
+            {(robot.accessMode === 'PASSWORD' || robot.accessMode === 'ALLOWED_USERS') && !roomAccessToken ? (
+              <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center text-[var(--muted-foreground)]">
+                <div className="rounded-xl border border-[var(--border)] bg-[var(--muted)] p-3">
+                  <Video className="h-7 w-7 text-sky-300" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-[var(--foreground)]">
+                    {robot.accessMode === 'PASSWORD'
+                      ? 'This room is password protected.'
+                      : 'This room is allow-list only.'}
+                  </p>
+                  <p className="mt-1 text-sm">
+                    {robot.accessMode === 'PASSWORD'
+                      ? 'Enter the room password to unlock video, chat, and controls.'
+                      : accessToken
+                        ? 'Verifying your room access...'
+                        : 'Sign in with an allowed account to enter this room.'}
+                  </p>
+                </div>
+                {robot.accessMode === 'PASSWORD' && (
+                  <div className="flex w-full max-w-sm gap-2">
+                    <input
+                      type="password"
+                      value={accessPasswordInput}
+                      onChange={(event) => setAccessPasswordInput(event.target.value)}
+                      className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm text-[var(--foreground)]"
+                      placeholder="Room password"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void requestRoomAccess()}
+                      disabled={accessLoading}
+                      className="rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+                    >
+                      {accessLoading ? 'Checking...' : 'Unlock'}
+                    </button>
+                  </div>
+                )}
+                {robot.accessMode === 'ALLOWED_USERS' && !accessToken && (
+                  <Link
+                    href="/login"
+                    className="rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-medium text-white transition hover:bg-[var(--primary-hover)]"
+                  >
+                    Sign in
+                  </Link>
+                )}
+                {accessError && <p className="text-xs text-red-300">{accessError}</p>}
+              </div>
+            ) : isOnline && livekitCreds ? (
               <LiveKitPlayer
                 key={`${robot.id}-${livekitVersion}`}
                 token={livekitCreds.token}
@@ -781,6 +958,7 @@ export default function RobotView({ robot }: Props) {
                       hotKey={k}
                       isDown={isDown}
                       isCrowd={isCrowdActive(cmd)}
+                      disabled={Boolean(btn) && !canUseButton(btn)}
                       onPress={() => sendCommand(cmd, btn?.cooldownMs)}
                     />
                   );
@@ -799,6 +977,7 @@ export default function RobotView({ robot }: Props) {
                       hotKey={k}
                       isDown={isDown}
                       isCrowd={isCrowdActive(cmd)}
+                      disabled={Boolean(btn) && !canUseButton(btn)}
                       onPress={() => sendCommand(cmd, btn?.cooldownMs)}
                     />
                   );
@@ -811,6 +990,7 @@ export default function RobotView({ robot }: Props) {
               <div className="flex flex-wrap gap-2">
                 {buttons
                   .filter((b) => !['w', 'a', 's', 'd'].includes(b.hotKey ?? ''))
+                  .filter((b) => canUseButton(b))
                   .map((btn) => (
                     <button
                       key={btn.id}
@@ -1120,20 +1300,25 @@ function ControlKey({
   hotKey,
   isDown,
   isCrowd,
+  disabled,
   onPress,
 }: {
   label: string;
   hotKey: string;
   isDown: boolean;
   isCrowd: boolean;
+  disabled?: boolean;
   onPress: () => void;
 }) {
   return (
     <button
-      onMouseDown={onPress}
+      onMouseDown={disabled ? undefined : onPress}
       title={hotKey.toUpperCase()}
+      disabled={disabled}
       className={`flex h-11 w-11 items-center justify-center rounded-lg border text-sm font-bold transition select-none ${
-        isDown
+        disabled
+          ? 'cursor-not-allowed border-[var(--border)] bg-[var(--background)] text-[var(--muted-foreground)] opacity-50'
+          : isDown
           ? 'border-[var(--primary)] bg-[var(--primary)] text-white scale-95'
           : isCrowd
           ? 'border-amber-500 bg-amber-500/20 text-amber-300'

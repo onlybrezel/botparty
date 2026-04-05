@@ -7,7 +7,7 @@ import {
   MessageBody,
   ConnectedSocket,
 } from '@nestjs/websockets';
-import { Logger } from '@nestjs/common';
+import { Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Server, WebSocket } from 'ws';
 import { WS_EVENTS, LIMITS } from '@botparty/shared';
 import { RobotsService } from '../robots/robots.service';
@@ -15,6 +15,7 @@ import { SessionsService } from '../sessions/sessions.service';
 import { QueueService } from '../queue/queue.service';
 import { RedisService } from '../redis/redis.service';
 import { ModerationService } from '../moderation/moderation.service';
+import Redis from 'ioredis';
 
 interface WsClient extends WebSocket {
   id: string;
@@ -46,11 +47,14 @@ interface PresenceRecord {
     origin: process.env.CORS_ORIGIN?.split(',') ?? ['http://localhost:3000'],
   },
 })
-export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class BotGateway
+  implements OnGatewayConnection, OnGatewayDisconnect, OnModuleInit, OnModuleDestroy
+{
   @WebSocketServer()
   server!: Server;
 
   private readonly logger = new Logger(BotGateway.name);
+  private subscriber: Redis | null = null;
 
   /** All connected sockets: clientId → WsClient */
   private readonly clients = new Map<string, WsClient>();
@@ -71,6 +75,23 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly redis: RedisService,
     private readonly moderationService: ModerationService,
   ) {}
+
+  async onModuleInit() {
+    this.subscriber = this.redis.duplicate();
+
+    this.subscriber.on('pmessage', (_pattern, channel, message) => {
+      void this.handleRedisMessage(channel, message);
+    });
+
+    await this.subscriber.psubscribe('queue:*', 'ws:moderation:*');
+  }
+
+  async onModuleDestroy() {
+    if (this.subscriber) {
+      await this.subscriber.quit();
+      this.subscriber = null;
+    }
+  }
 
   handleConnection(client: WsClient) {
     client.id = crypto.randomUUID();
@@ -100,7 +121,14 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('room:join')
   async handleRoomJoin(
     @ConnectedSocket() client: WsClient,
-    @MessageBody() data: { robotId: string; userId?: string; username?: string; guestSessionId?: string },
+    @MessageBody()
+    data: {
+      robotId: string;
+      userId?: string;
+      username?: string;
+      guestSessionId?: string;
+      roomAccessToken?: string;
+    },
   ) {
     if (client.watchingRobotId) {
       this._leaveRoom(client);
@@ -122,6 +150,20 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
     } else {
       client.userId = authUserId;
       client.username = data.username?.trim() || `User-${authUserId!.slice(0, 6)}`;
+    }
+
+    const allowed = await this.robotsService.validateRoomAccess({
+      robotId: data.robotId,
+      actorId: client.userId,
+      roomAccessToken: data.roomAccessToken,
+    });
+    if (!allowed) {
+      client.watchingRobotId = undefined;
+      client.userId = undefined;
+      client.username = undefined;
+      client.isGuest = undefined;
+      client.send(JSON.stringify({ event: 'error', data: { message: 'Room access verification required' } }));
+      return;
     }
 
     if (!this.rooms.has(data.robotId)) this.rooms.set(data.robotId, new Set());
@@ -147,6 +189,20 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
     // Send full presence snapshot to the joining client
     const presenceList = Array.from(this.presence.get(data.robotId)?.values() ?? []);
     client.send(JSON.stringify({ event: WS_EVENTS.PRESENCE_UPDATE, data: { viewers: presenceList } }));
+
+    if (client.userId) {
+      const restriction = await this.moderationService.getActiveRestriction(data.robotId, client.userId);
+      if (restriction) {
+        const action = typeof restriction.action === 'string' ? restriction.action : 'TIMEOUT';
+        const event =
+          action === 'BAN'
+            ? WS_EVENTS.MOD_BAN
+            : action === 'KICK'
+              ? WS_EVENTS.MOD_KICK
+              : WS_EVENTS.MOD_TIMEOUT;
+        client.send(JSON.stringify({ event, data: restriction }));
+      }
+    }
 
     return { event: 'room:join', data: { ok: true, viewerCount: this.rooms.get(data.robotId)?.size ?? 0 } };
   }
@@ -232,6 +288,11 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody()
     data: { robotId: string; command: string; value?: unknown; timestamp: number },
   ) {
+    if (client.watchingRobotId !== data.robotId) {
+      client.send(JSON.stringify({ event: 'error', data: { message: 'Join the room before sending controls' } }));
+      return;
+    }
+
     const robot = await this.robotsService.findById(data.robotId);
 
     if (robot.queueMode !== 'DISABLED') {
@@ -354,6 +415,11 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: WsClient,
     @MessageBody() data: { robotId: string; content: string },
   ) {
+    if (client.watchingRobotId !== data.robotId) {
+      client.send(JSON.stringify({ event: 'error', data: { message: 'Join the room before chatting' } }));
+      return;
+    }
+
     const access = await this.robotsService.getAccessPolicy(data.robotId);
     if (access.chat === 'DISABLED') {
       client.send(
@@ -502,5 +568,59 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     client.watchingRobotId = undefined;
   }
-}
 
+  private async handleRedisMessage(channel: string, message: string) {
+    if (channel.startsWith('queue:')) {
+      const robotId = channel.slice('queue:'.length);
+      if (!robotId) {
+        return;
+      }
+
+      try {
+        const queue = await this.queueService.getQueue(robotId);
+        this._broadcastToRoomLocally(robotId, WS_EVENTS.QUEUE_UPDATE, { queue });
+      } catch (err) {
+        this.logger.warn(`Failed to broadcast queue update for ${robotId}: ${(err as Error).message}`);
+      }
+      return;
+    }
+
+    if (channel.startsWith('ws:moderation:')) {
+      const robotId = channel.slice('ws:moderation:'.length);
+      if (!robotId) {
+        return;
+      }
+
+      try {
+        const payload = JSON.parse(message) as { event?: string; data?: unknown };
+        if (!payload.event) {
+          return;
+        }
+        this._broadcastToRoomLocally(robotId, payload.event, payload.data ?? {});
+      } catch (err) {
+        this.logger.warn(`Failed to process moderation event for ${robotId}: ${(err as Error).message}`);
+      }
+    }
+  }
+
+  private _broadcastToRoomLocally(
+    robotId: string,
+    event: string,
+    data: unknown,
+    excludeClientId?: string,
+  ) {
+    const message = JSON.stringify({ event, data });
+    const room = this.rooms.get(robotId);
+    if (!room) {
+      return;
+    }
+
+    for (const clientId of room) {
+      if (clientId === excludeClientId) continue;
+      const ws = this.clients.get(clientId);
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(message);
+      }
+    }
+  }
+}

@@ -54,6 +54,7 @@ type RobotFormState = {
   maxViewers: number;
   maxControllers: number;
   tags: string;
+  accessPassword: string;
 };
 
 const DEFAULT_CREATE_FORM: RobotFormState = {
@@ -71,6 +72,7 @@ const DEFAULT_CREATE_FORM: RobotFormState = {
   maxViewers: 1000,
   maxControllers: 10,
   tags: '',
+  accessPassword: '',
 };
 
 const LOCAL_SETTINGS_KEY = 'botparty.settings.v1';
@@ -130,6 +132,7 @@ function toUpdatePayload(form: RobotFormState) {
       .split(',')
       .map((tag) => tag.trim())
       .filter(Boolean),
+    accessPassword: form.accessPassword.trim() || undefined,
   };
 }
 
@@ -153,6 +156,7 @@ function formFromRobot(robot: RobotManaged): RobotFormState {
     maxViewers: robot.maxViewers,
     maxControllers: robot.maxControllers,
     tags: robot.tags.join(', '),
+    accessPassword: '',
   };
 }
 
@@ -742,6 +746,13 @@ export default function DashboardPage() {
               value={createForm.tags}
               onChange={(event) => setCreateForm((prev) => ({ ...prev, tags: event.target.value }))}
             />
+            <input
+              type="password"
+              className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+              placeholder="Optional room password"
+              value={createForm.accessPassword}
+              onChange={(event) => setCreateForm((prev) => ({ ...prev, accessPassword: event.target.value }))}
+            />
           </div>
 
           <button
@@ -916,6 +927,15 @@ export default function DashboardPage() {
                       <option value="LINK_ONLY">Room Access: Link only</option>
                       <option value="ALLOWED_USERS">Room Access: Allow list only</option>
                     </select>
+                    <input
+                      type="password"
+                      className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                      value={editForm.accessPassword}
+                      onChange={(event) =>
+                        setEditForm((prev) => ({ ...prev, accessPassword: event.target.value }))
+                      }
+                      placeholder="Room password (only used in password mode)"
+                    />
                     <select
                       className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                       value={editForm.queueMode}

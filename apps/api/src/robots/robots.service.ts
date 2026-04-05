@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { createRobotSchema, updateRobotSchema } from '@botparty/shared';
 import { randomBytes } from 'crypto';
+import { hash, verify } from 'argon2';
 import type { z } from 'zod';
 import type { Prisma } from '@botparty/prisma';
 
@@ -69,6 +70,11 @@ export interface PublicRobotOverview {
   }>;
 }
 
+export interface RoomAccessGrant {
+  token: string;
+  expiresAt: string;
+}
+
 export type RobotActionType =
   | 'restart_video'
   | 'restart_control'
@@ -110,15 +116,20 @@ export class RobotsService {
   async create(ownerId: string, input: z.infer<typeof createRobotSchema>) {
     const data = createRobotSchema.parse(input);
     const metadata = this.mergeMetadata(null, data.acl, data.stream);
-    const { acl: _acl, stream: _stream, ...baseData } = data;
+    const { acl: _acl, stream: _stream, accessPassword, ...baseData } = data;
 
     const slug = this.generateSlug(data.name);
     const streamKey = randomBytes(32).toString('hex');
     const claimToken = randomBytes(32).toString('hex');
+    const passwordHash =
+      data.accessMode === 'PASSWORD' && accessPassword
+        ? await hash(accessPassword, { type: 2 })
+        : null;
 
     const robot = await this.prisma.robot.create({
       data: {
         ...baseData,
+        accessPassword: passwordHash,
         metadata: metadata as Prisma.InputJsonValue,
         slug,
         streamKey,
@@ -133,7 +144,7 @@ export class RobotsService {
     });
 
     this.logger.log(`Robot created: ${robot.name} (${robot.slug}) by ${ownerId}`);
-    return robot;
+    return this.sanitizeManagedRobot(robot);
   }
 
   async findAll(filters?: { visibility?: string; status?: string; tag?: string; q?: string; sort?: string }) {
@@ -192,6 +203,7 @@ export class RobotsService {
       },
     });
     if (!robot) throw new NotFoundException('Robot not found');
+    if (robot.visibility === 'PRIVATE') throw new NotFoundException('Robot not found');
     return robot;
   }
 
@@ -211,10 +223,11 @@ export class RobotsService {
   async findByOwner(ownerId: string) {
     await this.refreshStaleStatus();
 
-    return this.prisma.robot.findMany({
+    const robots = await this.prisma.robot.findMany({
       where: { ownerId },
       orderBy: { createdAt: 'desc' },
     });
+    return robots.map((robot) => this.sanitizeManagedRobot(robot));
   }
 
   async update(id: string, ownerId: string, input: z.infer<typeof updateRobotSchema>) {
@@ -225,16 +238,25 @@ export class RobotsService {
 
     const data = updateRobotSchema.parse(input);
     const metadata = this.mergeMetadata(robot.metadata, data.acl, data.stream);
-    const { acl: _acl, stream: _stream, ...baseData } = data;
+    const { acl: _acl, stream: _stream, accessPassword, ...baseData } = data;
     this.policyCache.delete(id);
+    const nextAccessMode = data.accessMode ?? robot.accessMode;
+    const nextAccessPassword =
+      nextAccessMode === 'PASSWORD'
+        ? accessPassword
+          ? await hash(accessPassword, { type: 2 })
+          : robot.accessPassword
+        : null;
 
-    return this.prisma.robot.update({
+    const updated = await this.prisma.robot.update({
       where: { id },
       data: {
         ...baseData,
+        accessPassword: nextAccessPassword,
         metadata: metadata as Prisma.InputJsonValue,
       },
     });
+    return this.sanitizeManagedRobot(updated);
   }
 
   async updateByStaff(id: string, input: z.infer<typeof updateRobotSchema>) {
@@ -247,16 +269,29 @@ export class RobotsService {
     });
 
     const metadata = this.mergeMetadata(current?.metadata, data.acl, data.stream);
-    const { acl: _acl, stream: _stream, ...baseData } = data;
+    const { acl: _acl, stream: _stream, accessPassword, ...baseData } = data;
     this.policyCache.delete(id);
+    const currentRobot = await this.prisma.robot.findUnique({
+      where: { id },
+      select: { accessMode: true, accessPassword: true },
+    });
+    const nextAccessMode = data.accessMode ?? currentRobot?.accessMode ?? 'OPEN';
+    const nextAccessPassword =
+      nextAccessMode === 'PASSWORD'
+        ? accessPassword
+          ? await hash(accessPassword, { type: 2 })
+          : currentRobot?.accessPassword ?? null
+        : null;
 
-    return this.prisma.robot.update({
+    const updated = await this.prisma.robot.update({
       where: { id },
       data: {
         ...baseData,
+        accessPassword: nextAccessPassword,
         metadata: metadata as Prisma.InputJsonValue,
       },
     });
+    return this.sanitizeManagedRobot(updated);
   }
 
   async delete(id: string, ownerId: string) {
@@ -706,6 +741,121 @@ export class RobotsService {
     };
   }
 
+  async issueRoomAccessGrant(input: {
+    robotId: string;
+    requesterUserId: string | null;
+    guestSessionId?: string;
+    password?: string;
+  }): Promise<RoomAccessGrant> {
+    const robot = await this.prisma.robot.findUnique({
+      where: { id: input.robotId },
+      select: {
+        id: true,
+        ownerId: true,
+        visibility: true,
+        accessMode: true,
+        accessPassword: true,
+        allowedUsers: {
+          where: input.requesterUserId ? { userId: input.requesterUserId } : { userId: '__none__' },
+          select: { userId: true },
+        },
+      },
+    });
+
+    if (!robot) {
+      throw new NotFoundException('Robot not found');
+    }
+
+    const actorId = input.requesterUserId ?? this.buildGuestActorId(input.guestSessionId);
+    const isOwner = input.requesterUserId === robot.ownerId;
+    const isAllowedUser =
+      Boolean(input.requesterUserId) && (isOwner || robot.allowedUsers.some((entry) => entry.userId === input.requesterUserId));
+
+    if (robot.visibility === 'PRIVATE' && !isOwner) {
+      throw new ForbiddenException('This robot is private');
+    }
+
+    if (robot.accessMode === 'ALLOWED_USERS' && !isAllowedUser) {
+      throw new ForbiddenException('You are not on the allow list for this robot');
+    }
+
+    if (robot.accessMode === 'PASSWORD') {
+      const password = input.password?.trim() ?? '';
+      if (!password) {
+        throw new ForbiddenException('Password required');
+      }
+
+      const matches = robot.accessPassword
+        ? await this.verifyStoredPassword(password, robot.accessPassword)
+        : false;
+
+      if (!matches) {
+        throw new ForbiddenException('Invalid room password');
+      }
+    }
+
+    const token = randomBytes(24).toString('hex');
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+
+    await this.redis.set(
+      this.roomAccessKey(token),
+      JSON.stringify({
+        robotId: robot.id,
+        actorId,
+      }),
+      'EX',
+      60 * 60,
+    );
+
+    return {
+      token,
+      expiresAt: expiresAt.toISOString(),
+    };
+  }
+
+  async validateRoomAccess(input: {
+    robotId: string;
+    actorId: string;
+    roomAccessToken?: string;
+  }): Promise<boolean> {
+    const robot = await this.prisma.robot.findUnique({
+      where: { id: input.robotId },
+      select: {
+        visibility: true,
+        accessMode: true,
+      },
+    });
+
+    if (!robot) {
+      return false;
+    }
+
+    const requiresGrant =
+      robot.visibility === 'PRIVATE' ||
+      robot.accessMode === 'PASSWORD' ||
+      robot.accessMode === 'ALLOWED_USERS';
+
+    if (!requiresGrant) {
+      return true;
+    }
+
+    if (!input.roomAccessToken) {
+      return false;
+    }
+
+    const raw = await this.redis.get(this.roomAccessKey(input.roomAccessToken));
+    if (!raw) {
+      return false;
+    }
+
+    try {
+      const parsed = JSON.parse(raw) as { robotId?: string; actorId?: string };
+      return parsed.robotId === input.robotId && parsed.actorId === input.actorId;
+    } catch {
+      return false;
+    }
+  }
+
   async setViewerCount(robotId: string, viewerCount: number) {
     await this.prisma.robot.update({
       where: { id: robotId },
@@ -809,5 +959,32 @@ export class RobotsService {
       return value;
     }
     return 'AUTHENTICATED';
+  }
+
+  private buildGuestActorId(guestSessionId?: string): string {
+    const raw = guestSessionId?.trim().toLowerCase() ?? '';
+    if (/^[a-z0-9_-]{6,64}$/.test(raw)) {
+      return `guest:${raw}`;
+    }
+    throw new ForbiddenException('Valid guest session required');
+  }
+
+  private roomAccessKey(token: string): string {
+    return `robot:room-access:${token}`;
+  }
+
+  private async verifyStoredPassword(password: string, stored: string): Promise<boolean> {
+    try {
+      return await verify(stored, password);
+    } catch {
+      return stored === password;
+    }
+  }
+
+  private sanitizeManagedRobot<T extends { accessPassword?: string | null }>(robot: T): T {
+    return {
+      ...robot,
+      accessPassword: null,
+    };
   }
 }

@@ -110,7 +110,7 @@ export class ModerationService {
       });
       // Publish unban event for the gateway to react to
       await this.redis.publish(
-        `ws:room:${robotId}`,
+        `ws:moderation:${robotId}`,
         JSON.stringify({
           event: WS_EVENTS.MOD_UNBAN,
           data: { userId: dto.targetUserId, robotId },
@@ -140,7 +140,7 @@ export class ModerationService {
           : WS_EVENTS.MOD_TIMEOUT;
 
     await this.redis.publish(
-      `ws:room:${robotId}`,
+      `ws:moderation:${robotId}`,
       JSON.stringify({
         event: wsEvent,
         data: {
