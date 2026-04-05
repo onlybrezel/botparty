@@ -32,7 +32,9 @@ export class ControlsService {
   }
 
   /** Returns all buttons (including disabled) for the robot owner / admins. */
-  async getAllButtons(robotId: string) {
+  async getAllButtons(robotId: string, requesterId: string) {
+    await this._assertOwner(robotId, requesterId);
+
     return this.prisma.controlButton.findMany({
       where: { robotId },
       orderBy: { position: 'asc' },

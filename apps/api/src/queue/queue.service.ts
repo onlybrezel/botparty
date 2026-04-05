@@ -1,4 +1,10 @@
-import { Injectable, ConflictException, ForbiddenException, Logger, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  ConflictException,
+  ForbiddenException,
+  Logger,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { RobotsService } from '../robots/robots.service';
@@ -50,6 +56,15 @@ export class QueueService {
   }
 
   async leave(robotId: string, userId: string) {
+    const existing = await this.prisma.queueEntry.findUnique({
+      where: { robotId_userId: { robotId, userId } },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      return { removed: false };
+    }
+
     await this.prisma.queueEntry.delete({
       where: { robotId_userId: { robotId, userId } },
     });
@@ -73,6 +88,7 @@ export class QueueService {
     }
 
     await this.redis.publish(`queue:${robotId}`, JSON.stringify({ type: 'leave', userId }));
+    return { removed: true };
   }
 
   async getQueue(robotId: string) {

@@ -49,6 +49,12 @@ export class RobotsController {
     return this.robotsService.getFeatured();
   }
 
+  @Get('overview')
+  @ApiOperation({ summary: 'Get public robot overview for discovery surfaces' })
+  async getOverview() {
+    return this.robotsService.getPublicOverview();
+  }
+
   @Get('my')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()

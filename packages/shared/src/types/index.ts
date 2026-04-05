@@ -72,6 +72,45 @@ export interface RobotPublic {
   createdAt: string;
 }
 
+export interface PublicRobotOverview {
+  totals: {
+    publicRobots: number;
+    liveRobots: number;
+    featuredRobots: number;
+    totalViewers: number;
+    queueEntries: number;
+  };
+  statusBreakdown: {
+    online: number;
+    busy: number;
+    offline: number;
+    maintenance: number;
+  };
+  featured: Array<{
+    id: string;
+    name: string;
+    slug: string;
+    status: RobotStatus;
+    viewerCount: number;
+    tags: string[];
+    owner: Pick<UserPublic, 'username' | 'displayName'>;
+  }>;
+  liveNow: Array<{
+    id: string;
+    name: string;
+    slug: string;
+    status: RobotStatus;
+    viewerCount: number;
+    queueMode: QueueMode;
+    tags: string[];
+    owner: Pick<UserPublic, 'username' | 'displayName'>;
+  }>;
+  topTags: Array<{
+    tag: string;
+    count: number;
+  }>;
+}
+
 // ─── Token Payloads ──────────────────────────────────
 export interface JwtPayload {
   sub: string;

@@ -17,12 +17,27 @@ import {
   Eye,
   EyeOff,
 } from 'lucide-react';
-import { api, type RobotManaged, type RobotTelemetryPoint } from '@/lib/api';
+import {
+  api,
+  type ControlButtonRecord,
+  type RobotManaged,
+  type RobotTelemetryPoint,
+} from '@/lib/api';
 import { useAuth } from '@/lib/store';
 import { LiveKitPlayer } from '@/components/livekit-player';
 import { pushToast } from '@/lib/toast';
 
 type RemoteActionType = 'restart_video' | 'restart_control' | 'restart_chat' | 'set_log_stream';
+type ControlAccess = 'EVERYONE' | 'QUEUE_TURN' | 'MODERATOR' | 'OWNER';
+
+type ControlButtonDraft = {
+  label: string;
+  command: string;
+  hotKey: string;
+  cooldownMs: string;
+  access: ControlAccess;
+  color: string;
+};
 
 type RobotFormState = {
   name: string;
@@ -59,6 +74,14 @@ const DEFAULT_CREATE_FORM: RobotFormState = {
 };
 
 const LOCAL_SETTINGS_KEY = 'botparty.settings.v1';
+const DEFAULT_CONTROL_DRAFT: ControlButtonDraft = {
+  label: '',
+  command: '',
+  hotKey: '',
+  cooldownMs: '200',
+  access: 'QUEUE_TURN',
+  color: '',
+};
 
 const accessModeOptions: Array<{
   value: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
@@ -72,6 +95,13 @@ const accessModeOptions: Array<{
     description: 'Requires login',
   },
   { value: 'DISABLED', title: 'Disabled', description: 'Function is disabled' },
+];
+
+const controlAccessOptions: Array<{ value: ControlAccess; label: string }> = [
+  { value: 'EVERYONE', label: 'Everyone' },
+  { value: 'QUEUE_TURN', label: 'Current turn' },
+  { value: 'MODERATOR', label: 'Moderator' },
+  { value: 'OWNER', label: 'Owner' },
 ];
 
 function toUpdatePayload(form: RobotFormState) {
@@ -159,6 +189,11 @@ export default function DashboardPage() {
   const [preview, setPreview] = useState<{ token: string; url: string } | null>(null);
   const [previewVersion, setPreviewVersion] = useState(0);
   const [showToken, setShowToken] = useState(false);
+  const [controlButtons, setControlButtons] = useState<ControlButtonRecord[]>([]);
+  const [controlsLoading, setControlsLoading] = useState(false);
+  const [controlDraft, setControlDraft] = useState<ControlButtonDraft>(DEFAULT_CONTROL_DRAFT);
+  const [creatingControl, setCreatingControl] = useState(false);
+  const [controlOp, setControlOp] = useState<string | null>(null);
   const previousPendingActionTypesRef = useRef<RemoteActionType[]>([]);
   const previewRefreshInFlightRef = useRef(false);
 
@@ -201,7 +236,41 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!selectedRobot) return;
     setEditForm(formFromRobot(selectedRobot));
+    setControlDraft(DEFAULT_CONTROL_DRAFT);
   }, [selectedRobot]);
+
+  useEffect(() => {
+    if (!accessToken || !selectedRobot) {
+      setControlButtons([]);
+      return;
+    }
+
+    let active = true;
+
+    const loadControls = async () => {
+      setControlsLoading(true);
+      try {
+        api.setToken(accessToken);
+        const buttons = await api.getAllControls(selectedRobot.id);
+        if (active) {
+          setControlButtons(buttons.sort((a, b) => a.position - b.position));
+        }
+      } catch {
+        if (active) {
+          setControlButtons([]);
+        }
+      } finally {
+        if (active) {
+          setControlsLoading(false);
+        }
+      }
+    };
+
+    void loadControls();
+    return () => {
+      active = false;
+    };
+  }, [selectedRobot?.id, accessToken]);
 
   const refreshPreview = useCallback(async (forceRemount = false) => {
     if (!selectedRobot || !accessToken || selectedRobot.status !== 'ONLINE') {
@@ -523,6 +592,107 @@ export default function DashboardPage() {
       setError(err instanceof Error ? err.message : 'Failed to load logs');
     } finally {
       setLogsLoading(false);
+    }
+  };
+
+  const handleCreateControl = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!accessToken || !selectedRobot) return;
+
+    setCreatingControl(true);
+    setError(null);
+    try {
+      api.setToken(accessToken);
+      const next = await api.createControl(selectedRobot.id, {
+        label: controlDraft.label.trim(),
+        command: controlDraft.command.trim(),
+        hotKey: controlDraft.hotKey.trim() || undefined,
+        cooldownMs: Number(controlDraft.cooldownMs),
+        access: controlDraft.access,
+        color: controlDraft.color.trim() || undefined,
+      });
+
+      setControlButtons((prev) =>
+        [...prev, next].sort((a, b) => a.position - b.position),
+      );
+      setControlDraft(DEFAULT_CONTROL_DRAFT);
+      pushToast('Control button created.', 'success', 2500);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to create control button';
+      setError(message);
+      pushToast(message, 'error', 3200);
+    } finally {
+      setCreatingControl(false);
+    }
+  };
+
+  const handleToggleControl = async (button: ControlButtonRecord) => {
+    if (!accessToken) return;
+
+    setControlOp(button.id);
+    try {
+      api.setToken(accessToken);
+      const updated = await api.updateControl(button.id, { isEnabled: !button.isEnabled });
+      setControlButtons((prev) =>
+        prev.map((entry) => (entry.id === button.id ? updated : entry)),
+      );
+    } catch (err) {
+      pushToast(err instanceof Error ? err.message : 'Failed to update control.', 'error');
+    } finally {
+      setControlOp(null);
+    }
+  };
+
+  const handleDeleteControl = async (button: ControlButtonRecord) => {
+    if (!accessToken || !selectedRobot) return;
+    if (!window.confirm(`Delete control button ${button.label}?`)) return;
+
+    setControlOp(button.id);
+    try {
+      api.setToken(accessToken);
+      await api.deleteControl(button.id);
+      const nextButtons = controlButtons
+        .filter((entry) => entry.id !== button.id)
+        .map((entry, index) => ({ ...entry, position: index }));
+      setControlButtons(nextButtons);
+      await api.reorderControls(
+        selectedRobot.id,
+        nextButtons.map((entry, index) => ({ id: entry.id, position: index })),
+      );
+      pushToast('Control button deleted.', 'success', 2200);
+    } catch (err) {
+      pushToast(err instanceof Error ? err.message : 'Failed to delete control.', 'error');
+    } finally {
+      setControlOp(null);
+    }
+  };
+
+  const moveControl = async (buttonId: string, direction: -1 | 1) => {
+    if (!accessToken || !selectedRobot) return;
+
+    const currentIndex = controlButtons.findIndex((entry) => entry.id === buttonId);
+    const targetIndex = currentIndex + direction;
+    if (currentIndex < 0 || targetIndex < 0 || targetIndex >= controlButtons.length) {
+      return;
+    }
+
+    const nextButtons = [...controlButtons];
+    const [moved] = nextButtons.splice(currentIndex, 1);
+    nextButtons.splice(targetIndex, 0, moved);
+    const normalized = nextButtons.map((entry, index) => ({ ...entry, position: index }));
+
+    setControlButtons(normalized);
+    setControlOp(buttonId);
+    try {
+      api.setToken(accessToken);
+      await api.reorderControls(
+        selectedRobot.id,
+        normalized.map((entry, index) => ({ id: entry.id, position: index })),
+      );
+    } catch (err) {
+      pushToast(err instanceof Error ? err.message : 'Failed to reorder controls.', 'error');
+    } finally {
+      setControlOp(null);
     }
   };
 
@@ -929,6 +1099,172 @@ export default function DashboardPage() {
                             : 'Enable 2min Diagnostics'}
                       </button>
                     </div>
+                  </div>
+
+                  <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Control Buttons</p>
+                        <p className="text-xs text-[var(--muted-foreground)]">
+                          Manage the button deck shown on the public robot page.
+                        </p>
+                      </div>
+                      <span className="text-[10px] text-[var(--muted-foreground)]">
+                        {controlButtons.length} configured
+                      </span>
+                    </div>
+
+                    <form onSubmit={handleCreateControl} className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <input
+                        className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                        placeholder="Label"
+                        value={controlDraft.label}
+                        onChange={(event) =>
+                          setControlDraft((prev) => ({ ...prev, label: event.target.value }))
+                        }
+                        required
+                      />
+                      <input
+                        className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                        placeholder="Command"
+                        value={controlDraft.command}
+                        onChange={(event) =>
+                          setControlDraft((prev) => ({ ...prev, command: event.target.value }))
+                        }
+                        required
+                      />
+                      <input
+                        className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                        placeholder="Hotkey (optional)"
+                        maxLength={8}
+                        value={controlDraft.hotKey}
+                        onChange={(event) =>
+                          setControlDraft((prev) => ({ ...prev, hotKey: event.target.value }))
+                        }
+                      />
+                      <input
+                        type="number"
+                        min={50}
+                        max={10000}
+                        className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                        placeholder="Cooldown ms"
+                        value={controlDraft.cooldownMs}
+                        onChange={(event) =>
+                          setControlDraft((prev) => ({ ...prev, cooldownMs: event.target.value }))
+                        }
+                      />
+                      <select
+                        className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                        value={controlDraft.access}
+                        onChange={(event) =>
+                          setControlDraft((prev) => ({
+                            ...prev,
+                            access: event.target.value as ControlAccess,
+                          }))
+                        }
+                      >
+                        {controlAccessOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            Access: {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                        placeholder="Color (optional, e.g. #22c55e)"
+                        value={controlDraft.color}
+                        onChange={(event) =>
+                          setControlDraft((prev) => ({ ...prev, color: event.target.value }))
+                        }
+                      />
+                      <div className="sm:col-span-2">
+                        <button
+                          type="submit"
+                          disabled={creatingControl}
+                          className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-medium disabled:opacity-60"
+                        >
+                          <Plus className="h-4 w-4" />
+                          {creatingControl ? 'Creating...' : 'Add control button'}
+                        </button>
+                      </div>
+                    </form>
+
+                    {controlsLoading ? (
+                      <p className="text-xs text-[var(--muted-foreground)]">Loading control buttons...</p>
+                    ) : controlButtons.length === 0 ? (
+                      <p className="text-xs text-[var(--muted-foreground)]">
+                        No custom controls yet. Add your first button above.
+                      </p>
+                    ) : (
+                      <div className="space-y-2">
+                        {controlButtons
+                          .slice()
+                          .sort((a, b) => a.position - b.position)
+                          .map((button, index) => (
+                            <div
+                              key={button.id}
+                              className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-semibold">{button.label}</span>
+                                  <span className="rounded-full border border-[var(--border)] px-2 py-0.5 text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">
+                                    {button.command}
+                                  </span>
+                                  <span
+                                    className={`rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide ${
+                                      button.isEnabled === false
+                                        ? 'bg-zinc-700/60 text-zinc-300'
+                                        : 'bg-emerald-500/15 text-emerald-300'
+                                    }`}
+                                  >
+                                    {button.isEnabled === false ? 'Disabled' : 'Enabled'}
+                                  </span>
+                                </div>
+                                <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+                                  Access: {button.access} · Cooldown: {button.cooldownMs}ms
+                                  {button.hotKey ? ` · Hotkey: ${button.hotKey}` : ''}
+                                  {button.color ? ` · Color: ${button.color}` : ''}
+                                </p>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => void moveControl(button.id, -1)}
+                                  disabled={index === 0 || controlOp === button.id}
+                                  className="rounded border border-[var(--border)] px-2 py-1 text-xs disabled:opacity-50"
+                                >
+                                  Up
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void moveControl(button.id, 1)}
+                                  disabled={index === controlButtons.length - 1 || controlOp === button.id}
+                                  className="rounded border border-[var(--border)] px-2 py-1 text-xs disabled:opacity-50"
+                                >
+                                  Down
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleToggleControl(button)}
+                                  disabled={controlOp === button.id}
+                                  className="rounded border border-[var(--border)] px-2 py-1 text-xs disabled:opacity-50"
+                                >
+                                  {button.isEnabled === false ? 'Enable' : 'Disable'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleDeleteControl(button)}
+                                  disabled={controlOp === button.id}
+                                  className="rounded border border-red-500/40 px-2 py-1 text-xs text-red-300 disabled:opacity-50"
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                      </div>
+                    )}
                   </div>
 
                   <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">

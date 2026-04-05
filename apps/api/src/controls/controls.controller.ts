@@ -37,9 +37,9 @@ export class ControlsController {
   @ApiOperation({ summary: 'Get all control buttons (owner only)' })
   getAllButtons(
     @Param('robotId', ParseUUIDPipe) robotId: string,
-    @CurrentUser('sub') _userId: string,
+    @CurrentUser('sub') userId: string,
   ) {
-    return this.controlsService.getAllButtons(robotId);
+    return this.controlsService.getAllButtons(robotId, userId);
   }
 
   @Post('robot/:robotId')

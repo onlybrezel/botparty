@@ -24,6 +24,51 @@ export interface RobotStreamPolicy {
   targetBitrateKbps: number | null;
 }
 
+export interface PublicRobotOverview {
+  totals: {
+    publicRobots: number;
+    liveRobots: number;
+    featuredRobots: number;
+    totalViewers: number;
+    queueEntries: number;
+  };
+  statusBreakdown: {
+    online: number;
+    busy: number;
+    offline: number;
+    maintenance: number;
+  };
+  featured: Array<{
+    id: string;
+    name: string;
+    slug: string;
+    status: 'ONLINE' | 'OFFLINE' | 'BUSY' | 'MAINTENANCE';
+    viewerCount: number;
+    tags: string[];
+    owner: {
+      username: string;
+      displayName: string | null;
+    };
+  }>;
+  liveNow: Array<{
+    id: string;
+    name: string;
+    slug: string;
+    status: 'ONLINE' | 'OFFLINE' | 'BUSY' | 'MAINTENANCE';
+    viewerCount: number;
+    queueMode: 'FIRST_COME' | 'VOTING' | 'DISABLED';
+    tags: string[];
+    owner: {
+      username: string;
+      displayName: string | null;
+    };
+  }>;
+  topTags: Array<{
+    tag: string;
+    count: number;
+  }>;
+}
+
 export type RobotActionType =
   | 'restart_video'
   | 'restart_control'
@@ -575,6 +620,90 @@ export class RobotsService {
         },
       },
     });
+  }
+
+  async getPublicOverview(): Promise<PublicRobotOverview> {
+    await this.refreshStaleStatus();
+
+    const publicRobots = await this.prisma.robot.findMany({
+      where: { visibility: 'PUBLIC' },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        status: true,
+        viewerCount: true,
+        queueMode: true,
+        isFeatured: true,
+        tags: true,
+        owner: {
+          select: {
+            username: true,
+            displayName: true,
+          },
+        },
+      },
+      orderBy: [{ isFeatured: 'desc' }, { viewerCount: 'desc' }, { createdAt: 'desc' }],
+    });
+
+    const liveStatuses = new Set(['ONLINE', 'BUSY'] as const);
+    const liveRobots = publicRobots.filter((robot) => liveStatuses.has(robot.status));
+    const featuredRobots = publicRobots.filter((robot) => robot.isFeatured);
+    const topTags = new Map<string, number>();
+
+    for (const robot of publicRobots) {
+      for (const tag of robot.tags) {
+        const normalized = tag.trim();
+        if (!normalized) {
+          continue;
+        }
+        topTags.set(normalized, (topTags.get(normalized) ?? 0) + 1);
+      }
+    }
+
+    const liveRobotIds = liveRobots.map((robot) => robot.id);
+    const queueEntries = liveRobotIds.length
+      ? await this.prisma.queueEntry.count({ where: { robotId: { in: liveRobotIds } } })
+      : 0;
+
+    return {
+      totals: {
+        publicRobots: publicRobots.length,
+        liveRobots: liveRobots.length,
+        featuredRobots: featuredRobots.length,
+        totalViewers: publicRobots.reduce((sum, robot) => sum + robot.viewerCount, 0),
+        queueEntries,
+      },
+      statusBreakdown: {
+        online: publicRobots.filter((robot) => robot.status === 'ONLINE').length,
+        busy: publicRobots.filter((robot) => robot.status === 'BUSY').length,
+        offline: publicRobots.filter((robot) => robot.status === 'OFFLINE').length,
+        maintenance: publicRobots.filter((robot) => robot.status === 'MAINTENANCE').length,
+      },
+      featured: featuredRobots.slice(0, 6).map((robot) => ({
+        id: robot.id,
+        name: robot.name,
+        slug: robot.slug,
+        status: robot.status,
+        viewerCount: robot.viewerCount,
+        tags: robot.tags,
+        owner: robot.owner,
+      })),
+      liveNow: liveRobots.slice(0, 8).map((robot) => ({
+        id: robot.id,
+        name: robot.name,
+        slug: robot.slug,
+        status: robot.status,
+        viewerCount: robot.viewerCount,
+        queueMode: robot.queueMode,
+        tags: robot.tags,
+        owner: robot.owner,
+      })),
+      topTags: [...topTags.entries()]
+        .sort((a, b) => (b[1] === a[1] ? a[0].localeCompare(b[0]) : b[1] - a[1]))
+        .slice(0, 12)
+        .map(([tag, count]) => ({ tag, count })),
+    };
   }
 
   async setViewerCount(robotId: string, viewerCount: number) {

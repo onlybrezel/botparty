@@ -29,8 +29,8 @@ export class QueueController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Leave the control queue' })
   async leave(@Param('robotId') robotId: string, @CurrentUser() user: JwtPayload) {
-    await this.queueService.leave(robotId, user.sub);
-    return { message: 'Left queue' };
+    const result = await this.queueService.leave(robotId, user.sub);
+    return { message: result.removed ? 'Left queue' : 'Not in queue' };
   }
 
   @Post(':robotId/vote/:targetUserId')

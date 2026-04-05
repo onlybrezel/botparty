@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import type { RobotPublic } from '@botparty/shared';
+import type { PublicRobotOverview, RobotPublic } from '@botparty/shared';
 import { Trophy, Eye, Radio, Clock3 } from 'lucide-react';
 
 type CreatorLeaderboardEntry = {
@@ -41,6 +41,19 @@ async function getTopCreators(): Promise<CreatorLeaderboardEntry[]> {
   }
 }
 
+async function getOverview(): Promise<PublicRobotOverview | null> {
+  const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
+  try {
+    const res = await fetch(`${apiUrl}/api/v1/robots/overview`, {
+      next: { revalidate: 30 },
+    });
+    if (!res.ok) return null;
+    return res.json() as Promise<PublicRobotOverview>;
+  } catch {
+    return null;
+  }
+}
+
 function statusColor(status: RobotPublic['status']) {
   if (status === 'ONLINE') return 'text-[var(--online)] bg-[var(--online)]/15';
   if (status === 'BUSY') return 'text-amber-400 bg-amber-500/15';
@@ -49,7 +62,7 @@ function statusColor(status: RobotPublic['status']) {
 }
 
 export default async function LeaderboardPage() {
-  const [robots, creators] = await Promise.all([getRobots(), getTopCreators()]);
+  const [robots, creators, overview] = await Promise.all([getRobots(), getTopCreators(), getOverview()]);
   const ranked = [...robots].sort((a, b) => b.viewerCount - a.viewerCount);
 
   return (
@@ -127,7 +140,7 @@ export default async function LeaderboardPage() {
             Online robots
           </p>
           <p className="mt-2 text-2xl font-black">
-            {ranked.filter((r) => r.status === 'ONLINE').length}
+            {overview ? overview.totals.liveRobots : ranked.filter((r) => r.status === 'ONLINE' || r.status === 'BUSY').length}
           </p>
         </div>
         <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
@@ -136,7 +149,7 @@ export default async function LeaderboardPage() {
             Total live viewers
           </p>
           <p className="mt-2 text-2xl font-black">
-            {ranked.reduce((sum, r) => sum + r.viewerCount, 0)}
+            {overview ? overview.totals.totalViewers : ranked.reduce((sum, r) => sum + r.viewerCount, 0)}
           </p>
         </div>
         <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">

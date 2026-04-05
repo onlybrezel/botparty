@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import type { RobotPublic } from '@botparty/shared';
+import type { PublicRobotOverview, RobotPublic } from '@botparty/shared';
 import RobotCard from '@/components/robot-card';
 import { ArrowRight, Bot, Gamepad2, Radio, Sparkles } from 'lucide-react';
 
@@ -38,9 +38,28 @@ async function getPlatformStats(): Promise<PlatformStats | null> {
   }
 }
 
+async function getRobotsOverview(): Promise<PublicRobotOverview | null> {
+  const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
+  try {
+    const res = await fetch(`${apiUrl}/api/v1/robots/overview`, {
+      next: { revalidate: 30 },
+    });
+    if (!res.ok) return null;
+    return res.json() as Promise<PublicRobotOverview>;
+  } catch {
+    return null;
+  }
+}
+
 export default async function HomePage() {
-  const [robots, stats] = await Promise.all([getPublicRobots(), getPlatformStats()]);
-  const featured = robots.slice(0, 3);
+  const [robots, stats, overview] = await Promise.all([
+    getPublicRobots(),
+    getPlatformStats(),
+    getRobotsOverview(),
+  ]);
+  const featured = overview?.featured.length
+    ? robots.filter((robot) => overview.featured.some((featuredRobot) => featuredRobot.id === robot.id)).slice(0, 3)
+    : robots.slice(0, 3);
 
   return (
     <>
@@ -94,11 +113,11 @@ export default async function HomePage() {
           {stats && (
             <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
               <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-left">
-                <p className="text-lg font-bold">{stats.liveRobots}</p>
+                <p className="text-lg font-bold">{overview?.totals.liveRobots ?? stats.liveRobots}</p>
                 <p className="text-xs text-[var(--muted-foreground)]">Live robots</p>
               </div>
               <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-left">
-                <p className="text-lg font-bold">{stats.totalLiveViewers}</p>
+                <p className="text-lg font-bold">{overview?.totals.totalViewers ?? stats.totalLiveViewers}</p>
                 <p className="text-xs text-[var(--muted-foreground)]">Live viewers</p>
               </div>
               <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-left">
@@ -170,9 +189,27 @@ export default async function HomePage() {
               </div>
             ))}
           </div>
+
+          {overview && overview.topTags.length > 0 && (
+            <div className="mt-8">
+              <p className="mb-3 text-center text-xs uppercase tracking-[0.2em] text-[var(--muted-foreground)]">
+                Popular tags
+              </p>
+              <div className="flex flex-wrap justify-center gap-2">
+                {overview.topTags.slice(0, 8).map((tag) => (
+                  <Link
+                    key={tag.tag}
+                    href={`/explore?tag=${encodeURIComponent(tag.tag)}`}
+                    className="rounded-full border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-sm text-[var(--muted-foreground)] transition hover:text-[var(--foreground)]"
+                  >
+                    {tag.tag} · {tag.count}
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </section>
     </>
   );
 }
-

@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import type { RobotPublic } from '@botparty/shared';
+import type { PublicRobotOverview, RobotPublic } from '@botparty/shared';
 import RobotCard from '@/components/robot-card';
 import { Search, SlidersHorizontal, Bot } from 'lucide-react';
 
@@ -27,6 +27,19 @@ async function getRobots(params: { status?: string; tag?: string; q?: string; so
   }
 }
 
+async function getOverview(): Promise<PublicRobotOverview | null> {
+  const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
+  try {
+    const res = await fetch(`${apiUrl}/api/v1/robots/overview`, {
+      next: { revalidate: 30 },
+    });
+    if (!res.ok) return null;
+    return res.json() as Promise<PublicRobotOverview>;
+  } catch {
+    return null;
+  }
+}
+
 const STATUS_OPTIONS = [
   { value: '', label: 'All robots' },
   { value: 'ONLINE', label: 'Online now' },
@@ -46,8 +59,8 @@ export default async function ExplorePage({
   searchParams: Promise<{ status?: string; tag?: string; q?: string; sort?: string }>;
 }) {
   const params = await searchParams;
-  const robots = await getRobots(params);
-  const onlineCount = robots.filter((r) => r.status === 'ONLINE').length;
+  const [robots, overview] = await Promise.all([getRobots(params), getOverview()]);
+  const liveCount = robots.filter((r) => r.status === 'ONLINE' || r.status === 'BUSY').length;
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
@@ -57,7 +70,7 @@ export default async function ExplorePage({
         <p className="mt-1 text-sm text-[var(--muted-foreground)]">
           {robots.length === 0
             ? 'No robots found'
-            : `${robots.length} robot${robots.length !== 1 ? 's' : ''} · ${onlineCount} live`}
+            : `${robots.length} robot${robots.length !== 1 ? 's' : ''} · ${liveCount} live`}
         </p>
       </div>
 
@@ -122,6 +135,24 @@ export default async function ExplorePage({
         </div>
       </form>
 
+      {overview && overview.topTags.length > 0 && !params.q && (
+        <div className="mb-6 flex flex-wrap gap-2">
+          {overview.topTags.slice(0, 10).map((tag) => (
+            <a
+              key={tag.tag}
+              href={`/explore?tag=${encodeURIComponent(tag.tag)}`}
+              className={`rounded-full border px-3 py-1 text-sm transition ${
+                params.tag === tag.tag
+                  ? 'border-[var(--primary)] bg-[var(--primary)]/10'
+                  : 'border-[var(--border)] bg-[var(--card)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+              }`}
+            >
+              {tag.tag} · {tag.count}
+            </a>
+          ))}
+        </div>
+      )}
+
       {/* Grid */}
       {robots.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-[var(--border)] py-20 text-center">
@@ -145,4 +176,3 @@ export default async function ExplorePage({
     </div>
   );
 }
-

@@ -1,4 +1,4 @@
-import type { RobotPublic, UserPublic } from '@botparty/shared';
+import type { ControlButtonAccess, PublicRobotOverview, RobotPublic, UserPublic } from '@botparty/shared';
 import { useAuth } from '@/lib/store';
 
 class ApiError extends Error {
@@ -75,6 +75,37 @@ export interface RobotTelemetryPoint {
   livekitConnected: boolean;
   commandsReceived: number;
   cameraFrames: number;
+}
+
+export interface ControlButtonRecord {
+  id: string;
+  label: string;
+  command: string;
+  hotKey: string | null;
+  icon: string | null;
+  cooldownMs: number;
+  access: ControlButtonAccess;
+  position: number;
+  color: string | null;
+  isEnabled?: boolean;
+}
+
+function buildQueryString(params?: Record<string, string | number | boolean | null | undefined>) {
+  if (!params) {
+    return '';
+  }
+
+  const qs = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null || value === '') {
+      continue;
+    }
+
+    qs.set(key, String(value));
+  }
+
+  const serialized = qs.toString();
+  return serialized ? `?${serialized}` : '';
 }
 
 function resolveApiUrl() {
@@ -316,8 +347,7 @@ class ApiClient {
   // ─── Robots ────────────────────────────────────────────────────────────────
 
   async getRobots(params?: { status?: string; tag?: string; q?: string; sort?: string }) {
-    const qs = new URLSearchParams(params as Record<string, string>).toString();
-    return this.request<RobotPublic[]>(`/robots${qs ? `?${qs}` : ''}`);
+    return this.request<RobotPublic[]>(`/robots${buildQueryString(params)}`);
   }
 
   async getRobot(slug: string) {
@@ -326,6 +356,10 @@ class ApiClient {
 
   async getFeaturedRobots() {
     return this.request<RobotPublic[]>('/robots/featured');
+  }
+
+  async getRobotsOverview() {
+    return this.request<PublicRobotOverview>('/robots/overview');
   }
 
   async getMyRobots() {
@@ -530,19 +564,64 @@ class ApiClient {
   // ─── Controls ──────────────────────────────────────────────────────────────
 
   async getControls(robotId: string) {
-    return this.request<
-      Array<{
-        id: string;
-        label: string;
-        command: string;
-        hotKey: string | null;
-        icon: string | null;
-        cooldownMs: number;
-        access: string;
-        position: number;
-        color: string | null;
-      }>
-    >(`/controls/robot/${robotId}`);
+    return this.request<ControlButtonRecord[]>(`/controls/robot/${robotId}`);
+  }
+
+  async getAllControls(robotId: string) {
+    return this.request<ControlButtonRecord[]>(`/controls/robot/${robotId}/all`);
+  }
+
+  async createControl(
+    robotId: string,
+    data: {
+      label: string;
+      command: string;
+      hotKey?: string;
+      icon?: string;
+      cooldownMs?: number;
+      access?: ControlButtonAccess;
+      position?: number;
+      isEnabled?: boolean;
+      color?: string;
+    },
+  ) {
+    return this.request<ControlButtonRecord>(`/controls/robot/${robotId}`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateControl(
+    buttonId: string,
+    data: {
+      label?: string;
+      command?: string;
+      hotKey?: string;
+      icon?: string;
+      cooldownMs?: number;
+      access?: ControlButtonAccess;
+      position?: number;
+      isEnabled?: boolean;
+      color?: string | null;
+    },
+  ) {
+    return this.request<ControlButtonRecord>(`/controls/${buttonId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteControl(buttonId: string) {
+    return this.request<void>(`/controls/${buttonId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async reorderControls(robotId: string, order: Array<{ id: string; position: number }>) {
+    return this.request<void>(`/controls/robot/${robotId}/reorder`, {
+      method: 'PUT',
+      body: JSON.stringify({ order }),
+    });
   }
 
   // ─── Health ────────────────────────────────────────────────────────────────
@@ -557,4 +636,3 @@ class ApiClient {
 }
 
 export const api = new ApiClient(API_URL);
-
