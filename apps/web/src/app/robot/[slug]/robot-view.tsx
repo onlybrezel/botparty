@@ -491,14 +491,21 @@ export default function RobotView({ robot }: Props) {
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
-  // Save chat history to localStorage
+  // Save chat history to localStorage (debounced - max once per second)
+  const saveChatTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    try {
-      const key = `botparty.chat.${robot.id}`;
-      window.localStorage.setItem(key, JSON.stringify(messages));
-    } catch {
-      // Ignore localStorage errors (quota full, etc)
-    }
+    if (saveChatTimerRef.current) clearTimeout(saveChatTimerRef.current);
+    saveChatTimerRef.current = setTimeout(() => {
+      try {
+        const key = `botparty.chat.${robot.id}`;
+        window.localStorage.setItem(key, JSON.stringify(messages));
+      } catch {
+        // Ignore localStorage errors (quota full, etc)
+      }
+    }, 1000);
+    return () => {
+      if (saveChatTimerRef.current) clearTimeout(saveChatTimerRef.current);
+    };
   }, [messages, robot.id]);
 
   const sendChat = useCallback(() => {

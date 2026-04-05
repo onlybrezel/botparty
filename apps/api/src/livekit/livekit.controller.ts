@@ -5,10 +5,9 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Public } from '../auth/decorators/public.decorator';
 import { PrismaService } from '../prisma/prisma.service';
+import { type GuestAccess } from '../robots/robots.service';
 import type { JwtPayload } from '@botparty/shared';
 import { randomUUID } from 'crypto';
-
-type GuestAccess = 'ALL' | 'AUTHENTICATED' | 'DISABLED';
 
 @ApiTags('livekit')
 @Controller('livekit')
@@ -99,7 +98,20 @@ export class LivekitController {
     @Param('robotId') robotId: string,
     @CurrentUser() user: JwtPayload,
   ) {
-    const token = await this.livekitService.generateRobotToken(robotId, user.username);
+    const robot = await this.prisma.robot.findUnique({
+      where: { id: robotId },
+      select: { id: true, name: true, ownerId: true },
+    });
+
+    if (!robot) {
+      throw new ForbiddenException('Robot not found');
+    }
+
+    if (robot.ownerId !== user.sub) {
+      throw new ForbiddenException('Not your robot');
+    }
+
+    const token = await this.livekitService.generateRobotToken(robot.id, robot.name);
     return {
       token,
       livekitUrl: this.livekitService.getLivekitUrl(),

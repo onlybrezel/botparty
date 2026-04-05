@@ -6,12 +6,14 @@ import {
   Query,
   Patch,
   Body,
-  ForbiddenException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { UsersService } from './users.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Role } from '@botparty/shared';
 import type { JwtPayload } from '@botparty/shared';
 import { UpdateMeDto } from './users.dto';
 
@@ -37,19 +39,14 @@ export class UsersController {
   }
 
   @Get('admin/list')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MOD)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'List users for admin/mod dashboard' })
   async getAdminUsers(
-    @CurrentUser() user: JwtPayload,
     @Query('q') q?: string,
     @Query('limit') limit?: string,
   ) {
-    const role = String(user.role);
-    if (!['ADMIN', 'MOD', 'MODERATOR', 'CREATOR'].includes(role)) {
-      throw new ForbiddenException('Access denied');
-    }
-
     return this.usersService.listUsersForStaff({
       q,
       limit: limit ? Number(limit) : undefined,
@@ -57,11 +54,11 @@ export class UsersController {
   }
 
   @Patch('admin/:id')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MOD)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update user profile/role as staff' })
   async updateAdminUser(
-    @CurrentUser() user: JwtPayload,
     @Param('id') id: string,
     @Body()
     body: {
@@ -72,11 +69,6 @@ export class UsersController {
       balance?: number;
     },
   ) {
-    const role = String(user.role);
-    if (!['ADMIN', 'MOD', 'MODERATOR', 'CREATOR'].includes(role)) {
-      throw new ForbiddenException('Access denied');
-    }
-
     return this.usersService.updateUserByStaff(id, body);
   }
 

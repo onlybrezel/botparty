@@ -54,21 +54,22 @@ export class QueueService {
       where: { robotId_userId: { robotId, userId } },
     });
 
-    // Reorder remaining entries
+    // Reorder remaining entries in a single transaction to avoid N+1 queries
     const orderBy = await this.getQueueOrderBy(robotId);
     const entries = await this.prisma.queueEntry.findMany({
       where: { robotId },
       orderBy,
     });
 
-    for (let i = 0; i < entries.length; i++) {
-      const entry = entries[i];
-      if (entry) {
-        await this.prisma.queueEntry.update({
-          where: { id: entry.id },
-          data: { position: i + 1 },
-        });
-      }
+    if (entries.length > 0) {
+      await this.prisma.$transaction(
+        entries.map((entry, i) =>
+          this.prisma.queueEntry.update({
+            where: { id: entry.id },
+            data: { position: i + 1 },
+          }),
+        ),
+      );
     }
 
     await this.redis.publish(`queue:${robotId}`, JSON.stringify({ type: 'leave', userId }));

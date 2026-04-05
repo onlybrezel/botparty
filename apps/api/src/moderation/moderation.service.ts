@@ -259,7 +259,7 @@ export class ModerationService {
     const normalized = raw.normalize('NFKC');
     // Remove control/non-printable chars and collapse whitespace.
     const cleaned = normalized
-      .replace(/[\u0000-\u001F\u007F\u0080-\u009F]/g, ' ')
+      .replace(/[\u0000-\u001F\u007F\u0080-\u009F]/g, ' ') // eslint-disable-line no-control-regex
       .replace(/\s+/g, ' ')
       .trim();
 

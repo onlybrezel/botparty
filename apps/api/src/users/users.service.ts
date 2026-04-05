@@ -42,7 +42,7 @@ export class UsersService {
 
   async getLeaderboard(limit = 20) {
     return this.prisma.user.findMany({
-      take: limit,
+      take: Math.min(limit, 100),
       orderBy: { credits: 'desc' },
       select: {
         id: true,

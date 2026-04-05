@@ -17,8 +17,11 @@ import {
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { RobotsService } from './robots.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { LivekitService } from '../livekit/livekit.service';
+import { Role } from '@botparty/shared';
 import type { JwtPayload } from '@botparty/shared';
 
 @ApiTags('robots')
@@ -84,19 +87,14 @@ export class RobotsController {
   }
 
   @Put('admin/:id')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MOD)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update robot settings as staff' })
   async updateAsStaff(
     @Param('id') id: string,
-    @CurrentUser() user: JwtPayload,
     @Body() body: Record<string, unknown>,
   ) {
-    const role = String(user.role);
-    if (!['ADMIN', 'MOD', 'MODERATOR', 'CREATOR'].includes(role)) {
-      throw new ForbiddenException('Access denied');
-    }
-
     return this.robotsService.updateByStaff(id, body as never);
   }
 
@@ -111,15 +109,11 @@ export class RobotsController {
 
   @Delete('admin/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MOD)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Delete robot as staff' })
-  async deleteAsStaff(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
-    const role = String(user.role);
-    if (!['ADMIN', 'MOD', 'MODERATOR', 'CREATOR'].includes(role)) {
-      throw new ForbiddenException('Access denied');
-    }
-
+  async deleteAsStaff(@Param('id') id: string) {
     await this.robotsService.deleteByStaff(id);
   }
 

@@ -1,9 +1,9 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
-import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
+import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { WsAdapter } from '@nestjs/platform-ws';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
-import { Logger } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
@@ -25,6 +25,15 @@ async function bootstrap() {
 
   // ─── WebSocket adapter (ws, not socket.io) ────────
   app.useWebSocketAdapter(new WsAdapter(app));
+
+  // ─── Global validation ────────────────────────────
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,      // strip unknown fields
+      forbidNonWhitelisted: false,
+      transform: true,      // auto-cast primitives (e.g. string -> number)
+    }),
+  );
 
   // ─── CORS (strict) ────────────────────────────────
   app.enableCors({

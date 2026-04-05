@@ -43,7 +43,7 @@ export class SessionsService {
     return this.prisma.session.findMany({
       where: { robotId },
       orderBy: { startedAt: 'desc' },
-      take: limit,
+      take: Math.min(limit, 200),
       include: {
         user: {
           select: { id: true, username: true, displayName: true, avatarUrl: true },
@@ -56,7 +56,7 @@ export class SessionsService {
     return this.prisma.session.findMany({
       where: { userId },
       orderBy: { startedAt: 'desc' },
-      take: limit,
+      take: Math.min(limit, 200),
       include: {
         robot: {
           select: { id: true, name: true, slug: true, thumbnailUrl: true },
