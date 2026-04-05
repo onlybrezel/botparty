@@ -17,7 +17,7 @@ import {
   Eye,
   EyeOff,
 } from 'lucide-react';
-import { api, type RobotManaged } from '@/lib/api';
+import { api, type RobotManaged, type RobotTelemetryPoint } from '@/lib/api';
 import { useAuth } from '@/lib/store';
 import { LiveKitPlayer } from '@/components/livekit-player';
 import { pushToast } from '@/lib/toast';
@@ -149,6 +149,10 @@ export default function DashboardPage() {
   const [opLoading, setOpLoading] = useState<string | null>(null);
   const [logsLoading, setLogsLoading] = useState(false);
   const [diagLogs, setDiagLogs] = useState<Array<{ ts: number; line: string }>>([]);
+  const [telemetry, setTelemetry] = useState<{ latest: RobotTelemetryPoint | null; history: RobotTelemetryPoint[] }>({
+    latest: null,
+    history: [],
+  });
   const [preview, setPreview] = useState<{ token: string; url: string } | null>(null);
   const [showToken, setShowToken] = useState(false);
 
@@ -228,6 +232,36 @@ export default function DashboardPage() {
     const interval = setInterval(() => {
       poll().catch(() => {});
     }, 3000);
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [selectedRobot?.id, accessToken]);
+
+  useEffect(() => {
+    if (!accessToken || !selectedRobot) {
+      setTelemetry({ latest: null, history: [] });
+      return;
+    }
+
+    let active = true;
+    const poll = async () => {
+      try {
+        api.setToken(accessToken);
+        const result = await api.getRobotTelemetry(selectedRobot.id);
+        if (active) {
+          setTelemetry(result);
+        }
+      } catch {
+        // ignore telemetry polling errors
+      }
+    };
+
+    poll().catch(() => {});
+    const interval = setInterval(() => {
+      poll().catch(() => {});
+    }, 5000);
 
     return () => {
       active = false;
@@ -808,6 +842,75 @@ export default function DashboardPage() {
                     </div>
                   </div>
 
+                  <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
+                    <div className="mb-2 flex items-center justify-between">
+                      <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Runtime Telemetry</p>
+                      <p className="text-[10px] text-[var(--muted-foreground)]">auto-refresh 5s</p>
+                    </div>
+                    {telemetry.latest ? (
+                      <>
+                        <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+                          <div className="rounded border border-[var(--border)] px-2 py-1.5">
+                            <p className="text-[var(--muted-foreground)]">CPU</p>
+                            <p className="font-semibold">{telemetry.latest.cpuPercent ?? '-'}%</p>
+                          </div>
+                          <div className="rounded border border-[var(--border)] px-2 py-1.5">
+                            <p className="text-[var(--muted-foreground)]">Memory</p>
+                            <p className="font-semibold">{telemetry.latest.memoryPercent ?? '-'}%</p>
+                          </div>
+                          <div className="rounded border border-[var(--border)] px-2 py-1.5">
+                            <p className="text-[var(--muted-foreground)]">Temp</p>
+                            <p className="font-semibold">
+                              {telemetry.latest.temperatureC === null ? '-' : `${telemetry.latest.temperatureC.toFixed(1)} C`}
+                            </p>
+                          </div>
+                          <div className="rounded border border-[var(--border)] px-2 py-1.5">
+                            <p className="text-[var(--muted-foreground)]">Uptime</p>
+                            <p className="font-semibold">{telemetry.latest.uptimeSec ?? 0}s</p>
+                          </div>
+                        </div>
+                        <div className="mt-2 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+                          <div className="rounded border border-[var(--border)] px-2 py-1.5">
+                            <p className="text-[var(--muted-foreground)]">LiveKit</p>
+                            <p className="font-semibold">{telemetry.latest.livekitConnected ? 'Connected' : 'Offline'}</p>
+                          </div>
+                          <div className="rounded border border-[var(--border)] px-2 py-1.5">
+                            <p className="text-[var(--muted-foreground)]">Control WS</p>
+                            <p className="font-semibold">{telemetry.latest.controlConnected ? 'Connected' : 'Offline'}</p>
+                          </div>
+                          <div className="rounded border border-[var(--border)] px-2 py-1.5">
+                            <p className="text-[var(--muted-foreground)]">Commands</p>
+                            <p className="font-semibold">{telemetry.latest.commandsReceived}</p>
+                          </div>
+                          <div className="rounded border border-[var(--border)] px-2 py-1.5">
+                            <p className="text-[var(--muted-foreground)]">Frames</p>
+                            <p className="font-semibold">{telemetry.latest.cameraFrames}</p>
+                          </div>
+                        </div>
+                        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                          <TelemetryBars
+                            title="CPU trend"
+                            values={telemetry.history
+                              .map((point) => point.cpuPercent)
+                              .filter((value): value is number => typeof value === 'number')}
+                            suffix="%"
+                          />
+                          <TelemetryBars
+                            title="Memory trend"
+                            values={telemetry.history
+                              .map((point) => point.memoryPercent)
+                              .filter((value): value is number => typeof value === 'number')}
+                            suffix="%"
+                          />
+                        </div>
+                      </>
+                    ) : (
+                      <p className="text-xs text-[var(--muted-foreground)]">
+                        No telemetry yet. Start your robot client to stream runtime stats.
+                      </p>
+                    )}
+                  </div>
+
                   <div className="flex flex-wrap gap-2">
                     <button
                       type="submit"
@@ -838,6 +941,42 @@ export default function DashboardPage() {
           </div>
         )}
       </section>
+    </div>
+  );
+}
+
+function TelemetryBars({
+  title,
+  values,
+  suffix,
+}: {
+  title: string;
+  values: number[];
+  suffix: string;
+}) {
+  const recent = values.slice(-24);
+  const current = recent.length > 0 ? (recent[recent.length - 1] ?? null) : null;
+
+  return (
+    <div className="rounded border border-[var(--border)] p-2">
+      <div className="mb-1 flex items-center justify-between">
+        <p className="text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">{title}</p>
+        <p className="text-xs font-semibold">{current === null ? '-' : `${Math.round(current)}${suffix}`}</p>
+      </div>
+      {recent.length === 0 ? (
+        <p className="text-[10px] text-[var(--muted-foreground)]">No recent samples</p>
+      ) : (
+        <div className="flex h-14 items-end gap-1">
+          {recent.map((value, idx) => (
+            <div
+              key={`${title}-${idx}`}
+              className="flex-1 rounded-sm bg-[var(--primary)]/60"
+              style={{ height: `${Math.max(8, Math.min(100, value))}%` }}
+              title={`${Math.round(value)}${suffix}`}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

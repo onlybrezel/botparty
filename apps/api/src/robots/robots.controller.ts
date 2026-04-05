@@ -35,8 +35,9 @@ export class RobotsController {
     @Query('status') status?: string,
     @Query('tag') tag?: string,
     @Query('q') q?: string,
+    @Query('sort') sort?: string,
   ) {
-    return this.robotsService.findAll({ status, tag, q });
+    return this.robotsService.findAll({ status, tag, q, sort });
   }
 
   @Get('featured')
@@ -220,6 +221,30 @@ export class RobotsController {
     return this.robotsService.ingestRobotLogs(claimToken, body.lines);
   }
 
+  @Post('telemetry')
+  @ApiOperation({ summary: 'Robot uploads temporary runtime telemetry using claim token' })
+  async pushTelemetry(
+    @Body()
+    body: {
+      claimToken?: string;
+      cpuPercent?: number;
+      memoryPercent?: number;
+      temperatureC?: number;
+      uptimeSec?: number;
+      controlConnected?: boolean;
+      livekitConnected?: boolean;
+      commandsReceived?: number;
+      cameraFrames?: number;
+    },
+  ) {
+    const claimToken = body.claimToken?.trim();
+    if (!claimToken) {
+      throw new BadRequestException('claimToken is required');
+    }
+
+    return this.robotsService.ingestRobotTelemetry(claimToken, body);
+  }
+
   @Get(':id/logs')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
@@ -234,5 +259,13 @@ export class RobotsController {
       }
       throw err;
     }
+  }
+
+  @Get(':id/telemetry')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get recent temporary robot telemetry (owner only)' })
+  async getTelemetry(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.robotsService.getRobotTelemetry(id, user.sub);
   }
 }

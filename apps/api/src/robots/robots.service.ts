@@ -91,10 +91,20 @@ export class RobotsService {
     return robot;
   }
 
-  async findAll(filters?: { visibility?: string; status?: string; tag?: string; q?: string }) {
+  async findAll(filters?: { visibility?: string; status?: string; tag?: string; q?: string; sort?: string }) {
     await this.refreshStaleStatus();
 
     const query = filters?.q?.trim();
+    const sort = filters?.sort?.trim().toLowerCase();
+
+    const orderBy: Prisma.RobotOrderByWithRelationInput[] =
+      sort === 'new'
+        ? [{ createdAt: 'desc' }]
+        : sort === 'sessions'
+          ? [{ totalSessions: 'desc' }, { viewerCount: 'desc' }, { createdAt: 'desc' }]
+          : sort === 'name'
+            ? [{ name: 'asc' }, { createdAt: 'desc' }]
+            : [{ isFeatured: 'desc' }, { viewerCount: 'desc' }, { createdAt: 'desc' }];
 
     return this.prisma.robot.findMany({
       where: {
@@ -116,7 +126,7 @@ export class RobotsService {
           ],
         }),
       },
-      orderBy: [{ isFeatured: 'desc' }, { viewerCount: 'desc' }, { createdAt: 'desc' }],
+      orderBy,
       include: {
         owner: {
           select: { id: true, username: true, displayName: true, avatarUrl: true },
@@ -349,6 +359,96 @@ export class RobotsService {
     pipeline.expire(key, 1800);
     await pipeline.exec();
     return { ok: true };
+  }
+
+  async ingestRobotTelemetry(
+    claimToken: string,
+    payload: {
+      cpuPercent?: number;
+      memoryPercent?: number;
+      temperatureC?: number;
+      uptimeSec?: number;
+      controlConnected?: boolean;
+      livekitConnected?: boolean;
+      commandsReceived?: number;
+      cameraFrames?: number;
+    },
+  ) {
+    const robot = await this.findByClaimToken(claimToken);
+    if (!robot) {
+      throw new ForbiddenException('Invalid claim token');
+    }
+
+    const telemetry = {
+      ts: Date.now(),
+      cpuPercent:
+        typeof payload.cpuPercent === 'number' && Number.isFinite(payload.cpuPercent)
+          ? Math.max(0, Math.min(100, payload.cpuPercent))
+          : null,
+      memoryPercent:
+        typeof payload.memoryPercent === 'number' && Number.isFinite(payload.memoryPercent)
+          ? Math.max(0, Math.min(100, payload.memoryPercent))
+          : null,
+      temperatureC:
+        typeof payload.temperatureC === 'number' && Number.isFinite(payload.temperatureC)
+          ? payload.temperatureC
+          : null,
+      uptimeSec:
+        typeof payload.uptimeSec === 'number' && Number.isFinite(payload.uptimeSec)
+          ? Math.max(0, Math.floor(payload.uptimeSec))
+          : null,
+      controlConnected: Boolean(payload.controlConnected),
+      livekitConnected: Boolean(payload.livekitConnected),
+      commandsReceived:
+        typeof payload.commandsReceived === 'number' && Number.isFinite(payload.commandsReceived)
+          ? Math.max(0, Math.floor(payload.commandsReceived))
+          : 0,
+      cameraFrames:
+        typeof payload.cameraFrames === 'number' && Number.isFinite(payload.cameraFrames)
+          ? Math.max(0, Math.floor(payload.cameraFrames))
+          : 0,
+    };
+
+    const latestKey = `robot:telemetry:${robot.id}:latest`;
+    const historyKey = `robot:telemetry:${robot.id}:history`;
+    const pipeline = this.redis.pipeline();
+    pipeline.set(latestKey, JSON.stringify(telemetry), 'EX', 300);
+    pipeline.rpush(historyKey, JSON.stringify(telemetry));
+    pipeline.ltrim(historyKey, -300, -1);
+    pipeline.expire(historyKey, 60 * 60 * 24);
+    await pipeline.exec();
+
+    return { ok: true };
+  }
+
+  async getRobotTelemetry(robotId: string, ownerId: string) {
+    const robot = await this.findById(robotId);
+    if (robot.ownerId !== ownerId) {
+      throw new ForbiddenException('Not your robot');
+    }
+
+    const latestKey = `robot:telemetry:${robotId}:latest`;
+    const historyKey = `robot:telemetry:${robotId}:history`;
+    const [latestRaw, historyRaw] = await Promise.all([
+      this.redis.get(latestKey),
+      this.redis.lrange(historyKey, -120, -1),
+    ]);
+
+    const latest = latestRaw
+      ? (JSON.parse(latestRaw) as Record<string, unknown>)
+      : null;
+
+    const history = historyRaw
+      .map((entry) => {
+        try {
+          return JSON.parse(entry) as Record<string, unknown>;
+        } catch {
+          return null;
+        }
+      })
+      .filter((entry): entry is Record<string, unknown> => entry !== null);
+
+    return { latest, history };
   }
 
   async getRobotLogs(robotId: string, ownerId: string) {

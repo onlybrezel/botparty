@@ -8,12 +8,13 @@ export const metadata: Metadata = {
   description: 'Browse live robots and take control in real-time.',
 };
 
-async function getRobots(params: { status?: string; tag?: string; q?: string }): Promise<RobotPublic[]> {
+async function getRobots(params: { status?: string; tag?: string; q?: string; sort?: string }): Promise<RobotPublic[]> {
   const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
   const qs = new URLSearchParams();
   if (params.status) qs.set('status', params.status);
   if (params.tag) qs.set('tag', params.tag);
   if (params.q) qs.set('q', params.q);
+  if (params.sort) qs.set('sort', params.sort);
 
   try {
     const res = await fetch(`${apiUrl}/api/v1/robots?${qs.toString()}`, {
@@ -32,10 +33,17 @@ const STATUS_OPTIONS = [
   { value: 'OFFLINE', label: 'Offline' },
 ];
 
+const SORT_OPTIONS = [
+  { value: '', label: 'Featured first' },
+  { value: 'new', label: 'Newest' },
+  { value: 'sessions', label: 'Most active' },
+  { value: 'name', label: 'Name A-Z' },
+];
+
 export default async function ExplorePage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; tag?: string; q?: string }>;
+  searchParams: Promise<{ status?: string; tag?: string; q?: string; sort?: string }>;
 }) {
   const params = await searchParams;
   const robots = await getRobots(params);
@@ -82,6 +90,20 @@ export default async function ExplorePage({
             </select>
           </div>
 
+          <div className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--background)] px-2 py-1">
+            <select
+              name="sort"
+              defaultValue={params.sort ?? ''}
+              className="bg-transparent px-1 py-1 text-sm outline-none"
+            >
+              {SORT_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <button
             type="submit"
             className="rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-medium text-white transition hover:bg-[var(--primary-hover)]"
@@ -89,7 +111,7 @@ export default async function ExplorePage({
             Apply filters
           </button>
 
-          {(params.status || params.q || params.tag) && (
+          {(params.status || params.q || params.tag || params.sort) && (
             <a
               href="/explore"
               className="text-sm text-[var(--muted-foreground)] transition hover:text-[var(--foreground)]"

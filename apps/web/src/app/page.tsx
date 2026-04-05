@@ -3,6 +3,15 @@ import type { RobotPublic } from '@botparty/shared';
 import RobotCard from '@/components/robot-card';
 import { ArrowRight, Bot, Gamepad2, Radio, Sparkles } from 'lucide-react';
 
+interface PlatformStats {
+  totalUsers: number;
+  totalRobots: number;
+  liveRobots: number;
+  totalLiveViewers: number;
+  activeQueueEntries: number;
+  totalSessions: number;
+}
+
 async function getPublicRobots(): Promise<RobotPublic[]> {
   const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
   try {
@@ -16,8 +25,21 @@ async function getPublicRobots(): Promise<RobotPublic[]> {
   }
 }
 
+async function getPlatformStats(): Promise<PlatformStats | null> {
+  const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
+  try {
+    const res = await fetch(`${apiUrl}/api/v1/health/stats`, {
+      next: { revalidate: 30 },
+    });
+    if (!res.ok) return null;
+    return res.json() as Promise<PlatformStats>;
+  } catch {
+    return null;
+  }
+}
+
 export default async function HomePage() {
-  const robots = await getPublicRobots();
+  const [robots, stats] = await Promise.all([getPublicRobots(), getPlatformStats()]);
   const featured = robots.slice(0, 3);
 
   return (
@@ -68,6 +90,27 @@ export default async function HomePage() {
           <p className="mt-7 text-sm text-[var(--muted-foreground)]">
             Built for creator-hosted robots, classrooms, and community events.
           </p>
+
+          {stats && (
+            <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-left">
+                <p className="text-lg font-bold">{stats.liveRobots}</p>
+                <p className="text-xs text-[var(--muted-foreground)]">Live robots</p>
+              </div>
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-left">
+                <p className="text-lg font-bold">{stats.totalLiveViewers}</p>
+                <p className="text-xs text-[var(--muted-foreground)]">Live viewers</p>
+              </div>
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-left">
+                <p className="text-lg font-bold">{stats.totalUsers}</p>
+                <p className="text-xs text-[var(--muted-foreground)]">Active users</p>
+              </div>
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-left">
+                <p className="text-lg font-bold">{stats.totalSessions}</p>
+                <p className="text-xs text-[var(--muted-foreground)]">Total sessions</p>
+              </div>
+            </div>
+          )}
         </div>
       </section>
 

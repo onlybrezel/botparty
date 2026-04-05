@@ -1,7 +1,8 @@
-import { Injectable, ConflictException, ForbiddenException, Logger } from '@nestjs/common';
+import { Injectable, ConflictException, ForbiddenException, Logger, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { RobotsService } from '../robots/robots.service';
+import type { Prisma } from '@botparty/prisma';
 
 @Injectable()
 export class QueueService {
@@ -54,9 +55,10 @@ export class QueueService {
     });
 
     // Reorder remaining entries
+    const orderBy = await this.getQueueOrderBy(robotId);
     const entries = await this.prisma.queueEntry.findMany({
       where: { robotId },
-      orderBy: [{ isPriority: 'desc' }, { position: 'asc' }],
+      orderBy,
     });
 
     for (let i = 0; i < entries.length; i++) {
@@ -73,9 +75,10 @@ export class QueueService {
   }
 
   async getQueue(robotId: string) {
+    const orderBy = await this.getQueueOrderBy(robotId);
     return this.prisma.queueEntry.findMany({
       where: { robotId },
-      orderBy: [{ isPriority: 'desc' }, { position: 'asc' }],
+      orderBy,
       include: {
         user: {
           select: { id: true, username: true, displayName: true, avatarUrl: true },
@@ -85,9 +88,10 @@ export class QueueService {
   }
 
   async getNextInQueue(robotId: string) {
+    const orderBy = await this.getQueueOrderBy(robotId);
     return this.prisma.queueEntry.findFirst({
       where: { robotId },
-      orderBy: [{ isPriority: 'desc' }, { position: 'asc' }],
+      orderBy,
       include: {
         user: {
           select: { id: true, username: true, displayName: true },
@@ -97,20 +101,39 @@ export class QueueService {
   }
 
   async getCurrentControllerUserId(robotId: string): Promise<string | null> {
+    const orderBy = await this.getQueueOrderBy(robotId);
     const next = await this.prisma.queueEntry.findFirst({
       where: { robotId },
-      orderBy: [{ isPriority: 'desc' }, { position: 'asc' }],
+      orderBy,
       select: { userId: true },
     });
 
     return next?.userId ?? null;
   }
 
-  async vote(robotId: string, targetUserId: string) {
+  async vote(robotId: string, targetUserId: string, voterUserId: string) {
+    if (targetUserId === voterUserId) {
+      throw new BadRequestException('You cannot vote for yourself');
+    }
+
     const entry = await this.prisma.queueEntry.findUnique({
       where: { robotId_userId: { robotId, userId: targetUserId } },
     });
     if (!entry) return null;
+
+    const voterEntry = await this.prisma.queueEntry.findUnique({
+      where: { robotId_userId: { robotId, userId: voterUserId } },
+      select: { id: true },
+    });
+    if (!voterEntry) {
+      throw new ForbiddenException('Join the queue to vote');
+    }
+
+    const cooldownKey = `queue:vote:${robotId}:${voterUserId}`;
+    const voteAllowed = await this.redis.set(cooldownKey, Date.now().toString(), 'EX', 4, 'NX');
+    if (voteAllowed !== 'OK') {
+      throw new ConflictException('Voting too fast. Please wait a moment.');
+    }
 
     return this.prisma.queueEntry.update({
       where: { id: entry.id },
@@ -121,5 +144,18 @@ export class QueueService {
   async clearQueue(robotId: string) {
     await this.prisma.queueEntry.deleteMany({ where: { robotId } });
     await this.redis.publish(`queue:${robotId}`, JSON.stringify({ type: 'clear' }));
+  }
+
+  private async getQueueOrderBy(robotId: string): Promise<Prisma.QueueEntryOrderByWithRelationInput[]> {
+    const robot = await this.prisma.robot.findUnique({
+      where: { id: robotId },
+      select: { queueMode: true },
+    });
+
+    if (robot?.queueMode === 'VOTING') {
+      return [{ isPriority: 'desc' }, { votes: 'desc' }, { joinedAt: 'asc' }, { position: 'asc' }];
+    }
+
+    return [{ isPriority: 'desc' }, { position: 'asc' }, { joinedAt: 'asc' }];
   }
 }

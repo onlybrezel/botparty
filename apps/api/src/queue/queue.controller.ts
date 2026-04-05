@@ -40,7 +40,8 @@ export class QueueController {
   async vote(
     @Param('robotId') robotId: string,
     @Param('targetUserId') targetUserId: string,
+    @CurrentUser() user: JwtPayload,
   ) {
-    return this.queueService.vote(robotId, targetUserId);
+    return this.queueService.vote(robotId, targetUserId, user.sub);
   }
 }

@@ -41,6 +41,7 @@ interface QueueEntry {
   userId: string;
   username: string;
   position: number;
+  votes?: number;
 }
 
 type FocusMode = 'controls' | 'chat';
@@ -123,6 +124,7 @@ export default function RobotView({ robot }: Props) {
   const [moderatingUserId, setModeratingUserId] = useState<string | null>(null);
   const [robotStatus, setRobotStatus] = useState(robot.status);
   const [chatRestriction, setChatRestriction] = useState<string | null>(null);
+  const [votingForUserId, setVotingForUserId] = useState<string | null>(null);
   const [tabSwitchOnlyWhenEmpty, setTabSwitchOnlyWhenEmpty] = useState(true);
   const [guestSessionId] = useState<string>(() => getOrCreateGuestSessionId());
 
@@ -346,6 +348,26 @@ export default function RobotView({ robot }: Props) {
 
   const sendCommand = useCallback(
     (command: string, cooldownMs = 150) => {
+      if (robot.queueMode !== 'DISABLED') {
+        const myPos = userId ? queue.findIndex((entry) => entry.userId === userId) + 1 : 0;
+        const myTurn = myPos > 0 && myPos === 1;
+        if (!myTurn) {
+          const now = Date.now();
+          const lastError = lastErrorToastRef.current;
+          if (!lastError || now - lastError.timestamp > 3000) {
+            pushToast(
+              myPos > 0
+                ? `Queue position #${myPos}. Wait until you are #1.`
+                : 'Join the queue to control this robot.',
+              'error',
+              2200,
+            );
+            lastErrorToastRef.current = { message: 'control-queue-blocked', timestamp: now };
+          }
+          return;
+        }
+      }
+
       if (wsRef.current?.readyState !== WebSocket.OPEN) {
         // Show warning only once per 3 seconds if not connected
         const now = Date.now();
@@ -361,7 +383,7 @@ export default function RobotView({ robot }: Props) {
       cooldownMap.current.set(command, Date.now());
       wsRef.current.send(JSON.stringify({ event: 'control:command', data: { robotId: robot.id, command, timestamp: Date.now() } }));
     },
-    [robot.id],
+    [queue, robot.id, robot.queueMode, userId],
   );
 
   const triggerEStop = useCallback(() => {
@@ -561,6 +583,26 @@ export default function RobotView({ robot }: Props) {
     }
   }, [accessToken, inQueue, robot.id]);
 
+  const voteForQueueUser = useCallback(async (targetUserId: string) => {
+    if (!accessToken) {
+      pushToast('Sign in to vote in queue mode.', 'error', 2200);
+      return;
+    }
+
+    setVotingForUserId(targetUserId);
+    try {
+      api.setToken(accessToken);
+      await api.voteQueue(robot.id, targetUserId);
+      const updated = await api.getQueue(robot.id);
+      setQueue(updated);
+      pushToast('Vote submitted.', 'success', 1400);
+    } catch (err) {
+      pushToast(err instanceof Error ? err.message : 'Vote failed.', 'error', 2200);
+    } finally {
+      setVotingForUserId(null);
+    }
+  }, [accessToken, robot.id]);
+
   // ─── Derived ──────────────────────────────────────────────────────────────
 
   const isCrowdActive = (command: string) => Date.now() - (crowdInputs.get(command) ?? 0) < 600;
@@ -575,6 +617,16 @@ export default function RobotView({ robot }: Props) {
 
   const isOnline = robotStatus === 'ONLINE' || robotStatus === 'BUSY';
   const queueEnabled = robot.queueMode !== 'DISABLED';
+  const myQueuePosition = userId ? queue.findIndex((entry) => entry.userId === userId) + 1 : 0;
+  const isMyTurn = !queueEnabled || (myQueuePosition > 0 && myQueuePosition === 1);
+
+  useEffect(() => {
+    if (!userId) {
+      setInQueue(false);
+      return;
+    }
+    setInQueue(queue.some((entry) => entry.userId === userId));
+  }, [queue, userId]);
 
   // ─── UI ───────────────────────────────────────────────────────────────────
 
@@ -768,6 +820,13 @@ export default function RobotView({ robot }: Props) {
               WASD or arrow keys &middot; <span className="text-amber-400">amber</span> = another player just pressed
               {canUseEStop ? ' · ESC = emergency stop' : ''}
             </p>
+            {queueEnabled && !isMyTurn && (
+              <p className="mt-2 text-center text-xs text-amber-300">
+                {myQueuePosition > 0
+                  ? `Queue position #${myQueuePosition}. Controls unlock when you reach #1.`
+                  : 'Join the queue to control this robot.'}
+              </p>
+            )}
           </div>
         </div>
 
@@ -900,8 +959,26 @@ export default function RobotView({ robot }: Props) {
                     <span className={i === 0 ? 'font-medium' : 'text-[var(--muted-foreground)]'}>
                       {entry.username}
                     </span>
+                    {robot.queueMode === 'VOTING' && (
+                      <span className="rounded-full border border-[var(--border)] px-1.5 py-0.5 text-[10px] text-[var(--muted-foreground)]">
+                        {entry.votes ?? 0} votes
+                      </span>
+                    )}
                     {i === 0 && (
                       <span className="ml-auto text-xs text-[var(--online)]">Controlling</span>
+                    )}
+                    {userId && entry.userId === userId && i > 0 && (
+                      <span className="ml-auto text-xs text-amber-300">You</span>
+                    )}
+                    {robot.queueMode === 'VOTING' && accessToken && userId && entry.userId !== userId && i > 0 && (
+                      <button
+                        type="button"
+                        disabled={votingForUserId === entry.userId}
+                        onClick={() => void voteForQueueUser(entry.userId)}
+                        className="ml-auto rounded border border-[var(--border)] px-2 py-0.5 text-[10px] text-[var(--muted-foreground)] hover:text-[var(--foreground)] disabled:opacity-60"
+                      >
+                        {votingForUserId === entry.userId ? 'Voting...' : 'Vote'}
+                      </button>
                     )}
                   </div>
                 ))}

@@ -213,6 +213,25 @@ export class BotGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody()
     data: { robotId: string; command: string; value?: unknown; timestamp: number },
   ) {
+    const robot = await this.robotsService.findById(data.robotId);
+
+    if (robot.queueMode !== 'DISABLED') {
+      if (!client.userId || client.isGuest) {
+        client.send(
+          JSON.stringify({ event: 'error', data: { message: 'Please sign in and join the queue to control this robot' } }),
+        );
+        return;
+      }
+
+      const currentControllerUserId = await this.queueService.getCurrentControllerUserId(data.robotId);
+      if (!currentControllerUserId || currentControllerUserId !== client.userId) {
+        client.send(
+          JSON.stringify({ event: 'error', data: { message: 'Wait for your turn in the queue before sending controls' } }),
+        );
+        return;
+      }
+    }
+
     const access = await this.robotsService.getAccessPolicy(data.robotId);
     if (access.control === 'DISABLED') {
       client.send(

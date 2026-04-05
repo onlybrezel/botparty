@@ -55,6 +55,28 @@ export interface RobotMutationInput {
   };
 }
 
+export interface PlatformStats {
+  totalUsers: number;
+  totalRobots: number;
+  liveRobots: number;
+  totalLiveViewers: number;
+  activeQueueEntries: number;
+  totalSessions: number;
+  timestamp: string;
+}
+
+export interface RobotTelemetryPoint {
+  ts: number;
+  cpuPercent: number | null;
+  memoryPercent: number | null;
+  temperatureC: number | null;
+  uptimeSec: number | null;
+  controlConnected: boolean;
+  livekitConnected: boolean;
+  commandsReceived: number;
+  cameraFrames: number;
+}
+
 function resolveApiUrl() {
   const configured = process.env.NEXT_PUBLIC_API_URL;
 
@@ -293,7 +315,7 @@ class ApiClient {
 
   // ─── Robots ────────────────────────────────────────────────────────────────
 
-  async getRobots(params?: { status?: string; tag?: string; q?: string }) {
+  async getRobots(params?: { status?: string; tag?: string; q?: string; sort?: string }) {
     const qs = new URLSearchParams(params as Record<string, string>).toString();
     return this.request<RobotPublic[]>(`/robots${qs ? `?${qs}` : ''}`);
   }
@@ -456,12 +478,32 @@ class ApiClient {
     return this.request<{ logs: Array<{ ts: number; line: string }> }>(`/robots/${robotId}/logs`);
   }
 
+  async getRobotTelemetry(robotId: string) {
+    return this.request<{ latest: RobotTelemetryPoint | null; history: RobotTelemetryPoint[] }>(
+      `/robots/${robotId}/telemetry`,
+    );
+  }
+
   // ─── Queue ─────────────────────────────────────────────────────────────────
 
   async getQueue(robotId: string) {
-    return this.request<Array<{ userId: string; username: string; position: number; joinedAt: string }>>(
-      `/queue/${robotId}`,
-    );
+    const rows = await this.request<
+      Array<{
+        userId: string;
+        position: number;
+        joinedAt: string;
+        votes?: number;
+        user?: { username?: string; displayName?: string | null };
+      }>
+    >(`/queue/${robotId}`);
+
+    return rows.map((row) => ({
+      userId: row.userId,
+      username: row.user?.displayName ?? row.user?.username ?? row.userId.slice(0, 8),
+      position: row.position,
+      joinedAt: row.joinedAt,
+      votes: typeof row.votes === 'number' ? row.votes : 0,
+    }));
   }
 
   async joinQueue(robotId: string) {
@@ -470,6 +512,13 @@ class ApiClient {
 
   async leaveQueue(robotId: string) {
     return this.request(`/queue/${robotId}/leave`, { method: 'DELETE' });
+  }
+
+  async voteQueue(robotId: string, targetUserId: string) {
+    return this.request<{ userId: string; votes: number }>(`/queue/${robotId}/vote/${targetUserId}`, {
+      method: 'POST',
+      body: '{}',
+    });
   }
 
   // ─── Controls ──────────────────────────────────────────────────────────────
@@ -494,6 +543,10 @@ class ApiClient {
 
   async health() {
     return this.request<{ status: string }>('/health');
+  }
+
+  async getPlatformStats() {
+    return this.request<PlatformStats>('/health/stats');
   }
 }
 

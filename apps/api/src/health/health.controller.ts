@@ -33,4 +33,34 @@ export class HealthController {
     const healthy = Object.values(checks).every((v) => v === 'ok');
     return { status: healthy ? 'healthy' : 'degraded', checks, timestamp: new Date().toISOString() };
   }
+
+  @Get('stats')
+  @ApiOperation({ summary: 'Public platform stats for landing pages and dashboards' })
+  async stats() {
+    const [
+      totalUsers,
+      totalRobots,
+      liveRobots,
+      totalLiveViewers,
+      activeQueueEntries,
+      totalSessions,
+    ] = await Promise.all([
+      this.prisma.user.count({ where: { isActive: true } }),
+      this.prisma.robot.count(),
+      this.prisma.robot.count({ where: { status: { in: ['ONLINE', 'BUSY'] } } }),
+      this.prisma.robot.aggregate({ _sum: { viewerCount: true } }),
+      this.prisma.queueEntry.count(),
+      this.prisma.session.count(),
+    ]);
+
+    return {
+      totalUsers,
+      totalRobots,
+      liveRobots,
+      totalLiveViewers: totalLiveViewers._sum.viewerCount ?? 0,
+      activeQueueEntries,
+      totalSessions,
+      timestamp: new Date().toISOString(),
+    };
+  }
 }
