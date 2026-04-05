@@ -810,8 +810,8 @@ export class RobotsService {
       orderBy: [{ isFeatured: 'desc' }, { viewerCount: 'desc' }, { createdAt: 'desc' }],
     });
 
-    const liveStatuses = new Set(['ONLINE', 'BUSY'] as const);
-    const liveRobots = publicRobots.filter((robot) => liveStatuses.has(robot.status));
+    const liveStatuses = new Set<string>(['ONLINE', 'BUSY']);
+    const liveRobots = publicRobots.filter((robot) => liveStatuses.has(robot.status as string));
     const featuredRobots = publicRobots.filter((robot) => robot.isFeatured);
     const topTags = new Map<string, number>();
 

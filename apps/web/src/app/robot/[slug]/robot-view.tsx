@@ -1041,7 +1041,7 @@ export default function RobotView({ robot }: Props) {
                       hotKey={k}
                       isDown={isDown}
                       isCrowd={isCrowdActive(cmd)}
-                      disabled={Boolean(btn) && !canUseButton(btn)}
+                      disabled={Boolean(btn) && (btn ? !canUseButton(btn) : true)}
                       onPress={() => sendCommand(cmd, btn?.cooldownMs)}
                     />
                   );
@@ -1060,7 +1060,7 @@ export default function RobotView({ robot }: Props) {
                       hotKey={k}
                       isDown={isDown}
                       isCrowd={isCrowdActive(cmd)}
-                      disabled={Boolean(btn) && !canUseButton(btn)}
+                      disabled={Boolean(btn) && (btn ? !canUseButton(btn) : true)}
                       onPress={() => sendCommand(cmd, btn?.cooldownMs)}
                     />
                   );

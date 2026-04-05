@@ -24,19 +24,20 @@ import {
   type RobotManaged,
   type RobotTelemetryPoint,
 } from '@/lib/api';
+import type { ControlButtonAccess } from '@botparty/shared';
+import { ControlButtonAccess as ControlButtonAccessEnum } from '@botparty/shared';
 import { useAuth } from '@/lib/store';
 import { LiveKitPlayer } from '@/components/livekit-player';
 import { pushToast } from '@/lib/toast';
 
 type RemoteActionType = 'restart_video' | 'restart_control' | 'restart_chat' | 'set_log_stream';
-type ControlAccess = 'EVERYONE' | 'QUEUE_TURN' | 'MODERATOR' | 'OWNER';
 
 type ControlButtonDraft = {
   label: string;
   command: string;
   hotKey: string;
   cooldownMs: string;
-  access: ControlAccess;
+  access: ControlButtonAccess;
   color: string;
 };
 
@@ -82,7 +83,7 @@ const DEFAULT_CONTROL_DRAFT: ControlButtonDraft = {
   command: '',
   hotKey: '',
   cooldownMs: '200',
-  access: 'QUEUE_TURN',
+  access: ControlButtonAccessEnum.QUEUE_TURN,
   color: '',
 };
 
@@ -100,11 +101,11 @@ const accessModeOptions: Array<{
   { value: 'DISABLED', title: 'Disabled', description: 'Function is disabled' },
 ];
 
-const controlAccessOptions: Array<{ value: ControlAccess; label: string }> = [
-  { value: 'EVERYONE', label: 'Everyone' },
-  { value: 'QUEUE_TURN', label: 'Current turn' },
-  { value: 'MODERATOR', label: 'Moderator' },
-  { value: 'OWNER', label: 'Owner' },
+const controlAccessOptions: Array<{ value: ControlButtonAccess; label: string }> = [
+  { value: ControlButtonAccessEnum.EVERYONE, label: 'Everyone' },
+  { value: ControlButtonAccessEnum.QUEUE_TURN, label: 'Current turn' },
+  { value: ControlButtonAccessEnum.MODERATOR, label: 'Moderator' },
+  { value: ControlButtonAccessEnum.OWNER, label: 'Owner' },
 ];
 
 function toUpdatePayload(form: RobotFormState) {
@@ -719,6 +720,9 @@ export default function DashboardPage() {
 
     const nextButtons = [...controlButtons];
     const [moved] = nextButtons.splice(currentIndex, 1);
+    if (!moved) {
+      return;
+    }
     nextButtons.splice(targetIndex, 0, moved);
     const normalized = nextButtons.map((entry, index) => ({ ...entry, position: index }));
 
@@ -1312,7 +1316,7 @@ export default function DashboardPage() {
                         onChange={(event) =>
                           setControlDraft((prev) => ({
                             ...prev,
-                            access: event.target.value as ControlAccess,
+                            access: event.target.value as ControlButtonAccess,
                           }))
                         }
                       >
