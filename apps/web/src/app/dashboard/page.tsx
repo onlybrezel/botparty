@@ -164,7 +164,7 @@ function formFromRobot(robot: RobotManaged): RobotFormState {
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { accessToken } = useAuth();
+  const { accessToken, hasHydrated } = useAuth();
 
   const [robots, setRobots] = useState<RobotManaged[]>([]);
   const [loading, setLoading] = useState(true);
@@ -208,6 +208,10 @@ export default function DashboardPage() {
   const previewRefreshInFlightRef = useRef(false);
 
   useEffect(() => {
+    if (!hasHydrated) {
+      return;
+    }
+
     if (!accessToken) {
       router.replace('/login');
       return;
@@ -241,7 +245,7 @@ export default function DashboardPage() {
     } catch {
       setShowToken(false);
     }
-  }, [accessToken, router]);
+  }, [accessToken, hasHydrated, router]);
 
   useEffect(() => {
     if (!selectedRobot) return;
@@ -779,7 +783,7 @@ export default function DashboardPage() {
     }
   };
 
-  if (!accessToken) return null;
+  if (!hasHydrated || !accessToken) return null;
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">

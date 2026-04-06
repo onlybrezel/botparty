@@ -22,7 +22,7 @@ const DEFAULT_SETTINGS: LocalSettings = {
 export default function SettingsPage() {
   const router = useRouter();
   const auth = useAuth();
-  const { accessToken } = auth;
+  const { accessToken, hasHydrated } = auth;
 
   const [displayName, setDisplayName] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
@@ -32,6 +32,10 @@ export default function SettingsPage() {
   const [showAvatar, setShowAvatar] = useState(false);
 
   useEffect(() => {
+    if (!hasHydrated) {
+      return;
+    }
+
     if (!accessToken) {
       router.replace('/login');
       return;
@@ -58,7 +62,7 @@ export default function SettingsPage() {
         pushToast('Failed to load profile.', 'error');
       })
       .finally(() => setLoading(false));
-  }, [accessToken, router]);
+  }, [accessToken, hasHydrated, router]);
 
   const savePrefs = (next: LocalSettings) => {
     setPrefs(next);
@@ -87,7 +91,7 @@ export default function SettingsPage() {
     }
   };
 
-  if (!accessToken) return null;
+  if (!hasHydrated || !accessToken) return null;
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-8">

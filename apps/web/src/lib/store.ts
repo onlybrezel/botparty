@@ -10,6 +10,7 @@ interface AuthState {
   userId: string | null;
   displayName: string | null;
   role: 'ADMIN' | 'MOD' | 'USER' | null;
+  hasHydrated: boolean;
 }
 
 interface AuthActions {
@@ -24,6 +25,7 @@ interface AuthActions {
   logout: () => void;
   setAccessToken: (token: string) => void;
   setSession: (data: Partial<AuthState>) => void;
+  setHasHydrated: (value: boolean) => void;
 }
 
 export const useAuth = create(
@@ -35,6 +37,7 @@ export const useAuth = create(
       userId: null,
       displayName: null,
       role: null,
+      hasHydrated: false,
 
       login: ({ accessToken, refreshToken, username, userId, displayName, role }) =>
         set({
@@ -59,7 +62,14 @@ export const useAuth = create(
       setAccessToken: (token) => set({ accessToken: token }),
 
       setSession: (data) => set((state) => ({ ...state, ...data })),
+
+      setHasHydrated: (value) => set({ hasHydrated: value }),
     }),
-    { name: 'botparty-auth' },
+    {
+      name: 'botparty-auth',
+      onRehydrateStorage: () => (state) => {
+        state?.setHasHydrated(true);
+      },
+    },
   ),
 );

@@ -91,7 +91,7 @@ const statusClassName = (status: 'ONLINE' | 'OFFLINE' | 'BUSY' | 'MAINTENANCE') 
 
 export default function ModDashboardPage() {
   const router = useRouter();
-  const { accessToken } = useAuth();
+  const { accessToken, hasHydrated } = useAuth();
 
   const [allowed, setAllowed] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -110,6 +110,10 @@ export default function ModDashboardPage() {
   const [robotDraft, setRobotDraft] = useState<RobotDraft | null>(null);
 
   useEffect(() => {
+    if (!hasHydrated) {
+      return;
+    }
+
     if (!accessToken) {
       router.replace('/login');
       return;
@@ -146,7 +150,7 @@ export default function ModDashboardPage() {
     };
 
     void boot();
-  }, [accessToken, router]);
+  }, [accessToken, hasHydrated, router]);
 
   const filteredUsers = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -421,7 +425,7 @@ export default function ModDashboardPage() {
     }
   };
 
-  if (!accessToken || !allowed || loading) {
+  if (!hasHydrated || !accessToken || !allowed || loading) {
     return (
       <div className="mx-auto max-w-7xl px-4 py-8">
         <p className="text-sm text-[var(--muted-foreground)]">Loading mod dashboard...</p>

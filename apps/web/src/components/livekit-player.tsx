@@ -254,6 +254,36 @@ function VideoRenderer({ onStreamStalled }: { onStreamStalled?: () => void }) {
   const audioTrack = audioPublication?.audioTrack;
 
   useEffect(() => {
+    let active = true;
+
+    const startAudio = async () => {
+      try {
+        await room.startAudio();
+      } catch {
+        // Browser may require a user gesture before audio playback is allowed.
+      }
+    };
+
+    void startAudio();
+
+    const onUserGesture = () => {
+      if (!active) {
+        return;
+      }
+      void startAudio();
+    };
+
+    window.addEventListener('pointerdown', onUserGesture, { passive: true });
+    window.addEventListener('keydown', onUserGesture);
+
+    return () => {
+      active = false;
+      window.removeEventListener('pointerdown', onUserGesture);
+      window.removeEventListener('keydown', onUserGesture);
+    };
+  }, [room]);
+
+  useEffect(() => {
     const nextVolume = isMuted ? 0 : volume / 100;
     for (const track of robotAudioTracks) {
       const audioTrack = track.publication?.audioTrack as { setVolume?: (value: number) => void } | undefined;
