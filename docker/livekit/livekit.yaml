@@ -6,9 +6,6 @@ rtc:
   tcp_port: 7881
   use_external_ip: true
 
-keys:
-  devkey: secret_that_is_at_least_32_characters_long
-
 logging:
   level: info
   pion_level: warn
@@ -22,4 +19,4 @@ room:
 # webhook:
 #   urls:
 #     - http://api:4000/api/v1/webhooks/livekit
-#   api_key: devkey
+#   api_key: ${LIVEKIT_API_KEY}

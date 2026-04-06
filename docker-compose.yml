@@ -72,6 +72,8 @@ services:
     container_name: botparty-livekit
     restart: unless-stopped
     command: --config /etc/livekit.yaml
+    environment:
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:-devkey}: ${LIVEKIT_API_SECRET:-secret_that_is_at_least_32_characters_long}"
     # network_mode: host lets livekit bind directly to the host's network stack.
     # This makes all ports (7880 TCP/WS and 50000-50100 UDP for WebRTC ICE)
     # available on the host's IP without manual port mapping.
