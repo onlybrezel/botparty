@@ -1,7 +1,7 @@
 'use client';
 
 import { LiveKitRoom, RoomAudioRenderer, VideoTrack, useRoomContext, useTracks } from '@livekit/components-react';
-import { Track } from 'livekit-client';
+import { Track, type RemoteVideoTrack } from 'livekit-client';
 import type { TrackReference } from '@livekit/components-core';
 import { Check, Copy, Radio, Volume2, VolumeX, X } from 'lucide-react';
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
@@ -331,6 +331,23 @@ function VideoRenderer({ onStreamStalled }: { onStreamStalled?: () => void }) {
 
     return () => window.clearTimeout(timeout);
   }, [robotTrack, room.state, onStreamStalled]);
+
+  // Minimize the browser WebRTC jitter buffer. playoutDelayHint is Chrome-specific
+  // but silently ignored elsewhere. Setting it to 0 tells Chrome to target the
+  // smallest possible playout queue, which alone can cut 300-600 ms of latency.
+  useEffect(() => {
+    if (!videoTrack) {
+      return;
+    }
+    try {
+      const receiver = (videoTrack as RemoteVideoTrack & { receiver?: RTCRtpReceiver }).receiver;
+      if (receiver && 'playoutDelayHint' in receiver) {
+        (receiver as RTCRtpReceiver & { playoutDelayHint: number }).playoutDelayHint = 0;
+      }
+    } catch {
+      // best-effort, not supported in all browsers
+    }
+  }, [videoTrack]);
 
   useEffect(() => {
     if (!videoTrack || !videoPublication) {
@@ -732,7 +749,7 @@ export function LiveKitPlayer({ token, livekitUrl, onStreamStalled }: Props) {
     <LiveKitRoom
       token={token}
       serverUrl={livekitUrl}
-      options={{ adaptiveStream: false }}
+      options={{ adaptiveStream: false, dynacast: false }}
       video={false}
       audio={false}
       className="relative h-full w-full"
