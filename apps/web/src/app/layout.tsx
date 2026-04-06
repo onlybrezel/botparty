@@ -11,6 +11,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL('https://botparty.live'),
   title: { default: 'BotParty', template: '%s | BotParty' },
   description: 'Drive real robots from your browser.',
   keywords: ['robot', 'teleoperation', 'webrtc', 'livekit', 'remote control', 'robotics'],
@@ -18,6 +19,8 @@ export const metadata: Metadata = {
     title: 'BotParty',
     description: 'Drive real robots from your browser.',
     type: 'website',
+    url: 'https://botparty.live',
+    siteName: 'BotParty',
   },
 };
 

@@ -52,6 +52,11 @@ type StatHistoryPoint = {
   roundTripMs: number | null;
 };
 
+type SparklineBounds = {
+  min: number;
+  max: number;
+};
+
 function formatStat(value: string | number | null | undefined, suffix = '') {
   if (value === null || value === undefined || value === '') {
     return 'n/a';
@@ -76,14 +81,52 @@ function formatPercent(value: number | null | undefined) {
   return `${value}%`;
 }
 
-function buildSparklinePath(values: Array<number | null>, width: number, height: number) {
+function getSparklineBounds(
+  values: Array<number | null>,
+  {
+    baseline = 0,
+    minRange = 1,
+    paddingRatio = 0.12,
+  }: {
+    baseline?: number;
+    minRange?: number;
+    paddingRatio?: number;
+  } = {},
+): SparklineBounds | null {
   const numericValues = values.filter((value): value is number => value !== null && Number.isFinite(value));
-  if (numericValues.length < 2) {
+  if (numericValues.length === 0) {
+    return null;
+  }
+
+  let min = Math.min(...numericValues, baseline);
+  let max = Math.max(...numericValues, baseline);
+  const rawRange = max - min;
+  const paddedRange = Math.max(rawRange, minRange);
+  const padding = paddedRange * paddingRatio;
+
+  min -= padding;
+  max += padding;
+
+  if (baseline >= 0) {
+    min = Math.max(0, min);
+  }
+
+  if (max - min < minRange) {
+    const deficit = minRange - (max - min);
+    min = Math.max(baseline >= 0 ? 0 : Number.NEGATIVE_INFINITY, min - deficit / 2);
+    max += deficit / 2;
+  }
+
+  return { min, max };
+}
+
+function buildSparklinePath(values: Array<number | null>, width: number, height: number, bounds: SparklineBounds | null) {
+  const numericValues = values.filter((value): value is number => value !== null && Number.isFinite(value));
+  if (numericValues.length < 2 || !bounds) {
     return '';
   }
 
-  const max = Math.max(...numericValues, 1);
-  const min = Math.min(...numericValues, 0);
+  const { min, max } = bounds;
   const range = Math.max(max - min, 1);
   const stepX = values.length > 1 ? width / (values.length - 1) : width;
 
@@ -106,16 +149,21 @@ function Sparkline({
   suffix,
   values,
   stroke,
+  baseline = 0,
+  minRange = 1,
 }: {
   label: string;
   value: number | null;
   suffix: string;
   values: Array<number | null>;
   stroke: string;
+  baseline?: number;
+  minRange?: number;
 }) {
   const width = 132;
   const height = 36;
-  const path = buildSparklinePath(values, width, height);
+  const bounds = getSparklineBounds(values, { baseline, minRange });
+  const path = buildSparklinePath(values, width, height, bounds);
 
   return (
     <div className="rounded-xl border border-white/8 bg-white/4 px-2 py-2">
@@ -200,6 +248,10 @@ function VideoRenderer({ onStreamStalled }: { onStreamStalled?: () => void }) {
   // Filter out placeholder tracks (no publication)
   const robotTrack = tracks.find((t) => t.publication !== undefined) as TrackReference | undefined;
   const robotAudioTracks = audioTracks.filter((t) => t.publication !== undefined) as TrackReference[];
+  const videoPublication = robotTrack?.publication;
+  const videoTrack = videoPublication?.videoTrack;
+  const audioPublication = robotAudioTracks[0]?.publication;
+  const audioTrack = audioPublication?.audioTrack;
 
   useEffect(() => {
     const nextVolume = isMuted ? 0 : volume / 100;
@@ -236,24 +288,16 @@ function VideoRenderer({ onStreamStalled }: { onStreamStalled?: () => void }) {
   }, [robotTrack, room.state, onStreamStalled]);
 
   useEffect(() => {
-    if (!panelPosition || !robotTrack?.publication?.videoTrack) {
+    if (!videoTrack || !videoPublication) {
       return;
     }
 
     let cancelled = false;
 
     const collectStats = async () => {
-      const publication = robotTrack.publication;
-      const remoteVideoTrack = publication.videoTrack;
-      const audioPublication = robotAudioTracks[0]?.publication;
-      const remoteAudioTrack = audioPublication?.audioTrack;
-      if (!remoteVideoTrack) {
-        return;
-      }
-
       const videoElement = containerRef.current?.querySelector('video') ?? null;
-      const report = await remoteVideoTrack.getRTCStatsReport().catch(() => undefined);
-      const audioReport = remoteAudioTrack ? await remoteAudioTrack.getRTCStatsReport().catch(() => undefined) : undefined;
+      const report = await videoTrack.getRTCStatsReport().catch(() => undefined);
+      const audioReport = audioTrack ? await audioTrack.getRTCStatsReport().catch(() => undefined) : undefined;
 
       let inbound: RTCInboundRtpStreamStats | undefined;
       let audioInbound: RTCInboundRtpStreamStats | undefined;
@@ -285,19 +329,19 @@ function VideoRenderer({ onStreamStalled }: { onStreamStalled?: () => void }) {
         timestamp: new Date().toLocaleTimeString(),
         connectionState: String(room.state),
         participantQuality: String(robotTrack.participant.connectionQuality),
-        trackSid: maskIdentifier(publication.trackSid),
+        trackSid: maskIdentifier(videoPublication.trackSid),
         audioTrackSid: maskIdentifier(audioPublication?.trackSid),
-        mimeType: publication.mimeType ?? 'n/a',
+        mimeType: videoPublication.mimeType ?? 'n/a',
         audioMimeType: audioPublication?.mimeType ?? 'n/a',
-        source: String(publication.source),
-        subscription: publication.isSubscribed ? 'subscribed' : 'not-subscribed',
-        streamState: String(remoteVideoTrack.streamState),
-        bitrateKbps: remoteVideoTrack.currentBitrate ? Math.round(remoteVideoTrack.currentBitrate / 1000) : null,
-        audioBitrateKbps: remoteAudioTrack?.currentBitrate ? Math.round(remoteAudioTrack.currentBitrate / 1000) : null,
+        source: String(videoPublication.source),
+        subscription: videoPublication.isSubscribed ? 'subscribed' : 'not-subscribed',
+        streamState: String(videoTrack.streamState),
+        bitrateKbps: videoTrack.currentBitrate ? Math.round(videoTrack.currentBitrate / 1000) : null,
+        audioBitrateKbps: audioTrack?.currentBitrate ? Math.round(audioTrack.currentBitrate / 1000) : null,
         framesPerSecond:
           typeof inbound?.framesPerSecond === 'number' ? Math.round(inbound.framesPerSecond * 10) / 10 : null,
-        frameWidth: inbound?.frameWidth ?? publication.dimensions?.width ?? null,
-        frameHeight: inbound?.frameHeight ?? publication.dimensions?.height ?? null,
+        frameWidth: inbound?.frameWidth ?? videoPublication.dimensions?.width ?? null,
+        frameHeight: inbound?.frameHeight ?? videoPublication.dimensions?.height ?? null,
         framesDropped: inbound?.framesDropped ?? null,
         packetsLost: inbound?.packetsLost ?? null,
         audioPacketsLost: audioInbound?.packetsLost ?? null,
@@ -339,7 +383,16 @@ function VideoRenderer({ onStreamStalled }: { onStreamStalled?: () => void }) {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [panelPosition, robotTrack, robotAudioTracks, room]);
+  }, [audioPublication, audioTrack, robotTrack, room.state, videoPublication, videoTrack]);
+
+  useEffect(() => {
+    if (videoTrack) {
+      return;
+    }
+
+    setStats(null);
+    setHistory([]);
+  }, [videoTrack]);
 
   useEffect(() => {
     if (!panelPosition) {
@@ -566,6 +619,7 @@ function VideoRenderer({ onStreamStalled }: { onStreamStalled?: () => void }) {
                 suffix=" kbps"
                 values={history.map((point) => point.videoBitrateKbps)}
                 stroke="#22d3ee"
+                minRange={120}
               />
               <Sparkline
                 label="Audio bitrate"
@@ -573,6 +627,7 @@ function VideoRenderer({ onStreamStalled }: { onStreamStalled?: () => void }) {
                 suffix=" kbps"
                 values={history.map((point) => point.audioBitrateKbps)}
                 stroke="#f59e0b"
+                minRange={24}
               />
               <Sparkline
                 label="RTT"
@@ -580,6 +635,7 @@ function VideoRenderer({ onStreamStalled }: { onStreamStalled?: () => void }) {
                 suffix=" ms"
                 values={history.map((point) => point.roundTripMs)}
                 stroke="#fb7185"
+                minRange={40}
               />
             </div>
           </div>

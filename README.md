@@ -212,7 +212,7 @@ The API container runs `prisma db push` and seeds the database on first start. C
 
 The setup wizard walks through this, but the short version:
 
-1. Point your domain's A record at the server.
+1. Point your domain's A record, e.g. `botparty.live`, at the server.
 2. Run `bash setup-env.sh` and choose "Let's Encrypt" when asked.
 3. The script sets up the nginx config and tells you the certbot command to run.
 4. Certificates go in `docker/nginx/ssl/` — nginx picks them up automatically.

@@ -10,8 +10,8 @@ export class MailService {
   private readonly appUrl: string;
 
   constructor(private readonly config: ConfigService) {
-    this.fromAddress = this.config.get<string>('SMTP_FROM', 'BotParty <no-reply@botparty.local>');
-    this.appUrl = this.config.get<string>('APP_URL', 'http://localhost:3000');
+    this.fromAddress = this.config.get<string>('SMTP_FROM', 'BotParty <no-reply@botparty.live>');
+    this.appUrl = this.config.get<string>('APP_URL', 'https://botparty.live');
     this.transport = this.createTransport();
   }
 

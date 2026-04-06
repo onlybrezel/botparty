@@ -113,7 +113,7 @@ if [[ "$IS_LOCAL" == "y" ]]; then
   success "Using localhost defaults."
   NGINX_CONF_VALUE=./docker/nginx/nginx.conf
 else
-  ask DOMAIN "Your domain (e.g. botparty.example.com)"
+  ask DOMAIN "Your domain (e.g. botparty.live)"
   [[ -z "$DOMAIN" ]] && die "Domain is required for server deployment."
 
   # SSL choice
@@ -174,7 +174,7 @@ ask LIVEKIT_API_SECRET "LiveKit API secret (leave empty to generate)" ""
 
 # Seed admin password
 echo ""
-ask SEED_ADMIN_PASSWORD "Demo admin password (for the seeded admin@botparty.io account)" "admin123456"
+ask SEED_ADMIN_PASSWORD "Demo admin password (for the seeded admin@botparty.live account)" "admin123456"
 
 success "Secrets ready."
 
@@ -344,5 +344,5 @@ fi
 
 echo ""
 echo "  Demo login (seeded on first start):"
-echo "    admin@botparty.io  /  ${SEED_ADMIN_PASSWORD}"
+echo "    admin@botparty.live  /  ${SEED_ADMIN_PASSWORD}"
 echo ""

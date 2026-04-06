@@ -77,15 +77,16 @@ async function ensureSeedRobot(input: {
 
 async function main() {
   console.log('🌱 Seeding BotParty database...');
+  const appUrl = process.env.APP_URL ?? 'https://botparty.live';
 
   // Create admin user
   const adminPassword = await hash('admin123456');
   const admin = await prisma.user.upsert({
-    where: { email: 'admin@botparty.io' },
+    where: { email: 'admin@botparty.live' },
     update: {},
     create: {
       username: 'admin',
-      email: 'admin@botparty.io',
+      email: 'admin@botparty.live',
       passwordHash: adminPassword,
       displayName: 'BotParty Admin',
       role: 'ADMIN',
@@ -99,11 +100,11 @@ async function main() {
   // Create demo user
   const userPassword = await hash('user123456');
   const user = await prisma.user.upsert({
-    where: { email: 'user@botparty.io' },
+    where: { email: 'user@botparty.live' },
     update: {},
     create: {
       username: 'demo_user',
-      email: 'user@botparty.io',
+      email: 'user@botparty.live',
       passwordHash: userPassword,
       displayName: 'Demo User',
       role: 'USER',
@@ -162,11 +163,11 @@ async function main() {
 
   console.log('\n🎉 Seed complete!');
   console.log('\n📋 Login credentials:');
-  console.log('   Admin:   admin@botparty.io   / admin123456');
-  console.log('   User:    user@botparty.io    / user123456');
+  console.log('   Admin:   admin@botparty.live   / admin123456');
+  console.log('   User:    user@botparty.live    / user123456');
   console.log(`   User Bot URL:  /robot/${userBot.slug}`);
   console.log(`   Admin Bot URL: /robot/${adminBot.slug}`);
-  console.log('   Web:     http://localhost:3000');
+  console.log(`   Web:     ${appUrl}`);
 }
 
 main()
