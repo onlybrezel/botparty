@@ -44,6 +44,17 @@ interface QueueEntry {
   votes?: number;
 }
 
+type QueueEntryWire = {
+  userId: string;
+  username?: string;
+  position: number;
+  votes?: number;
+  user?: {
+    username?: string;
+    displayName?: string | null;
+  };
+};
+
 interface ActiveSessionState {
   sessionId: string;
   userId: string;
@@ -105,6 +116,19 @@ function getOrCreateGuestSessionId(): string {
   }
 }
 
+function normalizeQueueEntries(rows: QueueEntryWire[] | undefined): QueueEntry[] {
+  if (!rows?.length) {
+    return [];
+  }
+
+  return rows.map((row) => ({
+    userId: row.userId,
+    username: row.username ?? row.user?.displayName ?? row.user?.username ?? row.userId.slice(0, 8),
+    position: row.position,
+    votes: typeof row.votes === 'number' ? row.votes : 0,
+  }));
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 interface Props {
@@ -145,7 +169,7 @@ export default function RobotView({ robot }: Props) {
   const [turnCountdownMs, setTurnCountdownMs] = useState<number | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
-  const chatEndRef = useRef<HTMLDivElement>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<HTMLInputElement>(null);
   const cooldownMap = useRef<Map<string, number>>(new Map());
   const lastErrorToastRef = useRef<{ message: string; timestamp: number } | null>(null);
@@ -157,13 +181,19 @@ export default function RobotView({ robot }: Props) {
 
   const isAuthenticated = Boolean(accessToken && userId);
   const robotAccess = (robot as RobotPublic & {
-    metadata?: { access?: { estop?: 'ALL' | 'AUTHENTICATED' | 'DISABLED' } };
+    metadata?: {
+      access?: {
+        video?: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
+        estop?: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
+      };
+    };
   }).metadata?.access;
   const canUseAccess = (mode: 'ALL' | 'AUTHENTICATED' | 'DISABLED' | undefined) => {
     if (mode === 'DISABLED') return false;
     if (mode === 'ALL') return true;
     return isAuthenticated;
   };
+  const guestVideoAllowed = robotAccess?.video === 'ALL';
   const estopAccess = robotAccess?.estop;
   const canUseEStop = canUseAccess(estopAccess);
   const canModerate = Boolean(userId && (userId === robot.owner.id || role === 'ADMIN' || role === 'MOD'));
@@ -246,7 +276,11 @@ export default function RobotView({ robot }: Props) {
   // ─── Fetch LiveKit token (auth required) ──────────────────────────────────
 
   const refreshViewerToken = useCallback(async (forceRemount = false) => {
-    if ((robot.accessMode === 'PASSWORD' || robot.accessMode === 'ALLOWED_USERS') && !roomAccessToken) {
+    if (
+      (robot.accessMode === 'PASSWORD' || robot.accessMode === 'ALLOWED_USERS') &&
+      !roomAccessToken &&
+      !guestVideoAllowed
+    ) {
       setLivekitCreds(null);
       setVideoState('idle');
       return;
@@ -288,7 +322,7 @@ export default function RobotView({ robot }: Props) {
     } finally {
       livekitRefreshInFlightRef.current = false;
     }
-  }, [accessToken, robot.accessMode, robot.id, roomAccessToken]);
+  }, [accessToken, guestVideoAllowed, robot.accessMode, robot.id, roomAccessToken]);
 
   useEffect(() => {
     void refreshViewerToken(false);
@@ -297,7 +331,7 @@ export default function RobotView({ robot }: Props) {
   // ─── Fetch queue ──────────────────────────────────────────────────────────
 
   useEffect(() => {
-    api.getQueue(robot.id).then(setQueue).catch(() => {});
+    api.getQueue(robot.id).then((rows) => setQueue(normalizeQueueEntries(rows as QueueEntryWire[]))).catch(() => {});
   }, [robot.id]);
 
   useEffect(() => {
@@ -442,7 +476,7 @@ export default function RobotView({ robot }: Props) {
         ]);
         break;
       case 'queue:update':
-        setQueue((data.queue as QueueEntry[]) ?? []);
+        setQueue(normalizeQueueEntries(data.queue as QueueEntryWire[] | undefined));
         break;
       case 'session:start':
       case 'queue:turn-start': {
@@ -649,6 +683,12 @@ export default function RobotView({ robot }: Props) {
     };
 
     const onKeyUp = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      const inInput = ['INPUT', 'TEXTAREA'].includes(target.tagName);
+      const inContentEditable = target.isContentEditable;
+      const inChatInput = target === chatInputRef.current;
+      if (inInput || inContentEditable || focusMode === 'chat' || inChatInput) return;
+
       const key = e.key.toLowerCase();
       setActiveKeys((s) => { const n = new Set(s); n.delete(key); return n; });
       if (WASD[key]) {
@@ -677,7 +717,19 @@ export default function RobotView({ robot }: Props) {
 
   // ─── Chat ─────────────────────────────────────────────────────────────────
 
-  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+  useEffect(() => {
+    const container = chatScrollRef.current;
+    if (!container) return;
+
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    const shouldStickToBottom = distanceFromBottom < 48;
+
+    if (!shouldStickToBottom) {
+      return;
+    }
+
+    container.scrollTop = container.scrollHeight;
+  }, [messages]);
 
   // Save chat history to localStorage (debounced - max once per second)
   const saveChatTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -882,7 +934,7 @@ export default function RobotView({ robot }: Props) {
         <div className="lg:col-span-2 space-y-4">
           {/* Video */}
           <div className="relative aspect-video overflow-hidden rounded-xl border border-[var(--border)] bg-black">
-            {(robot.accessMode === 'PASSWORD' || robot.accessMode === 'ALLOWED_USERS') && !roomAccessToken ? (
+            {(robot.accessMode === 'PASSWORD' || robot.accessMode === 'ALLOWED_USERS') && !roomAccessToken && !guestVideoAllowed ? (
               <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center text-[var(--muted-foreground)]">
                 <div className="rounded-xl border border-[var(--border)] bg-[var(--muted)] p-3">
                   <Video className="h-7 w-7 text-sky-300" />
@@ -972,13 +1024,19 @@ export default function RobotView({ robot }: Props) {
             )}
 
             {/* Live badge */}
-            {isOnline && (
+            {isOnline && livekitCreds && (
               <div className="absolute left-3 top-3 flex items-center gap-1 rounded-full bg-[var(--live)]/90 px-2 py-0.5 text-xs font-semibold text-white backdrop-blur-sm">
                 <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse-dot" />
                 LIVE
               </div>
             )}
           </div>
+
+          {(robot.accessMode === 'PASSWORD' || robot.accessMode === 'ALLOWED_USERS') && !roomAccessToken && guestVideoAllowed ? (
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm text-[var(--muted-foreground)]">
+              Video is public for guests. Room access is still required for chat, queue, and controls.
+            </div>
+          ) : null}
 
           {/* Focus toggles */}
           <div className="flex items-center gap-2">
@@ -1303,19 +1361,46 @@ export default function RobotView({ robot }: Props) {
               Chat
             </p>
 
-            <div className="mb-3 h-52 space-y-1 overflow-y-auto rounded-lg bg-[var(--background)] p-2 text-sm leading-relaxed">
+            <div
+              ref={chatScrollRef}
+              className="mb-3 h-52 space-y-2 overflow-y-auto rounded-lg bg-[var(--background)] p-2 text-sm leading-relaxed"
+            >
               {messages.map((msg, i) => (
-                <p key={i} className="animate-fade-in">
+                <div
+                  key={i}
+                  className={`animate-fade-in rounded-lg border px-3 py-2 ${
+                    msg.isSystem
+                      ? 'border-[var(--border)] bg-[var(--muted)]/40'
+                      : msg.userId === userId
+                        ? 'border-violet-500/30 bg-violet-500/8'
+                        : 'border-[var(--border)] bg-[var(--card)]/80'
+                  }`}
+                >
                   {msg.isSystem ? (
-                    <span className="italic text-[var(--muted-foreground)]">{msg.content}</span>
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--muted-foreground)]">
+                          System
+                        </span>
+                        <span className="text-[10px] text-[var(--muted-foreground)]">
+                          {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                      <p className="italic text-[var(--muted-foreground)]">{msg.content}</p>
+                    </div>
                   ) : (
-                    <span className="inline-flex items-center gap-2">
-                      <span className="font-semibold text-violet-400">{msg.username}: </span>
-                      <span className="text-[var(--foreground)]/90">{msg.content}</span>
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-semibold text-violet-400">{msg.username}</span>
+                        <span className="text-[10px] text-[var(--muted-foreground)]">
+                          {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                      <p className="whitespace-pre-wrap break-words text-[var(--foreground)]/90">{msg.content}</p>
                       {canModerate &&
                         msg.userId !== 'system' &&
                         msg.userId !== userId && (
-                          <span className="inline-flex items-center gap-1">
+                          <div className="inline-flex flex-wrap items-center gap-1">
                             <button
                               type="button"
                               onClick={() => void moderateChatUser(msg.userId, 'TIMEOUT')}
@@ -1340,13 +1425,12 @@ export default function RobotView({ robot }: Props) {
                             >
                               Unban
                             </button>
-                          </span>
+                          </div>
                         )}
-                    </span>
+                    </div>
                   )}
-                </p>
+                </div>
               ))}
-              <div ref={chatEndRef} />
             </div>
 
             <div className="flex gap-2">

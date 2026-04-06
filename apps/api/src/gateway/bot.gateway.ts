@@ -660,8 +660,16 @@ export class BotGateway
     const current = this.activeTurns.get(robotId) ?? null;
     const nextEntry = queue[0] ?? null;
     const robot = await this.robotsService.findById(robotId);
+    const robotRealtimeOnline = this.robotClients.has(robotId);
 
     if (robot.queueMode === 'DISABLED') {
+      if (current) {
+        await this.clearTurnState(robotId, 'clear');
+      }
+      return;
+    }
+
+    if (!robotRealtimeOnline || robot.status === 'OFFLINE' || robot.status === 'MAINTENANCE') {
       if (current) {
         await this.clearTurnState(robotId, 'clear');
       }

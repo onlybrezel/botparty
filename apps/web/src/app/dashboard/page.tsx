@@ -644,13 +644,20 @@ export default function DashboardPage() {
   const handleCreateControl = async () => {
     if (!accessToken || !selectedRobot) return;
 
+    const label = controlDraft.label.trim();
+    const command = controlDraft.command.trim();
+    if (!label || !command) {
+      pushToast('Label and command are required for a control button.', 'error', 2600);
+      return;
+    }
+
     setCreatingControl(true);
     setError(null);
     try {
       api.setToken(accessToken);
       const next = await api.createControl(selectedRobot.id, {
-        label: controlDraft.label.trim(),
-        command: controlDraft.command.trim(),
+        label,
+        command,
         hotKey: controlDraft.hotKey.trim() || undefined,
         cooldownMs: Number(controlDraft.cooldownMs),
         access: controlDraft.access,
@@ -1282,7 +1289,6 @@ export default function DashboardPage() {
                         onChange={(event) =>
                           setControlDraft((prev) => ({ ...prev, label: event.target.value }))
                         }
-                        required
                       />
                       <input
                         className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
@@ -1291,7 +1297,6 @@ export default function DashboardPage() {
                         onChange={(event) =>
                           setControlDraft((prev) => ({ ...prev, command: event.target.value }))
                         }
-                        required
                       />
                       <input
                         className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"

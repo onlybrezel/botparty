@@ -64,15 +64,6 @@ export class LivekitController {
     if (access.video !== 'ALL') {
       throw new ForbiddenException('Guest video access is disabled');
     }
-    const guestActorId = guestSessionId?.trim() ? `guest:${guestSessionId.trim().toLowerCase()}` : '';
-    const allowed = await this.robotsService.validateRoomAccess({
-      robotId,
-      actorId: guestActorId,
-      roomAccessToken,
-    });
-    if (!allowed) {
-      throw new ForbiddenException('Room access verification required');
-    }
 
     const guestId = `guest-${randomUUID()}`;
     const token = await this.livekitService.generateViewerToken(

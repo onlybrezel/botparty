@@ -26,6 +26,11 @@ export class QueueService {
       throw new ForbiddenException('Control is disabled for this robot');
     }
 
+    const robot = await this.robotsService.findById(robotId);
+    if (robot.status === 'OFFLINE' || robot.status === 'MAINTENANCE') {
+      throw new ForbiddenException('This robot is currently offline');
+    }
+
     const allowed = await this.robotsService.validateRoomAccess({
       robotId,
       actorId: userId,
