@@ -27,6 +27,8 @@ type NerdStats = {
   audioPacketsLost: number | null;
   jitterMs: number | null;
   audioJitterMs: number | null;
+  jitterBufferMs: number | null;
+  audioJitterBufferMs: number | null;
   roundTripMs: number | null;
   videoWidth: number | null;
   videoHeight: number | null;
@@ -34,6 +36,9 @@ type NerdStats = {
   audioLevel: number | null;
   concealedSamples: number | null;
   audioMuted: string;
+  transportProtocol: string;
+  localCandidateType: string;
+  remoteCandidateType: string;
 };
 
 type PanelPosition = {
@@ -55,6 +60,11 @@ type StatHistoryPoint = {
 type SparklineBounds = {
   min: number;
   max: number;
+};
+
+type CandidateStats = RTCStats & {
+  candidateType?: string;
+  protocol?: string;
 };
 
 function formatStat(value: string | number | null | undefined, suffix = '') {
@@ -223,7 +233,12 @@ function statsToClipboardText(stats: NerdStats | null) {
     `Audio packets lost: ${formatStat(stats.audioPacketsLost)}`,
     `Video jitter: ${formatStat(stats.jitterMs, ' ms')}`,
     `Audio jitter: ${formatStat(stats.audioJitterMs, ' ms')}`,
+    `Video jitter buffer: ${formatStat(stats.jitterBufferMs, ' ms')}`,
+    `Audio jitter buffer: ${formatStat(stats.audioJitterBufferMs, ' ms')}`,
     `RTT: ${formatStat(stats.roundTripMs, ' ms')}`,
+    `Transport: ${stats.transportProtocol}`,
+    `Local candidate: ${stats.localCandidateType}`,
+    `Remote candidate: ${stats.remoteCandidateType}`,
     `Video readyState: ${formatStat(stats.readyState)}`,
     `Audio level: ${formatPercent(stats.audioLevel)}`,
     `Concealed samples: ${formatStat(stats.concealedSamples)}`,
@@ -332,6 +347,8 @@ function VideoRenderer({ onStreamStalled }: { onStreamStalled?: () => void }) {
       let inbound: RTCInboundRtpStreamStats | undefined;
       let audioInbound: RTCInboundRtpStreamStats | undefined;
       let candidatePair: RTCIceCandidatePairStats | undefined;
+      let localCandidate: CandidateStats | undefined;
+      let remoteCandidate: CandidateStats | undefined;
 
       report?.forEach((entry) => {
         if (entry.type === 'inbound-rtp' && (entry as RTCInboundRtpStreamStats).kind === 'video') {
@@ -342,6 +359,12 @@ function VideoRenderer({ onStreamStalled }: { onStreamStalled?: () => void }) {
           if (selected === true || candidatePair === undefined) {
             candidatePair = entry as RTCIceCandidatePairStats;
           }
+        }
+        if (entry.type === 'local-candidate') {
+          localCandidate = entry as CandidateStats;
+        }
+        if (entry.type === 'remote-candidate') {
+          remoteCandidate = entry as CandidateStats;
         }
       });
 
@@ -377,6 +400,16 @@ function VideoRenderer({ onStreamStalled }: { onStreamStalled?: () => void }) {
         audioPacketsLost: audioInbound?.packetsLost ?? null,
         jitterMs: typeof inbound?.jitter === 'number' ? Math.round(inbound.jitter * 1000) : null,
         audioJitterMs: typeof audioInbound?.jitter === 'number' ? Math.round(audioInbound.jitter * 1000) : null,
+        jitterBufferMs:
+          typeof inbound?.jitterBufferDelay === 'number' && typeof inbound?.jitterBufferEmittedCount === 'number' && inbound.jitterBufferEmittedCount > 0
+            ? Math.round((inbound.jitterBufferDelay / inbound.jitterBufferEmittedCount) * 1000)
+            : null,
+        audioJitterBufferMs:
+          typeof audioInbound?.jitterBufferDelay === 'number' &&
+          typeof audioInbound?.jitterBufferEmittedCount === 'number' &&
+          audioInbound.jitterBufferEmittedCount > 0
+            ? Math.round((audioInbound.jitterBufferDelay / audioInbound.jitterBufferEmittedCount) * 1000)
+            : null,
         roundTripMs:
           typeof candidatePair?.currentRoundTripTime === 'number'
             ? Math.round(candidatePair.currentRoundTripTime * 1000)
@@ -391,6 +424,9 @@ function VideoRenderer({ onStreamStalled }: { onStreamStalled?: () => void }) {
         concealedSamples: (audioInbound as RTCInboundRtpStreamStats & { concealedSamples?: number } | undefined)
           ?.concealedSamples ?? null,
         audioMuted: audioPublication?.isMuted ? 'muted' : 'live',
+        transportProtocol: localCandidate?.protocol ?? remoteCandidate?.protocol ?? 'n/a',
+        localCandidateType: localCandidate?.candidateType ?? 'n/a',
+        remoteCandidateType: remoteCandidate?.candidateType ?? 'n/a',
       };
 
       setStats(nextStats);
@@ -626,6 +662,16 @@ function VideoRenderer({ onStreamStalled }: { onStreamStalled?: () => void }) {
               <p>{formatStat(stats?.jitterMs, ' ms')}</p>
               <p className="text-slate-400">Audio jitter</p>
               <p>{formatStat(stats?.audioJitterMs, ' ms')}</p>
+              <p className="text-slate-400">Video buffer</p>
+              <p>{formatStat(stats?.jitterBufferMs, ' ms')}</p>
+              <p className="text-slate-400">Audio buffer</p>
+              <p>{formatStat(stats?.audioJitterBufferMs, ' ms')}</p>
+              <p className="text-slate-400">Transport</p>
+              <p>{formatStat(stats?.transportProtocol)}</p>
+              <p className="text-slate-400">Local candidate</p>
+              <p>{formatStat(stats?.localCandidateType)}</p>
+              <p className="text-slate-400">Remote candidate</p>
+              <p>{formatStat(stats?.remoteCandidateType)}</p>
               <p className="text-slate-400">Audio level</p>
               <p>{formatPercent(stats?.audioLevel)}</p>
               <p className="text-slate-400">Audio state</p>
