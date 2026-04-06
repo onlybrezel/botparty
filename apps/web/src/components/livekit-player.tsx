@@ -41,6 +41,11 @@ type PanelPosition = {
   y: number;
 };
 
+type DragState = {
+  offsetX: number;
+  offsetY: number;
+};
+
 type StatHistoryPoint = {
   videoBitrateKbps: number | null;
   audioBitrateKbps: number | null;
@@ -189,6 +194,7 @@ function VideoRenderer({ onStreamStalled }: { onStreamStalled?: () => void }) {
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
   const [volume, setVolume] = useState(100);
   const [isMuted, setIsMuted] = useState(false);
+  const [dragState, setDragState] = useState<DragState | null>(null);
   const hadTrackRef = useRef(false);
   const stallNotifiedRef = useRef(false);
   // Filter out placeholder tracks (no publication)
@@ -357,6 +363,31 @@ function VideoRenderer({ onStreamStalled }: { onStreamStalled?: () => void }) {
   }, [panelPosition]);
 
   useEffect(() => {
+    if (!panelPosition || !dragState) {
+      return;
+    }
+
+    const move = (event: MouseEvent) => {
+      const panelWidth = Math.min(672, window.innerWidth - 16);
+      const panelHeight = Math.min(420, window.innerHeight - 16);
+      setPanelPosition({
+        x: Math.max(8, Math.min(event.clientX - dragState.offsetX, window.innerWidth - panelWidth - 8)),
+        y: Math.max(8, Math.min(event.clientY - dragState.offsetY, window.innerHeight - panelHeight - 8)),
+      });
+    };
+
+    const stop = () => setDragState(null);
+
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', stop);
+
+    return () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', stop);
+    };
+  }, [panelPosition, dragState]);
+
+  useEffect(() => {
     if (copyState === 'idle') {
       return;
     }
@@ -368,8 +399,19 @@ function VideoRenderer({ onStreamStalled }: { onStreamStalled?: () => void }) {
   const openPanel = (event: ReactMouseEvent<HTMLDivElement>) => {
     event.preventDefault();
     setPanelPosition({
-      x: Math.min(event.clientX, window.innerWidth - 20),
-      y: Math.min(event.clientY, window.innerHeight - 20),
+      x: Math.max(8, Math.min(event.clientX, window.innerWidth - 680)),
+      y: Math.max(8, Math.min(event.clientY, window.innerHeight - 420)),
+    });
+  };
+
+  const startDraggingPanel = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!panelPosition) {
+      return;
+    }
+    event.preventDefault();
+    setDragState({
+      offsetX: event.clientX - panelPosition.x,
+      offsetY: event.clientY - panelPosition.y,
     });
   };
 
@@ -430,14 +472,17 @@ function VideoRenderer({ onStreamStalled }: { onStreamStalled?: () => void }) {
 
       {panelPosition && (
         <div
-          className="fixed z-[70] w-[min(24rem,calc(100vw-1rem))] overflow-hidden rounded-2xl border border-cyan-400/30 bg-slate-950/92 text-[11px] text-slate-100 shadow-2xl backdrop-blur-xl"
+          className="fixed z-[70] w-[min(42rem,calc(100vw-1rem))] overflow-hidden rounded-2xl border border-cyan-400/30 bg-slate-950/92 text-[11px] text-slate-100 shadow-2xl backdrop-blur-xl"
           style={{
-            left: Math.max(8, Math.min(panelPosition.x, window.innerWidth - 392)),
-            top: Math.max(8, Math.min(panelPosition.y, window.innerHeight - 320)),
+            left: Math.max(8, Math.min(panelPosition.x, window.innerWidth - 680)),
+            top: Math.max(8, Math.min(panelPosition.y, window.innerHeight - 420)),
           }}
           onClick={(event) => event.stopPropagation()}
         >
-          <div className="flex items-center justify-between border-b border-white/10 bg-cyan-400/10 px-3 py-2">
+          <div
+            className="flex cursor-move items-center justify-between border-b border-white/10 bg-cyan-400/10 px-3 py-2"
+            onMouseDown={startDraggingPanel}
+          >
             <div>
               <p className="text-[10px] uppercase tracking-[0.3em] text-cyan-200/70">Stats</p>
               <p className="mt-1 text-xs font-semibold text-white">Local stream diagnostics</p>
@@ -462,81 +507,81 @@ function VideoRenderer({ onStreamStalled }: { onStreamStalled?: () => void }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2 px-3 py-3">
-            <p className="text-slate-400">Updated</p>
-            <p>{stats?.timestamp ?? 'collecting...'}</p>
-            <p className="text-slate-400">Room state</p>
-            <p>{formatStat(stats?.connectionState)}</p>
-            <p className="text-slate-400">Connection quality</p>
-            <p>{formatStat(stats?.participantQuality)}</p>
-            <p className="text-slate-400">Track</p>
-            <p>{formatStat(stats?.trackSid)}</p>
-            <p className="text-slate-400">Audio track</p>
-            <p>{formatStat(stats?.audioTrackSid)}</p>
-            <p className="text-slate-400">Mime</p>
-            <p className="truncate">{formatStat(stats?.mimeType)}</p>
-            <p className="text-slate-400">Audio mime</p>
-            <p className="truncate">{formatStat(stats?.audioMimeType)}</p>
-            <p className="text-slate-400">Source</p>
-            <p>{formatStat(stats?.source)}</p>
-            <p className="text-slate-400">Subscription</p>
-            <p>{formatStat(stats?.subscription)}</p>
-            <p className="text-slate-400">Stream state</p>
-            <p>{formatStat(stats?.streamState)}</p>
-            <p className="text-slate-400">Video bitrate</p>
-            <p>{formatStat(stats?.bitrateKbps, ' kbps')}</p>
-            <p className="text-slate-400">Audio bitrate</p>
-            <p>{formatStat(stats?.audioBitrateKbps, ' kbps')}</p>
-            <p className="text-slate-400">FPS</p>
-            <p>{formatStat(stats?.framesPerSecond)}</p>
-            <p className="text-slate-400">Inbound size</p>
-            <p>{formatStat(stats?.frameWidth)} x {formatStat(stats?.frameHeight)}</p>
-            <p className="text-slate-400">Rendered size</p>
-            <p>{formatStat(stats?.videoWidth)} x {formatStat(stats?.videoHeight)}</p>
-            <p className="text-slate-400">Frames dropped</p>
-            <p>{formatStat(stats?.framesDropped)}</p>
-            <p className="text-slate-400">Video packets lost</p>
-            <p>{formatStat(stats?.packetsLost)}</p>
-            <p className="text-slate-400">Audio packets lost</p>
-            <p>{formatStat(stats?.audioPacketsLost)}</p>
-            <p className="text-slate-400">Video jitter</p>
-            <p>{formatStat(stats?.jitterMs, ' ms')}</p>
-            <p className="text-slate-400">Audio jitter</p>
-            <p>{formatStat(stats?.audioJitterMs, ' ms')}</p>
-            <p className="text-slate-400">RTT</p>
-            <p>{formatStat(stats?.roundTripMs, ' ms')}</p>
-            <p className="text-slate-400">Video readyState</p>
-            <p>{formatStat(stats?.readyState)}</p>
-            <p className="text-slate-400">Audio level</p>
-            <p>{formatPercent(stats?.audioLevel)}</p>
-            <p className="text-slate-400">Concealed samples</p>
-            <p>{formatStat(stats?.concealedSamples)}</p>
-            <p className="text-slate-400">Audio state</p>
-            <p>{formatStat(stats?.audioMuted)}</p>
-          </div>
+          <div className="grid gap-0 md:grid-cols-[minmax(0,1fr)_17rem]">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2 px-3 py-3 md:grid-cols-[auto_1fr_auto_1fr]">
+              <p className="text-slate-400">Updated</p>
+              <p>{stats?.timestamp ?? 'collecting...'}</p>
+              <p className="text-slate-400">Room state</p>
+              <p>{formatStat(stats?.connectionState)}</p>
+              <p className="text-slate-400">Connection quality</p>
+              <p>{formatStat(stats?.participantQuality)}</p>
+              <p className="text-slate-400">Track</p>
+              <p>{formatStat(stats?.trackSid)}</p>
+              <p className="text-slate-400">Audio track</p>
+              <p>{formatStat(stats?.audioTrackSid)}</p>
+              <p className="text-slate-400">Source</p>
+              <p>{formatStat(stats?.source)}</p>
+              <p className="text-slate-400">Video bitrate</p>
+              <p>{formatStat(stats?.bitrateKbps, ' kbps')}</p>
+              <p className="text-slate-400">Audio bitrate</p>
+              <p>{formatStat(stats?.audioBitrateKbps, ' kbps')}</p>
+              <p className="text-slate-400">FPS</p>
+              <p>{formatStat(stats?.framesPerSecond)}</p>
+              <p className="text-slate-400">RTT</p>
+              <p>{formatStat(stats?.roundTripMs, ' ms')}</p>
+              <p className="text-slate-400">Inbound size</p>
+              <p>{formatStat(stats?.frameWidth)} x {formatStat(stats?.frameHeight)}</p>
+              <p className="text-slate-400">Rendered size</p>
+              <p>{formatStat(stats?.videoWidth)} x {formatStat(stats?.videoHeight)}</p>
+              <p className="text-slate-400">Frames dropped</p>
+              <p>{formatStat(stats?.framesDropped)}</p>
+              <p className="text-slate-400">Video loss</p>
+              <p>{formatStat(stats?.packetsLost)}</p>
+              <p className="text-slate-400">Audio loss</p>
+              <p>{formatStat(stats?.audioPacketsLost)}</p>
+              <p className="text-slate-400">Video jitter</p>
+              <p>{formatStat(stats?.jitterMs, ' ms')}</p>
+              <p className="text-slate-400">Audio jitter</p>
+              <p>{formatStat(stats?.audioJitterMs, ' ms')}</p>
+              <p className="text-slate-400">Audio level</p>
+              <p>{formatPercent(stats?.audioLevel)}</p>
+              <p className="text-slate-400">Audio state</p>
+              <p>{formatStat(stats?.audioMuted)}</p>
+              <p className="text-slate-400">Mime</p>
+              <p className="truncate">{formatStat(stats?.mimeType)}</p>
+              <p className="text-slate-400">Audio mime</p>
+              <p className="truncate">{formatStat(stats?.audioMimeType)}</p>
+              <p className="text-slate-400">Stream state</p>
+              <p>{formatStat(stats?.streamState)}</p>
+              <p className="text-slate-400">Ready</p>
+              <p>{formatStat(stats?.readyState)}</p>
+              <p className="text-slate-400">Concealed</p>
+              <p>{formatStat(stats?.concealedSamples)}</p>
+            </div>
 
-          <div className="grid grid-cols-1 gap-2 border-t border-white/8 px-3 py-3">
-            <Sparkline
-              label="Video bitrate"
-              value={stats?.bitrateKbps ?? null}
-              suffix=" kbps"
-              values={history.map((point) => point.videoBitrateKbps)}
-              stroke="#22d3ee"
-            />
-            <Sparkline
-              label="Audio bitrate"
-              value={stats?.audioBitrateKbps ?? null}
-              suffix=" kbps"
-              values={history.map((point) => point.audioBitrateKbps)}
-              stroke="#f59e0b"
-            />
-            <Sparkline
-              label="RTT"
-              value={stats?.roundTripMs ?? null}
-              suffix=" ms"
-              values={history.map((point) => point.roundTripMs)}
-              stroke="#fb7185"
-            />
+            <div className="grid grid-cols-1 gap-2 border-t border-white/8 px-3 py-3 md:border-l md:border-t-0">
+              <Sparkline
+                label="Video bitrate"
+                value={stats?.bitrateKbps ?? null}
+                suffix=" kbps"
+                values={history.map((point) => point.videoBitrateKbps)}
+                stroke="#22d3ee"
+              />
+              <Sparkline
+                label="Audio bitrate"
+                value={stats?.audioBitrateKbps ?? null}
+                suffix=" kbps"
+                values={history.map((point) => point.audioBitrateKbps)}
+                stroke="#f59e0b"
+              />
+              <Sparkline
+                label="RTT"
+                value={stats?.roundTripMs ?? null}
+                suffix=" ms"
+                values={history.map((point) => point.roundTripMs)}
+                stroke="#fb7185"
+              />
+            </div>
           </div>
         </div>
       )}
