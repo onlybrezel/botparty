@@ -6,6 +6,7 @@ import {
   Query,
   Patch,
   Body,
+  Delete,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { UsersService } from './users.service';
@@ -15,7 +16,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Role } from '@botparty/shared';
 import type { JwtPayload } from '@botparty/shared';
-import { UpdateMeDto } from './users.dto';
+import { UpdateAdminUserDto, UpdateMeDto } from './users.dto';
 
 @ApiTags('users')
 @Controller('users')
@@ -60,16 +61,22 @@ export class UsersController {
   @ApiOperation({ summary: 'Update user profile/role as staff' })
   async updateAdminUser(
     @Param('id') id: string,
-    @Body()
-    body: {
-      displayName?: string | null;
-      role?: 'ADMIN' | 'MOD' | 'USER';
-      isActive?: boolean;
-      credits?: number;
-      balance?: number;
-    },
+    @CurrentUser() requester: JwtPayload,
+    @Body() body: UpdateAdminUserDto,
   ) {
-    return this.usersService.updateUserByStaff(id, body);
+    return this.usersService.updateUserByStaff(id, requester, body);
+  }
+
+  @Delete('admin/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MOD)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Delete user account as staff' })
+  async deleteAdminUser(
+    @Param('id') id: string,
+    @CurrentUser() requester: JwtPayload,
+  ) {
+    await this.usersService.deleteUserByStaff(id, requester);
   }
 
   @Get('leaderboard')

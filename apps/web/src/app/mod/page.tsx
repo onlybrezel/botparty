@@ -21,7 +21,10 @@ type StaffUser = {
 };
 
 type UserDraft = {
+  username: string;
+  email: string;
   displayName: string;
+  password: string;
   role: 'ADMIN' | 'MOD' | 'USER';
   isActive: boolean;
   credits: string;
@@ -91,7 +94,7 @@ const statusClassName = (status: 'ONLINE' | 'OFFLINE' | 'BUSY' | 'MAINTENANCE') 
 
 export default function ModDashboardPage() {
   const router = useRouter();
-  const { accessToken, hasHydrated } = useAuth();
+  const { accessToken, hasHydrated, role: authRole, userId: authUserId, setSession, logout } = useAuth();
 
   const [allowed, setAllowed] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -170,6 +173,13 @@ export default function ModDashboardPage() {
     if (!runtimeOverview?.robots.length) return null;
     return runtimeOverview.robots.find((robot) => robot.id === selectedRuntimeRobotId) ?? runtimeOverview.robots[0] ?? null;
   }, [runtimeOverview, selectedRuntimeRobotId]);
+
+  const selectedUser = useMemo(
+    () => users.find((user) => user.id === editingUserId) ?? null,
+    [editingUserId, users],
+  );
+
+  const viewerIsAdmin = authRole === 'ADMIN';
 
   const overviewCards = useMemo(
     () => [
@@ -368,7 +378,10 @@ export default function ModDashboardPage() {
   const startUserEdit = (user: StaffUser) => {
     setEditingUserId(user.id);
     setUserDraft({
+      username: user.username,
+      email: user.email,
       displayName: user.displayName ?? '',
+      password: '',
       role: user.role,
       isActive: user.isActive,
       credits: String(user.credits),
@@ -381,16 +394,50 @@ export default function ModDashboardPage() {
     try {
       api.setToken(accessToken);
       await api.updateAdminUser(editingUserId, {
+        username: userDraft.username.trim(),
+        email: userDraft.email.trim(),
         displayName: userDraft.displayName.trim() || null,
+        password: userDraft.password.trim() || undefined,
         role: userDraft.role,
         isActive: userDraft.isActive,
         credits: Number(userDraft.credits),
         balance: Number(userDraft.balance),
       });
+      if (editingUserId === authUserId) {
+        setSession({
+          username: userDraft.username.trim(),
+          displayName: userDraft.displayName.trim() || null,
+          role: userDraft.role,
+        });
+      }
+      setEditingUserId(null);
+      setUserDraft(null);
       await refresh();
       pushToast('User updated.', 'success');
     } catch (err) {
       pushToast(err instanceof Error ? err.message : 'Failed to update user.', 'error');
+    }
+  };
+
+  const deleteUserAsStaff = async () => {
+    if (!editingUserId || !selectedUser || !accessToken) return;
+    if (!window.confirm(`Delete user ${selectedUser.username}? This cannot be undone.`)) return;
+
+    try {
+      api.setToken(accessToken);
+      await api.deleteAdminUser(editingUserId);
+      const deletedOwnAccount = editingUserId === authUserId;
+      setEditingUserId(null);
+      setUserDraft(null);
+      await refresh();
+      if (deletedOwnAccount) {
+        logout();
+        router.replace('/login');
+        return;
+      }
+      pushToast('User deleted.', 'success');
+    } catch (err) {
+      pushToast(err instanceof Error ? err.message : 'Failed to delete user.', 'error');
     }
   };
 
@@ -981,8 +1028,43 @@ export default function ModDashboardPage() {
 
         {editingUserId && userDraft && (
           <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
-            <p className="mb-2 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Edit user</p>
-            <div className="grid gap-2 sm:grid-cols-5">
+            <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Edit user</p>
+                <p className="mt-1 text-sm font-semibold">{selectedUser?.username ?? 'User'}</p>
+                <p className="text-xs text-[var(--muted-foreground)]">
+                  {viewerIsAdmin
+                    ? 'Admins can edit credentials, password and delete accounts.'
+                    : 'Mods can edit regular user profiles. Sensitive account changes stay admin-only.'}
+                </p>
+              </div>
+              {selectedUser ? (
+                <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
+                  <p>Role: {selectedUser.role}</p>
+                  <p>Status: {selectedUser.isActive ? 'Active' : 'Inactive'}</p>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-2">
+              <input
+                value={userDraft.username}
+                onChange={(event) => setUserDraft((prev) => (prev ? { ...prev, username: event.target.value } : prev))}
+                placeholder="Username"
+                disabled={!viewerIsAdmin}
+                className="rounded border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+              />
+              <input
+                value={userDraft.email}
+                onChange={(event) => setUserDraft((prev) => (prev ? { ...prev, email: event.target.value } : prev))}
+                placeholder="Email"
+                type="email"
+                disabled={!viewerIsAdmin}
+                className="rounded border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+              />
+            </div>
+
+            <div className="mt-2 grid gap-2 sm:grid-cols-5">
               <input
                 value={userDraft.displayName}
                 onChange={(event) => setUserDraft((prev) => (prev ? { ...prev, displayName: event.target.value } : prev))}
@@ -992,7 +1074,8 @@ export default function ModDashboardPage() {
               <select
                 value={userDraft.role}
                 onChange={(event) => setUserDraft((prev) => (prev ? { ...prev, role: event.target.value as UserDraft['role'] } : prev))}
-                className="rounded border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-sm"
+                disabled={!viewerIsAdmin}
+                className="rounded border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <option value="USER">USER</option>
                 <option value="MOD">MOD</option>
@@ -1019,6 +1102,20 @@ export default function ModDashboardPage() {
                 Active
               </label>
             </div>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              <input
+                value={userDraft.password}
+                onChange={(event) => setUserDraft((prev) => (prev ? { ...prev, password: event.target.value } : prev))}
+                placeholder={viewerIsAdmin ? 'New password (optional)' : 'Password changes are admin-only'}
+                type="password"
+                autoComplete="new-password"
+                disabled={!viewerIsAdmin}
+                className="rounded border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+              />
+              <div className="rounded border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
+                Leave password empty to keep the current password.
+              </div>
+            </div>
             <div className="mt-3 flex items-center gap-2">
               <button
                 type="button"
@@ -1037,6 +1134,16 @@ export default function ModDashboardPage() {
               >
                 Cancel
               </button>
+              {viewerIsAdmin ? (
+                <button
+                  type="button"
+                  onClick={() => void deleteUserAsStaff()}
+                  className="ml-auto inline-flex items-center gap-2 rounded border border-red-500/40 px-3 py-1.5 text-xs text-red-300"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Delete user
+                </button>
+              ) : null}
             </div>
           </div>
         )}

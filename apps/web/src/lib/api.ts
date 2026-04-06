@@ -491,7 +491,10 @@ class ApiClient {
   async updateAdminUser(
     id: string,
     data: {
+      username?: string;
+      email?: string;
       displayName?: string | null;
+      password?: string;
       role?: 'ADMIN' | 'MOD' | 'USER';
       isActive?: boolean;
       credits?: number;
@@ -509,6 +512,12 @@ class ApiClient {
     >(`/users/admin/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
+    });
+  }
+
+  async deleteAdminUser(id: string) {
+    return this.request<void>(`/users/admin/${id}`, {
+      method: 'DELETE',
     });
   }
 
