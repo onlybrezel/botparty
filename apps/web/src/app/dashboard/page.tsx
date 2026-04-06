@@ -641,8 +641,7 @@ export default function DashboardPage() {
     }
   };
 
-  const handleCreateControl = async (event: FormEvent) => {
-    event.preventDefault();
+  const handleCreateControl = async () => {
     if (!accessToken || !selectedRobot) return;
 
     setCreatingControl(true);
@@ -1275,7 +1274,7 @@ export default function DashboardPage() {
                       </span>
                     </div>
 
-                    <form onSubmit={handleCreateControl} className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
                       <input
                         className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
                         placeholder="Label"
@@ -1340,7 +1339,10 @@ export default function DashboardPage() {
                       />
                       <div className="sm:col-span-2">
                         <button
-                          type="submit"
+                          type="button"
+                          onClick={() => {
+                            void handleCreateControl();
+                          }}
                           disabled={creatingControl}
                           className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-medium disabled:opacity-60"
                         >
@@ -1348,7 +1350,7 @@ export default function DashboardPage() {
                           {creatingControl ? 'Creating...' : 'Add control button'}
                         </button>
                       </div>
-                    </form>
+                    </div>
 
                     {controlsLoading ? (
                       <p className="text-xs text-[var(--muted-foreground)]">Loading control buttons...</p>
