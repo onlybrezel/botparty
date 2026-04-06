@@ -970,8 +970,8 @@ export class ModerationService {
       }
 
       const id = labels.id ?? labels.name ?? '';
-      const service = labels.container_label_com_docker_compose_service?.trim() ?? '';
-      const containerName = labels.name?.trim() || labels.container?.trim() || null;
+      const containerName = this._normalizeCadvisorContainerName(labels.name?.trim() || labels.container?.trim() || null);
+      const service = this._resolveCadvisorService(labels, containerName);
       const interfaceName = labels.interface?.trim();
 
       if (id === '/') {
@@ -1023,7 +1023,9 @@ export class ModerationService {
   }
 
   private _parsePrometheusLine(line: string): { metric: string; labels: Record<string, string>; value: number } | null {
-    const match = line.match(/^([a-zA-Z_:][a-zA-Z0-9_:]*)(\{([^}]*)\})?\s+([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)$/);
+    const match = line.match(
+      /^([a-zA-Z_:][a-zA-Z0-9_:]*)(\{([^}]*)\})?\s+([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)(?:\s+[-+]?\d+)?$/,
+    );
     if (!match) {
       return null;
     }
@@ -1051,6 +1053,32 @@ export class ModerationService {
     }
 
     return { metric, labels, value };
+  }
+
+  private _normalizeCadvisorContainerName(name: string | null): string | null {
+    if (!name) {
+      return null;
+    }
+
+    const normalized = name.trim().replace(/^\/+/, '');
+    return normalized || null;
+  }
+
+  private _resolveCadvisorService(labels: Record<string, string>, containerName: string | null) {
+    const composeService = labels.container_label_com_docker_compose_service?.trim();
+    if (composeService) {
+      return composeService;
+    }
+
+    if (!containerName) {
+      return '';
+    }
+
+    if (containerName.startsWith('botparty-')) {
+      return containerName.slice('botparty-'.length);
+    }
+
+    return containerName;
   }
 
   private _computeCpuPercent(

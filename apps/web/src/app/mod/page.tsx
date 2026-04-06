@@ -94,6 +94,7 @@ export default function ModDashboardPage() {
   const [users, setUsers] = useState<StaffUser[]>([]);
   const [overview, setOverview] = useState<Awaited<ReturnType<typeof api.getModerationOverview>> | null>(null);
   const [runtimeOverview, setRuntimeOverview] = useState<Awaited<ReturnType<typeof api.getModRuntimeOverview>> | null>(null);
+  const [selectedRuntimeRobotId, setSelectedRuntimeRobotId] = useState<string>('');
   const [selectedRobotId, setSelectedRobotId] = useState<string>('ALL');
   const [profanity, setProfanity] = useState<Awaited<ReturnType<typeof api.getGlobalProfanityOverview>> | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -154,6 +155,25 @@ export default function ModDashboardPage() {
     if (selectedRobotId === 'ALL') return profanity.events;
     return profanity.events.filter((event) => event.robotId === selectedRobotId);
   }, [profanity, selectedRobotId]);
+
+  const selectedRuntimeRobot = useMemo(() => {
+    if (!runtimeOverview?.robots.length) return null;
+    return runtimeOverview.robots.find((robot) => robot.id === selectedRuntimeRobotId) ?? runtimeOverview.robots[0] ?? null;
+  }, [runtimeOverview, selectedRuntimeRobotId]);
+
+  useEffect(() => {
+    const robots = runtimeOverview?.robots ?? [];
+    if (robots.length === 0) {
+      if (selectedRuntimeRobotId) {
+        setSelectedRuntimeRobotId('');
+      }
+      return;
+    }
+
+    if (!selectedRuntimeRobotId || !robots.some((robot) => robot.id === selectedRuntimeRobotId)) {
+      setSelectedRuntimeRobotId(robots[0]?.id ?? '');
+    }
+  }, [runtimeOverview, selectedRuntimeRobotId]);
 
   const refresh = async () => {
     if (!accessToken) return;
@@ -402,12 +422,12 @@ export default function ModDashboardPage() {
           </div>
         ) : null}
 
-        {runtimeOverview?.platform.host ? (
-          <div className="mb-4 rounded-lg border border-[var(--border)] bg-[var(--background)] p-4">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-base font-bold">Docker Host</h3>
-              <p className="text-xs text-[var(--muted-foreground)]">cAdvisor snapshot</p>
-            </div>
+        <div className="mb-4 rounded-lg border border-[var(--border)] bg-[var(--background)] p-4">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-base font-bold">Docker Host</h3>
+            <p className="text-xs text-[var(--muted-foreground)]">cAdvisor snapshot</p>
+          </div>
+          {runtimeOverview?.platform.host ? (
             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
               <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
                 <p className="text-[var(--muted-foreground)]">CPU</p>
@@ -429,15 +449,17 @@ export default function ModDashboardPage() {
                 <p className="mt-1 text-sm font-semibold">{formatBitrate(runtimeOverview.platform.host.txKbps)}</p>
               </div>
             </div>
-          </div>
-        ) : null}
+          ) : (
+            <p className="text-sm text-[var(--muted-foreground)]">No Docker host metrics available right now.</p>
+          )}
+        </div>
 
-        {(runtimeOverview?.platform.containers ?? []).length > 0 ? (
-          <div className="mb-4 rounded-lg border border-[var(--border)] bg-[var(--background)] p-4">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-base font-bold">Docker Containers</h3>
-              <p className="text-xs text-[var(--muted-foreground)]">API, web, LiveKit, nginx, redis, postgres, cAdvisor</p>
-            </div>
+        <div className="mb-4 rounded-lg border border-[var(--border)] bg-[var(--background)] p-4">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-base font-bold">Docker Containers</h3>
+            <p className="text-xs text-[var(--muted-foreground)]">API, web, LiveKit, nginx, redis, postgres, cAdvisor</p>
+          </div>
+          {(runtimeOverview?.platform.containers ?? []).length > 0 ? (
             <div className="grid gap-3 xl:grid-cols-2">
               {(runtimeOverview?.platform.containers ?? []).map((container) => (
                 <div key={container.service} className="rounded border border-[var(--border)] p-3">
@@ -472,29 +494,50 @@ export default function ModDashboardPage() {
                 </div>
               ))}
             </div>
-          </div>
-        ) : null}
+          ) : (
+            <p className="text-sm text-[var(--muted-foreground)]">No Docker container metrics available right now.</p>
+          )}
+        </div>
 
-        <div className="grid gap-3 xl:grid-cols-2">
-          {(runtimeOverview?.robots ?? []).map((robot) => (
-            <article key={robot.id} className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-4">
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-4">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-base font-bold">Robot Runtime</h3>
+              <p className="text-xs text-[var(--muted-foreground)]">Select one robot to inspect instead of rendering the full fleet list.</p>
+            </div>
+            <select
+              value={selectedRuntimeRobotId}
+              onChange={(event) => setSelectedRuntimeRobotId(event.target.value)}
+              disabled={(runtimeOverview?.robots ?? []).length === 0}
+              className="min-w-56 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm disabled:opacity-60"
+            >
+              {(runtimeOverview?.robots ?? []).map((robot) => (
+                <option key={robot.id} value={robot.id}>
+                  {robot.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {selectedRuntimeRobot ? (
+            <article key={selectedRuntimeRobot.id} className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="text-base font-bold">{robot.name}</h3>
-                    <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${statusClassName(robot.status)}`}>
-                      {robot.status}
+                    <h3 className="text-base font-bold">{selectedRuntimeRobot.name}</h3>
+                    <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${statusClassName(selectedRuntimeRobot.status)}`}>
+                      {selectedRuntimeRobot.status}
                     </span>
                     <span className="rounded-full border border-[var(--border)] px-2 py-0.5 text-[10px] font-semibold text-[var(--muted-foreground)]">
-                      {robot.visibility}
+                      {selectedRuntimeRobot.visibility}
                     </span>
                   </div>
                   <p className="mt-1 text-xs text-[var(--muted-foreground)]">
-                    /{robot.slug} · owner {robot.owner.displayName ?? robot.owner.username}
+                    /{selectedRuntimeRobot.slug} · owner {selectedRuntimeRobot.owner.displayName ?? selectedRuntimeRobot.owner.username}
                   </p>
                 </div>
                 <Link
-                  href={`/robot/${robot.slug}`}
+                  href={`/robot/${selectedRuntimeRobot.slug}`}
                   className="rounded border border-sky-500/40 px-2 py-1 text-xs text-sky-300"
                 >
                   Preview
@@ -504,80 +547,82 @@ export default function ModDashboardPage() {
               <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                 <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
                   <p className="text-[var(--muted-foreground)]">Viewers</p>
-                  <p className="mt-1 text-sm font-semibold">{robot.viewerCount}</p>
+                  <p className="mt-1 text-sm font-semibold">{selectedRuntimeRobot.viewerCount}</p>
                 </div>
                 <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
                   <p className="text-[var(--muted-foreground)]">Queue</p>
-                  <p className="mt-1 text-sm font-semibold">{robot.queueLength} · {robot.queueMode}</p>
+                  <p className="mt-1 text-sm font-semibold">{selectedRuntimeRobot.queueLength} · {selectedRuntimeRobot.queueMode}</p>
                 </div>
                 <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
                   <p className="text-[var(--muted-foreground)]">Controller</p>
-                  <p className="mt-1 text-sm font-semibold">{robot.activeSession?.user.displayName ?? robot.activeSession?.user.username ?? robot.queueHead?.displayName ?? robot.queueHead?.username ?? '-'}</p>
+                  <p className="mt-1 text-sm font-semibold">{selectedRuntimeRobot.activeSession?.user.displayName ?? selectedRuntimeRobot.activeSession?.user.username ?? selectedRuntimeRobot.queueHead?.displayName ?? selectedRuntimeRobot.queueHead?.username ?? '-'}</p>
                 </div>
                 <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
                   <p className="text-[var(--muted-foreground)]">Heartbeat</p>
-                  <p className="mt-1 text-sm font-semibold">{formatAge(robot.heartbeatAgeSec)}</p>
+                  <p className="mt-1 text-sm font-semibold">{formatAge(selectedRuntimeRobot.heartbeatAgeSec)}</p>
                 </div>
                 <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
                   <p className="text-[var(--muted-foreground)]">Telemetry</p>
-                  <p className="mt-1 text-sm font-semibold">{formatAge(robot.telemetryAgeSec)}</p>
+                  <p className="mt-1 text-sm font-semibold">{formatAge(selectedRuntimeRobot.telemetryAgeSec)}</p>
                 </div>
                 <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
                   <p className="text-[var(--muted-foreground)]">LiveKit Room</p>
-                  <p className="mt-1 text-sm font-semibold">{robot.livekit ? `${robot.livekit.participants} clients` : '-'}</p>
+                  <p className="mt-1 text-sm font-semibold">{selectedRuntimeRobot.livekit ? `${selectedRuntimeRobot.livekit.participants} clients` : '-'}</p>
                 </div>
               </div>
 
               <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                 <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
                   <p className="text-[var(--muted-foreground)]">CPU</p>
-                  <p className="mt-1 text-sm font-semibold">{formatPercent(robot.telemetry?.cpuPercent)}</p>
+                  <p className="mt-1 text-sm font-semibold">{formatPercent(selectedRuntimeRobot.telemetry?.cpuPercent)}</p>
                 </div>
                 <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
                   <p className="text-[var(--muted-foreground)]">RAM</p>
-                  <p className="mt-1 text-sm font-semibold">{formatPercent(robot.telemetry?.memoryPercent)}</p>
+                  <p className="mt-1 text-sm font-semibold">{formatPercent(selectedRuntimeRobot.telemetry?.memoryPercent)}</p>
                 </div>
                 <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
                   <p className="text-[var(--muted-foreground)]">Temp</p>
                   <p className="mt-1 text-sm font-semibold">
-                    {typeof robot.telemetry?.temperatureC === 'number' ? `${robot.telemetry.temperatureC.toFixed(1)} C` : '-'}
+                    {typeof selectedRuntimeRobot.telemetry?.temperatureC === 'number' ? `${selectedRuntimeRobot.telemetry.temperatureC.toFixed(1)} C` : '-'}
                   </p>
                 </div>
                 <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
                   <p className="text-[var(--muted-foreground)]">Uptime</p>
-                  <p className="mt-1 text-sm font-semibold">{formatUptime(robot.telemetry?.uptimeSec)}</p>
+                  <p className="mt-1 text-sm font-semibold">{formatUptime(selectedRuntimeRobot.telemetry?.uptimeSec)}</p>
                 </div>
               </div>
 
               <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                 <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
                   <p className="text-[var(--muted-foreground)]">Control WS</p>
-                  <p className="mt-1 text-sm font-semibold">{robot.telemetry?.controlConnected ? 'Connected' : 'Offline'}</p>
+                  <p className="mt-1 text-sm font-semibold">{selectedRuntimeRobot.telemetry?.controlConnected ? 'Connected' : 'Offline'}</p>
                 </div>
                 <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
                   <p className="text-[var(--muted-foreground)]">LiveKit</p>
-                  <p className="mt-1 text-sm font-semibold">{robot.telemetry?.livekitConnected ? 'Connected' : 'Offline'}</p>
+                  <p className="mt-1 text-sm font-semibold">{selectedRuntimeRobot.telemetry?.livekitConnected ? 'Connected' : 'Offline'}</p>
                 </div>
                 <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
                   <p className="text-[var(--muted-foreground)]">Commands</p>
-                  <p className="mt-1 text-sm font-semibold">{robot.telemetry?.commandsReceived ?? '-'}</p>
+                  <p className="mt-1 text-sm font-semibold">{selectedRuntimeRobot.telemetry?.commandsReceived ?? '-'}</p>
                 </div>
                 <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
                   <p className="text-[var(--muted-foreground)]">Ingress est.</p>
-                  <p className="mt-1 text-sm font-semibold">{formatBitrate(robot.livekit?.estimatedIngressKbps)}</p>
+                  <p className="mt-1 text-sm font-semibold">{formatBitrate(selectedRuntimeRobot.livekit?.estimatedIngressKbps)}</p>
                 </div>
               </div>
 
               <div className="mt-3 rounded border border-[var(--border)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
                 <p>
-                  LiveKit clients: {robot.livekit?.participantNames.length ? robot.livekit.participantNames.join(', ') : 'none'}
+                  LiveKit clients: {selectedRuntimeRobot.livekit?.participantNames.length ? selectedRuntimeRobot.livekit.participantNames.join(', ') : 'none'}
                 </p>
                 <p className="mt-1">
-                  Publishers {robot.livekit?.publishers ?? 0} · Subscribers {robot.livekit?.subscribers ?? 0} · Recording {robot.livekit?.activeRecording ? 'on' : 'off'}
+                  Publishers {selectedRuntimeRobot.livekit?.publishers ?? 0} · Subscribers {selectedRuntimeRobot.livekit?.subscribers ?? 0} · Recording {selectedRuntimeRobot.livekit?.activeRecording ? 'on' : 'off'}
                 </p>
               </div>
             </article>
-          ))}
+          ) : (
+            <p className="text-sm text-[var(--muted-foreground)]">No robot runtime data available right now.</p>
+          )}
         </div>
       </section>
 
