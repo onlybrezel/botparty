@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Shield, Search, Ban, Clock3, Trash2, RefreshCw, Activity, Server, Users } from 'lucide-react';
+import { Shield, Search, Ban, Clock3, Trash2, RefreshCw, Activity, Server, Users, Bot, UserRound, Siren, ChevronRight } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/store';
 import { pushToast } from '@/lib/toast';
@@ -34,6 +34,8 @@ type RobotDraft = {
   tags: string;
   visibility: 'PUBLIC' | 'UNLISTED' | 'PRIVATE';
 };
+
+type ModView = 'moderation' | 'runtime' | 'robots' | 'users';
 
 const formatPercent = (value: number | null | undefined) => {
   if (typeof value !== 'number') return '-';
@@ -96,6 +98,7 @@ export default function ModDashboardPage() {
   const [runtimeOverview, setRuntimeOverview] = useState<Awaited<ReturnType<typeof api.getModRuntimeOverview>> | null>(null);
   const [selectedRuntimeRobotId, setSelectedRuntimeRobotId] = useState<string>('');
   const [selectedRobotId, setSelectedRobotId] = useState<string>('ALL');
+  const [activeView, setActiveView] = useState<ModView>('moderation');
   const [profanity, setProfanity] = useState<Awaited<ReturnType<typeof api.getGlobalProfanityOverview>> | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
@@ -160,6 +163,113 @@ export default function ModDashboardPage() {
     if (!runtimeOverview?.robots.length) return null;
     return runtimeOverview.robots.find((robot) => robot.id === selectedRuntimeRobotId) ?? runtimeOverview.robots[0] ?? null;
   }, [runtimeOverview, selectedRuntimeRobotId]);
+
+  const overviewCards = useMemo(
+    () => [
+      {
+        key: 'restrictions',
+        label: 'Open restrictions',
+        value: (overview?.counts.bans ?? 0) + (overview?.counts.timeouts ?? 0),
+        detail: `${overview?.counts.bans ?? 0} bans, ${overview?.counts.timeouts ?? 0} timeouts`,
+        accent: 'text-red-300',
+        icon: Ban,
+      },
+      {
+        key: 'profanity',
+        label: 'Blocked profanities',
+        value: profanity?.total ?? 0,
+        detail: `${filteredProfanityEvents.length} visible in current filter`,
+        accent: 'text-amber-300',
+        icon: Siren,
+      },
+      {
+        key: 'runtime',
+        label: 'Live viewers',
+        value: runtimeOverview?.summary.totalViewers ?? 0,
+        detail: `${runtimeOverview?.summary.queuedUsers ?? 0} queued users`,
+        accent: 'text-sky-300',
+        icon: Users,
+      },
+      {
+        key: 'fleet',
+        label: 'Robots online',
+        value: runtimeOverview?.summary.onlineRobots ?? 0,
+        detail: `${runtimeOverview?.summary.busyRobots ?? 0} busy, ${runtimeOverview?.summary.offlineRobots ?? 0} offline`,
+        accent: 'text-emerald-300',
+        icon: Bot,
+      },
+      {
+        key: 'runtime-load',
+        label: 'Avg host load',
+        value: formatPercent(runtimeOverview?.summary.avgCpuPercent),
+        detail: `RAM ${formatPercent(runtimeOverview?.summary.avgMemoryPercent)}`,
+        accent: 'text-emerald-300',
+        icon: Activity,
+      },
+      {
+        key: 'rooms',
+        label: 'LiveKit rooms',
+        value: runtimeOverview?.livekit.totals.rooms ?? 0,
+        detail: `${runtimeOverview?.livekit.totals.participants ?? 0} connected clients`,
+        accent: 'text-sky-300',
+        icon: Server,
+      },
+    ],
+    [filteredProfanityEvents.length, overview, profanity, runtimeOverview],
+  );
+
+  const actionItems = useMemo(() => {
+    const items: Array<{ title: string; detail: string; view: ModView }> = [];
+
+    if ((overview?.activeRestrictions.length ?? 0) > 0) {
+      items.push({
+        title: 'Restrictions need review',
+        detail: `${overview?.activeRestrictions.length ?? 0} active restriction entries are still open.`,
+        view: 'moderation',
+      });
+    }
+
+    if ((profanity?.events.length ?? 0) > 0) {
+      items.push({
+        title: 'Profanity events available',
+        detail: `${profanity?.events.length ?? 0} recent events can be reviewed in the moderation tab.`,
+        view: 'moderation',
+      });
+    }
+
+    if (runtimeOverview && !runtimeOverview.livekit.available) {
+      items.push({
+        title: 'LiveKit telemetry degraded',
+        detail: runtimeOverview.livekit.error ?? 'Room stats are unavailable right now.',
+        view: 'runtime',
+      });
+    }
+
+    if (runtimeOverview && !runtimeOverview.platform.available) {
+      items.push({
+        title: 'Docker runtime degraded',
+        detail: runtimeOverview.platform.error ?? 'Container metrics are unavailable right now.',
+        view: 'runtime',
+      });
+    }
+
+    if (!items.length) {
+      items.push({
+        title: 'No urgent issues',
+        detail: 'Moderation queue and runtime telemetry look stable at the moment.',
+        view: 'moderation',
+      });
+    }
+
+    return items.slice(0, 3);
+  }, [overview, profanity, runtimeOverview]);
+
+  const viewButtons: Array<{ id: ModView; label: string; description: string; icon: typeof Shield }> = [
+    { id: 'moderation', label: 'Moderation', description: 'Restrictions, profanity, incident flow', icon: Shield },
+    { id: 'runtime', label: 'Runtime', description: 'Ops, Docker, LiveKit, robot health', icon: Activity },
+    { id: 'robots', label: 'Robots', description: 'Robot administration and edits', icon: Bot },
+    { id: 'users', label: 'Users', description: 'Staff user search and account edits', icon: UserRound },
+  ];
 
   useEffect(() => {
     const robots = runtimeOverview?.robots ?? [];
@@ -302,72 +412,131 @@ export default function ModDashboardPage() {
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
-      <section className="mb-6 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="flex items-center gap-2 text-3xl font-black tracking-tight">
-              <Shield className="h-7 w-7 text-sky-300" />
-              Mod Dashboard
-            </h1>
-            <p className="mt-1 text-sm text-[var(--muted-foreground)]">
-              Users, active restrictions, moderation history, and robot administration.
-            </p>
+      <section className="mb-6 overflow-hidden rounded-[28px] border border-[var(--border)] bg-[var(--card)]">
+        <div className="grid gap-0 xl:grid-cols-[1.35fr,0.95fr]">
+          <div className="border-b border-[var(--border)] bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.18),transparent_38%),linear-gradient(180deg,rgba(15,23,42,0.08),rgba(15,23,42,0))] p-6 xl:border-b-0 xl:border-r">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.22em] text-sky-300">Staff Console</p>
+                <h1 className="mt-2 flex items-center gap-3 text-3xl font-black tracking-tight">
+                  <span className="rounded-2xl border border-sky-400/30 bg-sky-400/10 p-2">
+                    <Shield className="h-7 w-7 text-sky-300" />
+                  </span>
+                  Mod Dashboard
+                </h1>
+                <p className="mt-3 max-w-2xl text-sm text-[var(--muted-foreground)]">
+                  Moderation comes first. Runtime, robot admin and staff user management are separated into focused work areas.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void refresh()}
+                disabled={refreshing}
+                className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm disabled:opacity-60"
+              >
+                <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+                {refreshing ? 'Updating...' : 'Update'}
+              </button>
+            </div>
+
+            <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {overviewCards.map((card) => {
+                const Icon = card.icon;
+                return (
+                  <article key={card.key} className="rounded-2xl border border-[var(--border)] bg-[var(--background)]/90 p-4 backdrop-blur">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">{card.label}</p>
+                      <Icon className={`h-4 w-4 ${card.accent}`} />
+                    </div>
+                    <p className="mt-3 text-2xl font-black">{card.value}</p>
+                    <p className="mt-1 text-xs text-[var(--muted-foreground)]">{card.detail}</p>
+                  </article>
+                );
+              })}
+            </div>
           </div>
-          <button
-            type="button"
-            onClick={() => void refresh()}
-            disabled={refreshing}
-            className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2 text-sm disabled:opacity-60"
-          >
-            <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-            {refreshing ? 'Updating...' : 'Update'}
-          </button>
+
+          <div className="p-6">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-bold">Action Queue</h2>
+                <p className="text-sm text-[var(--muted-foreground)]">Shortcuts into the area that currently needs attention.</p>
+              </div>
+              <p className="text-xs text-[var(--muted-foreground)]">
+                Snapshot {runtimeOverview ? new Date(runtimeOverview.generatedAt).toLocaleTimeString() : '-'}
+              </p>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              {actionItems.map((item, index) => (
+                <button
+                  key={`${item.title}-${index}`}
+                  type="button"
+                  onClick={() => setActiveView(item.view)}
+                  className="flex w-full items-start justify-between gap-3 rounded-2xl border border-[var(--border)] bg-[var(--background)] px-4 py-3 text-left transition hover:border-sky-400/40 hover:bg-sky-500/5"
+                >
+                  <div>
+                    <p className="text-sm font-semibold">{item.title}</p>
+                    <p className="mt-1 text-xs text-[var(--muted-foreground)]">{item.detail}</p>
+                  </div>
+                  <ChevronRight className="mt-0.5 h-4 w-4 text-[var(--muted-foreground)]" />
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-6 grid gap-3 sm:grid-cols-2">
+              <div className="rounded-2xl border border-[var(--border)] bg-[var(--background)] p-4">
+                <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Platform traffic</p>
+                <p className="mt-2 text-lg font-bold">{formatBitrate(runtimeOverview?.summary.totalIngressKbps)}</p>
+                <p className="text-xs text-[var(--muted-foreground)]">Ingress across tracked containers</p>
+                <p className="mt-3 text-lg font-bold">{formatBitrate(runtimeOverview?.summary.totalEgressKbps)}</p>
+                <p className="text-xs text-[var(--muted-foreground)]">Egress across tracked containers</p>
+              </div>
+              <div className="rounded-2xl border border-[var(--border)] bg-[var(--background)] p-4">
+                <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Current focus</p>
+                <p className="mt-2 text-lg font-bold capitalize">{activeView}</p>
+                <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+                  {(viewButtons.find((view) => view.id === activeView)?.description) ?? 'No section selected.'}
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 
-      <section className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        <article className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-          <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Active Bans</p>
-          <p className="mt-2 flex items-center gap-2 text-2xl font-black"><Ban className="h-5 w-5 text-red-300" />{overview?.counts.bans ?? 0}</p>
-        </article>
-        <article className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-          <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Active Timeouts</p>
-          <p className="mt-2 flex items-center gap-2 text-2xl font-black"><Clock3 className="h-5 w-5 text-amber-300" />{overview?.counts.timeouts ?? 0}</p>
-        </article>
-        <article className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-          <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Blocked Profanities</p>
-          <p className="mt-2 text-2xl font-black">{profanity?.total ?? 0}</p>
-        </article>
-        <article className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-          <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">LiveKit Rooms</p>
-          <p className="mt-2 flex items-center gap-2 text-2xl font-black"><Server className="h-5 w-5 text-sky-300" />{runtimeOverview?.livekit.totals.rooms ?? 0}</p>
-          <p className="mt-1 text-xs text-[var(--muted-foreground)]">
-            {runtimeOverview?.livekit.available ? `${runtimeOverview.livekit.totals.publishers} publishers active` : 'LiveKit stats unavailable'}
-          </p>
-        </article>
-        <article className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-          <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Connected Clients</p>
-          <p className="mt-2 flex items-center gap-2 text-2xl font-black"><Users className="h-5 w-5 text-sky-300" />{runtimeOverview?.livekit.totals.participants ?? 0}</p>
-          <p className="mt-1 text-xs text-[var(--muted-foreground)]">{runtimeOverview?.summary.totalViewers ?? 0} viewers, {runtimeOverview?.summary.queuedUsers ?? 0} queued</p>
-        </article>
-        <article className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-          <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Average Host Load</p>
-          <p className="mt-2 flex items-center gap-2 text-2xl font-black"><Activity className="h-5 w-5 text-emerald-300" />{formatPercent(runtimeOverview?.summary.avgCpuPercent)}</p>
-          <p className="mt-1 text-xs text-[var(--muted-foreground)]">RAM {formatPercent(runtimeOverview?.summary.avgMemoryPercent)} across reporting robots</p>
-        </article>
-        <article className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-          <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Platform Ingress</p>
-          <p className="mt-2 flex items-center gap-2 text-2xl font-black">{formatBitrate(runtimeOverview?.summary.totalIngressKbps)}</p>
-          <p className="mt-1 text-xs text-[var(--muted-foreground)]">Aggregate receive traffic across tracked containers</p>
-        </article>
-        <article className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-          <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Platform Egress</p>
-          <p className="mt-2 flex items-center gap-2 text-2xl font-black">{formatBitrate(runtimeOverview?.summary.totalEgressKbps)}</p>
-          <p className="mt-1 text-xs text-[var(--muted-foreground)]">Aggregate transmit traffic across tracked containers</p>
-        </article>
+      <section className="mb-6">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {viewButtons.map((view) => {
+            const Icon = view.icon;
+            const active = activeView === view.id;
+            return (
+              <button
+                key={view.id}
+                type="button"
+                onClick={() => setActiveView(view.id)}
+                className={`rounded-2xl border px-4 py-4 text-left transition ${
+                  active
+                    ? 'border-sky-400/40 bg-sky-500/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]'
+                    : 'border-[var(--border)] bg-[var(--card)] hover:border-sky-400/30 hover:bg-sky-500/5'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <span className={`rounded-xl p-2 ${active ? 'bg-sky-400/10 text-sky-300' : 'bg-[var(--muted)] text-[var(--muted-foreground)]'}`}>
+                    <Icon className="h-4 w-4" />
+                  </span>
+                  <div>
+                    <p className="text-sm font-semibold">{view.label}</p>
+                    <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">{view.description}</p>
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
       </section>
 
-      <section className="mb-6 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+      {activeView === 'runtime' ? (
+        <section className="mb-6 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-bold">Runtime Overview</h2>
@@ -625,77 +794,138 @@ export default function ModDashboardPage() {
           )}
         </div>
       </section>
+      ) : null}
 
-      <section className="mb-6 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <h2 className="text-lg font-bold">Profanity Log (All Robots)</h2>
-          <select
-            value={selectedRobotId}
-            onChange={(event) => setSelectedRobotId(event.target.value || 'ALL')}
-            className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-1.5 text-sm"
-          >
-            <option value="ALL">All robots</option>
-            {(overview?.robots ?? []).map((robot) => (
-              <option key={robot.id} value={robot.id}>{robot.name}</option>
-            ))}
-          </select>
-        </div>
-
-        <div className="grid gap-3 lg:grid-cols-2">
-          <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
-            <p className="mb-2 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Top Users (Count)</p>
-            {(profanity?.byUser ?? []).length === 0 ? (
-              <p className="text-xs text-[var(--muted-foreground)]">No entries yet.</p>
-            ) : (
-              profanity?.byUser.slice(0, 12).map((entry) => (
-                <p key={entry.userId} className="text-sm">{entry.userId.slice(0, 8)}...: {entry.count}</p>
-              ))
-            )}
-          </div>
-          <div className="max-h-56 overflow-auto rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
-            <p className="mb-2 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Recent Events</p>
-            {filteredProfanityEvents.length === 0 ? (
-              <p className="text-xs text-[var(--muted-foreground)]">No events yet.</p>
-            ) : (
-              filteredProfanityEvents.map((event, idx) => (
-                <p key={`${event.ts}-${idx}`} className="mb-1 text-xs text-[var(--muted-foreground)]">
-                  [{new Date(event.ts).toLocaleTimeString()}] <span className="text-[var(--foreground)]">{event.username}</span> in <span className="text-sky-300">{event.robotName}</span>: {event.content}
-                </p>
-              ))
-            )}
-          </div>
-        </div>
-      </section>
-
-      <section className="mb-6 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-        <h2 className="mb-3 text-lg font-bold">Active Restrictions (robot-specific)</h2>
-        <div className="space-y-2">
-          {(overview?.activeRestrictions ?? []).length === 0 ? (
-            <p className="text-xs text-[var(--muted-foreground)]">No active timeouts or bans.</p>
-          ) : (
-            overview?.activeRestrictions.map((entry) => (
-              <div key={entry.id} className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3 text-sm">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded bg-[var(--muted)] px-2 py-0.5 text-xs font-semibold">{entry.action}</span>
-                  <span>{entry.user.displayName ?? entry.user.username}</span>
-                  <span className="text-[var(--muted-foreground)]">on /{entry.robot.slug}</span>
-                  <span className="text-[var(--muted-foreground)]">by {entry.moderator?.username ?? 'unknown'}</span>
-                  <button
-                    type="button"
-                    onClick={() => void unrestrict(entry.robot.id, entry.user.id)}
-                    className="ml-auto rounded border border-emerald-500/40 px-2 py-0.5 text-xs text-emerald-300"
-                  >
-                    Unban
-                  </button>
+      {activeView === 'moderation' ? (
+        <section className="mb-6 grid gap-6 xl:grid-cols-[1.2fr,0.8fr]">
+          <div className="space-y-6">
+            <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-bold">Active Restrictions</h2>
+                  <p className="text-sm text-[var(--muted-foreground)]">Robot-specific bans and timeouts that may need follow-up.</p>
                 </div>
-                {entry.reason && <p className="mt-1 text-xs text-[var(--muted-foreground)]">{entry.reason}</p>}
+                <div className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs font-semibold text-red-200">
+                  {(overview?.activeRestrictions ?? []).length} open
+                </div>
               </div>
-            ))
-          )}
-        </div>
-      </section>
+              <div className="space-y-2">
+                {(overview?.activeRestrictions ?? []).length === 0 ? (
+                  <p className="text-xs text-[var(--muted-foreground)]">No active timeouts or bans.</p>
+                ) : (
+                  overview?.activeRestrictions.map((entry) => (
+                    <div key={entry.id} className="rounded-2xl border border-[var(--border)] bg-[var(--background)] p-3 text-sm">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded bg-[var(--muted)] px-2 py-0.5 text-xs font-semibold">{entry.action}</span>
+                        <span>{entry.user.displayName ?? entry.user.username}</span>
+                        <span className="text-[var(--muted-foreground)]">on /{entry.robot.slug}</span>
+                        <span className="text-[var(--muted-foreground)]">by {entry.moderator?.username ?? 'unknown'}</span>
+                        <button
+                          type="button"
+                          onClick={() => void unrestrict(entry.robot.id, entry.user.id)}
+                          className="ml-auto rounded border border-emerald-500/40 px-2 py-0.5 text-xs text-emerald-300"
+                        >
+                          Unban
+                        </button>
+                      </div>
+                      {entry.reason && <p className="mt-1 text-xs text-[var(--muted-foreground)]">{entry.reason}</p>}
+                    </div>
+                  ))
+                )}
+              </div>
+            </section>
 
-      <section className="mb-6 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+            <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <div>
+                  <h2 className="text-lg font-bold">Profanity Log</h2>
+                  <p className="text-sm text-[var(--muted-foreground)]">Recent blocked messages across the fleet.</p>
+                </div>
+                <select
+                  value={selectedRobotId}
+                  onChange={(event) => setSelectedRobotId(event.target.value || 'ALL')}
+                  className="ml-auto rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-1.5 text-sm"
+                >
+                  <option value="ALL">All robots</option>
+                  {(overview?.robots ?? []).map((robot) => (
+                    <option key={robot.id} value={robot.id}>{robot.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid gap-3 lg:grid-cols-2">
+                <div className="rounded-2xl border border-[var(--border)] bg-[var(--background)] p-3">
+                  <p className="mb-2 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Top Users</p>
+                  {(profanity?.byUser ?? []).length === 0 ? (
+                    <p className="text-xs text-[var(--muted-foreground)]">No entries yet.</p>
+                  ) : (
+                    profanity?.byUser.slice(0, 12).map((entry) => (
+                      <p key={entry.userId} className="text-sm">{entry.userId.slice(0, 8)}...: {entry.count}</p>
+                    ))
+                  )}
+                </div>
+                <div className="max-h-72 overflow-auto rounded-2xl border border-[var(--border)] bg-[var(--background)] p-3">
+                  <p className="mb-2 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Recent Events</p>
+                  {filteredProfanityEvents.length === 0 ? (
+                    <p className="text-xs text-[var(--muted-foreground)]">No events yet.</p>
+                  ) : (
+                    filteredProfanityEvents.map((event, idx) => (
+                      <p key={`${event.ts}-${idx}`} className="mb-1 text-xs text-[var(--muted-foreground)]">
+                        [{new Date(event.ts).toLocaleTimeString()}] <span className="text-[var(--foreground)]">{event.username}</span> in <span className="text-sky-300">{event.robotName}</span>: {event.content}
+                      </p>
+                    ))
+                  )}
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <aside className="space-y-6">
+            <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+              <h2 className="text-lg font-bold">Moderation Snapshot</h2>
+              <div className="mt-4 grid gap-3">
+                <div className="rounded-2xl border border-[var(--border)] bg-[var(--background)] p-3">
+                  <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Active bans</p>
+                  <p className="mt-2 flex items-center gap-2 text-2xl font-black"><Ban className="h-5 w-5 text-red-300" />{overview?.counts.bans ?? 0}</p>
+                </div>
+                <div className="rounded-2xl border border-[var(--border)] bg-[var(--background)] p-3">
+                  <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Active timeouts</p>
+                  <p className="mt-2 flex items-center gap-2 text-2xl font-black"><Clock3 className="h-5 w-5 text-amber-300" />{overview?.counts.timeouts ?? 0}</p>
+                </div>
+                <div className="rounded-2xl border border-[var(--border)] bg-[var(--background)] p-3">
+                  <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Blocked profanities</p>
+                  <p className="mt-2 text-2xl font-black">{profanity?.total ?? 0}</p>
+                </div>
+              </div>
+            </section>
+
+            <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+              <h2 className="text-lg font-bold">Escalation Signals</h2>
+              <div className="mt-4 space-y-3 text-sm">
+                <div className="rounded-2xl border border-[var(--border)] bg-[var(--background)] p-3">
+                  <p className="font-semibold">Queue pressure</p>
+                  <p className="mt-1 text-xs text-[var(--muted-foreground)]">{runtimeOverview?.summary.queuedUsers ?? 0} users are waiting for control.</p>
+                </div>
+                <div className="rounded-2xl border border-[var(--border)] bg-[var(--background)] p-3">
+                  <p className="font-semibold">Robot availability</p>
+                  <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+                    {runtimeOverview?.summary.onlineRobots ?? 0} online, {runtimeOverview?.summary.maintenanceRobots ?? 0} in maintenance.
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-[var(--border)] bg-[var(--background)] p-3">
+                  <p className="font-semibold">LiveKit health</p>
+                  <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+                    {runtimeOverview?.livekit.available ? `${runtimeOverview?.livekit.totals.publishers ?? 0} publishers active.` : runtimeOverview?.livekit.error ?? 'Unavailable'}
+                  </p>
+                </div>
+              </div>
+            </section>
+          </aside>
+        </section>
+      ) : null}
+
+      {activeView === 'users' ? (
+        <section className="mb-6 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <div className="mb-3 flex items-center gap-2">
           <h2 className="text-lg font-bold">Users</h2>
           <div className="relative ml-auto w-full max-w-xs">
@@ -788,8 +1018,10 @@ export default function ModDashboardPage() {
           </div>
         )}
       </section>
+      ) : null}
 
-      <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+      {activeView === 'robots' ? (
+        <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <h3 className="mb-4 text-lg font-bold">Manage Robots</h3>
         <div className="space-y-2">
           {(overview?.robots ?? []).map((robot) => (
@@ -879,6 +1111,7 @@ export default function ModDashboardPage() {
           </div>
         )}
       </section>
+      ) : null}
     </div>
   );
 }
