@@ -39,6 +39,8 @@ type ModView = 'moderation' | 'runtime' | 'robots' | 'users';
 
 const formatPercent = (value: number | null | undefined) => {
   if (typeof value !== 'number') return '-';
+  if (value > 0 && value < 1) return '<1%';
+  if (value < 10) return `${value.toFixed(1)}%`;
   return `${Math.round(value)}%`;
 };
 
@@ -50,9 +52,10 @@ const formatAge = (value: number | null | undefined) => {
 };
 
 const formatBitrate = (value: number | null | undefined) => {
-  if (typeof value !== 'number' || value <= 0) return '-';
+  if (typeof value !== 'number') return '-';
+  if (value <= 0) return '0 kbps';
   if (value >= 1000) return `${(value / 1000).toFixed(1)} Mbps`;
-  return `${value} kbps`;
+  return `${value.toFixed(value < 10 ? 1 : 0)} kbps`;
 };
 
 const formatBytes = (value: number | null | undefined) => {
@@ -285,7 +288,7 @@ export default function ModDashboardPage() {
     }
   }, [runtimeOverview, selectedRuntimeRobotId]);
 
-  const refresh = async () => {
+  const refresh = async (options?: { silent?: boolean }) => {
     if (!accessToken) return;
     setRefreshing(true);
     try {
@@ -300,13 +303,29 @@ export default function ModDashboardPage() {
       setOverview(modOverview);
       setRuntimeOverview(runtime);
       setProfanity(globalProfanity);
-      pushToast('Mod data refreshed.', 'success');
+      if (!options?.silent) {
+        pushToast('Mod data refreshed.', 'success');
+      }
     } catch (err) {
-      pushToast(err instanceof Error ? err.message : 'Update failed.', 'error');
+      if (!options?.silent) {
+        pushToast(err instanceof Error ? err.message : 'Update failed.', 'error');
+      }
     } finally {
       setRefreshing(false);
     }
   };
+
+  useEffect(() => {
+    if (!accessToken || !allowed) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void refresh({ silent: true });
+    }, 15000);
+
+    return () => window.clearInterval(intervalId);
+  }, [accessToken, allowed]);
 
   const unrestrict = async (robotId: string, userId: string) => {
     if (!accessToken) return;

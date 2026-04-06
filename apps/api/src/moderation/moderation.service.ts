@@ -3,6 +3,9 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
@@ -81,8 +84,11 @@ const PROFANITY_REGEX = new RegExp(
 );
 
 @Injectable()
-export class ModerationService {
+export class ModerationService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(ModerationService.name);
   private previousCadvisorSample: CadvisorSample | null = null;
+  private cadvisorWarmupInterval: ReturnType<typeof setInterval> | null = null;
+  private cadvisorWarmupInFlight = false;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -90,6 +96,20 @@ export class ModerationService {
     private readonly livekit: LivekitService,
     private readonly config: ConfigService,
   ) {}
+
+  onModuleInit() {
+    void this._warmCadvisorSample();
+    this.cadvisorWarmupInterval = setInterval(() => {
+      void this._warmCadvisorSample();
+    }, 15000);
+  }
+
+  onModuleDestroy() {
+    if (this.cadvisorWarmupInterval) {
+      clearInterval(this.cadvisorWarmupInterval);
+      this.cadvisorWarmupInterval = null;
+    }
+  }
 
   /**
    * Apply a moderation action to a user within a robot's room.
@@ -731,6 +751,8 @@ export class ModerationService {
       };
     });
 
+    const platformRuntime = this._mergePlatformRuntimeWithLivekit(cadvisorRuntime, livekitRuntime);
+
     const cpuSamples = robotRuntime
       .map((robot) => robot.telemetry?.cpuPercent)
       .filter((value): value is number => typeof value === 'number');
@@ -758,10 +780,10 @@ export class ModerationService {
           memorySamples.length > 0
             ? Number((memorySamples.reduce((sum, value) => sum + value, 0) / memorySamples.length).toFixed(1))
             : null,
-        totalIngressKbps: cadvisorRuntime.containers.reduce((sum, container) => sum + (container.rxKbps ?? 0), 0),
-        totalEgressKbps: cadvisorRuntime.containers.reduce((sum, container) => sum + (container.txKbps ?? 0), 0),
+        totalIngressKbps: platformRuntime.containers.reduce((sum, container) => sum + (container.rxKbps ?? 0), 0),
+        totalEgressKbps: platformRuntime.containers.reduce((sum, container) => sum + (container.txKbps ?? 0), 0),
       },
-      platform: cadvisorRuntime,
+      platform: platformRuntime,
       livekit: {
         available: livekitRuntime.error === null,
         error: livekitRuntime.error,
@@ -822,6 +844,39 @@ export class ModerationService {
         rooms: [],
       };
     }
+  }
+
+  private _mergePlatformRuntimeWithLivekit(
+    cadvisorRuntime: Awaited<ReturnType<ModerationService['_getCadvisorRuntime']>>,
+    livekitRuntime: Awaited<ReturnType<ModerationService['_getLivekitRuntime']>>,
+  ) {
+    if (!cadvisorRuntime.containers.length) {
+      return cadvisorRuntime;
+    }
+
+    const livekitIngressKbps = livekitRuntime.rooms.reduce((sum, room) => sum + room.estimatedIngressKbps, 0);
+    if (livekitIngressKbps <= 0) {
+      return cadvisorRuntime;
+    }
+
+    return {
+      ...cadvisorRuntime,
+      containers: cadvisorRuntime.containers.map((container) => {
+        if (container.service !== 'livekit') {
+          return container;
+        }
+
+        const hasMeasuredIngress = typeof container.rxKbps === 'number' && container.rxKbps > 0;
+        if (hasMeasuredIngress) {
+          return container;
+        }
+
+        return {
+          ...container,
+          rxKbps: livekitIngressKbps,
+        };
+      }),
+    };
   }
 
   private async _getCadvisorRuntime() {
@@ -932,6 +987,22 @@ export class ModerationService {
         host: null,
         containers: [],
       };
+    }
+  }
+
+  private async _warmCadvisorSample() {
+    const cadvisorUrl = this.config.get<string>('CADVISOR_URL')?.trim();
+    if (!cadvisorUrl || this.cadvisorWarmupInFlight) {
+      return;
+    }
+
+    this.cadvisorWarmupInFlight = true;
+    try {
+      await this._getCadvisorRuntime();
+    } catch (err) {
+      this.logger.debug(`cAdvisor warmup failed: ${err instanceof Error ? err.message : 'unknown error'}`);
+    } finally {
+      this.cadvisorWarmupInFlight = false;
     }
   }
 
