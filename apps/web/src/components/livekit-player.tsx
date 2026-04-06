@@ -11,26 +11,40 @@ type NerdStats = {
   connectionState: string;
   participantQuality: string;
   trackSid: string;
+  audioTrackSid: string;
   mimeType: string;
+  audioMimeType: string;
   source: string;
   subscription: string;
   streamState: string;
   bitrateKbps: number | null;
+  audioBitrateKbps: number | null;
   framesPerSecond: number | null;
   frameWidth: number | null;
   frameHeight: number | null;
   framesDropped: number | null;
   packetsLost: number | null;
+  audioPacketsLost: number | null;
   jitterMs: number | null;
+  audioJitterMs: number | null;
   roundTripMs: number | null;
   videoWidth: number | null;
   videoHeight: number | null;
   readyState: number | null;
+  audioLevel: number | null;
+  concealedSamples: number | null;
+  audioMuted: string;
 };
 
 type PanelPosition = {
   x: number;
   y: number;
+};
+
+type StatHistoryPoint = {
+  videoBitrateKbps: number | null;
+  audioBitrateKbps: number | null;
+  roundTripMs: number | null;
 };
 
 function formatStat(value: string | number | null | undefined, suffix = '') {
@@ -50,6 +64,86 @@ function maskIdentifier(value: string | undefined, visible = 8) {
   return `${value.slice(0, visible)}...`;
 }
 
+function formatPercent(value: number | null | undefined) {
+  if (value === null || value === undefined) {
+    return 'n/a';
+  }
+  return `${value}%`;
+}
+
+function buildSparklinePath(values: Array<number | null>, width: number, height: number) {
+  const numericValues = values.filter((value): value is number => value !== null && Number.isFinite(value));
+  if (numericValues.length < 2) {
+    return '';
+  }
+
+  const max = Math.max(...numericValues, 1);
+  const min = Math.min(...numericValues, 0);
+  const range = Math.max(max - min, 1);
+  const stepX = values.length > 1 ? width / (values.length - 1) : width;
+
+  let path = '';
+  values.forEach((value, index) => {
+    if (value === null || !Number.isFinite(value)) {
+      return;
+    }
+    const x = index * stepX;
+    const y = height - ((value - min) / range) * height;
+    path += path ? ` L ${x} ${y}` : `M ${x} ${y}`;
+  });
+
+  return path;
+}
+
+function Sparkline({
+  label,
+  value,
+  suffix,
+  values,
+  stroke,
+}: {
+  label: string;
+  value: number | null;
+  suffix: string;
+  values: Array<number | null>;
+  stroke: string;
+}) {
+  const width = 132;
+  const height = 36;
+  const path = buildSparklinePath(values, width, height);
+
+  return (
+    <div className="rounded-xl border border-white/8 bg-white/4 px-2 py-2">
+      <div className="mb-1 flex items-baseline justify-between gap-3">
+        <p className="text-[10px] uppercase tracking-[0.18em] text-slate-400">{label}</p>
+        <p className="text-xs font-semibold text-white">{formatStat(value, suffix)}</p>
+      </div>
+      <svg viewBox={`0 0 ${width} ${height}`} className="h-9 w-full overflow-visible">
+        <path
+          d={`M 0 ${height} L ${width} ${height}`}
+          fill="none"
+          stroke="rgba(148, 163, 184, 0.22)"
+          strokeWidth="1"
+        />
+        {path ? (
+          <path
+            d={path}
+            fill="none"
+            stroke={stroke}
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        ) : (
+          <text x="0" y="22" fill="rgba(148, 163, 184, 0.8)" fontSize="10">
+            collecting...
+          </text>
+        )}
+      </svg>
+    </div>
+  );
+}
+
 function statsToClipboardText(stats: NerdStats | null) {
   if (!stats) {
     return 'Stats for nerds: no data yet';
@@ -60,19 +154,27 @@ function statsToClipboardText(stats: NerdStats | null) {
     `Room state: ${stats.connectionState}`,
     `Connection quality: ${stats.participantQuality}`,
     `Track: ${stats.trackSid}`,
+    `Audio track: ${stats.audioTrackSid}`,
     `Mime: ${stats.mimeType}`,
+    `Audio mime: ${stats.audioMimeType}`,
     `Source: ${stats.source}`,
     `Subscription: ${stats.subscription}`,
     `Stream state: ${stats.streamState}`,
-    `Bitrate: ${formatStat(stats.bitrateKbps, ' kbps')}`,
+    `Video bitrate: ${formatStat(stats.bitrateKbps, ' kbps')}`,
+    `Audio bitrate: ${formatStat(stats.audioBitrateKbps, ' kbps')}`,
     `FPS: ${formatStat(stats.framesPerSecond)}`,
     `Inbound size: ${formatStat(stats.frameWidth)} x ${formatStat(stats.frameHeight)}`,
     `Rendered size: ${formatStat(stats.videoWidth)} x ${formatStat(stats.videoHeight)}`,
     `Frames dropped: ${formatStat(stats.framesDropped)}`,
-    `Packets lost: ${formatStat(stats.packetsLost)}`,
-    `Jitter: ${formatStat(stats.jitterMs, ' ms')}`,
+    `Video packets lost: ${formatStat(stats.packetsLost)}`,
+    `Audio packets lost: ${formatStat(stats.audioPacketsLost)}`,
+    `Video jitter: ${formatStat(stats.jitterMs, ' ms')}`,
+    `Audio jitter: ${formatStat(stats.audioJitterMs, ' ms')}`,
     `RTT: ${formatStat(stats.roundTripMs, ' ms')}`,
     `Video readyState: ${formatStat(stats.readyState)}`,
+    `Audio level: ${formatPercent(stats.audioLevel)}`,
+    `Concealed samples: ${formatStat(stats.concealedSamples)}`,
+    `Audio muted: ${stats.audioMuted}`,
   ].join('\n');
 }
 
@@ -82,6 +184,7 @@ function VideoRenderer({ onStreamStalled }: { onStreamStalled?: () => void }) {
   const room = useRoomContext();
   const containerRef = useRef<HTMLDivElement>(null);
   const [stats, setStats] = useState<NerdStats | null>(null);
+  const [history, setHistory] = useState<StatHistoryPoint[]>([]);
   const [panelPosition, setPanelPosition] = useState<PanelPosition | null>(null);
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
   const [volume, setVolume] = useState(100);
@@ -136,14 +239,18 @@ function VideoRenderer({ onStreamStalled }: { onStreamStalled?: () => void }) {
     const collectStats = async () => {
       const publication = robotTrack.publication;
       const remoteVideoTrack = publication.videoTrack;
+      const audioPublication = robotAudioTracks[0]?.publication;
+      const remoteAudioTrack = audioPublication?.audioTrack;
       if (!remoteVideoTrack) {
         return;
       }
 
       const videoElement = containerRef.current?.querySelector('video') ?? null;
       const report = await remoteVideoTrack.getRTCStatsReport().catch(() => undefined);
+      const audioReport = remoteAudioTrack ? await remoteAudioTrack.getRTCStatsReport().catch(() => undefined) : undefined;
 
       let inbound: RTCInboundRtpStreamStats | undefined;
+      let audioInbound: RTCInboundRtpStreamStats | undefined;
       let candidatePair: RTCIceCandidatePairStats | undefined;
 
       report?.forEach((entry) => {
@@ -158,27 +265,38 @@ function VideoRenderer({ onStreamStalled }: { onStreamStalled?: () => void }) {
         }
       });
 
+      audioReport?.forEach((entry) => {
+        if (entry.type === 'inbound-rtp' && (entry as RTCInboundRtpStreamStats).kind === 'audio') {
+          audioInbound = entry as RTCInboundRtpStreamStats;
+        }
+      });
+
       if (cancelled) {
         return;
       }
 
-      setStats({
+      const nextStats: NerdStats = {
         timestamp: new Date().toLocaleTimeString(),
         connectionState: String(room.state),
         participantQuality: String(robotTrack.participant.connectionQuality),
         trackSid: maskIdentifier(publication.trackSid),
+        audioTrackSid: maskIdentifier(audioPublication?.trackSid),
         mimeType: publication.mimeType ?? 'n/a',
+        audioMimeType: audioPublication?.mimeType ?? 'n/a',
         source: String(publication.source),
         subscription: publication.isSubscribed ? 'subscribed' : 'not-subscribed',
         streamState: String(remoteVideoTrack.streamState),
         bitrateKbps: remoteVideoTrack.currentBitrate ? Math.round(remoteVideoTrack.currentBitrate / 1000) : null,
+        audioBitrateKbps: remoteAudioTrack?.currentBitrate ? Math.round(remoteAudioTrack.currentBitrate / 1000) : null,
         framesPerSecond:
           typeof inbound?.framesPerSecond === 'number' ? Math.round(inbound.framesPerSecond * 10) / 10 : null,
         frameWidth: inbound?.frameWidth ?? publication.dimensions?.width ?? null,
         frameHeight: inbound?.frameHeight ?? publication.dimensions?.height ?? null,
         framesDropped: inbound?.framesDropped ?? null,
         packetsLost: inbound?.packetsLost ?? null,
+        audioPacketsLost: audioInbound?.packetsLost ?? null,
         jitterMs: typeof inbound?.jitter === 'number' ? Math.round(inbound.jitter * 1000) : null,
+        audioJitterMs: typeof audioInbound?.jitter === 'number' ? Math.round(audioInbound.jitter * 1000) : null,
         roundTripMs:
           typeof candidatePair?.currentRoundTripTime === 'number'
             ? Math.round(candidatePair.currentRoundTripTime * 1000)
@@ -186,7 +304,24 @@ function VideoRenderer({ onStreamStalled }: { onStreamStalled?: () => void }) {
         videoWidth: videoElement?.videoWidth ?? null,
         videoHeight: videoElement?.videoHeight ?? null,
         readyState: videoElement?.readyState ?? null,
-      });
+        audioLevel:
+          typeof robotAudioTracks[0]?.participant.audioLevel === 'number'
+            ? Math.round(robotAudioTracks[0].participant.audioLevel * 100)
+            : null,
+        concealedSamples: (audioInbound as RTCInboundRtpStreamStats & { concealedSamples?: number } | undefined)
+          ?.concealedSamples ?? null,
+        audioMuted: audioPublication?.isMuted ? 'muted' : 'live',
+      };
+
+      setStats(nextStats);
+      setHistory((previous) => [
+        ...previous.slice(-29),
+        {
+          videoBitrateKbps: nextStats.bitrateKbps,
+          audioBitrateKbps: nextStats.audioBitrateKbps,
+          roundTripMs: nextStats.roundTripMs,
+        },
+      ]);
     };
 
     void collectStats();
@@ -198,7 +333,7 @@ function VideoRenderer({ onStreamStalled }: { onStreamStalled?: () => void }) {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [panelPosition, robotTrack, room]);
+  }, [panelPosition, robotTrack, robotAudioTracks, room]);
 
   useEffect(() => {
     if (!panelPosition) {
@@ -336,16 +471,22 @@ function VideoRenderer({ onStreamStalled }: { onStreamStalled?: () => void }) {
             <p>{formatStat(stats?.participantQuality)}</p>
             <p className="text-slate-400">Track</p>
             <p>{formatStat(stats?.trackSid)}</p>
+            <p className="text-slate-400">Audio track</p>
+            <p>{formatStat(stats?.audioTrackSid)}</p>
             <p className="text-slate-400">Mime</p>
             <p className="truncate">{formatStat(stats?.mimeType)}</p>
+            <p className="text-slate-400">Audio mime</p>
+            <p className="truncate">{formatStat(stats?.audioMimeType)}</p>
             <p className="text-slate-400">Source</p>
             <p>{formatStat(stats?.source)}</p>
             <p className="text-slate-400">Subscription</p>
             <p>{formatStat(stats?.subscription)}</p>
             <p className="text-slate-400">Stream state</p>
             <p>{formatStat(stats?.streamState)}</p>
-            <p className="text-slate-400">Bitrate</p>
+            <p className="text-slate-400">Video bitrate</p>
             <p>{formatStat(stats?.bitrateKbps, ' kbps')}</p>
+            <p className="text-slate-400">Audio bitrate</p>
+            <p>{formatStat(stats?.audioBitrateKbps, ' kbps')}</p>
             <p className="text-slate-400">FPS</p>
             <p>{formatStat(stats?.framesPerSecond)}</p>
             <p className="text-slate-400">Inbound size</p>
@@ -354,14 +495,48 @@ function VideoRenderer({ onStreamStalled }: { onStreamStalled?: () => void }) {
             <p>{formatStat(stats?.videoWidth)} x {formatStat(stats?.videoHeight)}</p>
             <p className="text-slate-400">Frames dropped</p>
             <p>{formatStat(stats?.framesDropped)}</p>
-            <p className="text-slate-400">Packets lost</p>
+            <p className="text-slate-400">Video packets lost</p>
             <p>{formatStat(stats?.packetsLost)}</p>
-            <p className="text-slate-400">Jitter</p>
+            <p className="text-slate-400">Audio packets lost</p>
+            <p>{formatStat(stats?.audioPacketsLost)}</p>
+            <p className="text-slate-400">Video jitter</p>
             <p>{formatStat(stats?.jitterMs, ' ms')}</p>
+            <p className="text-slate-400">Audio jitter</p>
+            <p>{formatStat(stats?.audioJitterMs, ' ms')}</p>
             <p className="text-slate-400">RTT</p>
             <p>{formatStat(stats?.roundTripMs, ' ms')}</p>
             <p className="text-slate-400">Video readyState</p>
             <p>{formatStat(stats?.readyState)}</p>
+            <p className="text-slate-400">Audio level</p>
+            <p>{formatPercent(stats?.audioLevel)}</p>
+            <p className="text-slate-400">Concealed samples</p>
+            <p>{formatStat(stats?.concealedSamples)}</p>
+            <p className="text-slate-400">Audio state</p>
+            <p>{formatStat(stats?.audioMuted)}</p>
+          </div>
+
+          <div className="grid grid-cols-1 gap-2 border-t border-white/8 px-3 py-3">
+            <Sparkline
+              label="Video bitrate"
+              value={stats?.bitrateKbps ?? null}
+              suffix=" kbps"
+              values={history.map((point) => point.videoBitrateKbps)}
+              stroke="#22d3ee"
+            />
+            <Sparkline
+              label="Audio bitrate"
+              value={stats?.audioBitrateKbps ?? null}
+              suffix=" kbps"
+              values={history.map((point) => point.audioBitrateKbps)}
+              stroke="#f59e0b"
+            />
+            <Sparkline
+              label="RTT"
+              value={stats?.roundTripMs ?? null}
+              suffix=" ms"
+              values={history.map((point) => point.roundTripMs)}
+              stroke="#fb7185"
+            />
           </div>
         </div>
       )}
