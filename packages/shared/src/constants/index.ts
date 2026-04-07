@@ -121,6 +121,9 @@ export const WS_EVENTS = {
   SESSION_START: 'session:start',
   SESSION_END: 'session:end',
 
+  // Server lifecycle
+  SERVER_SHUTDOWN: 'server:shutdown',
+
   // Internal event bus (server-side only, not exposed to clients)
   INTERNAL_MOD_ACTION: 'internal:mod-action',
   INTERNAL_ALERT: 'internal:alert',

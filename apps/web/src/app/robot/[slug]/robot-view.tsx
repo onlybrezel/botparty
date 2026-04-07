@@ -63,6 +63,12 @@ interface ActiveSessionState {
   expiresAt: number | null;
 }
 
+interface ReconnectNotice {
+  message: string;
+  reason: string;
+  retryAt: number;
+}
+
 type FocusMode = 'controls' | 'chat';
 
 function resolveWsUrl(): string {
@@ -167,6 +173,8 @@ export default function RobotView({ robot }: Props) {
   const [accessError, setAccessError] = useState<string | null>(null);
   const [activeSession, setActiveSession] = useState<ActiveSessionState | null>(null);
   const [turnCountdownMs, setTurnCountdownMs] = useState<number | null>(null);
+  const [reconnectNotice, setReconnectNotice] = useState<ReconnectNotice | null>(null);
+  const [reconnectCountdownMs, setReconnectCountdownMs] = useState<number | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
@@ -181,6 +189,8 @@ export default function RobotView({ robot }: Props) {
   const previousRobotStatusRef = useRef(robot.status);
   const initialChatScrollDoneRef = useRef(false);
   const chatShouldStickRef = useRef(true);
+  const shutdownNoticeAtRef = useRef(0);
+  const reconnectRetryAfterRef = useRef<number | null>(null);
 
   // ─── Fetch controls ────────────────────────────────────────────────────────
 
@@ -429,6 +439,21 @@ export default function RobotView({ robot }: Props) {
   }, [robot.status]);
 
   useEffect(() => {
+    if (!reconnectNotice) {
+      setReconnectCountdownMs(null);
+      return;
+    }
+
+    const tick = () => {
+      setReconnectCountdownMs(Math.max(0, reconnectNotice.retryAt - Date.now()));
+    };
+
+    tick();
+    const interval = setInterval(tick, 250);
+    return () => clearInterval(interval);
+  }, [reconnectNotice]);
+
+  useEffect(() => {
     try {
       const raw = window.localStorage.getItem('botparty.settings.v1');
       if (!raw) return;
@@ -461,7 +486,10 @@ export default function RobotView({ robot }: Props) {
       ws.onopen = () => {
         if (!active) return;
         reconnectDelayMs = 1000;
+        reconnectRetryAfterRef.current = null;
         setConnected(true);
+        setReconnectNotice(null);
+        setReconnectCountdownMs(null);
         ws.send(
           JSON.stringify({
             event: 'room:join',
@@ -475,10 +503,29 @@ export default function RobotView({ robot }: Props) {
         );
       };
 
-      ws.onclose = () => {
+      ws.onclose = (closeEvent) => {
         if (!active) return;
         setConnected(false);
-        reconnectTimer = setTimeout(connect, reconnectDelayMs);
+        if (closeEvent.code === 1012) {
+          const now = Date.now();
+          if (now - shutdownNoticeAtRef.current > 3000) {
+            pushToast('Server restart detected. Reconnecting...', 'error', 2500);
+            shutdownNoticeAtRef.current = now;
+          }
+        }
+        const nextDelayMs = Math.max(reconnectDelayMs, reconnectRetryAfterRef.current ?? 0);
+        reconnectTimer = setTimeout(connect, nextDelayMs);
+        setReconnectNotice((prev) => {
+          if (!prev) {
+            return prev;
+          }
+
+          return {
+            ...prev,
+            retryAt: Date.now() + nextDelayMs,
+          };
+        });
+        reconnectRetryAfterRef.current = null;
         reconnectDelayMs = Math.min(reconnectDelayMs * 2, 8000);
       };
 
@@ -610,6 +657,27 @@ export default function RobotView({ robot }: Props) {
           setQueue([]);
           setActiveSession(null);
           setInQueue(false);
+        }
+        break;
+      }
+      case 'server:shutdown': {
+        const retryAfterMs =
+          typeof data.retryAfterMs === 'number' && Number.isFinite(data.retryAfterMs)
+            ? Math.max(1000, data.retryAfterMs)
+            : 12000;
+        const reason = typeof data.reason === 'string' ? data.reason : 'restart';
+        const message =
+          typeof data.message === 'string' ? data.message : 'Realtime connection is restarting. Reconnecting soon...';
+        reconnectRetryAfterRef.current = retryAfterMs;
+        setReconnectNotice({
+          message,
+          reason,
+          retryAt: Date.now() + retryAfterMs,
+        });
+        const now = Date.now();
+        if (now - shutdownNoticeAtRef.current > 3000) {
+          pushToast(message, 'error', 2500);
+          shutdownNoticeAtRef.current = now;
         }
         break;
       }
@@ -1032,7 +1100,12 @@ export default function RobotView({ robot }: Props) {
   const queueEnabled = robot.queueMode !== 'DISABLED';
   const myQueuePosition = queue.findIndex((entry) => entry.userId === currentViewerId) + 1;
   const isMyTurn = !queueEnabled || (myQueuePosition > 0 && myQueuePosition === 1);
-  const viewerLabel = connected ? `${viewers.length} viewer${viewers.length !== 1 ? 's' : ''}` : 'Disconnected';
+  const reconnectSeconds = reconnectCountdownMs !== null ? Math.max(1, Math.ceil(reconnectCountdownMs / 1000)) : null;
+  const viewerLabel = connected
+    ? `${viewers.length} viewer${viewers.length !== 1 ? 's' : ''}`
+    : reconnectSeconds !== null
+      ? `Reconnecting in ${reconnectSeconds}s`
+      : 'Disconnected';
   const queueSummary = queueEnabled
     ? inQueue
       ? isMyTurn
@@ -1076,6 +1149,22 @@ export default function RobotView({ robot }: Props) {
           </span>
         </div>
       </div>
+
+      {reconnectNotice && !connected && (
+        <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+          <p className="font-medium">
+            {reconnectNotice.reason === 'maintenance'
+              ? 'Maintenance window'
+              : reconnectNotice.reason === 'update' || reconnectNotice.reason === 'deploy'
+                ? 'Update in progress'
+                : 'Realtime restart'}
+          </p>
+          <p className="mt-1 text-amber-100/85">
+            {reconnectNotice.message}
+            {reconnectSeconds !== null ? ` Trying again in about ${reconnectSeconds}s.` : ''}
+          </p>
+        </div>
+      )}
 
       <div className="mb-5 grid grid-cols-2 gap-3 lg:hidden">
         <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 py-3">

@@ -7,7 +7,7 @@ import {
   MessageBody,
   ConnectedSocket,
 } from '@nestjs/websockets';
-import { Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { BeforeApplicationShutdown, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Server, WebSocket } from 'ws';
 import { WS_EVENTS, LIMITS } from '@botparty/shared';
@@ -68,7 +68,7 @@ interface CommandMetadata {
   },
 })
 export class BotGateway
-  implements OnGatewayConnection, OnGatewayDisconnect, OnModuleInit, OnModuleDestroy
+  implements OnGatewayConnection, OnGatewayDisconnect, OnModuleInit, OnModuleDestroy, BeforeApplicationShutdown
 {
   @WebSocketServer()
   server!: Server;
@@ -76,6 +76,7 @@ export class BotGateway
   private readonly logger = new Logger(BotGateway.name);
   private subscriber: Redis | null = null;
   private readonly instanceId = crypto.randomUUID();
+  private isShuttingDown = false;
 
   /** All connected sockets: clientId → WsClient */
   private readonly clients = new Map<string, WsClient>();
@@ -108,13 +109,66 @@ export class BotGateway
       void this.handleRedisMessage(channel, message);
     });
 
-    await this.subscriber.psubscribe('queue:*', 'ws:moderation:*', 'ws:room:*');
+    await this.subscriber.psubscribe('queue:*', 'ws:moderation:*', 'ws:room:*', 'ws:system:*');
   }
 
   async onModuleDestroy() {
     if (this.subscriber) {
       await this.subscriber.quit();
       this.subscriber = null;
+    }
+  }
+
+  async beforeApplicationShutdown(signal?: string) {
+    if (this.isShuttingDown) {
+      return;
+    }
+
+    this.isShuttingDown = true;
+    const reason = signal === 'SIGTERM' ? 'maintenance' : 'restart';
+    const retryAfterMs = 12000;
+    const message =
+      reason === 'maintenance'
+        ? 'Server maintenance in progress. Reconnecting soon...'
+        : 'Realtime connection is restarting. Reconnecting soon...';
+
+    this.logger.warn(`WebSocket gateway shutting down${signal ? ` (${signal})` : ''}`);
+
+    const payload = JSON.stringify({
+      event: WS_EVENTS.SERVER_SHUTDOWN,
+      data: {
+        message,
+        reason,
+        retryAfterMs,
+        signal: signal ?? null,
+        ts: Date.now(),
+      },
+    });
+
+    for (const client of this.clients.values()) {
+      if (client.readyState !== WebSocket.OPEN) {
+        continue;
+      }
+
+      try {
+        client.send(payload);
+      } catch {
+        // Best effort notification during shutdown.
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    for (const client of this.clients.values()) {
+      if (client.readyState !== WebSocket.OPEN) {
+        continue;
+      }
+
+      try {
+        client.close(1012, 'Server restarting');
+      } catch {
+        // Ignore close failures during shutdown.
+      }
     }
   }
 
@@ -749,6 +803,29 @@ export class BotGateway
         this._broadcastToRoomLocally(robotId, payload.event, payload.data ?? {});
       } catch (err) {
         this.logger.warn(`Failed to relay room event for ${robotId}: ${(err as Error).message}`);
+      }
+    }
+
+    if (channel.startsWith('ws:system:')) {
+      try {
+        const payload = JSON.parse(message) as { event?: string; data?: unknown };
+        if (!payload.event) {
+          return;
+        }
+
+        const data =
+          payload.data && typeof payload.data === 'object' && !Array.isArray(payload.data)
+            ? payload.data
+            : {};
+        const systemMessage = JSON.stringify({ event: payload.event, data });
+
+        for (const client of this.clients.values()) {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(systemMessage);
+          }
+        }
+      } catch (err) {
+        this.logger.warn(`Failed to relay system event: ${(err as Error).message}`);
       }
     }
   }

@@ -27,6 +27,7 @@ async function bootstrap() {
 
   // ─── WebSocket adapter (ws, not socket.io) ────────
   app.useWebSocketAdapter(new WsAdapter(app));
+  app.enableShutdownHooks();
 
   const helmetRegistration = (async (instance: Parameters<FastifyPluginAsync<FastifyHelmetOptions>>[0]) => {
     const registerHelmet = helmet as unknown as (
