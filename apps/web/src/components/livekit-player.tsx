@@ -343,10 +343,12 @@ function VideoRenderer({
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
   const [volume, setVolume] = useState(100);
   const [isMuted, setIsMuted] = useState(false);
+  const [showVolumeControls, setShowVolumeControls] = useState(true);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [selectedCameraId, setSelectedCameraId] = useState<string | null>(streamConfig?.activeCameraId ?? null);
   const hadTrackRef = useRef(false);
   const stallNotifiedRef = useRef(false);
+  const volumeHideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const publishedTracks = tracks.filter((track) => track.publication !== undefined) as TrackReference[];
   const cameraTracks = buildCameraTracks(publishedTracks, streamConfig);
   const cameraTrackIdsKey = cameraTracks.map((camera) => camera.id).join('|');
@@ -646,6 +648,35 @@ function VideoRenderer({
     return () => window.clearTimeout(timeout);
   }, [copyState]);
 
+  useEffect(() => {
+    const scheduleHide = () => {
+      if (volumeHideTimeoutRef.current) {
+        clearTimeout(volumeHideTimeoutRef.current);
+      }
+      volumeHideTimeoutRef.current = setTimeout(() => {
+        setShowVolumeControls(false);
+      }, 2200);
+    };
+
+    scheduleHide();
+
+    return () => {
+      if (volumeHideTimeoutRef.current) {
+        clearTimeout(volumeHideTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const revealVolumeControls = () => {
+    setShowVolumeControls(true);
+    if (volumeHideTimeoutRef.current) {
+      clearTimeout(volumeHideTimeoutRef.current);
+    }
+    volumeHideTimeoutRef.current = setTimeout(() => {
+      setShowVolumeControls(false);
+    }, 2200);
+  };
+
   const openPanel = (event: ReactMouseEvent<HTMLDivElement>) => {
     event.preventDefault();
     setPanelPosition({
@@ -684,7 +715,13 @@ function VideoRenderer({
   }
 
   return (
-    <div ref={containerRef} onContextMenu={openPanel} className="relative h-full w-full select-none">
+    <div
+      ref={containerRef}
+      onContextMenu={openPanel}
+      onPointerMove={revealVolumeControls}
+      onPointerDown={revealVolumeControls}
+      className="relative h-full w-full select-none"
+    >
       <div ref={primaryVideoRef} className="h-full w-full">
         <VideoTrack
           trackRef={robotTrack}
@@ -693,7 +730,7 @@ function VideoRenderer({
       </div>
 
       {selectedCamera && (
-        <div className="absolute left-3 top-3 z-10 rounded-full border border-white/15 bg-black/45 px-3 py-1.5 text-xs font-semibold text-white backdrop-blur-sm">
+        <div className="absolute left-3 top-12 z-10 rounded-full border border-white/15 bg-black/45 px-3 py-1.5 text-xs font-semibold text-white backdrop-blur-sm">
           {selectedCamera.label}
         </div>
       )}
@@ -723,34 +760,48 @@ function VideoRenderer({
         </div>
       )}
 
-      <div className="absolute bottom-3 left-3 z-10 flex items-center gap-2 rounded-full border border-white/15 bg-black/45 px-3 py-2 text-white backdrop-blur-sm">
+      <div
+        className="absolute bottom-3 left-3 z-10 flex items-center gap-2 rounded-full border border-white/15 bg-black/45 px-3 py-2 text-white backdrop-blur-sm"
+        onPointerEnter={revealVolumeControls}
+      >
         <button
           type="button"
-          onClick={() => setIsMuted((value) => !value)}
+          onClick={() => {
+            revealVolumeControls();
+            setIsMuted((value) => !value);
+          }}
           className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20"
           aria-label={isMuted ? 'Unmute stream audio' : 'Mute stream audio'}
           title={isMuted ? 'Unmute' : 'Mute'}
         >
           {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
         </button>
-        <input
-          type="range"
-          min={0}
-          max={100}
-          step={1}
-          value={volume}
-          onChange={(event) => {
-            const nextValue = Number(event.target.value);
-            setVolume(nextValue);
-            if (nextValue > 0 && isMuted) {
-              setIsMuted(false);
-            }
-          }}
-          className="h-1.5 w-24 accent-cyan-300"
-          aria-label="Stream volume"
-          title={`Volume ${volume}%`}
-        />
-        <span className="min-w-10 text-right text-xs tabular-nums text-white/90">{isMuted ? 0 : volume}%</span>
+        <div
+          className={`flex items-center gap-2 overflow-hidden transition-all duration-200 ${
+            showVolumeControls ? 'max-w-40 opacity-100' : 'max-w-0 opacity-0'
+          }`}
+          aria-hidden={!showVolumeControls}
+        >
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={1}
+            value={volume}
+            onChange={(event) => {
+              revealVolumeControls();
+              const nextValue = Number(event.target.value);
+              setVolume(nextValue);
+              if (nextValue > 0 && isMuted) {
+                setIsMuted(false);
+              }
+            }}
+            className="h-1.5 w-24 accent-cyan-300"
+            aria-label="Stream volume"
+            title={`Volume ${volume}%`}
+          />
+          <span className="min-w-10 text-right text-xs tabular-nums text-white/90">{isMuted ? 0 : volume}%</span>
+        </div>
       </div>
 
       {panelPosition && (
