@@ -41,7 +41,14 @@ export async function generateMetadata({
           alt: `${robot.name} on BotParty`,
         },
       ]
-    : undefined;
+    : [
+        {
+          url: '/brand/og-default.png',
+          width: 1200,
+          height: 630,
+          alt: 'BotParty robot social preview',
+        },
+      ];
 
   return {
     title,
@@ -61,7 +68,7 @@ export async function generateMetadata({
       card: robot.thumbnailUrl ? 'summary_large_image' : 'summary',
       title: `${title} | BotParty`,
       description,
-      images: robot.thumbnailUrl ? [robot.thumbnailUrl] : undefined,
+      images: robot.thumbnailUrl ? [robot.thumbnailUrl] : ['/brand/og-default.png'],
     },
   };
 }

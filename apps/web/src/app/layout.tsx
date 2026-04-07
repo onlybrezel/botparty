@@ -17,9 +17,15 @@ export const metadata: Metadata = {
   description: 'Watch, queue, and drive real internet-connected robots from your browser.',
   keywords: ['robot', 'teleoperation', 'webrtc', 'livekit', 'remote control', 'robotics'],
   icons: {
-    icon: '/icon.svg',
-    shortcut: '/icon.svg',
-    apple: '/icon.svg',
+    icon: [
+      { url: '/brand/favicon-16x16.png', sizes: '16x16', type: 'image/png' },
+      { url: '/brand/favicon-32x32.png', sizes: '32x32', type: 'image/png' },
+      { url: '/brand/favicon-48x48.png', sizes: '48x48', type: 'image/png' },
+      { url: '/brand/icon-192.png', sizes: '192x192', type: 'image/png' },
+      { url: '/brand/icon-512.png', sizes: '512x512', type: 'image/png' },
+    ],
+    shortcut: '/brand/favicon-32x32.png',
+    apple: '/brand/apple-touch-icon.png',
   },
   openGraph: {
     title: 'BotParty',
@@ -29,16 +35,18 @@ export const metadata: Metadata = {
     siteName: 'BotParty',
     images: [
       {
-        url: '/icon.svg',
-        alt: 'BotParty robot icon',
+        url: '/brand/og-default.png',
+        width: 1200,
+        height: 630,
+        alt: 'BotParty robot social preview',
       },
     ],
   },
   twitter: {
-    card: 'summary',
+    card: 'summary_large_image',
     title: 'BotParty',
     description: 'Watch, queue, and drive real internet-connected robots from your browser.',
-    images: ['/icon.svg'],
+    images: ['/brand/og-default.png'],
   },
 };
 

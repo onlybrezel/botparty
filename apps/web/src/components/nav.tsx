@@ -1,9 +1,10 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { Menu, X, Zap } from 'lucide-react';
+import { Menu, X } from 'lucide-react';
 import { useAuth } from '@/lib/store';
 import { api } from '@/lib/api';
 
@@ -78,11 +79,15 @@ export default function Nav() {
       <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         {/* Logo */}
         <Link href="/" className="flex items-center gap-2 text-lg font-bold tracking-tight">
-          <span
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-sm"
-            style={{ background: 'var(--primary)' }}
-          >
-            <Zap className="h-4 w-4 text-white" />
+          <span className="flex h-7 w-7 items-center justify-center overflow-hidden rounded-lg shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
+            <Image
+              src="/brand/icon-64.png"
+              alt="BotParty"
+              width={28}
+              height={28}
+              className="h-7 w-7"
+              priority
+            />
           </span>
           <span className="bg-gradient-to-r from-violet-400 to-purple-300 bg-clip-text text-transparent">
             BotParty
