@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useRef, useCallback, useState, useLayoutEffect } from 'react';
 import Link from 'next/link';
 import type { RobotPublic } from '@botparty/shared';
 import { AlertTriangle, Bot, Radio, Video, Gamepad2 } from 'lucide-react';
@@ -178,6 +178,7 @@ export default function RobotView({ robot }: Props) {
   const allowListAccessAttemptedRef = useRef(false);
   const previousRobotStatusRef = useRef(robot.status);
   const initialChatScrollDoneRef = useRef(false);
+  const chatShouldStickRef = useRef(true);
 
   // ─── Fetch controls ────────────────────────────────────────────────────────
 
@@ -236,6 +237,7 @@ export default function RobotView({ robot }: Props) {
   useEffect(() => {
     api.getControls(robot.id).then(setControlButtons).catch(() => {});
     initialChatScrollDoneRef.current = false;
+    chatShouldStickRef.current = true;
     
     // Load chat history from localStorage
     try {
@@ -806,25 +808,42 @@ export default function RobotView({ robot }: Props) {
 
   // ─── Chat ─────────────────────────────────────────────────────────────────
 
-  useEffect(() => {
+  const scrollChatToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     const container = chatScrollRef.current;
-    if (!container) return;
+    if (!container) {
+      return;
+    }
+
+    container.scrollTo({ top: container.scrollHeight, behavior });
+  }, []);
+
+  useLayoutEffect(() => {
+    const container = chatScrollRef.current;
+    if (!container) {
+      return;
+    }
 
     if (!initialChatScrollDoneRef.current) {
-      container.scrollTop = container.scrollHeight;
-      initialChatScrollDoneRef.current = true;
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          scrollChatToBottom('auto');
+          initialChatScrollDoneRef.current = true;
+        });
+      });
       return;
     }
 
     const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-    const shouldStickToBottom = distanceFromBottom < 48;
+    const shouldStickToBottom = chatShouldStickRef.current || distanceFromBottom < 80;
 
     if (!shouldStickToBottom) {
       return;
     }
 
-    container.scrollTop = container.scrollHeight;
-  }, [messages]);
+    requestAnimationFrame(() => {
+      scrollChatToBottom('auto');
+    });
+  }, [messages, scrollChatToBottom]);
 
   // Save chat history to localStorage (debounced - max once per second)
   const saveChatTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1466,6 +1485,12 @@ export default function RobotView({ robot }: Props) {
 
             <div
               ref={chatScrollRef}
+              onScroll={(event) => {
+                const container = event.currentTarget;
+                const distanceFromBottom =
+                  container.scrollHeight - container.scrollTop - container.clientHeight;
+                chatShouldStickRef.current = distanceFromBottom < 80;
+              }}
               className="mb-2 h-44 overflow-y-auto rounded-lg bg-[var(--background)] px-2 py-1.5 text-sm"
             >
               <div className="flex min-h-full flex-col justify-end gap-1.5">

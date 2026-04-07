@@ -3,6 +3,8 @@ import type { PublicRobotOverview, RobotPublic } from '@botparty/shared';
 import RobotCard from '@/components/robot-card';
 import { ArrowRight, Bot, Gamepad2, Radio, Sparkles } from 'lucide-react';
 
+export const dynamic = 'force-dynamic';
+
 interface PlatformStats {
   totalUsers: number;
   totalRobots: number;
@@ -16,7 +18,7 @@ async function getPublicRobots(): Promise<RobotPublic[]> {
   const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
   try {
     const res = await fetch(`${apiUrl}/api/v1/robots`, {
-      next: { revalidate: 30 },
+      cache: 'no-store',
     });
     if (!res.ok) return [];
     return res.json() as Promise<RobotPublic[]>;
@@ -29,7 +31,7 @@ async function getPlatformStats(): Promise<PlatformStats | null> {
   const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
   try {
     const res = await fetch(`${apiUrl}/api/v1/health/stats`, {
-      next: { revalidate: 30 },
+      cache: 'no-store',
     });
     if (!res.ok) return null;
     return res.json() as Promise<PlatformStats>;
@@ -42,7 +44,7 @@ async function getRobotsOverview(): Promise<PublicRobotOverview | null> {
   const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
   try {
     const res = await fetch(`${apiUrl}/api/v1/robots/overview`, {
-      next: { revalidate: 30 },
+      cache: 'no-store',
     });
     if (!res.ok) return null;
     return res.json() as Promise<PublicRobotOverview>;

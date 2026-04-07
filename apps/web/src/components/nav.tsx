@@ -101,16 +101,14 @@ export default function Nav() {
           >
             Leaderboard
           </Link>
-          <Link
-            href="/docs"
-            className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-              isActive('/docs')
-                ? 'bg-[var(--muted)] text-[var(--foreground)]'
-                : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
-            }`}
+          <a
+            href="https://github.com/onlybrezel/botparty-client/blob/main/docs/index.md"
+            target="_blank"
+            rel="noreferrer"
+            className="rounded-lg px-3 py-2 text-sm font-medium text-[var(--muted-foreground)] transition-colors hover:text-[var(--foreground)]"
           >
-            Docs
-          </Link>
+            Robot Setup
+          </a>
         </nav>
 
         {/* Auth */}

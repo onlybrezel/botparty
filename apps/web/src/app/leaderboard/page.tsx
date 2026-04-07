@@ -15,11 +15,13 @@ export const metadata: Metadata = {
   description: 'Top robots by live viewers and activity.',
 };
 
+export const dynamic = 'force-dynamic';
+
 async function getRobots(): Promise<RobotPublic[]> {
   const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
   try {
     const res = await fetch(`${apiUrl}/api/v1/robots`, {
-      next: { revalidate: 15 },
+      cache: 'no-store',
     });
     if (!res.ok) return [];
     return res.json() as Promise<RobotPublic[]>;
@@ -32,7 +34,7 @@ async function getTopCreators(): Promise<CreatorLeaderboardEntry[]> {
   const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
   try {
     const res = await fetch(`${apiUrl}/api/v1/users/leaderboard?limit=10`, {
-      next: { revalidate: 30 },
+      cache: 'no-store',
     });
     if (!res.ok) return [];
     return res.json() as Promise<CreatorLeaderboardEntry[]>;
@@ -45,7 +47,7 @@ async function getOverview(): Promise<PublicRobotOverview | null> {
   const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
   try {
     const res = await fetch(`${apiUrl}/api/v1/robots/overview`, {
-      next: { revalidate: 30 },
+      cache: 'no-store',
     });
     if (!res.ok) return null;
     return res.json() as Promise<PublicRobotOverview>;

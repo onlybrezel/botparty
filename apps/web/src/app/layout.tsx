@@ -47,9 +47,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/cookies" className="transition hover:text-[var(--foreground)]">
                 Cookie Notice
               </Link>
-              <Link href="/docs" className="transition hover:text-[var(--foreground)]">
-                Docs
-              </Link>
+              <a
+                href="https://github.com/onlybrezel/botparty-client/blob/main/docs/index.md"
+                target="_blank"
+                rel="noreferrer"
+                className="transition hover:text-[var(--foreground)]"
+              >
+                Robot Setup
+              </a>
             </div>
           </div>
         </footer>

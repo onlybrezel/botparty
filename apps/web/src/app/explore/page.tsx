@@ -8,6 +8,8 @@ export const metadata: Metadata = {
   description: 'Browse live robots and take control in real-time.',
 };
 
+export const dynamic = 'force-dynamic';
+
 async function getRobots(params: { status?: string; tag?: string; q?: string; sort?: string }): Promise<RobotPublic[]> {
   const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
   const qs = new URLSearchParams();
@@ -18,7 +20,7 @@ async function getRobots(params: { status?: string; tag?: string; q?: string; so
 
   try {
     const res = await fetch(`${apiUrl}/api/v1/robots?${qs.toString()}`, {
-      next: { revalidate: 10 },
+      cache: 'no-store',
     });
     if (!res.ok) return [];
     return res.json() as Promise<RobotPublic[]>;
@@ -31,7 +33,7 @@ async function getOverview(): Promise<PublicRobotOverview | null> {
   const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
   try {
     const res = await fetch(`${apiUrl}/api/v1/robots/overview`, {
-      next: { revalidate: 30 },
+      cache: 'no-store',
     });
     if (!res.ok) return null;
     return res.json() as Promise<PublicRobotOverview>;
