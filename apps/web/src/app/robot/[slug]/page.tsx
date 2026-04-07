@@ -3,6 +3,12 @@ import type { RobotPublic } from '@botparty/shared';
 import RobotView from './robot-view';
 import PrivateRobotClient from './private-robot-client';
 
+function buildRobotDescription(robot: RobotPublic): string {
+  const fallback = `Watch and control ${robot.name} live on BotParty.`;
+  const description = robot.description?.trim() || fallback;
+  return description.length <= 160 ? description : `${description.slice(0, 157).trimEnd()}...`;
+}
+
 async function getRobot(slug: string): Promise<RobotPublic | null> {
   const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
   try {
@@ -25,9 +31,38 @@ export async function generateMetadata({
   const { slug } = await params;
   const robot = await getRobot(slug);
   if (!robot) return { title: 'Robot not found' };
+  const title = robot.name;
+  const description = buildRobotDescription(robot);
+  const url = `/robot/${robot.slug}`;
+  const previewImages = robot.thumbnailUrl
+    ? [
+        {
+          url: robot.thumbnailUrl,
+          alt: `${robot.name} on BotParty`,
+        },
+      ]
+    : undefined;
+
   return {
-    title: robot.name,
-    description: robot.description ?? `Watch and control ${robot.name} live on BotParty.`,
+    title,
+    description,
+    alternates: {
+      canonical: url,
+    },
+    openGraph: {
+      title: `${title} | BotParty`,
+      description,
+      url,
+      type: 'website',
+      siteName: 'BotParty',
+      images: previewImages,
+    },
+    twitter: {
+      card: robot.thumbnailUrl ? 'summary_large_image' : 'summary',
+      title: `${title} | BotParty`,
+      description,
+      images: robot.thumbnailUrl ? [robot.thumbnailUrl] : undefined,
+    },
   };
 }
 
@@ -45,4 +80,3 @@ export default async function RobotPage({
 
   return <RobotView robot={robot} />;
 }
-

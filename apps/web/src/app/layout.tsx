@@ -16,12 +16,29 @@ export const metadata: Metadata = {
   title: { default: 'BotParty', template: '%s | BotParty' },
   description: 'Watch, queue, and drive real internet-connected robots from your browser.',
   keywords: ['robot', 'teleoperation', 'webrtc', 'livekit', 'remote control', 'robotics'],
+  icons: {
+    icon: '/icon.svg',
+    shortcut: '/icon.svg',
+    apple: '/icon.svg',
+  },
   openGraph: {
     title: 'BotParty',
     description: 'Watch, queue, and drive real internet-connected robots from your browser.',
     type: 'website',
     url: 'https://botparty.live',
     siteName: 'BotParty',
+    images: [
+      {
+        url: '/icon.svg',
+        alt: 'BotParty robot icon',
+      },
+    ],
+  },
+  twitter: {
+    card: 'summary',
+    title: 'BotParty',
+    description: 'Watch, queue, and drive real internet-connected robots from your browser.',
+    images: ['/icon.svg'],
   },
 };
 
