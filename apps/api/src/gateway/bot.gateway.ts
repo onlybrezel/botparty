@@ -394,8 +394,10 @@ export class BotGateway
     }
 
     if (Number.isFinite(data.timestamp)) {
-      const commandAgeMs = Date.now() - data.timestamp;
-      if (commandAgeMs > LIMITS.MAX_CONTROL_COMMAND_AGE_MS) {
+      const clientServerDeltaMs = Date.now() - data.timestamp;
+      const likelyClockSkew = Math.abs(clientServerDeltaMs) > LIMITS.MAX_CONTROL_CLOCK_SKEW_MS;
+
+      if (!likelyClockSkew && clientServerDeltaMs > LIMITS.MAX_CONTROL_COMMAND_AGE_MS) {
         client.send(
           JSON.stringify({
             event: 'error',
@@ -414,7 +416,7 @@ export class BotGateway
       client.id, // exclude sender
     );
 
-    const robotClient = this.robotClients.get(data.robotId);
+    const robotClient = this._getOpenRobotClient(data.robotId);
     if (!robotClient) {
       client.send(
         JSON.stringify({ event: 'error', data: { message: 'Robot realtime control channel is offline' } }),
@@ -441,7 +443,9 @@ export class BotGateway
     // Non-fatal advisory only: browser and server clocks can differ, so never E-STOP from this metric.
     if (Number.isFinite(data.timestamp)) {
       const clientServerDeltaMs = Date.now() - data.timestamp;
-      if (Math.abs(clientServerDeltaMs) > LIMITS.LATENCY_WARNING_MS) {
+      const likelyClockSkew = Math.abs(clientServerDeltaMs) > LIMITS.MAX_CONTROL_CLOCK_SKEW_MS;
+
+      if (!likelyClockSkew && Math.abs(clientServerDeltaMs) > LIMITS.LATENCY_WARNING_MS) {
         client.send(
           JSON.stringify({
             event: WS_EVENTS.CONTROL_LATENCY_WARNING,
@@ -567,7 +571,7 @@ export class BotGateway
     });
 
     // Forward chat to the robot client so it can drive TTS
-    const robotClient = this.robotClients.get(data.robotId);
+    const robotClient = this._getOpenRobotClient(data.robotId);
     if (robotClient) {
       robotClient.send(
         JSON.stringify({
@@ -597,7 +601,7 @@ export class BotGateway
   // ─── Private helpers ────────────────────────────────────────────────────────
 
   private _triggerEmergencyStop(robotId: string, reason: string) {
-    const robotClient = this.robotClients.get(robotId);
+    const robotClient = this._getOpenRobotClient(robotId);
     if (robotClient) {
       robotClient.send(
         JSON.stringify({ event: WS_EVENTS.CONTROL_EMERGENCY_STOP, data: { reason, timestamp: Date.now() } }),
@@ -608,7 +612,7 @@ export class BotGateway
   }
 
   private _sendRobotStop(robotId: string, reason: string) {
-    const robotClient = this.robotClients.get(robotId);
+    const robotClient = this._getOpenRobotClient(robotId);
     if (!robotClient) {
       return;
     }
@@ -688,6 +692,21 @@ export class BotGateway
       .catch(() => {});
 
     client.watchingRobotId = undefined;
+  }
+
+  private _getOpenRobotClient(robotId: string): WsClient | undefined {
+    const robotClient = this.robotClients.get(robotId);
+    if (!robotClient) {
+      return undefined;
+    }
+
+    if (robotClient.readyState !== WebSocket.OPEN) {
+      this.robotClients.delete(robotId);
+      this.logger.warn(`Robot channel for ${robotId} exists but is not open`);
+      return undefined;
+    }
+
+    return robotClient;
   }
 
   private async handleRedisMessage(channel: string, message: string) {
