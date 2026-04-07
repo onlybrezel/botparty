@@ -75,34 +75,34 @@ export default async function HomePage() {
           }}
         />
 
-        <div className="mx-auto flex min-h-[calc(100vh-12rem)] max-w-5xl flex-col justify-center px-4 py-16 text-center sm:py-20">
-          <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-sky-400/30 bg-sky-500/10 px-3 py-1 text-sm text-sky-200">
+        <div className="mx-auto flex min-h-[calc(100vh-15rem)] max-w-5xl flex-col justify-center px-4 py-14 text-center sm:min-h-[calc(100vh-12rem)] sm:py-20">
+          <div className="mb-5 inline-flex max-w-full items-center justify-center gap-2 self-center rounded-full border border-sky-400/30 bg-sky-500/10 px-3 py-1 text-xs text-sky-200 sm:text-sm">
             <span className="h-1.5 w-1.5 rounded-full bg-[var(--online)] animate-pulse-dot" />
             Public robot teleoperation platform
           </div>
 
-          <h1 className="mb-5 text-5xl font-extrabold leading-[1.1] tracking-tight text-[var(--foreground)] sm:text-6xl lg:text-7xl">
+          <h1 className="mb-5 text-4xl font-extrabold leading-[1.05] tracking-tight text-[var(--foreground)] sm:text-6xl lg:text-7xl">
             Drive real robots{' '}
             <span className="bg-gradient-to-r from-sky-300 via-teal-300 to-emerald-300 bg-clip-text text-transparent">
               from your browser
             </span>
           </h1>
 
-          <p className="mx-auto mb-9 max-w-2xl text-lg text-[var(--muted-foreground)] sm:text-xl">
+          <p className="mx-auto mb-9 max-w-2xl text-base leading-relaxed text-[var(--muted-foreground)] sm:text-xl">
             Real robots, live queues, and moderation tools for safe shared control.
           </p>
 
-          <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
+          <div className="flex w-full flex-col items-stretch gap-3 sm:w-auto sm:flex-row sm:justify-center">
             <Link
               href="/explore"
-              className="inline-flex items-center gap-2 rounded-xl bg-[var(--primary)] px-7 py-3 text-base font-semibold text-white shadow-lg shadow-sky-500/25 transition hover:bg-[var(--primary-hover)] hover:shadow-sky-500/40"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-[var(--primary)] px-7 py-3 text-base font-semibold text-white shadow-lg shadow-sky-500/25 transition hover:bg-[var(--primary-hover)] hover:shadow-sky-500/40"
             >
               Explore robots
               <ArrowRight className="h-4 w-4" />
             </Link>
             <Link
               href="/login"
-              className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-7 py-3 text-base font-semibold text-[var(--foreground)] transition hover:border-[var(--muted-foreground)]"
+              className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-7 py-3 text-center text-base font-semibold text-[var(--foreground)] transition hover:border-[var(--muted-foreground)]"
             >
               Host a robot
             </Link>
@@ -114,19 +114,19 @@ export default async function HomePage() {
 
           {stats && (
             <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-left">
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-3 text-left">
                 <p className="text-lg font-bold">{overview?.totals.liveRobots ?? stats.liveRobots}</p>
                 <p className="text-xs text-[var(--muted-foreground)]">Live robots</p>
               </div>
-              <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-left">
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-3 text-left">
                 <p className="text-lg font-bold">{overview?.totals.totalViewers ?? stats.totalLiveViewers}</p>
                 <p className="text-xs text-[var(--muted-foreground)]">Live viewers</p>
               </div>
-              <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-left">
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-3 text-left">
                 <p className="text-lg font-bold">{stats.totalUsers}</p>
                 <p className="text-xs text-[var(--muted-foreground)]">Active users</p>
               </div>
-              <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-left">
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-3 text-left">
                 <p className="text-lg font-bold">{stats.totalSessions}</p>
                 <p className="text-xs text-[var(--muted-foreground)]">Total sessions</p>
               </div>
@@ -138,7 +138,7 @@ export default async function HomePage() {
       {/* Featured robots */}
       {featured.length > 0 && (
         <section className="mx-auto max-w-7xl px-4 py-16 sm:py-20">
-          <div className="mb-6 flex items-center justify-between">
+          <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <h2 className="text-xl font-semibold">Live now</h2>
             <Link
               href="/explore"

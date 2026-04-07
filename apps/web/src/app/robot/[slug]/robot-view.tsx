@@ -1037,13 +1037,13 @@ export default function RobotView({ robot }: Props) {
   // ─── UI ───────────────────────────────────────────────────────────────────
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-6">
+    <div className="mx-auto max-w-7xl px-4 py-4 sm:py-6">
       {/* Breadcrumb */}
-      <div className="mb-4 flex items-center gap-2 text-sm text-[var(--muted-foreground)]">
+      <div className="mb-4 flex flex-wrap items-center gap-2 text-sm text-[var(--muted-foreground)]">
         <Link href="/explore" className="hover:text-[var(--foreground)] transition-colors">Explore</Link>
         <span>/</span>
-        <span className="text-[var(--foreground)]">{robot.name}</span>
-        <div className="ml-auto flex items-center gap-2">
+        <span className="max-w-full truncate text-[var(--foreground)]">{robot.name}</span>
+        <div className="ml-0 flex items-center gap-2 sm:ml-auto">
           <span className={`h-2 w-2 rounded-full ${connected ? 'bg-[var(--online)]' : 'bg-zinc-600'}`} />
           <span className="text-xs">
             {connected ? `${viewers.length} viewer${viewers.length !== 1 ? 's' : ''}` : 'Disconnected'}
@@ -1076,19 +1076,19 @@ export default function RobotView({ robot }: Props) {
                   </p>
                 </div>
                 {robot.accessMode === 'PASSWORD' && (
-                  <div className="flex w-full max-w-sm gap-2">
+                  <div className="flex w-full max-w-sm flex-col gap-2 sm:flex-row">
                     <input
                       type="password"
                       value={accessPasswordInput}
                       onChange={(event) => setAccessPasswordInput(event.target.value)}
-                      className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm text-[var(--foreground)]"
+                      className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-3 text-sm text-[var(--foreground)]"
                       placeholder="Room password"
                     />
                     <button
                       type="button"
                       onClick={() => void requestRoomAccess()}
                       disabled={accessLoading}
-                      className="rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+                      className="rounded-lg bg-[var(--primary)] px-4 py-3 text-sm font-medium text-white disabled:opacity-60"
                     >
                       {accessLoading ? 'Checking...' : 'Unlock'}
                     </button>
@@ -1161,10 +1161,10 @@ export default function RobotView({ robot }: Props) {
           ) : null}
 
           {/* Focus toggles */}
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() => setFocusMode('controls')}
-              className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-all ${
+              className={`rounded-lg px-3 py-2 text-xs font-semibold transition-all ${
                 focusMode === 'controls'
                   ? 'bg-[var(--primary)] text-white'
                   : 'border border-[var(--border)] text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--primary)]/50'
@@ -1177,7 +1177,7 @@ export default function RobotView({ robot }: Props) {
             </button>
             <button
               onClick={() => { setFocusMode('chat'); setTimeout(() => chatInputRef.current?.focus(), 50); }}
-              className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-all ${
+              className={`rounded-lg px-3 py-2 text-xs font-semibold transition-all ${
                 focusMode === 'chat'
                   ? 'bg-[var(--primary)] text-white'
                   : 'border border-[var(--border)] text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--primary)]/50'
@@ -1185,7 +1185,7 @@ export default function RobotView({ robot }: Props) {
             >
               Chat
             </button>
-            <span className="text-xs text-[var(--muted-foreground)]">Tab to switch &middot; ESC = E-STOP</span>
+            <span className="hidden text-xs text-[var(--muted-foreground)] sm:inline">Tab to switch &middot; ESC = E-STOP</span>
           </div>
 
           {/* Controls panel */}
@@ -1205,9 +1205,9 @@ export default function RobotView({ robot }: Props) {
               )}
             </div>
 
-            <div className="flex flex-wrap items-start gap-5">
+            <div className="flex flex-col gap-5 sm:flex-row sm:flex-wrap sm:items-start">
               {/* D-pad layout */}
-              <div className="grid grid-cols-3 grid-rows-3 gap-1">
+              <div className="mx-auto grid grid-cols-3 grid-rows-3 gap-1 sm:mx-0">
                 {/* Row 1: top-center = W */}
                 <div />
                 {(['w'] as const).map((k) => {
@@ -1259,7 +1259,7 @@ export default function RobotView({ robot }: Props) {
                       key={btn.id}
                       onMouseDown={() => sendCommand(btn.command, btn.cooldownMs)}
                       style={btn.color ? { borderColor: btn.color, color: btn.color } : undefined}
-                      className={`flex h-11 min-w-[2.75rem] items-center justify-center gap-1 rounded-lg border px-3 text-sm font-bold transition select-none ${
+                      className={`flex min-h-11 min-w-[2.75rem] items-center justify-center gap-1 rounded-lg border px-3 py-2 text-sm font-bold transition select-none ${
                         isCrowdActive(btn.command)
                           ? 'border-amber-500 bg-amber-500/20 text-amber-300'
                           : 'border-[var(--border)] bg-[var(--muted)] hover:bg-[var(--primary)] hover:border-[var(--primary)] hover:text-white'
@@ -1272,13 +1272,13 @@ export default function RobotView({ robot }: Props) {
                   ))}
               </div>
 
-              <div className="h-11 w-px self-center bg-[var(--border)]" />
+              <div className="hidden h-11 w-px self-center bg-[var(--border)] sm:block" />
 
               {/* E-STOP */}
               {canUseEStop && (
                 <button
                   onMouseDown={triggerEStop}
-                  className="flex h-14 w-24 flex-col items-center justify-center rounded-xl bg-[var(--destructive)] text-xs font-black text-white shadow-lg shadow-red-500/20 transition hover:brightness-110 active:scale-95 select-none"
+                  className="flex h-14 w-full max-w-[10rem] flex-col items-center justify-center rounded-xl bg-[var(--destructive)] text-xs font-black text-white shadow-lg shadow-red-500/20 transition hover:brightness-110 active:scale-95 select-none sm:w-24"
                 >
                     <AlertTriangle className="h-4 w-4" />
                   E-STOP
@@ -1306,7 +1306,7 @@ export default function RobotView({ robot }: Props) {
           <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
             <div className="flex items-start justify-between gap-2">
               <div>
-                <h1 className="font-bold text-lg">{robot.name}</h1>
+                <h1 className="text-lg font-bold leading-tight">{robot.name}</h1>
                 <p className="text-sm text-[var(--muted-foreground)]">
                   by{' '}
                   <span className="text-[var(--foreground)]/80">
@@ -1333,7 +1333,7 @@ export default function RobotView({ robot }: Props) {
               </p>
             )}
 
-            <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+            <div className="mt-3 grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
               <div className="rounded-lg bg-[var(--background)] px-2 py-1.5 text-[var(--muted-foreground)]">
                 <span className="inline-flex items-center gap-1 text-[var(--foreground)]">
                   <Video className="h-3.5 w-3.5 text-violet-300" />
@@ -1434,7 +1434,7 @@ export default function RobotView({ robot }: Props) {
             {queue.length > 0 && (
               <div className="mt-3 space-y-2">
                 {queue.slice(0, 5).map((entry, i) => (
-                  <div key={entry.userId} className="flex items-center gap-2 text-sm">
+                  <div key={entry.userId} className="flex flex-wrap items-center gap-2 text-sm">
                     <span
                       className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold ${
                         i === 0 ? 'bg-[var(--primary)] text-white' : 'bg-[var(--muted)] text-[var(--muted-foreground)]'
@@ -1442,7 +1442,7 @@ export default function RobotView({ robot }: Props) {
                     >
                       {i + 1}
                     </span>
-                    <span className={i === 0 ? 'font-medium' : 'text-[var(--muted-foreground)]'}>
+                    <span className={`min-w-0 flex-1 truncate ${i === 0 ? 'font-medium' : 'text-[var(--muted-foreground)]'}`}>
                       {entry.username}
                     </span>
                     {robot.queueMode === 'VOTING' && (
@@ -1491,7 +1491,7 @@ export default function RobotView({ robot }: Props) {
                   container.scrollHeight - container.scrollTop - container.clientHeight;
                 chatShouldStickRef.current = distanceFromBottom < 80;
               }}
-              className="mb-2 h-44 overflow-y-auto rounded-lg bg-[var(--background)] px-2 py-1.5 text-sm"
+              className="mb-2 h-52 overflow-y-auto rounded-lg bg-[var(--background)] px-2 py-1.5 text-sm sm:h-44"
             >
               <div className="flex min-h-full flex-col justify-end gap-1.5">
                 {messages.map((msg, i) => (

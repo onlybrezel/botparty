@@ -65,75 +65,83 @@ export default async function ExplorePage({
   const liveCount = robots.filter((r) => r.status === 'ONLINE' || r.status === 'BUSY').length;
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-8">
+    <div className="mx-auto max-w-7xl px-4 py-6 sm:py-8">
       {/* Header */}
-      <div className="mb-7">
-        <h1 className="text-3xl font-black tracking-tight">Explore Robots</h1>
-        <p className="mt-1 text-sm text-[var(--muted-foreground)]">
-          {robots.length === 0
-            ? 'No robots found'
-            : `${robots.length} robot${robots.length !== 1 ? 's' : ''} · ${liveCount} live`}
-        </p>
+      <div className="mb-6 flex flex-col gap-3 sm:mb-7 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-3xl font-black tracking-tight">Explore Robots</h1>
+          <p className="mt-1 text-sm text-[var(--muted-foreground)]">
+            {robots.length === 0
+              ? 'No robots found'
+              : `${robots.length} robot${robots.length !== 1 ? 's' : ''} · ${liveCount} live`}
+          </p>
+        </div>
+        <div className="inline-flex w-fit items-center gap-2 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-200">
+          <span className="h-2 w-2 rounded-full bg-emerald-400" />
+          {liveCount} available right now
+        </div>
       </div>
 
       {/* Filters */}
-      <form method="get" className="mb-7 rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 sm:p-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <div className="relative flex-1 max-w-sm">
+      <form method="get" className="mb-6 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3 sm:mb-7 sm:p-4">
+        <div className="flex flex-col gap-3">
+          <div className="relative w-full sm:max-w-md">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted-foreground)]" />
-          <input
-            type="text"
-            name="q"
-            defaultValue={params.q ?? ''}
-            placeholder="Search robots, tags, creators..."
-            className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] py-2 pl-9 pr-4 text-sm outline-none transition-colors focus:border-[var(--primary)]"
-          />
+            <input
+              type="text"
+              name="q"
+              defaultValue={params.q ?? ''}
+              placeholder="Search robots, tags, creators..."
+              className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] py-3 pl-10 pr-4 text-sm outline-none transition-colors focus:border-[var(--primary)]"
+            />
           </div>
 
-          <div className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--background)] px-2 py-1">
-            <SlidersHorizontal className="h-4 w-4 text-[var(--muted-foreground)]" />
-            <select
-              name="status"
-              defaultValue={params.status ?? ''}
-              className="bg-transparent px-1 py-1 text-sm outline-none"
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto] sm:items-center">
+            <label className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-3 text-sm text-[var(--muted-foreground)]">
+              <SlidersHorizontal className="h-4 w-4 flex-shrink-0" />
+              <select
+                name="status"
+                defaultValue={params.status ?? ''}
+                className="w-full bg-transparent text-sm outline-none"
+              >
+                {STATUS_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-3 text-sm text-[var(--muted-foreground)]">
+              <select
+                name="sort"
+                defaultValue={params.sort ?? ''}
+                className="w-full bg-transparent text-sm outline-none"
+              >
+                {SORT_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <button
+              type="submit"
+              className="rounded-xl bg-[var(--primary)] px-4 py-3 text-sm font-medium text-white transition hover:bg-[var(--primary-hover)]"
             >
-              {STATUS_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
+              Apply filters
+            </button>
+
+            {(params.status || params.q || params.tag || params.sort) && (
+              <a
+                href="/explore"
+                className="rounded-xl border border-[var(--border)] px-4 py-3 text-center text-sm text-[var(--muted-foreground)] transition hover:text-[var(--foreground)]"
+              >
+                Clear
+              </a>
+            )}
           </div>
-
-          <div className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--background)] px-2 py-1">
-            <select
-              name="sort"
-              defaultValue={params.sort ?? ''}
-              className="bg-transparent px-1 py-1 text-sm outline-none"
-            >
-              {SORT_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <button
-            type="submit"
-            className="rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-medium text-white transition hover:bg-[var(--primary-hover)]"
-          >
-            Apply filters
-          </button>
-
-          {(params.status || params.q || params.tag || params.sort) && (
-            <a
-              href="/explore"
-              className="text-sm text-[var(--muted-foreground)] transition hover:text-[var(--foreground)]"
-            >
-              Clear
-            </a>
-          )}
         </div>
       </form>
 
@@ -143,7 +151,7 @@ export default async function ExplorePage({
             <a
               key={tag.tag}
               href={`/explore?tag=${encodeURIComponent(tag.tag)}`}
-              className={`rounded-full border px-3 py-1 text-sm transition ${
+              className={`rounded-full border px-3 py-2 text-sm transition ${
                 params.tag === tag.tag
                   ? 'border-[var(--primary)] bg-[var(--primary)]/10'
                   : 'border-[var(--border)] bg-[var(--card)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]'

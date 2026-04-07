@@ -48,7 +48,7 @@ export default function RobotCard({ robot }: Props) {
   return (
     <Link
       href={`/robot/${robot.slug}`}
-      className="group block overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)] transition duration-200 hover:border-violet-500/40 hover:-translate-y-0.5"
+      className="group block overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] transition duration-200 hover:border-violet-500/40 hover:-translate-y-0.5"
     >
       {/* Thumbnail */}
       <div className="relative aspect-video overflow-hidden bg-[var(--muted)]">
@@ -92,23 +92,32 @@ export default function RobotCard({ robot }: Props) {
       </div>
 
       {/* Info */}
-      <div className="p-3">
-        <h3 className="truncate font-semibold text-[var(--foreground)] transition-colors group-hover:text-violet-400">
-          {robot.name}
-        </h3>
-        <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">
-          by{' '}
-          <span className="text-[var(--foreground)]/70">
-            {robot.owner.displayName ?? robot.owner.username}
-          </span>
-        </p>
+      <div className="p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="truncate text-base font-semibold text-[var(--foreground)] transition-colors group-hover:text-violet-400">
+              {robot.name}
+            </h3>
+            <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+              by{' '}
+              <span className="text-[var(--foreground)]/70">
+                {robot.owner.displayName ?? robot.owner.username}
+              </span>
+            </p>
+          </div>
+          {robot.viewerCount > 0 && (
+            <span className="rounded-full border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-[10px] font-semibold text-[var(--muted-foreground)]">
+              {robot.viewerCount} watching
+            </span>
+          )}
+        </div>
 
         {robot.tags.length > 0 && (
-          <div className="mt-2 flex flex-wrap gap-1">
+          <div className="mt-3 flex flex-wrap gap-1.5">
             {robot.tags.slice(0, 3).map((tag) => (
               <span
                 key={tag}
-                className="rounded-full bg-[var(--secondary)] px-2 py-0.5 text-xs text-[var(--secondary-foreground)]/80"
+                className="rounded-full bg-[var(--secondary)] px-2.5 py-1 text-xs text-[var(--secondary-foreground)]/80"
               >
                 {tag}
               </span>

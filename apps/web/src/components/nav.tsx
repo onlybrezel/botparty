@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { Zap } from 'lucide-react';
+import { Menu, X, Zap } from 'lucide-react';
 import { useAuth } from '@/lib/store';
 import { api } from '@/lib/api';
 
@@ -12,6 +12,7 @@ export default function Nav() {
   const { accessToken, username, refreshToken, logout, role } = useAuth();
   const [mounted, setMounted] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
   const [guestLabel, setGuestLabel] = useState('Guest');
 
   useEffect(() => {
@@ -51,7 +52,26 @@ export default function Nav() {
     }
   }, [accessToken, mounted]);
 
+  useEffect(() => {
+    setMenuOpen(false);
+    setDropdownOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [menuOpen]);
+
   const isActive = (href: string) => pathname === href || pathname.startsWith(href + '/');
+  const navLinks = [
+    { href: '/', label: 'Home', active: pathname === '/' },
+    { href: '/explore', label: 'Explore', active: isActive('/explore') },
+    { href: '/leaderboard', label: 'Leaderboard', active: isActive('/leaderboard') },
+  ];
 
   return (
     <header className="sticky top-0 z-50 border-b border-[var(--border)] bg-[var(--background)]/92 backdrop-blur-md">
@@ -71,36 +91,19 @@ export default function Nav() {
 
         {/* Nav links */}
         <nav className="hidden items-center gap-2 sm:flex">
-          <Link
-            href="/"
-            className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-              pathname === '/'
-                ? 'bg-[var(--muted)] text-[var(--foreground)]'
-                : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
-            }`}
-          >
-            Home
-          </Link>
-          <Link
-            href="/explore"
-            className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-              isActive('/explore')
-                ? 'bg-[var(--muted)] text-[var(--foreground)]'
-                : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
-            }`}
-          >
-            Explore
-          </Link>
-          <Link
-            href="/leaderboard"
-            className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-              isActive('/leaderboard')
-                ? 'bg-[var(--muted)] text-[var(--foreground)]'
-                : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
-            }`}
-          >
-            Leaderboard
-          </Link>
+          {navLinks.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                item.active
+                  ? 'bg-[var(--muted)] text-[var(--foreground)]'
+                  : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+              }`}
+            >
+              {item.label}
+            </Link>
+          ))}
           <a
             href="https://github.com/onlybrezel/botparty-client/blob/main/docs/index.md"
             target="_blank"
@@ -113,13 +116,22 @@ export default function Nav() {
 
         {/* Auth */}
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            aria-expanded={menuOpen}
+            aria-label={menuOpen ? 'Close navigation menu' : 'Open navigation menu'}
+            onClick={() => setMenuOpen((open) => !open)}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--card)] text-[var(--foreground)] transition hover:border-[var(--muted-foreground)] sm:hidden"
+          >
+            {menuOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
+          </button>
           {!mounted ? (
-            <div className="h-8 w-20 rounded-lg bg-[var(--muted)] animate-pulse" />
+            <div className="hidden h-8 w-20 rounded-lg bg-[var(--muted)] animate-pulse sm:block" />
           ) : accessToken && username ? (
             <div className="relative">
               <button
-                onClick={() => setMenuOpen((o) => !o)}
-                className="flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-sm font-medium transition hover:border-[var(--muted-foreground)]"
+                onClick={() => setDropdownOpen((open) => !open)}
+                className="hidden items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-sm font-medium transition hover:border-[var(--muted-foreground)] sm:flex"
               >
                 <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[var(--primary)] text-xs text-white font-bold uppercase">
                   {username[0]}
@@ -130,14 +142,14 @@ export default function Nav() {
                 </svg>
               </button>
 
-              {menuOpen && (
+              {dropdownOpen && (
                 <div
                   className="absolute right-0 top-full mt-1 w-44 rounded-xl border border-[var(--border)] bg-[var(--card)] py-1 shadow-lg shadow-black/40 animate-fade-in"
-                  onBlur={() => setMenuOpen(false)}
+                  onBlur={() => setDropdownOpen(false)}
                 >
                   <Link
                     href="/dashboard"
-                    onClick={() => setMenuOpen(false)}
+                    onClick={() => setDropdownOpen(false)}
                     className="block px-4 py-2 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition"
                   >
                     Robots Dashboard
@@ -145,7 +157,7 @@ export default function Nav() {
                   {(role === 'ADMIN' || role === 'MOD') && (
                     <Link
                       href="/mod"
-                      onClick={() => setMenuOpen(false)}
+                      onClick={() => setDropdownOpen(false)}
                       className="block px-4 py-2 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition"
                     >
                       Mod Dashboard
@@ -153,7 +165,7 @@ export default function Nav() {
                   )}
                   <Link
                     href="/settings"
-                    onClick={() => setMenuOpen(false)}
+                    onClick={() => setDropdownOpen(false)}
                     className="block px-4 py-2 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition"
                   >
                     Settings
@@ -162,7 +174,7 @@ export default function Nav() {
                   <button
                     onClick={() => {
                       logout();
-                      setMenuOpen(false);
+                      setDropdownOpen(false);
                     }}
                     className="block w-full px-4 py-2 text-left text-sm text-red-400 hover:bg-[var(--muted)] transition"
                   >
@@ -172,7 +184,7 @@ export default function Nav() {
               )}
             </div>
           ) : (
-            <div className="flex items-center gap-2">
+            <div className="hidden items-center gap-2 sm:flex">
               <span className="hidden rounded-lg border border-[var(--border)] bg-[var(--card)] px-2.5 py-1 text-xs font-medium text-[var(--muted-foreground)] sm:inline-flex">
                 {guestLabel}
               </span>
@@ -186,6 +198,87 @@ export default function Nav() {
           )}
         </div>
       </div>
+
+      {menuOpen && (
+        <div className="border-t border-[var(--border)] bg-[var(--background)] px-4 py-4 shadow-2xl shadow-black/30 sm:hidden">
+          <nav className="flex flex-col gap-2">
+            {navLinks.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`rounded-xl px-4 py-3 text-sm font-medium transition-colors ${
+                  item.active
+                    ? 'bg-[var(--muted)] text-[var(--foreground)]'
+                    : 'border border-[var(--border)] bg-[var(--card)] text-[var(--muted-foreground)]'
+                }`}
+              >
+                {item.label}
+              </Link>
+            ))}
+            <a
+              href="https://github.com/onlybrezel/botparty-client/blob/main/docs/index.md"
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm font-medium text-[var(--muted-foreground)]"
+            >
+              Robot Setup
+            </a>
+          </nav>
+
+          <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
+            {!mounted ? (
+              <div className="h-10 w-full rounded-xl bg-[var(--muted)] animate-pulse" />
+            ) : accessToken && username ? (
+              <div className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--primary)] text-sm font-bold uppercase text-white">
+                    {username[0]}
+                  </span>
+                  <div>
+                    <p className="text-sm font-semibold text-[var(--foreground)]">{username}</p>
+                    <p className="text-xs text-[var(--muted-foreground)]">Signed in</p>
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Link href="/dashboard" className="rounded-xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--foreground)]">
+                    Robots Dashboard
+                  </Link>
+                  {(role === 'ADMIN' || role === 'MOD') && (
+                    <Link href="/mod" className="rounded-xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--foreground)]">
+                      Mod Dashboard
+                    </Link>
+                  )}
+                  <Link href="/settings" className="rounded-xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--foreground)]">
+                    Settings
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      logout();
+                      setMenuOpen(false);
+                    }}
+                    className="rounded-xl border border-red-500/30 px-4 py-3 text-left text-sm font-medium text-red-300"
+                  >
+                    Sign out
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--muted-foreground)]">
+                  {guestLabel}
+                </p>
+                <Link
+                  href="/login"
+                  className="block rounded-xl bg-[var(--primary)] px-4 py-3 text-center text-sm font-semibold text-white"
+                >
+                  Sign in
+                </Link>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </header>
   );
 }
