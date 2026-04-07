@@ -1063,7 +1063,7 @@ export default function RobotView({ robot }: Props) {
   // ─── UI ───────────────────────────────────────────────────────────────────
 
   return (
-    <div className="safe-pb mx-auto max-w-7xl px-4 py-4 pb-28 sm:py-6 lg:pb-6">
+    <div className="safe-pb mx-auto max-w-7xl px-4 py-4 pb-24 sm:py-6 lg:pb-6">
       {/* Breadcrumb */}
       <div className="mb-4 flex flex-wrap items-center gap-2 text-sm text-[var(--muted-foreground)]">
         <Link href="/explore" className="hover:text-[var(--foreground)] transition-colors">Explore</Link>
@@ -1094,7 +1094,7 @@ export default function RobotView({ robot }: Props) {
         {/* ─── Left column: video + controls ─── */}
         <div className="space-y-4 lg:col-span-2">
           {/* Video */}
-          <div className="relative aspect-video overflow-hidden rounded-2xl border border-[var(--border)] bg-black shadow-[0_30px_80px_rgba(2,8,23,0.4)]">
+          <div className="relative aspect-video overflow-hidden rounded-xl border border-[var(--border)] bg-black lg:shadow-none">
             {(robot.accessMode === 'PASSWORD' || robot.accessMode === 'ALLOWED_USERS') && !roomAccessToken && !guestVideoAllowed ? (
               <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center text-[var(--muted-foreground)]">
                 <div className="rounded-xl border border-[var(--border)] bg-[var(--muted)] p-3">
@@ -1157,7 +1157,7 @@ export default function RobotView({ robot }: Props) {
                 {isOnline ? (
                   <>
                     <div className="rounded-xl border border-[var(--border)] bg-[var(--muted)] p-3">
-                      <Radio className="h-7 w-7 text-sky-300" />
+                      <Radio className="h-7 w-7 text-violet-300" />
                     </div>
                     {videoState === 'loading' || videoState === 'idle' ? (
                       <p className="text-sm">Connecting to video stream...</p>
@@ -1230,7 +1230,7 @@ export default function RobotView({ robot }: Props) {
           {/* Controls panel */}
           <div
             ref={controlsPanelRef}
-            className={`rounded-xl border p-5 transition-colors ${
+            className={`rounded-xl border p-4 sm:p-5 transition-colors ${
               focusMode === 'controls'
                 ? 'border-[var(--primary)]/50 bg-[var(--card)]'
                 : 'border-[var(--border)] bg-[var(--card)] opacity-70'
@@ -1303,7 +1303,7 @@ export default function RobotView({ robot }: Props) {
                       key={btn.id}
                       onPointerDown={() => sendCommand(btn.command, btn.cooldownMs)}
                       style={btn.color ? { borderColor: btn.color, color: btn.color } : undefined}
-                      className={`flex min-h-12 min-w-[3.25rem] items-center justify-center gap-1 rounded-xl border px-3 py-2 text-sm font-bold transition select-none ${
+                      className={`flex min-h-12 min-w-[3.25rem] items-center justify-center gap-1 rounded-lg border px-3 py-2 text-sm font-bold transition select-none lg:min-h-11 lg:min-w-[2.75rem] ${
                         isCrowdActive(btn.command)
                           ? 'border-amber-500 bg-amber-500/20 text-amber-300'
                           : 'border-[var(--border)] bg-[var(--muted)] hover:bg-[var(--primary)] hover:border-[var(--primary)] hover:text-white'
@@ -1322,7 +1322,7 @@ export default function RobotView({ robot }: Props) {
               {canUseEStop && (
                 <button
                   onPointerDown={triggerEStop}
-                  className="flex h-14 w-full max-w-[12rem] flex-col items-center justify-center rounded-xl bg-[var(--destructive)] text-xs font-black text-white shadow-lg shadow-red-500/20 transition hover:brightness-110 active:scale-95 select-none sm:w-28"
+                  className="flex h-14 w-full max-w-[12rem] flex-col items-center justify-center rounded-xl bg-[var(--destructive)] text-xs font-black text-white shadow-lg shadow-red-500/20 transition hover:brightness-110 active:scale-95 select-none sm:w-28 lg:max-w-[10rem] lg:rounded-xl lg:shadow-lg"
                 >
                     <AlertTriangle className="h-4 w-4" />
                   E-STOP
@@ -1380,13 +1380,13 @@ export default function RobotView({ robot }: Props) {
             <div className="mt-3 grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
               <div className="rounded-lg bg-[var(--background)] px-2 py-1.5 text-[var(--muted-foreground)]">
                 <span className="inline-flex items-center gap-1 text-[var(--foreground)]">
-                  <Video className="h-3.5 w-3.5 text-sky-300" />
+                  <Video className="h-3.5 w-3.5 text-violet-300" />
                   Live stream
                 </span>
               </div>
               <div className="rounded-lg bg-[var(--background)] px-2 py-1.5 text-[var(--muted-foreground)]">
                 <span className="inline-flex items-center gap-1 text-[var(--foreground)]">
-                  <Gamepad2 className="h-3.5 w-3.5 text-sky-300" />
+                  <Gamepad2 className="h-3.5 w-3.5 text-violet-300" />
                   Queue control
                 </span>
               </div>
@@ -1536,7 +1536,7 @@ export default function RobotView({ robot }: Props) {
                   container.scrollHeight - container.scrollTop - container.clientHeight;
                 chatShouldStickRef.current = distanceFromBottom < 80;
               }}
-                className="mb-2 h-64 overflow-y-auto rounded-lg bg-[var(--background)] px-2 py-1.5 text-sm sm:h-52"
+                className="mb-2 h-64 overflow-y-auto rounded-lg bg-[var(--background)] px-2 py-1.5 text-sm sm:h-52 lg:h-44"
             >
               <div className="flex min-h-full flex-col justify-end gap-1.5">
                 {messages.map((msg, i) => (
@@ -1546,7 +1546,7 @@ export default function RobotView({ robot }: Props) {
                       msg.isSystem
                         ? 'border-[var(--border)] bg-[var(--muted)]/30'
                         : msg.userId === userId
-                          ? 'border-sky-500/25 bg-sky-500/7'
+                          ? 'border-violet-500/25 bg-violet-500/7'
                           : 'border-[var(--border)] bg-[var(--card)]/70'
                     }`}
                   >
@@ -1565,7 +1565,7 @@ export default function RobotView({ robot }: Props) {
                   ) : (
                     <div className="space-y-1">
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="text-xs font-semibold text-sky-300">{msg.username}</span>
+                        <span className="text-xs font-semibold text-violet-400">{msg.username}</span>
                         <span className="text-[10px] text-[var(--muted-foreground)]">
                           {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </span>
@@ -1648,7 +1648,7 @@ export default function RobotView({ robot }: Props) {
 
       </div>
 
-      <div className="safe-bottom fixed inset-x-4 z-40 mx-auto flex max-w-xl items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--background)]/95 p-2 shadow-2xl shadow-black/40 backdrop-blur-md lg:hidden">
+      <div className="safe-bottom fixed inset-x-4 z-40 mx-auto flex max-w-xl items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--background)]/95 p-2 shadow-2xl shadow-black/40 backdrop-blur-md lg:hidden landscape:max-w-2xl landscape:px-3 landscape:py-1.5">
         <button
           type="button"
           onClick={activateControlsPanel}
@@ -1732,7 +1732,7 @@ function ControlKey({
       onPointerLeave={disabled || !isMotionKey ? undefined : onRelease}
       title={hotKey.toUpperCase()}
       disabled={disabled}
-      className={`flex h-16 w-16 touch-none items-center justify-center rounded-2xl border text-base font-bold transition select-none sm:h-14 sm:w-14 sm:rounded-xl sm:text-sm ${
+      className={`flex h-16 w-16 touch-none items-center justify-center rounded-2xl border text-base font-bold transition select-none sm:h-14 sm:w-14 sm:rounded-xl sm:text-sm lg:h-11 lg:w-11 lg:rounded-lg lg:text-sm ${
         disabled
           ? 'cursor-not-allowed border-[var(--border)] bg-[var(--background)] text-[var(--muted-foreground)] opacity-50'
           : isDown

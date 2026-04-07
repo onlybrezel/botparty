@@ -5,11 +5,11 @@
   --foreground: #f4f4f5;
   --card: #121320;
   --card-foreground: #f4f4f5;
-  --primary: #0f9fda;
-  --primary-hover: #0a88ba;
+  --primary: #7c3aed;
+  --primary-hover: #6d28d9;
   --primary-foreground: #ffffff;
   --secondary: #1a1a2e;
-  --secondary-foreground: #b8ecff;
+  --secondary-foreground: #c4b5fd;
   --accent: #f59e0b;
   --accent-foreground: #09090b;
   --muted: #1f2030;
@@ -78,6 +78,12 @@ textarea {
 
 .safe-bottom {
   bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+@media (max-height: 540px) and (orientation: landscape) {
+  .safe-bottom {
+    bottom: max(0.5rem, env(safe-area-inset-bottom));
+  }
 }
 
 /* Scrollbar */

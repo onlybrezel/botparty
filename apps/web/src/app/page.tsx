@@ -75,58 +75,58 @@ export default async function HomePage() {
           }}
         />
 
-        <div className="mx-auto flex min-h-[calc(100vh-13rem)] max-w-5xl flex-col justify-center px-4 py-12 text-center sm:min-h-[calc(100vh-12rem)] sm:py-20">
+        <div className="mx-auto flex min-h-[calc(100vh-15rem)] max-w-5xl flex-col justify-center px-4 py-14 text-center sm:min-h-[calc(100vh-12rem)] sm:py-20">
           <div className="mb-5 inline-flex max-w-full items-center justify-center gap-2 self-center rounded-full border border-sky-400/30 bg-sky-500/10 px-3 py-1 text-xs text-sky-200 sm:text-sm">
             <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-[var(--online)]" />
             Public robot teleoperation platform
           </div>
 
-          <h1 className="mb-5 text-balance text-4xl font-extrabold leading-[1.02] tracking-tight text-[var(--foreground)] sm:text-6xl lg:text-7xl">
+          <h1 className="mb-5 text-4xl font-extrabold leading-[1.05] tracking-tight text-[var(--foreground)] sm:text-6xl lg:text-7xl">
             Drive real robots{' '}
-            <span className="bg-gradient-to-r from-sky-300 via-cyan-200 to-emerald-300 bg-clip-text text-transparent">
+            <span className="bg-gradient-to-r from-sky-300 via-teal-300 to-emerald-300 bg-clip-text text-transparent">
               from your browser
             </span>
           </h1>
 
-          <p className="mx-auto mb-7 max-w-2xl text-pretty text-base leading-relaxed text-[var(--muted-foreground)] sm:text-xl">
-            Real robots, live queues, and moderation tools for safe shared control on phones, tablets, and desktops.
+          <p className="mx-auto mb-9 max-w-2xl text-base leading-relaxed text-[var(--muted-foreground)] sm:text-xl">
+            Real robots, live queues, and moderation tools for safe shared control.
           </p>
 
           <div className="flex w-full flex-col items-stretch gap-3 sm:w-auto sm:flex-row sm:justify-center">
             <Link
               href="/explore"
-              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[var(--primary)] px-7 py-3 text-base font-semibold text-white shadow-lg shadow-sky-500/25 transition hover:bg-[var(--primary-hover)] hover:shadow-sky-500/40"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-[var(--primary)] px-7 py-3 text-base font-semibold text-white shadow-lg shadow-sky-500/25 transition hover:bg-[var(--primary-hover)] hover:shadow-sky-500/40"
             >
               Explore robots
               <ArrowRight className="h-4 w-4" />
             </Link>
             <Link
               href="/login"
-              className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-7 py-3 text-center text-base font-semibold text-[var(--foreground)] transition hover:border-[var(--muted-foreground)]"
+              className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-7 py-3 text-center text-base font-semibold text-[var(--foreground)] transition hover:border-[var(--muted-foreground)]"
             >
               Host a robot
             </Link>
           </div>
 
-          <p className="mt-6 text-sm text-[var(--muted-foreground)]">
+          <p className="mt-7 text-sm text-[var(--muted-foreground)]">
             Built for creator-hosted robots, classrooms, and community events.
           </p>
 
           {stats && (
             <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-3 py-3 text-left">
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-3 text-left">
                 <p className="text-lg font-bold">{overview?.totals.liveRobots ?? stats.liveRobots}</p>
                 <p className="text-xs text-[var(--muted-foreground)]">Live robots</p>
               </div>
-              <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-3 py-3 text-left">
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-3 text-left">
                 <p className="text-lg font-bold">{overview?.totals.totalViewers ?? stats.totalLiveViewers}</p>
                 <p className="text-xs text-[var(--muted-foreground)]">Live viewers</p>
               </div>
-              <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-3 py-3 text-left">
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-3 text-left">
                 <p className="text-lg font-bold">{stats.totalUsers}</p>
                 <p className="text-xs text-[var(--muted-foreground)]">Active users</p>
               </div>
-              <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-3 py-3 text-left">
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-3 text-left">
                 <p className="text-lg font-bold">{stats.totalSessions}</p>
                 <p className="text-xs text-[var(--muted-foreground)]">Total sessions</p>
               </div>
@@ -181,10 +181,10 @@ export default async function HomePage() {
             ].map((item) => (
               <div
                 key={item.title}
-                className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6 transition hover:border-sky-400/40"
+                className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-6 transition hover:border-violet-500/40"
               >
                 <div className="mb-3 inline-flex rounded-lg border border-[var(--border)] bg-[var(--muted)] p-2">
-                  <item.icon className="h-5 w-5 text-sky-300" />
+                  <item.icon className="h-5 w-5 text-violet-300" />
                 </div>
                 <h3 className="mb-1 font-semibold">{item.title}</h3>
                 <p className="text-sm leading-relaxed text-[var(--muted-foreground)]">{item.desc}</p>

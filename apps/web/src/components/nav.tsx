@@ -84,7 +84,7 @@ export default function Nav() {
           >
             <Zap className="h-4 w-4 text-white" />
           </span>
-          <span className="bg-gradient-to-r from-sky-300 via-cyan-200 to-emerald-300 bg-clip-text text-transparent">
+          <span className="bg-gradient-to-r from-violet-400 to-purple-300 bg-clip-text text-transparent">
             BotParty
           </span>
         </Link>
