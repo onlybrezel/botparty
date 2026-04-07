@@ -1,6 +1,14 @@
 import { z } from 'zod';
 import { LIMITS } from '../constants/index.js';
 
+const robotStreamCameraSchema = z.object({
+  id: z.string().min(1).max(64),
+  label: z.string().min(1).max(64).optional(),
+  role: z.string().min(1).max(32).optional(),
+  enabled: z.boolean().optional(),
+  publishMode: z.enum(['always_on', 'preview_only', 'on_demand']).optional(),
+});
+
 // ─── Auth Schemas ────────────────────────────────────
 export const usernameSchema = z
   .string()
@@ -64,6 +72,8 @@ export const createRobotSchema = z.object({
   stream: z
     .object({
       targetBitrateKbps: z.number().int().min(150).max(3000).optional(),
+      activeCameraId: z.string().min(1).max(64).optional(),
+      cameras: z.array(robotStreamCameraSchema).max(8).optional(),
     })
     .optional(),
 });

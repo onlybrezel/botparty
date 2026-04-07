@@ -45,6 +45,14 @@ export interface UserPublic {
   createdAt: string;
 }
 
+export interface RobotStreamCameraConfig {
+  id: string;
+  label?: string;
+  role?: 'primary' | 'secondary' | 'rear' | 'arm' | 'dock' | string;
+  enabled?: boolean;
+  publishMode?: 'always_on' | 'preview_only' | 'on_demand' | string;
+}
+
 // ─── Robot Public ────────────────────────────────────
 export interface RobotPublic {
   id: string;
@@ -68,6 +76,8 @@ export interface RobotPublic {
     };
     stream?: {
       targetBitrateKbps?: number;
+      activeCameraId?: string;
+      cameras?: RobotStreamCameraConfig[];
     };
   } | null;
   tags: string[];

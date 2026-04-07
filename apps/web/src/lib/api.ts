@@ -1,4 +1,10 @@
-import type { ControlButtonAccess, PublicRobotOverview, RobotPublic, UserPublic } from '@botparty/shared';
+import type {
+  ControlButtonAccess,
+  PublicRobotOverview,
+  RobotPublic,
+  RobotStreamCameraConfig,
+  UserPublic,
+} from '@botparty/shared';
 import { useAuth } from '@/lib/store';
 
 class ApiError extends Error {
@@ -23,6 +29,8 @@ export interface RobotManaged extends RobotPublic {
     };
     stream?: {
       targetBitrateKbps?: number;
+      activeCameraId?: string;
+      cameras?: RobotStreamCameraConfig[];
     };
   } | null;
   accessPassword: string | null;
@@ -52,6 +60,8 @@ export interface RobotMutationInput {
   };
   stream?: {
     targetBitrateKbps?: number;
+    activeCameraId?: string;
+    cameras?: RobotStreamCameraConfig[];
   };
   accessPassword?: string;
 }

@@ -3,6 +3,7 @@
 import { LiveKitRoom, RoomAudioRenderer, VideoTrack, useRoomContext, useTracks } from '@livekit/components-react';
 import { Track, type RemoteVideoTrack } from 'livekit-client';
 import type { TrackReference } from '@livekit/components-core';
+import type { RobotStreamCameraConfig } from '@botparty/shared';
 import { Check, Copy, Radio, Volume2, VolumeX, X } from 'lucide-react';
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 
@@ -67,6 +68,20 @@ type CandidateStats = RTCStats & {
   protocol?: string;
 };
 
+type StreamConfig = {
+  activeCameraId?: string;
+  cameras?: RobotStreamCameraConfig[];
+} | null | undefined;
+
+type CameraTrackView = {
+  id: string;
+  label: string;
+  role: string | null;
+  order: number;
+  trackRef: TrackReference;
+  trackName: string;
+};
+
 function formatStat(value: string | number | null | undefined, suffix = '') {
   if (value === null || value === undefined || value === '') {
     return 'n/a';
@@ -89,6 +104,70 @@ function formatPercent(value: number | null | undefined) {
     return 'n/a';
   }
   return `${value}%`;
+}
+
+function prettifyCameraId(id: string) {
+  return id
+    .replace(/[._-]+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (part) => part.toUpperCase()) || 'Camera';
+}
+
+function readTrackName(trackRef: TrackReference) {
+  const publication = trackRef.publication as { trackName?: string; name?: string } | undefined;
+  return publication?.trackName ?? publication?.name ?? '';
+}
+
+function parseCameraIdFromTrackName(trackName: string) {
+  const trimmed = trackName.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (trimmed === 'camera') {
+    return 'front';
+  }
+
+  const match = /^camera[.:]([a-zA-Z0-9_-]+)$/.exec(trimmed);
+  if (match) {
+    return match[1];
+  }
+
+  return null;
+}
+
+function buildCameraTracks(trackRefs: TrackReference[], streamConfig?: StreamConfig): CameraTrackView[] {
+  const configuredCameras = streamConfig?.cameras ?? [];
+
+  return trackRefs
+    .map((trackRef, index) => {
+      const trackName = readTrackName(trackRef);
+      const parsedCameraId = parseCameraIdFromTrackName(trackName);
+      const configured =
+        (parsedCameraId ? configuredCameras.find((camera) => camera.id === parsedCameraId) : undefined)
+        ?? configuredCameras[index];
+      const id = configured?.id ?? parsedCameraId ?? `camera-${index + 1}`;
+      const label = configured?.label?.trim() || prettifyCameraId(id);
+      const role = configured?.role?.trim() || (index === 0 ? 'primary' : null);
+      const order = configuredCameras.findIndex((camera) => camera.id === id);
+
+      return {
+        id,
+        label,
+        role,
+        order: order >= 0 ? order : index,
+        trackRef,
+        trackName,
+      };
+    })
+    .sort((left, right) => {
+      const leftPrimary = streamConfig?.activeCameraId === left.id || left.role === 'primary';
+      const rightPrimary = streamConfig?.activeCameraId === right.id || right.role === 'primary';
+      if (leftPrimary !== rightPrimary) {
+        return leftPrimary ? -1 : 1;
+      }
+      return left.order - right.order;
+    });
 }
 
 function getSparklineBounds(
@@ -246,11 +325,18 @@ function statsToClipboardText(stats: NerdStats | null) {
   ].join('\n');
 }
 
-function VideoRenderer({ onStreamStalled }: { onStreamStalled?: () => void }) {
+function VideoRenderer({
+  onStreamStalled,
+  streamConfig,
+}: {
+  onStreamStalled?: () => void;
+  streamConfig?: StreamConfig;
+}) {
   const tracks = useTracks([{ source: Track.Source.Camera, withPlaceholder: false }]);
   const audioTracks = useTracks([{ source: Track.Source.Microphone, withPlaceholder: false }]);
   const room = useRoomContext();
   const containerRef = useRef<HTMLDivElement>(null);
+  const primaryVideoRef = useRef<HTMLDivElement>(null);
   const [stats, setStats] = useState<NerdStats | null>(null);
   const [history, setHistory] = useState<StatHistoryPoint[]>([]);
   const [panelPosition, setPanelPosition] = useState<PanelPosition | null>(null);
@@ -258,15 +344,43 @@ function VideoRenderer({ onStreamStalled }: { onStreamStalled?: () => void }) {
   const [volume, setVolume] = useState(100);
   const [isMuted, setIsMuted] = useState(false);
   const [dragState, setDragState] = useState<DragState | null>(null);
+  const [selectedCameraId, setSelectedCameraId] = useState<string | null>(streamConfig?.activeCameraId ?? null);
   const hadTrackRef = useRef(false);
   const stallNotifiedRef = useRef(false);
-  // Filter out placeholder tracks (no publication)
-  const robotTrack = tracks.find((t) => t.publication !== undefined) as TrackReference | undefined;
+  const publishedTracks = tracks.filter((track) => track.publication !== undefined) as TrackReference[];
+  const cameraTracks = buildCameraTracks(publishedTracks, streamConfig);
+  const cameraTrackIdsKey = cameraTracks.map((camera) => camera.id).join('|');
+  const robotTrack =
+    cameraTracks.find((camera) => camera.id === selectedCameraId)?.trackRef
+    ?? cameraTracks[0]?.trackRef;
+  const selectedCamera =
+    cameraTracks.find((camera) => camera.trackRef.publication?.trackSid === robotTrack?.publication?.trackSid)
+    ?? cameraTracks[0];
+  const previewTracks = cameraTracks.filter((camera) => camera.id !== selectedCamera?.id).slice(0, 3);
   const robotAudioTracks = audioTracks.filter((t) => t.publication !== undefined) as TrackReference[];
   const videoPublication = robotTrack?.publication;
   const videoTrack = videoPublication?.videoTrack;
   const audioPublication = robotAudioTracks[0]?.publication;
   const audioTrack = audioPublication?.audioTrack;
+
+  useEffect(() => {
+    if (cameraTracks.length === 0) {
+      setSelectedCameraId(null);
+      return;
+    }
+
+    setSelectedCameraId((current) => {
+      if (current && cameraTracks.some((camera) => camera.id === current)) {
+        return current;
+      }
+
+      if (streamConfig?.activeCameraId && cameraTracks.some((camera) => camera.id === streamConfig.activeCameraId)) {
+        return streamConfig.activeCameraId;
+      }
+
+      return cameraTracks[0]?.id ?? null;
+    });
+  }, [cameraTrackIdsKey, streamConfig?.activeCameraId]);
 
   useEffect(() => {
     let active = true;
@@ -357,7 +471,7 @@ function VideoRenderer({ onStreamStalled }: { onStreamStalled?: () => void }) {
     let cancelled = false;
 
     const collectStats = async () => {
-      const videoElement = containerRef.current?.querySelector('video') ?? null;
+      const videoElement = primaryVideoRef.current?.querySelector('video') ?? null;
       const report = await videoTrack.getRTCStatsReport().catch(() => undefined);
       const audioReport = audioTrack ? await audioTrack.getRTCStatsReport().catch(() => undefined) : undefined;
 
@@ -571,10 +685,43 @@ function VideoRenderer({ onStreamStalled }: { onStreamStalled?: () => void }) {
 
   return (
     <div ref={containerRef} onContextMenu={openPanel} className="relative h-full w-full select-none">
-      <VideoTrack
-        trackRef={robotTrack}
-        className="h-full w-full object-cover"
-      />
+      <div ref={primaryVideoRef} className="h-full w-full">
+        <VideoTrack
+          trackRef={robotTrack}
+          className="h-full w-full object-cover"
+        />
+      </div>
+
+      {selectedCamera && (
+        <div className="absolute left-3 top-3 z-10 rounded-full border border-white/15 bg-black/45 px-3 py-1.5 text-xs font-semibold text-white backdrop-blur-sm">
+          {selectedCamera.label}
+        </div>
+      )}
+
+      {previewTracks.length > 0 && (
+        <div className="absolute right-3 top-3 z-10 flex w-32 flex-col gap-2 sm:w-36">
+          {previewTracks.map((camera) => (
+            <button
+              key={camera.id}
+              type="button"
+              onClick={() => setSelectedCameraId(camera.id)}
+              className="group overflow-hidden rounded-xl border border-white/15 bg-black/45 text-left text-white shadow-lg backdrop-blur-sm transition hover:border-cyan-300/60"
+              aria-label={`Show ${camera.label}`}
+              title={`Show ${camera.label}`}
+            >
+              <div className="aspect-video bg-black/50">
+                <VideoTrack
+                  trackRef={camera.trackRef}
+                  className="h-full w-full object-cover transition group-hover:scale-[1.02]"
+                />
+              </div>
+              <div className="px-2 py-1.5 text-[11px] font-medium">
+                {camera.label}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="absolute bottom-3 left-3 z-10 flex items-center gap-2 rounded-full border border-white/15 bg-black/45 px-3 py-2 text-white backdrop-blur-sm">
         <button
@@ -742,9 +889,10 @@ interface Props {
   token: string;
   livekitUrl: string;
   onStreamStalled?: () => void;
+  streamConfig?: StreamConfig;
 }
 
-export function LiveKitPlayer({ token, livekitUrl, onStreamStalled }: Props) {
+export function LiveKitPlayer({ token, livekitUrl, onStreamStalled, streamConfig }: Props) {
   return (
     <LiveKitRoom
       token={token}
@@ -756,7 +904,7 @@ export function LiveKitPlayer({ token, livekitUrl, onStreamStalled }: Props) {
     >
       {/* Render remote participant audio tracks into hidden audio elements. */}
       <RoomAudioRenderer />
-      <VideoRenderer onStreamStalled={onStreamStalled} />
+      <VideoRenderer onStreamStalled={onStreamStalled} streamConfig={streamConfig} />
     </LiveKitRoom>
   );
 }

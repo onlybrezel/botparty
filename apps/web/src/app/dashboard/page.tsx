@@ -1022,6 +1022,7 @@ export default function DashboardPage() {
                           key={`${selectedRobot.id}-${previewVersion}`}
                           token={preview.token}
                           livekitUrl={preview.url}
+                          streamConfig={selectedRobot.metadata?.stream}
                           onStreamStalled={() => {
                             void refreshPreview(true);
                           }}

@@ -1148,6 +1148,7 @@ export default function RobotView({ robot }: Props) {
                 key={`${robot.id}-${livekitVersion}`}
                 token={livekitCreds.token}
                 livekitUrl={livekitCreds.url}
+                streamConfig={robot.metadata?.stream}
                 onStreamStalled={() => {
                   void refreshViewerToken(true);
                 }}

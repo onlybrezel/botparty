@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 
 export const metadata: Metadata = {
   title: 'Getting Started',
@@ -55,6 +56,19 @@ export default function GettingStartedPage() {
             <li>Set a short turn time so the room stays moving.</li>
             <li>Do not add fancy control buttons until the base movement path is stable.</li>
           </ul>
+        </div>
+
+        <div className="mt-6 rounded-xl border border-[var(--border)] bg-[var(--background)] p-4">
+          <p className="text-sm font-semibold">Thinking about front + rear cameras?</p>
+          <p className="mt-2 text-sm text-[var(--muted-foreground)]">
+            Treat multi-camera as a quality upgrade, not a separate deployment mode. The safest platform direction is one robot room, one video track per camera, and a viewer layout that falls back cleanly to single-camera behavior.
+          </p>
+          <Link
+            href="/docs/multi-camera"
+            className="mt-4 inline-flex rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-semibold transition hover:border-[var(--primary)]/60"
+          >
+            Read the Multi-Camera design guide
+          </Link>
         </div>
       </section>
     </div>

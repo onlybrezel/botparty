@@ -26,6 +26,15 @@ export default function DocsPage() {
             </p>
           </Link>
           <Link
+            href="/docs/multi-camera"
+            className="rounded-xl border border-[var(--border)] bg-[var(--background)] p-4 transition hover:border-[var(--primary)]/60"
+          >
+            <p className="text-sm font-semibold">Multi-Camera</p>
+            <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+              The recommended BotParty architecture for front, rear, and other secondary camera views.
+            </p>
+          </Link>
+          <Link
             href="/dashboard"
             className="rounded-xl border border-[var(--border)] bg-[var(--background)] p-4 transition hover:border-[var(--primary)]/60"
           >

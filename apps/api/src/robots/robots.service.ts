@@ -23,7 +23,17 @@ export interface RobotAccessPolicy {
 
 export interface RobotStreamPolicy {
   targetBitrateKbps: number | null;
+  activeCameraId?: string;
+  cameras?: RobotStreamCameraDescriptor[];
 }
+
+type RobotStreamCameraDescriptor = {
+  id: string;
+  label?: string;
+  role?: string;
+  enabled?: boolean;
+  publishMode?: string;
+};
 
 export interface PublicRobotOverview {
   totals: {
@@ -1065,7 +1075,11 @@ export class RobotsService {
   private mergeMetadata(
     current: unknown,
     acl?: { video?: GuestAccess; control?: GuestAccess; chat?: GuestAccess; estop?: GuestAccess },
-    stream?: { targetBitrateKbps?: number },
+    stream?: {
+      targetBitrateKbps?: number;
+      activeCameraId?: string;
+      cameras?: RobotStreamCameraDescriptor[];
+    },
   ): Record<string, unknown> {
     const existing =
       current && typeof current === 'object' && !Array.isArray(current)
@@ -1120,11 +1134,38 @@ export class RobotsService {
 
     const stream = streamRaw as Record<string, unknown>;
     const bitrate = stream.targetBitrateKbps;
-    if (typeof bitrate === 'number' && Number.isFinite(bitrate) && bitrate >= 150 && bitrate <= 3000) {
-      return { targetBitrateKbps: Math.round(bitrate) };
-    }
+    const activeCameraId = typeof stream.activeCameraId === 'string' ? stream.activeCameraId.trim() : '';
+    const cameras: RobotStreamCameraDescriptor[] | undefined = Array.isArray(stream.cameras)
+      ? stream.cameras.reduce<RobotStreamCameraDescriptor[]>((acc, entry) => {
+          if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+            return acc;
+          }
 
-    return DEFAULT_STREAM_POLICY;
+          const camera = entry as Record<string, unknown>;
+          const id = typeof camera.id === 'string' ? camera.id.trim() : '';
+          if (!id) {
+            return acc;
+          }
+
+          acc.push({
+            id,
+            label: typeof camera.label === 'string' ? camera.label.trim() || undefined : undefined,
+            role: typeof camera.role === 'string' ? camera.role.trim() || undefined : undefined,
+            enabled: typeof camera.enabled === 'boolean' ? camera.enabled : undefined,
+            publishMode: typeof camera.publishMode === 'string' ? camera.publishMode.trim() || undefined : undefined,
+          });
+          return acc;
+        }, [])
+      : undefined;
+
+    return {
+      targetBitrateKbps:
+        typeof bitrate === 'number' && Number.isFinite(bitrate) && bitrate >= 150 && bitrate <= 3000
+          ? Math.round(bitrate)
+          : DEFAULT_STREAM_POLICY.targetBitrateKbps,
+      activeCameraId: activeCameraId || undefined,
+      cameras: cameras?.length ? cameras : undefined,
+    };
   }
 
   private readAccessValue(value: unknown): GuestAccess {
