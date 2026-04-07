@@ -5,7 +5,7 @@ import { Track, type RemoteVideoTrack } from 'livekit-client';
 import type { TrackReference } from '@livekit/components-core';
 import type { RobotStreamCameraConfig } from '@botparty/shared';
 import { Check, Copy, Radio, Volume2, VolumeX, X } from 'lucide-react';
-import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 
 type NerdStats = {
   timestamp: string;
@@ -168,6 +168,20 @@ function buildCameraTracks(trackRefs: TrackReference[], streamConfig?: StreamCon
       }
       return left.order - right.order;
     });
+}
+
+function clampFloatingPosition(
+  nextPosition: PanelPosition,
+  containerWidth: number,
+  containerHeight: number,
+  floatingWidth: number,
+  floatingHeight: number,
+  margin = 12,
+): PanelPosition {
+  return {
+    x: Math.max(margin, Math.min(nextPosition.x, Math.max(margin, containerWidth - floatingWidth - margin))),
+    y: Math.max(margin, Math.min(nextPosition.y, Math.max(margin, containerHeight - floatingHeight - margin))),
+  };
 }
 
 function getSparklineBounds(
@@ -337,6 +351,7 @@ function VideoRenderer({
   const room = useRoomContext();
   const containerRef = useRef<HTMLDivElement>(null);
   const primaryVideoRef = useRef<HTMLDivElement>(null);
+  const previewTrayRef = useRef<HTMLDivElement>(null);
   const [stats, setStats] = useState<NerdStats | null>(null);
   const [history, setHistory] = useState<StatHistoryPoint[]>([]);
   const [panelPosition, setPanelPosition] = useState<PanelPosition | null>(null);
@@ -345,6 +360,8 @@ function VideoRenderer({
   const [isMuted, setIsMuted] = useState(false);
   const [showVolumeControls, setShowVolumeControls] = useState(false);
   const [dragState, setDragState] = useState<DragState | null>(null);
+  const [previewTrayPosition, setPreviewTrayPosition] = useState<PanelPosition | null>(null);
+  const [previewTrayDragState, setPreviewTrayDragState] = useState<DragState | null>(null);
   const [selectedCameraId, setSelectedCameraId] = useState<string | null>(streamConfig?.activeCameraId ?? null);
   const hadTrackRef = useRef(false);
   const stallNotifiedRef = useRef(false);
@@ -384,6 +401,60 @@ function VideoRenderer({
       return cameraTracks[0]?.id ?? null;
     });
   }, [cameraTrackIdsKey, streamConfig?.activeCameraId]);
+
+  useLayoutEffect(() => {
+    if (!hasMultipleCameras || previewTracks.length === 0) {
+      setPreviewTrayPosition(null);
+      return;
+    }
+
+    const container = containerRef.current;
+    const tray = previewTrayRef.current;
+    if (!container || !tray) {
+      return;
+    }
+
+    const updatePosition = () => {
+      const nextWidth = tray.offsetWidth;
+      const nextHeight = tray.offsetHeight;
+      const containerWidth = container.clientWidth;
+      const containerHeight = container.clientHeight;
+
+      setPreviewTrayPosition((current) => {
+        if (!current) {
+          return clampFloatingPosition(
+            { x: containerWidth - nextWidth - 12, y: 12 },
+            containerWidth,
+            containerHeight,
+            nextWidth,
+            nextHeight,
+          );
+        }
+
+        return clampFloatingPosition(
+          current,
+          containerWidth,
+          containerHeight,
+          nextWidth,
+          nextHeight,
+        );
+      });
+    };
+
+    updatePosition();
+
+    const resizeObserver = new ResizeObserver(() => {
+      updatePosition();
+    });
+    resizeObserver.observe(container);
+    resizeObserver.observe(tray);
+    window.addEventListener('resize', updatePosition);
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', updatePosition);
+    };
+  }, [hasMultipleCameras, previewTracks.length]);
 
   useEffect(() => {
     let active = true;
@@ -641,6 +712,44 @@ function VideoRenderer({
   }, [panelPosition, dragState]);
 
   useEffect(() => {
+    if (!previewTrayPosition || !previewTrayDragState) {
+      return;
+    }
+
+    const move = (event: MouseEvent) => {
+      const container = containerRef.current;
+      const tray = previewTrayRef.current;
+      if (!container || !tray) {
+        return;
+      }
+
+      const rect = container.getBoundingClientRect();
+      const nextPosition = clampFloatingPosition(
+        {
+          x: event.clientX - rect.left - previewTrayDragState.offsetX,
+          y: event.clientY - rect.top - previewTrayDragState.offsetY,
+        },
+        rect.width,
+        rect.height,
+        tray.offsetWidth,
+        tray.offsetHeight,
+      );
+
+      setPreviewTrayPosition(nextPosition);
+    };
+
+    const stop = () => setPreviewTrayDragState(null);
+
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', stop);
+
+    return () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', stop);
+    };
+  }, [previewTrayPosition, previewTrayDragState]);
+
+  useEffect(() => {
     if (copyState === 'idle') {
       return;
     }
@@ -697,6 +806,23 @@ function VideoRenderer({
     });
   };
 
+  const startDraggingPreviewTray = (event: ReactMouseEvent<HTMLDivElement>) => {
+    const container = containerRef.current;
+    const tray = previewTrayRef.current;
+    if (!container || !tray || !previewTrayPosition) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const rect = tray.getBoundingClientRect();
+    setPreviewTrayDragState({
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+    });
+  };
+
   const copyStats = async () => {
     try {
       await navigator.clipboard.writeText(statsToClipboardText(stats));
@@ -737,7 +863,30 @@ function VideoRenderer({
       )}
 
       {hasMultipleCameras && previewTracks.length > 0 && (
-        <div className="absolute right-3 top-3 z-10 flex w-28 flex-col gap-2 sm:w-32">
+        <div
+          ref={previewTrayRef}
+          className={`absolute z-10 flex w-28 flex-col gap-2 rounded-2xl border border-white/15 bg-black/30 p-2 shadow-lg backdrop-blur-md sm:w-32 ${
+            previewTrayPosition ? '' : 'right-3 top-3'
+          }`}
+          style={
+            previewTrayPosition
+              ? {
+                  left: previewTrayPosition.x,
+                  top: previewTrayPosition.y,
+                }
+              : undefined
+          }
+        >
+          <div
+            className={`flex items-center justify-between rounded-xl border border-white/10 bg-black/35 px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-white/75 ${
+              previewTrayDragState ? 'cursor-grabbing' : 'cursor-grab'
+            }`}
+            onMouseDown={startDraggingPreviewTray}
+            title="Drag camera tray"
+          >
+            <span>Other cams</span>
+            <span className="text-white/45">Move</span>
+          </div>
           {previewTracks.map((camera) => (
             <button
               key={camera.id}

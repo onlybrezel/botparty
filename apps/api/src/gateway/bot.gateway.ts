@@ -567,6 +567,23 @@ export class BotGateway
       return;
     }
 
+    if (this.moderationService.containsForbiddenSymbols(sanitized)) {
+      if (client.userId) {
+        this.moderationService
+          .recordProfanityEvent({
+            robotId: data.robotId,
+            userId: client.userId,
+            username: client.username ?? 'unknown',
+            content: sanitized,
+          })
+          .catch(() => {});
+      }
+      client.send(
+        JSON.stringify({ event: 'error', data: { message: 'Message blocked by moderation filter' } }),
+      );
+      return;
+    }
+
     if (this.moderationService.containsProfanity(sanitized)) {
       if (client.userId) {
         this.moderationService
