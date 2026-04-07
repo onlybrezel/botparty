@@ -5,6 +5,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Public } from '../auth/decorators/public.decorator';
 import { RobotsService, type GuestAccess } from '../robots/robots.service';
+import { QueueService } from '../queue/queue.service';
 import type { JwtPayload } from '@botparty/shared';
 import { randomUUID } from 'crypto';
 
@@ -14,6 +15,7 @@ export class LivekitController {
   constructor(
     private readonly livekitService: LivekitService,
     private readonly robotsService: RobotsService,
+    private readonly queueService: QueueService,
   ) {}
 
   @Post('token/viewer/:robotId')
@@ -39,7 +41,7 @@ export class LivekitController {
       throw new ForbiddenException('Room access verification required');
     }
 
-    const canControl = control === 'true';
+    const canControl = await this.canIssueDataToken(robotId, user, control === 'true');
     const token = await this.livekitService.generateViewerToken(
       robotId,
       user.sub,
@@ -57,8 +59,8 @@ export class LivekitController {
   @ApiOperation({ summary: 'Get guest LiveKit viewer token (ACL-aware)' })
   async getPublicViewerToken(
     @Param('robotId') robotId: string,
-    @Query('guestSessionId') guestSessionId?: string,
-    @Query('roomAccessToken') roomAccessToken?: string,
+    @Query('guestSessionId') _guestSessionId?: string,
+    @Query('roomAccessToken') _roomAccessToken?: string,
   ) {
     const access = await this.getVideoAccess(robotId);
     if (access.video !== 'ALL') {
@@ -77,6 +79,33 @@ export class LivekitController {
       token,
       livekitUrl: this.livekitService.getLivekitUrl(),
     };
+  }
+
+  private async canIssueDataToken(
+    robotId: string,
+    user: JwtPayload,
+    requested: boolean,
+  ): Promise<boolean> {
+    if (!requested) {
+      return false;
+    }
+
+    const robot = await this.robotsService.findById(robotId);
+    const access = await this.robotsService.getAccessPolicy(robotId);
+    if (access.control === 'DISABLED') {
+      return false;
+    }
+
+    if (robot.ownerId === user.sub || user.role === 'ADMIN' || user.role === 'MOD') {
+      return true;
+    }
+
+    if (robot.queueMode === 'DISABLED') {
+      return true;
+    }
+
+    const currentControllerUserId = await this.queueService.getCurrentControllerUserId(robotId);
+    return currentControllerUserId === user.sub;
   }
 
   private async getVideoAccess(robotId: string): Promise<{ video: GuestAccess }> {

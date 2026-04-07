@@ -1,13 +1,18 @@
 import {
+  ArrayMaxSize,
   IsString,
   IsOptional,
   IsInt,
   IsBoolean,
   IsEnum,
+  IsArray,
+  IsUUID,
   MaxLength,
   Min,
   Max,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ControlButtonAccess } from '@botparty/shared';
 
 export class CreateControlButtonDto {
@@ -100,8 +105,19 @@ export class UpdateControlButtonDto {
   color?: string;
 }
 
+export class ReorderControlButtonItemDto {
+  @IsUUID()
+  id!: string;
+
+  @IsInt()
+  @Min(0)
+  position!: number;
+}
+
 export class ReorderControlButtonsDto {
-  /** Array of { id, position } pairs */
-  @IsOptional()
-  order!: Array<{ id: string; position: number }>;
+  @IsArray()
+  @ArrayMaxSize(64)
+  @ValidateNested({ each: true })
+  @Type(() => ReorderControlButtonItemDto)
+  order!: ReorderControlButtonItemDto[];
 }

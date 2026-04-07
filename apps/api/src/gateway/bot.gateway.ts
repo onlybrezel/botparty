@@ -75,6 +75,7 @@ export class BotGateway
 
   private readonly logger = new Logger(BotGateway.name);
   private subscriber: Redis | null = null;
+  private readonly instanceId = crypto.randomUUID();
 
   /** All connected sockets: clientId → WsClient */
   private readonly clients = new Map<string, WsClient>();
@@ -107,7 +108,7 @@ export class BotGateway
       void this.handleRedisMessage(channel, message);
     });
 
-    await this.subscriber.psubscribe('queue:*', 'ws:moderation:*');
+    await this.subscriber.psubscribe('queue:*', 'ws:moderation:*', 'ws:room:*');
   }
 
   async onModuleDestroy() {
@@ -643,7 +644,10 @@ export class BotGateway
       }
     }
     // Also publish to Redis for horizontal scaling
-    this.redis.publish(`ws:room:${robotId}`, message).catch(() => {});
+    this.redis.publish(
+      `ws:room:${robotId}`,
+      JSON.stringify({ originId: this.instanceId, event, data }),
+    ).catch(() => {});
   }
 
   private _leaveRoom(client: WsClient) {
@@ -705,6 +709,27 @@ export class BotGateway
         this._broadcastToRoomLocally(robotId, payload.event, payload.data ?? {});
       } catch (err) {
         this.logger.warn(`Failed to process moderation event for ${robotId}: ${(err as Error).message}`);
+      }
+      return;
+    }
+
+    if (channel.startsWith('ws:room:')) {
+      const robotId = channel.slice('ws:room:'.length);
+      if (!robotId) {
+        return;
+      }
+
+      try {
+        const payload = JSON.parse(message) as { originId?: string; event?: string; data?: unknown };
+        if (!payload.event) {
+          return;
+        }
+        if (payload.originId === this.instanceId) {
+          return;
+        }
+        this._broadcastToRoomLocally(robotId, payload.event, payload.data ?? {});
+      } catch (err) {
+        this.logger.warn(`Failed to relay room event for ${robotId}: ${(err as Error).message}`);
       }
     }
   }

@@ -87,9 +87,35 @@ export class ControlsService {
   async reorder(robotId: string, dto: ReorderControlButtonsDto, requesterId: string) {
     await this._assertOwner(robotId, requesterId);
 
+    if (dto.order.length === 0) {
+      return;
+    }
+
+    const buttonIds = dto.order.map(({ id }) => id);
+    if (new Set(buttonIds).size !== buttonIds.length) {
+      throw new BadRequestException('Duplicate control button IDs are not allowed');
+    }
+
+    const positions = dto.order.map(({ position }) => position);
+    if (new Set(positions).size !== positions.length) {
+      throw new BadRequestException('Duplicate control button positions are not allowed');
+    }
+
+    const ownedButtons = await this.prisma.controlButton.findMany({
+      where: { robotId, id: { in: buttonIds } },
+      select: { id: true },
+    });
+
+    if (ownedButtons.length !== buttonIds.length) {
+      throw new BadRequestException('All reordered buttons must belong to the specified robot');
+    }
+
     await this.prisma.$transaction(
       dto.order.map(({ id, position }) =>
-        this.prisma.controlButton.update({ where: { id }, data: { position } }),
+        this.prisma.controlButton.updateMany({
+          where: { id, robotId },
+          data: { position },
+        }),
       ),
     );
   }

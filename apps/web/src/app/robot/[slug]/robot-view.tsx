@@ -140,7 +140,7 @@ export default function RobotView({ robot }: Props) {
 
   const [focusMode, setFocusMode] = useState<FocusMode>('controls');
   const [controlButtons, setControlButtons] = useState<ControlButton[]>([]);
-  const [activeKeys, setActiveKeys] = useState<Set<string>>(new Set());
+  const [, setActiveKeys] = useState<Set<string>>(new Set());
   const [activeCommands, setActiveCommands] = useState<Set<string>>(new Set());
   const [viewers, setViewers] = useState<Viewer[]>([]);
   const [queue, setQueue] = useState<QueueEntry[]>([]);
@@ -497,7 +497,7 @@ export default function RobotView({ robot }: Props) {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       wsRef.current?.close();
     };
-  }, [accessToken, guestSessionId, robot.accessMode, robot.id, roomAccessToken, userId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [accessToken, guestSessionId, robot.accessMode, robot.id, roomAccessToken, userId]);
 
   const handleWsEvent = useCallback((event: string, data: Record<string, unknown>) => {
     switch (event) {

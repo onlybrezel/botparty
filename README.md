@@ -101,11 +101,14 @@ botparty/
 - Docker & Docker Compose
 - Python 3.11+ (robot client only)
 
+Use `nvm use`, `asdf`, or `mise` before installing dependencies. This repository enforces the Node version from `.nvmrc` / `.node-version` and will fail installs on unsupported runtimes.
+
 ### Local development
 
 ```bash
 git clone https://github.com/your-org/botparty.git
 cd botparty
+nvm use
 pnpm install
 ```
 

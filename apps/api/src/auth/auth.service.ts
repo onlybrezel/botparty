@@ -5,16 +5,19 @@ import {
   Logger,
   BadRequestException,
 } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
+import { JwtService, type JwtSignOptions } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { hash, verify } from 'argon2';
 import { createHash, randomBytes } from 'crypto';
+import type { StringValue } from 'ms';
 import { PrismaService } from '../prisma/prisma.service';
 import type { JwtPayload, RefreshTokenPayload, ForgotPasswordInput, ResetPasswordInput } from '@botparty/shared';
 import { registerSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema } from '@botparty/shared';
 import type { z } from 'zod';
 import { RedisService } from '../redis/redis.service';
 import { MailService } from '../mail/mail.service';
+
+const asJwtExpiresIn = (value: string): StringValue => value as StringValue;
 
 @Injectable()
 export class AuthService {
@@ -208,8 +211,8 @@ export class AuthService {
     const refreshExpiresIn = this.config.getOrThrow<string>('JWT_REFRESH_EXPIRES_IN');
     const refreshTokenValue = this.jwt.sign(refreshPayload, {
       secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
-      expiresIn: refreshExpiresIn,
-    } as any);
+      expiresIn: asJwtExpiresIn(refreshExpiresIn),
+    } satisfies JwtSignOptions);
 
     return {
       accessToken,

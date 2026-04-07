@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import type { PublicRobotOverview, RobotPublic } from '@botparty/shared';
 import RobotCard from '@/components/robot-card';
-import { ArrowRight, Bot, Gamepad2, Radio, Sparkles } from 'lucide-react';
+import { ArrowRight, Bot, Gamepad2, Sparkles } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
 

@@ -24,12 +24,6 @@ type ContainerMetricAccumulator = {
   txBytes: number;
 };
 
-type CadvisorContainerSnapshot = {
-  cpuUsageSeconds: number;
-  rxBytes: number;
-  txBytes: number;
-};
-
 type CadvisorSample = {
   capturedAt: number;
   machineCpuCores: number | null;

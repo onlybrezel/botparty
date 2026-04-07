@@ -117,8 +117,8 @@ services:
       dockerfile: docker/api/Dockerfile
     container_name: botparty-api
     restart: unless-stopped
-    ports:
-      - "4000:4000"
+    expose:
+      - "4000"
     environment:
       NODE_ENV: production
       PORT: 4000
@@ -146,7 +146,8 @@ services:
       CORS_ORIGIN: ${CORS_ORIGIN:-https://botparty.live}
       THROTTLE_TTL: ${THROTTLE_TTL:-60000}
       THROTTLE_LIMIT: ${THROTTLE_LIMIT:-100}
-      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-admin123456}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
+      SEED_DEMO_USER_PASSWORD: ${SEED_DEMO_USER_PASSWORD:-}
     depends_on:
       postgres:
         condition: service_healthy

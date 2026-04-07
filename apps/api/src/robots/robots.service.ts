@@ -124,7 +124,8 @@ export class RobotsService {
   async create(ownerId: string, input: z.infer<typeof createRobotSchema>) {
     const data = createRobotSchema.parse(input);
     const metadata = this.mergeMetadata(null, data.acl, data.stream);
-    const { acl: _acl, stream: _stream, accessPassword, ...baseData } = data;
+    const accessPassword = data.accessPassword;
+    const baseData = this.stripRobotWriteFields(data);
 
     const slug = this.generateSlug(data.name);
     const streamKey = randomBytes(32).toString('hex');
@@ -246,7 +247,8 @@ export class RobotsService {
 
     const data = updateRobotSchema.parse(input);
     const metadata = this.mergeMetadata(robot.metadata, data.acl, data.stream);
-    const { acl: _acl, stream: _stream, accessPassword, ...baseData } = data;
+    const accessPassword = data.accessPassword;
+    const baseData = this.stripRobotWriteFields(data);
     this.policyCache.delete(id);
     const nextAccessMode = data.accessMode ?? robot.accessMode;
     const nextAccessPassword =
@@ -277,7 +279,8 @@ export class RobotsService {
     });
 
     const metadata = this.mergeMetadata(current?.metadata, data.acl, data.stream);
-    const { acl: _acl, stream: _stream, accessPassword, ...baseData } = data;
+    const accessPassword = data.accessPassword;
+    const baseData = this.stripRobotWriteFields(data);
     this.policyCache.delete(id);
     const currentRobot = await this.prisma.robot.findUnique({
       where: { id },
@@ -907,7 +910,7 @@ export class RobotsService {
       }
 
       const matches = robot.accessPassword
-        ? await this.verifyStoredPassword(password, robot.accessPassword)
+        ? await this.verifyStoredPassword(robot.id, password, robot.accessPassword)
         : false;
 
       if (!matches) {
@@ -1142,12 +1145,33 @@ export class RobotsService {
     return `robot:room-access:${token}`;
   }
 
-  private async verifyStoredPassword(password: string, stored: string): Promise<boolean> {
+  private async verifyStoredPassword(robotId: string, password: string, stored: string): Promise<boolean> {
     try {
       return await verify(stored, password);
     } catch {
-      return stored === password;
+      if (stored !== password) {
+        return false;
+      }
+
+      await this.prisma.robot.update({
+        where: { id: robotId },
+        data: {
+          accessPassword: await hash(password, { type: 2 }),
+        },
+      });
+      this.logger.warn(`Migrated legacy plaintext room password for robot ${robotId}`);
+      return true;
     }
+  }
+
+  private stripRobotWriteFields<T extends { acl?: unknown; stream?: unknown; accessPassword?: unknown }>(
+    data: T,
+  ): Omit<T, 'acl' | 'stream' | 'accessPassword'> {
+    const baseData = { ...data };
+    delete baseData.acl;
+    delete baseData.stream;
+    delete baseData.accessPassword;
+    return baseData;
   }
 
   private sanitizeManagedRobot<T extends { accessPassword?: string | null }>(robot: T): T {

@@ -1,8 +1,8 @@
 'use client';
 
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 import {
   Bot,
   Cable,
@@ -362,7 +362,7 @@ export default function DashboardPage() {
     }
 
     void refreshPreview(true);
-  }, [pendingActionTypes, selectedRobot?.id, selectedRobot?.status, accessToken]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [pendingActionTypes, selectedRobot?.id, selectedRobot?.status, accessToken]);
 
   useEffect(() => {
     if (!accessToken || !selectedRobot) {

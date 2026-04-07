@@ -9,7 +9,7 @@ import { api } from '@/lib/api';
 
 export default function Nav() {
   const pathname = usePathname();
-  const { accessToken, username, refreshToken, logout } = useAuth();
+  const { accessToken, username, refreshToken, logout, role } = useAuth();
   const [mounted, setMounted] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [guestLabel, setGuestLabel] = useState('Guest');
@@ -142,13 +142,15 @@ export default function Nav() {
                   >
                     Robots Dashboard
                   </Link>
-                  <Link
-                    href="/mod"
-                    onClick={() => setMenuOpen(false)}
-                    className="block px-4 py-2 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition"
-                  >
-                    Mod Dashboard
-                  </Link>
+                  {(role === 'ADMIN' || role === 'MOD') && (
+                    <Link
+                      href="/mod"
+                      onClick={() => setMenuOpen(false)}
+                      className="block px-4 py-2 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition"
+                    >
+                      Mod Dashboard
+                    </Link>
+                  )}
                   <Link
                     href="/settings"
                     onClick={() => setMenuOpen(false)}

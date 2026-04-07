@@ -6,8 +6,8 @@
     "dev": "next dev --port 3000",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
-    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "typecheck": "rm -rf .next && next typegen && tsc --noEmit",
     "clean": "rm -rf .next .turbo"
   },
   "dependencies": {
@@ -28,6 +28,7 @@
   },
   "devDependencies": {
     "@botparty/tsconfig": "workspace:*",
+    "@next/eslint-plugin-next": "^16.2.2",
     "@types/node": "^22.13.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

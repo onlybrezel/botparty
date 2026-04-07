@@ -10,12 +10,19 @@ echo "════════════════════════�
 SCHEMA="packages/prisma/prisma/schema.prisma"
 
 # 1. Push schema to database (idempotent, safe for dev/demo)
-echo "🔄 Pushing database schema..."
-./node_modules/.bin/prisma db push \
-  --schema="$SCHEMA" \
-  --skip-generate \
-  --accept-data-loss \
-  2>&1 | sed 's/^/  /'
+echo "🔄 Synchronizing database schema..."
+if [ "${NODE_ENV}" = "production" ]; then
+  ./node_modules/.bin/prisma db push \
+    --schema="$SCHEMA" \
+    --skip-generate \
+    2>&1 | sed 's/^/  /'
+else
+  ./node_modules/.bin/prisma db push \
+    --schema="$SCHEMA" \
+    --skip-generate \
+    --accept-data-loss \
+    2>&1 | sed 's/^/  /'
+fi
 echo "✅ Schema up to date"
 
 # 2. Seed demo data only when the database is completely empty
@@ -28,3 +35,4 @@ echo "  Starting NestJS API..."
 echo "════════════════════════════════════════"
 
 exec node apps/api/dist/main.js
+

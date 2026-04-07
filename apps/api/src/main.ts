@@ -4,6 +4,8 @@ import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fa
 import { WsAdapter } from '@nestjs/platform-ws';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { Logger, ValidationPipe } from '@nestjs/common';
+import helmet, { type FastifyHelmetOptions } from '@fastify/helmet';
+import type { FastifyPluginAsync } from 'fastify';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
@@ -25,6 +27,20 @@ async function bootstrap() {
 
   // ─── WebSocket adapter (ws, not socket.io) ────────
   app.useWebSocketAdapter(new WsAdapter(app));
+
+  const helmetRegistration = (async (instance: Parameters<FastifyPluginAsync<FastifyHelmetOptions>>[0]) => {
+    const registerHelmet = helmet as unknown as (
+      appInstance: Parameters<FastifyPluginAsync<FastifyHelmetOptions>>[0],
+      opts: FastifyHelmetOptions,
+    ) => ReturnType<FastifyPluginAsync<FastifyHelmetOptions>>;
+
+    await registerHelmet(instance, {
+      global: true,
+      contentSecurityPolicy: false,
+    } satisfies FastifyHelmetOptions);
+  }) as unknown as Parameters<typeof app.register>[0];
+
+  await app.register(helmetRegistration);
 
   // ─── Global validation ────────────────────────────
   app.useGlobalPipes(

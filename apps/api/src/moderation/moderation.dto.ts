@@ -1,8 +1,9 @@
-import { IsString, IsOptional, IsEnum, IsInt, Max, Min } from 'class-validator';
+import { IsString, IsOptional, IsEnum, IsInt, Max, Min, MaxLength } from 'class-validator';
 import { ModerationActionType } from '@botparty/shared';
 
 export class ModerateUserDto {
   @IsString()
+  @MaxLength(128)
   targetUserId!: string;
 
   @IsEnum(ModerationActionType)
@@ -10,6 +11,7 @@ export class ModerateUserDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(500)
   reason?: string;
 
   /** Duration in seconds. Required for TIMEOUT, ignored for BAN/KICK/WARN */

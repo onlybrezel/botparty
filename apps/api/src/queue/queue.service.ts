@@ -8,7 +8,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { RobotsService } from '../robots/robots.service';
-import type { Prisma } from '@botparty/prisma';
+import { Prisma } from '@botparty/prisma';
 
 @Injectable()
 export class QueueService {
@@ -40,32 +40,35 @@ export class QueueService {
       throw new ForbiddenException('Room access verification required');
     }
 
-    // Check if already in queue
-    const existing = await this.prisma.queueEntry.findUnique({
-      where: { robotId_userId: { robotId, userId } },
-    });
-    if (existing) throw new ConflictException('Already in queue');
+    const entry = await this.prisma.$transaction(
+      async (tx) => {
+        const existing = await tx.queueEntry.findUnique({
+          where: { robotId_userId: { robotId, userId } },
+        });
+        if (existing) throw new ConflictException('Already in queue');
 
-    // Get next position
-    const lastEntry = await this.prisma.queueEntry.findFirst({
-      where: { robotId },
-      orderBy: { position: 'desc' },
-    });
-    const position = (lastEntry?.position ?? 0) + 1;
+        const lastEntry = await tx.queueEntry.findFirst({
+          where: { robotId },
+          orderBy: { position: 'desc' },
+        });
+        const position = (lastEntry?.position ?? 0) + 1;
 
-    const entry = await this.prisma.queueEntry.create({
-      data: { robotId, userId, position, isPriority },
-      include: {
-        user: {
-          select: { id: true, username: true, displayName: true, avatarUrl: true },
-        },
+        return tx.queueEntry.create({
+          data: { robotId, userId, position, isPriority },
+          include: {
+            user: {
+              select: { id: true, username: true, displayName: true, avatarUrl: true },
+            },
+          },
+        });
       },
-    });
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
 
     // Publish queue update via Redis for real-time sync
     await this.redis.publish(`queue:${robotId}`, JSON.stringify({ type: 'join', entry }));
 
-    this.logger.log(`User ${userId} joined queue for robot ${robotId} at position ${position}`);
+    this.logger.log(`User ${userId} joined queue for robot ${robotId} at position ${entry.position}`);
     return entry;
   }
 
