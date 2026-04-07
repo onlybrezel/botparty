@@ -5,7 +5,7 @@ import { LivekitService } from './livekit.service';
 import { LivekitController } from './livekit.controller';
 
 @Module({
-  imports: [forwardRef(() => RobotsModule), QueueModule],
+  imports: [forwardRef(() => RobotsModule), forwardRef(() => QueueModule)],
   providers: [LivekitService],
   controllers: [LivekitController],
   exports: [LivekitService],
