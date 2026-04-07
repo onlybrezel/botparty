@@ -198,6 +198,8 @@ export default function DashboardPage() {
   const [controlButtons, setControlButtons] = useState<ControlButtonRecord[]>([]);
   const [controlsLoading, setControlsLoading] = useState(false);
   const [controlDraft, setControlDraft] = useState<ControlButtonDraft>(DEFAULT_CONTROL_DRAFT);
+  const [editingControlId, setEditingControlId] = useState<string | null>(null);
+  const [controlEditDraft, setControlEditDraft] = useState<ControlButtonDraft | null>(null);
   const [creatingControl, setCreatingControl] = useState(false);
   const [controlOp, setControlOp] = useState<string | null>(null);
   const [allowedUsers, setAllowedUsers] = useState<AllowedUserRecord[]>([]);
@@ -251,6 +253,8 @@ export default function DashboardPage() {
     if (!selectedRobot) return;
     setEditForm(formFromRobot(selectedRobot));
     setControlDraft(DEFAULT_CONTROL_DRAFT);
+    setEditingControlId(null);
+    setControlEditDraft(null);
   }, [selectedRobot]);
 
   useEffect(() => {
@@ -688,6 +692,50 @@ export default function DashboardPage() {
       setControlButtons((prev) =>
         prev.map((entry) => (entry.id === button.id ? updated : entry)),
       );
+    } catch (err) {
+      pushToast(err instanceof Error ? err.message : 'Failed to update control.', 'error');
+    } finally {
+      setControlOp(null);
+    }
+  };
+
+  const startEditControl = (button: ControlButtonRecord) => {
+    setEditingControlId(button.id);
+    setControlEditDraft({
+      label: button.label,
+      command: button.command,
+      hotKey: button.hotKey ?? '',
+      cooldownMs: String(button.cooldownMs),
+      access: button.access,
+      color: button.color ?? '',
+    });
+  };
+
+  const saveControlEdit = async () => {
+    if (!accessToken || !editingControlId || !controlEditDraft) return;
+
+    const label = controlEditDraft.label.trim();
+    const command = controlEditDraft.command.trim();
+    if (!label || !command) {
+      pushToast('Label and command are required for a control button.', 'error', 2600);
+      return;
+    }
+
+    setControlOp(editingControlId);
+    try {
+      api.setToken(accessToken);
+      const updated = await api.updateControl(editingControlId, {
+        label,
+        command,
+        hotKey: controlEditDraft.hotKey.trim() || undefined,
+        cooldownMs: Number(controlEditDraft.cooldownMs),
+        access: controlEditDraft.access,
+        color: controlEditDraft.color.trim() || null,
+      });
+      setControlButtons((prev) => prev.map((entry) => (entry.id === updated.id ? updated : entry)));
+      setEditingControlId(null);
+      setControlEditDraft(null);
+      pushToast('Control button updated.', 'success', 2200);
     } catch (err) {
       pushToast(err instanceof Error ? err.message : 'Failed to update control.', 'error');
     } finally {
@@ -1357,6 +1405,84 @@ export default function DashboardPage() {
                       </div>
                     </div>
 
+                    {editingControlId && controlEditDraft ? (
+                      <div className="mb-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
+                        <div className="mb-3 flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Edit control button</p>
+                            <p className="text-xs text-[var(--muted-foreground)]">Update label, command, hotkey, cooldown, access, and color.</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingControlId(null);
+                              setControlEditDraft(null);
+                            }}
+                            className="rounded border border-[var(--border)] px-2 py-1 text-xs text-[var(--muted-foreground)]"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                          <input
+                            className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                            placeholder="Label"
+                            value={controlEditDraft.label}
+                            onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, label: event.target.value } : prev))}
+                          />
+                          <input
+                            className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                            placeholder="Command"
+                            value={controlEditDraft.command}
+                            onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, command: event.target.value } : prev))}
+                          />
+                          <input
+                            className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                            placeholder="Hotkey (optional)"
+                            maxLength={8}
+                            value={controlEditDraft.hotKey}
+                            onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, hotKey: event.target.value } : prev))}
+                          />
+                          <input
+                            type="number"
+                            min={50}
+                            max={10000}
+                            className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                            placeholder="Cooldown ms"
+                            value={controlEditDraft.cooldownMs}
+                            onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, cooldownMs: event.target.value } : prev))}
+                          />
+                          <select
+                            className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                            value={controlEditDraft.access}
+                            onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, access: event.target.value as ControlButtonAccess } : prev))}
+                          >
+                            {controlAccessOptions.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                Access: {option.label}
+                              </option>
+                            ))}
+                          </select>
+                          <input
+                            className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                            placeholder="Color (optional, e.g. #22c55e)"
+                            value={controlEditDraft.color}
+                            onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, color: event.target.value } : prev))}
+                          />
+                        </div>
+                        <div className="mt-3">
+                          <button
+                            type="button"
+                            onClick={() => void saveControlEdit()}
+                            disabled={controlOp === editingControlId}
+                            className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/40 px-3 py-2 text-sm font-medium text-emerald-300 disabled:opacity-60"
+                          >
+                            {controlOp === editingControlId ? 'Saving...' : 'Save control button'}
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+
                     {controlsLoading ? (
                       <p className="text-xs text-[var(--muted-foreground)]">Loading control buttons...</p>
                     ) : controlButtons.length === 0 ? (
@@ -1396,6 +1522,14 @@ export default function DashboardPage() {
                                 </p>
                               </div>
                               <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => startEditControl(button)}
+                                  disabled={controlOp === button.id}
+                                  className="rounded border border-[var(--border)] px-2 py-1 text-xs disabled:opacity-50"
+                                >
+                                  Edit
+                                </button>
                                 <button
                                   type="button"
                                   onClick={() => void moveControl(button.id, -1)}

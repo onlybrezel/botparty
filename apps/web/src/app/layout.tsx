@@ -36,9 +36,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-6 text-sm text-[var(--muted-foreground)] sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
             <div>
               <p className="font-semibold text-[var(--foreground)]">BotParty</p>
-              <p className="mt-1 text-xs">Real-time robot teleoperation with live video, queueing, and moderation.</p>
             </div>
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+            <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs">
+              <Link href="/terms" className="transition hover:text-[var(--foreground)]">
+                Terms of Service
+              </Link>
               <Link href="/privacy" className="transition hover:text-[var(--foreground)]">
                 Privacy Policy
               </Link>

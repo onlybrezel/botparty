@@ -161,12 +161,18 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
         where: { robotId, userId: dto.targetUserId, isActive: true },
         data: { isActive: false },
       });
+      const targetLabel = this._getTargetLabel(dto.targetUserId, target);
       // Publish unban event for the gateway to react to
       await this.redis.publish(
         `ws:moderation:${robotId}`,
         JSON.stringify({
           event: WS_EVENTS.MOD_UNBAN,
-          data: { userId: dto.targetUserId, robotId },
+          data: {
+            userId: dto.targetUserId,
+            robotId,
+            username: targetLabel.username,
+            displayName: targetLabel.displayName,
+          },
         }),
       );
       return { action: 'UNBAN', userId: dto.targetUserId };
@@ -191,6 +197,7 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
         : dto.action === ModerationActionType.KICK
           ? WS_EVENTS.MOD_KICK
           : WS_EVENTS.MOD_TIMEOUT;
+    const targetLabel = this._getTargetLabel(dto.targetUserId, target);
 
     await this.redis.publish(
       `ws:moderation:${robotId}`,
@@ -198,6 +205,8 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
         event: wsEvent,
         data: {
           userId: dto.targetUserId,
+          username: targetLabel.displayName ?? targetLabel.username,
+          displayName: targetLabel.displayName,
           moderatorId,
           reason: dto.reason,
           expiresAt,
@@ -240,6 +249,7 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
 
   private async _moderateGuest(robotId: string, dto: ModerateUserDto, moderatorId: string) {
     const key = this._guestRestrictionKey(robotId, dto.targetUserId);
+    const targetLabel = this._getTargetLabel(dto.targetUserId, null);
 
     if (dto.action === ModerationActionType.UNBAN) {
       await this.redis.del(key);
@@ -247,7 +257,12 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
         `ws:moderation:${robotId}`,
         JSON.stringify({
           event: WS_EVENTS.MOD_UNBAN,
-          data: { userId: dto.targetUserId, robotId },
+          data: {
+            userId: dto.targetUserId,
+            robotId,
+            username: targetLabel.username,
+            displayName: targetLabel.displayName,
+          },
         }),
       );
       return { action: 'UNBAN', userId: dto.targetUserId };
@@ -291,6 +306,8 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
         event: wsEvent,
         data: {
           userId: dto.targetUserId,
+          username: targetLabel.username,
+          displayName: targetLabel.displayName,
           moderatorId,
           reason: dto.reason,
           expiresAt: payload.expiresAt,
@@ -334,6 +351,24 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
 
   private _guestRestrictionKey(robotId: string, userId: string): string {
     return `moderation:guest:restriction:${robotId}:${userId}`;
+  }
+
+  private _getTargetLabel(
+    targetUserId: string,
+    target: { username: string; displayName: string | null } | null,
+  ) {
+    if (target) {
+      return {
+        username: target.username,
+        displayName: target.displayName,
+      };
+    }
+
+    const guestLabel = this._isGuestUserId(targetUserId) ? targetUserId.slice('guest:'.length) : targetUserId;
+    return {
+      username: `Guest-${guestLabel.slice(0, 6)}`,
+      displayName: null,
+    };
   }
 
   sanitizeChatContent(raw: string): { sanitized: string; hasIllegalChars: boolean } {

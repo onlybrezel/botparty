@@ -464,14 +464,17 @@ export class RobotsService {
   }
 
   async touchHeartbeat(id: string) {
-    return this.prisma.robot.update({
-      where: { id },
+    await this.prisma.robot.updateMany({
+      where: {
+        id,
+        status: { in: ['ONLINE', 'BUSY'] },
+      },
       data: {
-        status: 'ONLINE',
         lastOnlineAt: new Date(),
       },
-      select: { id: true },
     });
+
+    return { id };
   }
 
   async findByClaimToken(claimToken: string) {

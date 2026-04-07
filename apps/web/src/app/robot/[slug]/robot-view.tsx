@@ -176,6 +176,7 @@ export default function RobotView({ robot }: Props) {
   const activeMotionKeysRef = useRef<Set<string>>(new Set());
   const livekitRefreshInFlightRef = useRef(false);
   const allowListAccessAttemptedRef = useRef(false);
+  const previousRobotStatusRef = useRef(robot.status);
 
   // ─── Fetch controls ────────────────────────────────────────────────────────
 
@@ -197,6 +198,39 @@ export default function RobotView({ robot }: Props) {
   const estopAccess = robotAccess?.estop;
   const canUseEStop = canUseAccess(estopAccess);
   const canModerate = Boolean(userId && (userId === robot.owner.id || role === 'ADMIN' || role === 'MOD'));
+  const resolveUserLabel = useCallback(
+    (targetUserId: string, preferredName?: string | null) => {
+      if (preferredName?.trim()) {
+        return preferredName.trim();
+      }
+
+      if (targetUserId === userId) {
+        return 'you';
+      }
+
+      const chatMatch = [...messages].reverse().find((entry) => entry.userId === targetUserId && !entry.isSystem);
+      if (chatMatch?.username) {
+        return chatMatch.username;
+      }
+
+      const viewerMatch = viewers.find((entry) => entry.userId === targetUserId);
+      if (viewerMatch?.username) {
+        return viewerMatch.username;
+      }
+
+      const queueMatch = queue.find((entry) => entry.userId === targetUserId);
+      if (queueMatch?.username) {
+        return queueMatch.username;
+      }
+
+      if (activeSession?.userId === targetUserId && activeSession.username) {
+        return activeSession.username;
+      }
+
+      return targetUserId.slice(0, 8);
+    },
+    [activeSession, messages, queue, userId, viewers],
+  );
 
   useEffect(() => {
     api.getControls(robot.id).then(setControlButtons).catch(() => {});
@@ -327,6 +361,21 @@ export default function RobotView({ robot }: Props) {
   useEffect(() => {
     void refreshViewerToken(false);
   }, [refreshViewerToken]);
+
+  useEffect(() => {
+    const previousStatus = previousRobotStatusRef.current;
+    previousRobotStatusRef.current = robotStatus;
+
+    const robotCameBackOnline =
+      (previousStatus === 'OFFLINE' || previousStatus === 'MAINTENANCE') &&
+      (robotStatus === 'ONLINE' || robotStatus === 'BUSY');
+
+    if (!robotCameBackOnline) {
+      return;
+    }
+
+    void refreshViewerToken(true);
+  }, [refreshViewerToken, robotStatus]);
 
   // ─── Fetch queue ──────────────────────────────────────────────────────────
 
@@ -507,6 +556,11 @@ export default function RobotView({ robot }: Props) {
           if (targetUserId && prev && prev.userId !== targetUserId) {
             return prev;
           }
+          if (targetUserId && targetUserId === currentViewerId) {
+            activeMotionKeysRef.current.clear();
+            setActiveKeys(new Set());
+            setActiveCommands(new Set());
+          }
           return null;
         });
         break;
@@ -524,10 +578,10 @@ export default function RobotView({ robot }: Props) {
         const until = expiresAt ? ` Until ${new Date(expiresAt).toLocaleTimeString()}.` : '';
         setChatRestriction(
           action === 'BAN'
-            ? 'You are banned from chat and control in this room.'
+            ? 'You are banned from this room. Your turn ended immediately and you were removed from the control queue.'
             : action === 'KICK'
-              ? 'You were removed from the current turn in this room.'
-              : `You are temporarily restricted in this room.${until}`,
+              ? 'You were removed from control immediately and taken out of the control queue.'
+              : `You are temporarily restricted in this room. Your turn ended immediately and you were removed from the control queue.${until}`,
         );
         break;
       }
@@ -561,9 +615,15 @@ export default function RobotView({ robot }: Props) {
         }
         if (message.includes('restricted')) {
           const restriction = (data.restriction as { action?: string; expiresAt?: string | null } | undefined) ?? {};
-          const text = restriction.action
-            ? `You are currently restricted (${restriction.action}).`
-            : 'You are currently restricted.';
+          const action = restriction.action;
+          const text =
+            action === 'BAN'
+              ? 'You are banned from this room.'
+              : action === 'KICK'
+                ? 'You were removed from control and from the control queue.'
+                : action === 'TIMEOUT'
+                  ? 'You are temporarily restricted from chat and control in this room.'
+                  : 'You are currently restricted.';
           setChatRestriction(text);
         } else {
           // Debounce error toasts - only show if message changed or 5+ seconds since last error
@@ -619,6 +679,31 @@ export default function RobotView({ robot }: Props) {
       wsRef.current.send(JSON.stringify({ event: 'control:command', data: { robotId: robot.id, command, timestamp: Date.now() } }));
     },
     [queue, robot.id, robot.queueMode, userId],
+  );
+
+  const sendImmediateStop = useCallback(() => {
+    if (wsRef.current?.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    wsRef.current.send(
+      JSON.stringify({
+        event: 'control:command',
+        data: { robotId: robot.id, command: 'stop', timestamp: Date.now() },
+      }),
+    );
+  }, [robot.id]);
+
+  const releaseLocalControls = useCallback(
+    (sendStop = false) => {
+      activeMotionKeysRef.current.clear();
+      setActiveKeys(new Set());
+      setActiveCommands(new Set());
+      if (sendStop) {
+        sendImmediateStop();
+      }
+    },
+    [sendImmediateStop],
   );
 
   const triggerEStop = useCallback(() => {
@@ -710,10 +795,9 @@ export default function RobotView({ robot }: Props) {
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
-      activeMotionKeysRef.current.clear();
-      setActiveCommands(new Set());
+      releaseLocalControls(false);
     };
-  }, [focusMode, controlButtons, sendCommand, triggerEStop, canUseEStop, tabSwitchOnlyWhenEmpty]);
+  }, [focusMode, controlButtons, sendCommand, triggerEStop, canUseEStop, releaseLocalControls, tabSwitchOnlyWhenEmpty]);
 
   // ─── Chat ─────────────────────────────────────────────────────────────────
 
@@ -785,9 +869,10 @@ export default function RobotView({ robot }: Props) {
   }, [accessPasswordInput, accessToken, guestSessionId, robot.id]);
 
   const moderateChatUser = useCallback(
-    async (targetUserId: string, action: 'TIMEOUT' | 'BAN' | 'UNBAN') => {
+    async (targetUserId: string, action: 'TIMEOUT' | 'BAN' | 'UNBAN', preferredName?: string | null) => {
       if (!canModerate || !accessToken) return;
       setModeratingUserId(targetUserId);
+      const targetLabel = resolveUserLabel(targetUserId, preferredName);
 
       try {
         api.setToken(accessToken);
@@ -805,10 +890,10 @@ export default function RobotView({ robot }: Props) {
             username: 'system',
             content:
               action === 'TIMEOUT'
-                ? `User ${targetUserId.slice(0, 8)} timed out for 5 minutes.`
+                ? `${targetLabel} timed out for 5 minutes.`
                 : action === 'BAN'
-                  ? `User ${targetUserId.slice(0, 8)} has been banned from this room.`
-                  : `User ${targetUserId.slice(0, 8)} has been unbanned.`,
+                  ? `${targetLabel} has been banned from this room.`
+                  : `${targetLabel} has been unbanned.`,
             timestamp: Date.now(),
             isSystem: true,
           },
@@ -837,7 +922,7 @@ export default function RobotView({ robot }: Props) {
         setModeratingUserId(null);
       }
     },
-    [accessToken, canModerate, robot.id],
+    [accessToken, canModerate, resolveUserLabel, robot.id],
   );
 
   // ─── Queue ─────────────────────────────────────────────────────────────────
@@ -847,6 +932,7 @@ export default function RobotView({ robot }: Props) {
     api.setToken(accessToken);
     try {
       if (inQueue) {
+        releaseLocalControls(true);
         await api.leaveQueue(robot.id);
         setInQueue(false);
         pushToast('Left the queue.', 'info');
@@ -860,7 +946,7 @@ export default function RobotView({ robot }: Props) {
     } catch (err) {
       pushToast(err instanceof Error ? err.message : 'Queue update failed.', 'error', 2200);
     }
-  }, [accessToken, inQueue, robot.id, roomAccessToken]);
+  }, [accessToken, inQueue, releaseLocalControls, robot.id, roomAccessToken]);
 
   const voteForQueueUser = useCallback(async (targetUserId: string) => {
     if (!accessToken) {
@@ -911,6 +997,12 @@ export default function RobotView({ robot }: Props) {
     }
     setInQueue(queue.some((entry) => entry.userId === userId));
   }, [queue, userId]);
+
+  useEffect(() => {
+    if (!isMyTurn && activeMotionKeysRef.current.size > 0) {
+      releaseLocalControls(true);
+    }
+  }, [isMyTurn, releaseLocalControls]);
 
   // ─── UI ───────────────────────────────────────────────────────────────────
 
@@ -1403,7 +1495,7 @@ export default function RobotView({ robot }: Props) {
                           <div className="inline-flex flex-wrap items-center gap-1">
                             <button
                               type="button"
-                              onClick={() => void moderateChatUser(msg.userId, 'TIMEOUT')}
+                              onClick={() => void moderateChatUser(msg.userId, 'TIMEOUT', msg.username)}
                               disabled={moderatingUserId === msg.userId}
                               className="rounded border border-amber-500/40 px-1.5 py-0.5 text-[10px] text-amber-300 transition-all hover:border-amber-500/80 hover:bg-amber-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
@@ -1411,7 +1503,7 @@ export default function RobotView({ robot }: Props) {
                             </button>
                             <button
                               type="button"
-                              onClick={() => void moderateChatUser(msg.userId, 'BAN')}
+                              onClick={() => void moderateChatUser(msg.userId, 'BAN', msg.username)}
                               disabled={moderatingUserId === msg.userId}
                               className="rounded border border-red-500/40 px-1.5 py-0.5 text-[10px] text-red-300 transition-all hover:border-red-500/80 hover:bg-red-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
@@ -1419,7 +1511,7 @@ export default function RobotView({ robot }: Props) {
                             </button>
                             <button
                               type="button"
-                              onClick={() => void moderateChatUser(msg.userId, 'UNBAN')}
+                              onClick={() => void moderateChatUser(msg.userId, 'UNBAN', msg.username)}
                               disabled={moderatingUserId === msg.userId}
                               className="rounded border border-emerald-500/40 px-1.5 py-0.5 text-[10px] text-emerald-300 transition-all hover:border-emerald-500/80 hover:bg-emerald-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
                             >

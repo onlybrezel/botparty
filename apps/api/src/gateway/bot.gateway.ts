@@ -50,6 +50,17 @@ interface ActiveTurnState {
   expiresAt: number;
 }
 
+interface CommandMetadata {
+  user: {
+    id: string | null;
+    username: string | null;
+    role: string | null;
+    isGuest: boolean;
+  };
+  robotId: string;
+  source: 'gateway' | 'system';
+}
+
 @WebSocketGateway({
   path: '/ws',
   cors: {
@@ -186,6 +197,35 @@ export class BotGateway
       return;
     }
 
+    let pendingRestriction:
+      | { event: string; data: unknown; action: string }
+      | null = null;
+
+    if (client.userId) {
+      const restriction = await this.moderationService.getActiveRestriction(data.robotId, client.userId);
+      if (restriction) {
+        const action = typeof restriction.action === 'string' ? restriction.action : 'TIMEOUT';
+        const event =
+          action === 'BAN'
+            ? WS_EVENTS.MOD_BAN
+            : action === 'KICK'
+              ? WS_EVENTS.MOD_KICK
+              : WS_EVENTS.MOD_TIMEOUT;
+
+        if (action === 'BAN') {
+          client.watchingRobotId = undefined;
+          client.userId = undefined;
+          client.username = undefined;
+          client.isGuest = undefined;
+          client.role = undefined;
+          client.send(JSON.stringify({ event, data: restriction }));
+          return;
+        }
+
+        pendingRestriction = { event, data: restriction, action };
+      }
+    }
+
     if (!this.rooms.has(data.robotId)) this.rooms.set(data.robotId, new Set());
     this.rooms.get(data.robotId)!.add(client.id);
 
@@ -210,18 +250,8 @@ export class BotGateway
     const presenceList = Array.from(this.presence.get(data.robotId)?.values() ?? []);
     client.send(JSON.stringify({ event: WS_EVENTS.PRESENCE_UPDATE, data: { viewers: presenceList } }));
 
-    if (client.userId) {
-      const restriction = await this.moderationService.getActiveRestriction(data.robotId, client.userId);
-      if (restriction) {
-        const action = typeof restriction.action === 'string' ? restriction.action : 'TIMEOUT';
-        const event =
-          action === 'BAN'
-            ? WS_EVENTS.MOD_BAN
-            : action === 'KICK'
-              ? WS_EVENTS.MOD_KICK
-              : WS_EVENTS.MOD_TIMEOUT;
-        client.send(JSON.stringify({ event, data: restriction }));
-      }
+    if (pendingRestriction) {
+      client.send(JSON.stringify({ event: pendingRestriction.event, data: pendingRestriction.data }));
     }
 
     return { event: 'room:join', data: { ok: true, viewerCount: this.rooms.get(data.robotId)?.size ?? 0 } };
@@ -380,6 +410,7 @@ export class BotGateway
         data: {
           command: data.command,
           value: data.value,
+          metadata: this._buildCommandMetadata(client, data.robotId),
           userId: client.userId,
           // Use server timestamp for robot-side latency checks to avoid clock-skew false positives.
           timestamp: Date.now(),
@@ -524,7 +555,19 @@ export class BotGateway
           event: WS_EVENTS.CONTROL_COMMAND,
           data: {
             command: 'chat',
-            value: { message: sanitized, sender: client.username, anonymous: client.isGuest },
+            value: {
+              message: sanitized,
+              sender: client.username,
+              anonymous: client.isGuest,
+              user: {
+                id: client.userId ?? null,
+                username: client.username ?? null,
+                role: client.role ?? null,
+                isGuest: Boolean(client.isGuest),
+              },
+              robotId: data.robotId,
+            },
+            metadata: this._buildCommandMetadata(client, data.robotId),
             timestamp: now,
           },
         }),
@@ -543,6 +586,34 @@ export class BotGateway
     }
     this._broadcastToRoom(robotId, WS_EVENTS.CONTROL_EMERGENCY_STOP, { reason });
     this.logger.warn(`EMERGENCY STOP: Robot ${robotId} – ${reason}`);
+  }
+
+  private _sendRobotStop(robotId: string, reason: string) {
+    const robotClient = this.robotClients.get(robotId);
+    if (!robotClient) {
+      return;
+    }
+
+    robotClient.send(
+      JSON.stringify({
+        event: WS_EVENTS.CONTROL_COMMAND,
+        data: {
+          command: 'stop',
+          value: { reason },
+          metadata: {
+            user: {
+              id: null,
+              username: 'system',
+              role: 'SYSTEM',
+              isGuest: false,
+            },
+            robotId,
+            source: 'system',
+          } satisfies CommandMetadata,
+          timestamp: Date.now(),
+        },
+      }),
+    );
   }
 
   /**
@@ -625,6 +696,7 @@ export class BotGateway
         if (!payload.event) {
           return;
         }
+        await this.enforceModerationEvent(robotId, payload);
         this._broadcastToRoomLocally(robotId, payload.event, payload.data ?? {});
       } catch (err) {
         this.logger.warn(`Failed to process moderation event for ${robotId}: ${(err as Error).message}`);
@@ -735,6 +807,7 @@ export class BotGateway
   private async clearTurnState(robotId: string, reason: 'handoff' | 'timeout' | 'clear' = 'handoff') {
     const current = this.activeTurns.get(robotId);
     if (current) {
+      this._sendRobotStop(robotId, `Turn ended: ${reason}`);
       await this.sessionsService.end(current.sessionId).catch(() => {});
       this._broadcastToRoomLocally(robotId, WS_EVENTS.SESSION_END, {
         sessionId: current.sessionId,
@@ -754,6 +827,56 @@ export class BotGateway
     }
   }
 
+  private async enforceModerationEvent(
+    robotId: string,
+    payload: { event?: string; data?: unknown },
+  ) {
+    const event = payload.event;
+    if (
+      event !== WS_EVENTS.MOD_TIMEOUT &&
+      event !== WS_EVENTS.MOD_KICK &&
+      event !== WS_EVENTS.MOD_BAN
+    ) {
+      return;
+    }
+
+    const data =
+      payload.data && typeof payload.data === 'object'
+        ? (payload.data as Record<string, unknown>)
+        : null;
+    const targetUserId = typeof data?.userId === 'string' ? data.userId : null;
+    if (!targetUserId) {
+      return;
+    }
+
+    const activeTurn = this.activeTurns.get(robotId);
+    if (activeTurn?.userId === targetUserId) {
+      await this.clearTurnState(robotId, 'clear');
+    }
+
+    await this.queueService.leave(robotId, targetUserId).catch(() => {});
+
+    if (event === WS_EVENTS.MOD_BAN) {
+      this.disconnectUserFromRoom(robotId, targetUserId);
+    }
+  }
+
+  private disconnectUserFromRoom(robotId: string, targetUserId: string) {
+    for (const client of this.clients.values()) {
+      if (client.isRobot) {
+        continue;
+      }
+      if (client.watchingRobotId !== robotId || client.userId !== targetUserId) {
+        continue;
+      }
+
+      this._leaveRoom(client);
+      if (client.readyState === WebSocket.OPEN) {
+        client.close();
+      }
+    }
+  }
+
   private resolveSocketUser(accessToken?: string): JwtPayload | null {
     const token = accessToken?.trim();
     if (!token) {
@@ -765,5 +888,18 @@ export class BotGateway
     } catch {
       return null;
     }
+  }
+
+  private _buildCommandMetadata(client: WsClient, robotId: string): CommandMetadata {
+    return {
+      user: {
+        id: client.userId ?? null,
+        username: client.username ?? null,
+        role: client.role ?? null,
+        isGuest: Boolean(client.isGuest),
+      },
+      robotId,
+      source: 'gateway',
+    };
   }
 }
