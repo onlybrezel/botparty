@@ -12,6 +12,7 @@ export type ToastMessage = {
 type Listener = (toast: ToastMessage) => void;
 
 const listeners = new Set<Listener>();
+const pendingToasts: ToastMessage[] = [];
 
 export function pushToast(
   message: string,
@@ -25,6 +26,11 @@ export function pushToast(
     durationMs,
   };
 
+  if (listeners.size === 0) {
+    pendingToasts.push(toast);
+    return;
+  }
+
   for (const listener of listeners) {
     listener(toast);
   }
@@ -32,6 +38,11 @@ export function pushToast(
 
 export function subscribeToToasts(listener: Listener) {
   listeners.add(listener);
+  if (pendingToasts.length > 0) {
+    for (const toast of pendingToasts.splice(0, pendingToasts.length)) {
+      listener(toast);
+    }
+  }
   return () => {
     listeners.delete(listener);
   };

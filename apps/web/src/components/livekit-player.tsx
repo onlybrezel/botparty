@@ -865,7 +865,7 @@ function VideoRenderer({
       {hasMultipleCameras && previewTracks.length > 0 && (
         <div
           ref={previewTrayRef}
-          className={`absolute z-10 flex w-28 flex-col gap-2 rounded-2xl border border-white/15 bg-black/30 p-2 shadow-lg backdrop-blur-md sm:w-32 ${
+          className={`absolute z-10 flex w-28 flex-col gap-2 sm:w-32 ${
             previewTrayPosition ? '' : 'right-3 top-3'
           }`}
           style={
@@ -876,27 +876,17 @@ function VideoRenderer({
                 }
               : undefined
           }
+          onMouseDown={startDraggingPreviewTray}
         >
-          <div
-            className={`flex items-center justify-between rounded-xl border border-white/10 bg-black/35 px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-white/75 ${
-              previewTrayDragState ? 'cursor-grabbing' : 'cursor-grab'
-            }`}
-            onMouseDown={startDraggingPreviewTray}
-            title="Drag camera tray"
-          >
-            <span>Other cams</span>
-            <span className="text-white/45">Move</span>
-          </div>
           {previewTracks.map((camera) => (
             <button
               key={camera.id}
               type="button"
-              onClick={() => setSelectedCameraId(camera.id)}
-              className={`group overflow-hidden rounded-xl border bg-black/45 text-left text-white shadow-lg backdrop-blur-sm transition ${
-                selectedCameraId === camera.id
-                  ? 'border-cyan-300/70 ring-1 ring-cyan-300/40'
-                  : 'border-white/15 hover:border-cyan-300/60'
-              }`}
+              onClick={(event) => {
+                event.stopPropagation();
+                setSelectedCameraId(camera.id);
+              }}
+              className="group overflow-hidden rounded-xl bg-black/35 text-left text-white shadow-lg backdrop-blur-sm transition hover:scale-[1.01]"
               aria-label={`Show ${camera.label}`}
               title={`Show ${camera.label}`}
             >
@@ -905,9 +895,6 @@ function VideoRenderer({
                   trackRef={camera.trackRef}
                   className="h-full w-full object-cover transition group-hover:scale-[1.02]"
                 />
-              </div>
-              <div className="px-2 py-1.5 text-[11px] font-medium">
-                {camera.label}
               </div>
             </button>
           ))}
