@@ -31,7 +31,7 @@ import { LiveKitPlayer } from '@/components/livekit-player';
 import { pushToast } from '@/lib/toast';
 import { Select } from '@/components/ui/select';
 
-type RemoteActionType = 'restart_video' | 'restart_control' | 'restart_chat' | 'set_log_stream';
+type RemoteActionType = 'restart_video' | 'restart_control' | 'restart_chat' | 'update_client' | 'set_log_stream';
 
 type ControlButtonDraft = {
   label: string;
@@ -386,6 +386,7 @@ export default function DashboardPage() {
                     type === 'restart_video' ||
                     type === 'restart_control' ||
                     type === 'restart_chat' ||
+                    type === 'update_client' ||
                     type === 'set_log_stream',
                 ),
             ),
@@ -620,6 +621,9 @@ export default function DashboardPage() {
         setDiagLogs([]);
         setStatus(`Temporary diagnostics enabled for ${durationSec ?? 120}s.`);
         pushToast(`Diagnostics enabled for ${durationSec ?? 120}s.`, 'info', 3000);
+      } else if (type === 'update_client') {
+        setStatus('Client update queued. The robot will pull the latest git changes and restart itself.');
+        pushToast('Client update queued.', 'success', 2800);
       } else {
         setStatus(`Action queued: ${type}`);
         pushToast(`Action queued: ${type}`, 'success', 2600);
@@ -1208,6 +1212,18 @@ export default function DashboardPage() {
                     <p className="mb-3 text-xs text-[var(--muted-foreground)]">
                       Run maintenance actions on the robot client without SSH. Commands are queued and picked up on the next poll cycle.
                     </p>
+                    {telemetry.latest && (
+                      <div className="mb-3 rounded-lg border border-[var(--border)] bg-black/20 px-3 py-2 text-xs text-[var(--muted-foreground)]">
+                        <p>
+                          Client build: <span className="font-semibold text-[var(--foreground)]">{formatClientBuild(telemetry.latest)}</span>
+                        </p>
+                        {telemetry.latest.pythonVersion && (
+                          <p className="mt-1">
+                            Python: <span className="font-semibold text-[var(--foreground)]">{telemetry.latest.pythonVersion}</span>
+                          </p>
+                        )}
+                      </div>
+                    )}
                     <div className="flex flex-wrap gap-2">
                       <button
                         type="button"
@@ -1244,6 +1260,18 @@ export default function DashboardPage() {
                           : pendingActionTypes.includes('restart_chat')
                             ? 'Queued, waiting for pickup'
                             : 'Restart Chat Bridge'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => runRobotAction('update_client')}
+                        disabled={opLoading !== null || pendingActionTypes.includes('update_client')}
+                        className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/40 px-3 py-1.5 text-xs text-emerald-300 disabled:opacity-60"
+                      >
+                        {opLoading === 'update_client'
+                          ? 'Queueing...'
+                          : pendingActionTypes.includes('update_client')
+                            ? 'Queued, waiting for pickup'
+                            : 'Update Client'}
                       </button>
                       <button
                         type="button"
@@ -1625,6 +1653,16 @@ export default function DashboardPage() {
                           </div>
                         </div>
                         <div className="mt-2 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+                          <div className="rounded border border-[var(--border)] px-2 py-1.5 sm:col-span-2">
+                            <p className="text-[var(--muted-foreground)]">Client build</p>
+                            <p className="font-semibold">{formatClientBuild(telemetry.latest)}</p>
+                          </div>
+                          <div className="rounded border border-[var(--border)] px-2 py-1.5 sm:col-span-2">
+                            <p className="text-[var(--muted-foreground)]">Python</p>
+                            <p className="font-semibold">{telemetry.latest.pythonVersion ?? '-'}</p>
+                          </div>
+                        </div>
+                        <div className="mt-2 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
                           <div className="rounded border border-[var(--border)] px-2 py-1.5">
                             <p className="text-[var(--muted-foreground)]">LiveKit</p>
                             <p className="font-semibold">{telemetry.latest.livekitConnected ? 'Connected' : 'Offline'}</p>
@@ -1756,6 +1794,26 @@ function formatUptime(value: number | null | undefined) {
     return `${hours}h ${minutes}m`;
   }
   return `${minutes}m`;
+}
+
+function formatClientBuild(telemetry: RobotTelemetryPoint | null | undefined) {
+  if (!telemetry) return '-';
+
+  const parts: string[] = [];
+  if (telemetry.clientVersion) {
+    parts.push(`v${telemetry.clientVersion}`);
+  }
+  if (telemetry.gitBranch) {
+    parts.push(telemetry.gitBranch);
+  }
+  if (telemetry.gitCommit) {
+    parts.push(telemetry.gitCommit);
+  }
+  if (telemetry.gitDirty) {
+    parts.push('dirty');
+  }
+
+  return parts.length > 0 ? parts.join(' • ') : '-';
 }
 
 function AclPicker({

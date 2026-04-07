@@ -241,7 +241,7 @@ export class RobotsController {
     @CurrentUser() user: JwtPayload,
     @Body()
     body: {
-      type?: 'restart_video' | 'restart_control' | 'restart_chat' | 'set_log_stream';
+      type?: 'restart_video' | 'restart_control' | 'restart_chat' | 'update_client' | 'set_log_stream';
       durationSec?: number;
     },
   ) {
@@ -299,6 +299,11 @@ export class RobotsController {
     @Body()
     body: {
       claimToken?: string;
+      clientVersion?: string;
+      gitBranch?: string;
+      gitCommit?: string;
+      gitDirty?: boolean;
+      pythonVersion?: string;
       cpuPercent?: number;
       memoryPercent?: number;
       temperatureC?: number;

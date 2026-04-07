@@ -78,6 +78,11 @@ export interface PlatformStats {
 
 export interface RobotTelemetryPoint {
   ts: number;
+  clientVersion: string | null;
+  gitBranch: string | null;
+  gitCommit: string | null;
+  gitDirty: boolean;
+  pythonVersion: string | null;
   cpuPercent: number | null;
   memoryPercent: number | null;
   temperatureC: number | null;
@@ -732,7 +737,7 @@ class ApiClient {
 
   async enqueueRobotAction(
     robotId: string,
-    data: { type: 'restart_video' | 'restart_control' | 'restart_chat' | 'set_log_stream'; durationSec?: number },
+    data: { type: 'restart_video' | 'restart_control' | 'restart_chat' | 'update_client' | 'set_log_stream'; durationSec?: number },
   ) {
     return this.request<{ id: string; type: string; createdAt: number; alreadyQueued?: boolean }>(`/robots/${robotId}/actions`, {
       method: 'POST',

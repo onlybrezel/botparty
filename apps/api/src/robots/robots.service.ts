@@ -97,6 +97,7 @@ export type RobotActionType =
   | 'restart_video'
   | 'restart_control'
   | 'restart_chat'
+  | 'update_client'
   | 'set_log_stream';
 
 export interface RobotActionPayload {
@@ -633,6 +634,11 @@ export class RobotsService {
   async ingestRobotTelemetry(
     claimToken: string,
     payload: {
+      clientVersion?: string;
+      gitBranch?: string;
+      gitCommit?: string;
+      gitDirty?: boolean;
+      pythonVersion?: string;
       cpuPercent?: number;
       memoryPercent?: number;
       temperatureC?: number;
@@ -650,6 +656,23 @@ export class RobotsService {
 
     const telemetry = {
       ts: Date.now(),
+      clientVersion:
+        typeof payload.clientVersion === 'string' && payload.clientVersion.trim()
+          ? payload.clientVersion.trim().slice(0, 64)
+          : null,
+      gitBranch:
+        typeof payload.gitBranch === 'string' && payload.gitBranch.trim()
+          ? payload.gitBranch.trim().slice(0, 128)
+          : null,
+      gitCommit:
+        typeof payload.gitCommit === 'string' && payload.gitCommit.trim()
+          ? payload.gitCommit.trim().slice(0, 64)
+          : null,
+      gitDirty: Boolean(payload.gitDirty),
+      pythonVersion:
+        typeof payload.pythonVersion === 'string' && payload.pythonVersion.trim()
+          ? payload.pythonVersion.trim().slice(0, 64)
+          : null,
       cpuPercent:
         typeof payload.cpuPercent === 'number' && Number.isFinite(payload.cpuPercent)
           ? Math.max(0, Math.min(100, payload.cpuPercent))
