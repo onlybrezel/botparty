@@ -34,6 +34,12 @@ export class HealthController {
     return { status: healthy ? 'healthy' : 'degraded', checks, timestamp: new Date().toISOString() };
   }
 
+  @Get('live')
+  @ApiOperation({ summary: 'Liveness check for container startup probes' })
+  live() {
+    return { status: 'ok', timestamp: new Date().toISOString() };
+  }
+
   @Get('stats')
   @ApiOperation({ summary: 'Public platform stats for landing pages and dashboards' })
   async stats() {

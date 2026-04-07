@@ -70,6 +70,7 @@ publish_shutdown_notice() {
   local reason="$1"
   local retry_after_ms="$2"
   local message="$3"
+  local scope="${4:-app}"
 
   if ! compose_running_service redis; then
     warn "Redis is not running; skipping realtime shutdown announcement."
@@ -80,15 +81,17 @@ publish_shutdown_notice() {
   local redis_password="${REDIS_PASSWORD:-botparty_redis_secret}"
   local payload
   payload=$(
-    printf '{"event":"server:shutdown","data":{"message":"%s","reason":"%s","retryAfterMs":%s,"ts":%s}}' \
+    printf '{"event":"server:shutdown","data":{"message":"%s","reason":"%s","scope":"%s","retryAfterMs":%s,"ts":%s}}' \
       "$message" \
       "$reason" \
+      "$scope" \
       "$retry_after_ms" \
       "$(date +%s)000"
   )
 
   info "Announcing ${reason} to connected clients"
-  docker compose exec -T redis redis-cli -a "$redis_password" PUBLISH "$ANNOUNCE_CHANNEL" "$payload" >/dev/null
+  docker compose exec -T -e REDISCLI_AUTH="$redis_password" redis \
+    redis-cli PUBLISH "$ANNOUNCE_CHANNEL" "$payload" >/dev/null
 }
 
 wait_for_drain() {
@@ -151,7 +154,7 @@ run_restart() {
   local build_mode="$5"
   local pull_git="$6"
 
-  publish_shutdown_notice "$reason" "$retry_after_ms" "$(message_for_reason "$reason")"
+  publish_shutdown_notice "$reason" "$retry_after_ms" "$(message_for_reason "$reason")" "$scope"
   wait_for_drain "$drain_sec"
 
   if [[ "$pull_git" == "yes" ]]; then
@@ -188,7 +191,7 @@ Usage:
   ./ops.sh maintenance-on-full
   ./ops.sh resume
   ./ops.sh resume-full
-  ./ops.sh announce <reason> [retry_after_ms]
+  ./ops.sh announce <reason> [retry_after_ms] [scope]
   ./ops.sh status
 
 Commands:
@@ -206,6 +209,7 @@ Commands:
   resume             Start app services again after maintenance.
   resume-full        Start the full stack again after maintenance/full-stop.
   announce           Only send the realtime shutdown notice to web + robot clients.
+                     scope can be app or full (default: app).
   status             Show docker compose service status.
 EOF
 }
@@ -238,13 +242,13 @@ case "$cmd" in
     run_restart full update "$DEFAULT_RETRY_AFTER_MS" "$DEFAULT_DRAIN_SEC" build yes
     ;;
   maintenance-on)
-    publish_shutdown_notice maintenance "$MAINTENANCE_RETRY_AFTER_MS" "$(message_for_reason maintenance)"
+    publish_shutdown_notice maintenance "$MAINTENANCE_RETRY_AFTER_MS" "$(message_for_reason maintenance)" app
     wait_for_drain "$MAINTENANCE_DRAIN_SEC"
     info "Stopping app services for maintenance"
     compose_stop_scope app
     ;;
   maintenance-on-full)
-    publish_shutdown_notice maintenance "$MAINTENANCE_RETRY_AFTER_MS" "$(message_for_reason maintenance)"
+    publish_shutdown_notice maintenance "$MAINTENANCE_RETRY_AFTER_MS" "$(message_for_reason maintenance)" full
     wait_for_drain "$MAINTENANCE_DRAIN_SEC"
     info "Stopping full stack for maintenance"
     compose_stop_scope full
@@ -260,7 +264,8 @@ case "$cmd" in
   announce)
     reason="${2:-restart}"
     retry_after_ms="${3:-$DEFAULT_RETRY_AFTER_MS}"
-    publish_shutdown_notice "$reason" "$retry_after_ms" "$(message_for_reason "$reason")"
+    scope="${4:-app}"
+    publish_shutdown_notice "$reason" "$retry_after_ms" "$(message_for_reason "$reason")" "$scope"
     ;;
   status)
     docker compose ps

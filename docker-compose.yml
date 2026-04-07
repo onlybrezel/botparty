@@ -32,9 +32,9 @@ services:
       - internal
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U botparty"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
+      interval: 2s
+      timeout: 2s
+      retries: 15
 
   # ═══════════════════════════════════════════════════
   # Redis
@@ -50,9 +50,9 @@ services:
       - internal
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-botparty_redis_secret}", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
+      interval: 2s
+      timeout: 2s
+      retries: 15
 
   # ═══════════════════════════════════════════════════
   # LiveKit Server (SFU)
@@ -144,18 +144,18 @@ services:
       redis:
         condition: service_healthy
       livekit:
-        condition: service_healthy
+        condition: service_started
       cadvisor:
-        condition: service_healthy
+        condition: service_started
     networks:
       - internal
       - frontend
     healthcheck:
-      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:4000/api/v1/health 2>/dev/null && echo ok || exit 1"]
-      interval: 10s
-      timeout: 5s
-      start_period: 40s
-      retries: 5
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:4000/api/v1/health/live 2>/dev/null && echo ok || exit 1"]
+      interval: 3s
+      timeout: 2s
+      start_period: 5s
+      retries: 15
 
   # ═══════════════════════════════════════════════════
   # BotParty Web (Next.js)
@@ -174,15 +174,15 @@ services:
       NEXT_PUBLIC_LIVEKIT_URL: ${NEXT_PUBLIC_LIVEKIT_URL:-wss://botparty.live/rtc}
     depends_on:
       api:
-        condition: service_healthy
+        condition: service_started
     networks:
       - frontend
     healthcheck:
       test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:3000/ 2>/dev/null && echo ok || exit 1"]
-      interval: 10s
-      timeout: 5s
-      start_period: 30s
-      retries: 3
+      interval: 3s
+      timeout: 2s
+      start_period: 5s
+      retries: 15
 
   # ═══════════════════════════════════════════════════
   # NGINX Reverse Proxy
@@ -201,9 +201,9 @@ services:
       - ./docker/nginx/ssl:/etc/nginx/ssl:ro
     depends_on:
       web:
-        condition: service_healthy
+        condition: service_started
       api:
-        condition: service_healthy
+        condition: service_started
     networks:
       - frontend
 
