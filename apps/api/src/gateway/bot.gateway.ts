@@ -393,21 +393,6 @@ export class BotGateway
       }
     }
 
-    if (Number.isFinite(data.timestamp)) {
-      const clientServerDeltaMs = Date.now() - data.timestamp;
-      const likelyClockSkew = Math.abs(clientServerDeltaMs) > LIMITS.MAX_CONTROL_CLOCK_SKEW_MS;
-
-      if (!likelyClockSkew && clientServerDeltaMs > LIMITS.MAX_CONTROL_COMMAND_AGE_MS) {
-        client.send(
-          JSON.stringify({
-            event: 'error',
-            data: { message: 'Control command expired before reaching the server' },
-          }),
-        );
-        return;
-      }
-    }
-
     // Crowd input echo: broadcast to all viewers so they see button presses
     this._broadcastToRoom(
       data.robotId,
@@ -440,12 +425,14 @@ export class BotGateway
       }),
     );
 
-    // Non-fatal advisory only: browser and server clocks can differ, so never E-STOP from this metric.
+    // Browser timestamps are useful for diagnostics, but not reliable enough to gate realtime control.
     if (Number.isFinite(data.timestamp)) {
       const clientServerDeltaMs = Date.now() - data.timestamp;
-      const likelyClockSkew = Math.abs(clientServerDeltaMs) > LIMITS.MAX_CONTROL_CLOCK_SKEW_MS;
+      const withinExpectedRange =
+        clientServerDeltaMs >= 0 &&
+        clientServerDeltaMs <= LIMITS.MAX_CONTROL_CLOCK_SKEW_MS;
 
-      if (!likelyClockSkew && Math.abs(clientServerDeltaMs) > LIMITS.LATENCY_WARNING_MS) {
+      if (withinExpectedRange && clientServerDeltaMs > LIMITS.LATENCY_WARNING_MS) {
         client.send(
           JSON.stringify({
             event: WS_EVENTS.CONTROL_LATENCY_WARNING,
