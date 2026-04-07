@@ -975,6 +975,11 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
         telemetry: telemetry
           ? {
               ts: telemetryTs,
+              clientVersion: this._asString(telemetry.clientVersion),
+              gitBranch: this._asString(telemetry.gitBranch),
+              gitCommit: this._asString(telemetry.gitCommit),
+              gitDirty: Boolean(telemetry.gitDirty),
+              pythonVersion: this._asString(telemetry.pythonVersion),
               cpuPercent: this._asNumber(telemetry.cpuPercent),
               memoryPercent: this._asNumber(telemetry.memoryPercent),
               temperatureC: this._asNumber(telemetry.temperatureC),
@@ -1544,6 +1549,10 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
 
   private _asNumber(value: unknown): number | null {
     return typeof value === 'number' && Number.isFinite(value) ? value : null;
+  }
+
+  private _asString(value: unknown): string | null {
+    return typeof value === 'string' && value.trim() ? value : null;
   }
 
   private async _assertStaffOrOwner(robotId: string, userId: string) {

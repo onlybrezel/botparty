@@ -771,6 +771,24 @@ export default function RobotView({ robot }: Props) {
     );
   }, [robot.id]);
 
+  useEffect(() => {
+    const heldMotionCommands = [...activeCommands].filter((command) =>
+      ['forward', 'backward', 'left', 'right'].includes(command),
+    );
+
+    if (heldMotionCommands.length === 0) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      for (const command of heldMotionCommands) {
+        sendCommand(command, 0);
+      }
+    }, 400);
+
+    return () => window.clearInterval(interval);
+  }, [activeCommands, sendCommand]);
+
   const releaseLocalControls = useCallback(
     (sendStop = false) => {
       activeMotionKeysRef.current.clear();
@@ -1353,8 +1371,18 @@ export default function RobotView({ robot }: Props) {
                       isDown={isDown}
                       isCrowd={isCrowdActive(cmd)}
                       disabled={Boolean(btn) && (btn ? !canUseButton(btn) : true)}
-                      onPress={() => sendCommand(cmd, btn?.cooldownMs)}
-                      onRelease={sendImmediateStop}
+                      onPress={() => {
+                        setActiveCommands((s) => new Set(s).add(cmd));
+                        sendCommand(cmd, btn?.cooldownMs);
+                      }}
+                      onRelease={() => {
+                        setActiveCommands((s) => {
+                          const next = new Set(s);
+                          next.delete(cmd);
+                          return next;
+                        });
+                        sendImmediateStop();
+                      }}
                     />
                   );
                 })}
@@ -1374,8 +1402,18 @@ export default function RobotView({ robot }: Props) {
                       isDown={isDown}
                       isCrowd={isCrowdActive(cmd)}
                       disabled={Boolean(btn) && (btn ? !canUseButton(btn) : true)}
-                      onPress={() => sendCommand(cmd, btn?.cooldownMs)}
-                      onRelease={sendImmediateStop}
+                      onPress={() => {
+                        setActiveCommands((s) => new Set(s).add(cmd));
+                        sendCommand(cmd, btn?.cooldownMs);
+                      }}
+                      onRelease={() => {
+                        setActiveCommands((s) => {
+                          const next = new Set(s);
+                          next.delete(cmd);
+                          return next;
+                        });
+                        sendImmediateStop();
+                      }}
                     />
                   );
                 })}
