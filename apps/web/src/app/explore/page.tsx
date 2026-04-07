@@ -5,7 +5,7 @@ import { Search, SlidersHorizontal, Bot } from 'lucide-react';
 
 export const metadata: Metadata = {
   title: 'Explore Robots',
-  description: 'Browse live robots and take control in real-time.',
+  description: 'Browse live robot rooms, watch what is online, and jump into the queue.',
 };
 
 export const dynamic = 'force-dynamic';
@@ -69,11 +69,11 @@ export default async function ExplorePage({
       {/* Header */}
       <div className="mb-6 flex flex-col gap-3 sm:mb-7 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-3xl font-black tracking-tight">Explore Robots</h1>
+          <h1 className="text-3xl font-black tracking-tight">Explore robot rooms</h1>
           <p className="mt-1 text-sm text-[var(--muted-foreground)]">
             {robots.length === 0
               ? 'No robots found'
-              : `${robots.length} robot${robots.length !== 1 ? 's' : ''} · ${liveCount} live`}
+              : `${robots.length} room${robots.length !== 1 ? 's' : ''} listed · ${liveCount} live right now`}
           </p>
         </div>
         <div className="inline-flex w-fit items-center gap-2 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-200">
@@ -91,7 +91,7 @@ export default async function ExplorePage({
               type="text"
               name="q"
               defaultValue={params.q ?? ''}
-              placeholder="Search robots, tags, creators..."
+              placeholder="Search robot names, hosts, descriptions, or an exact tag..."
               className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] py-3 pl-10 pr-4 text-sm outline-none transition-colors focus:border-[var(--primary)]"
             />
           </div>
@@ -146,20 +146,25 @@ export default async function ExplorePage({
       </form>
 
       {overview && overview.topTags.length > 0 && !params.q && (
-        <div className="mb-6 flex flex-wrap gap-2">
-          {overview.topTags.slice(0, 10).map((tag) => (
-            <a
-              key={tag.tag}
-              href={`/explore?tag=${encodeURIComponent(tag.tag)}`}
-              className={`rounded-full border px-3 py-2 text-sm transition ${
-                params.tag === tag.tag
-                  ? 'border-[var(--primary)] bg-[var(--primary)]/10'
-                  : 'border-[var(--border)] bg-[var(--card)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
-              }`}
-            >
-              {tag.tag} · {tag.count}
-            </a>
-          ))}
+        <div className="mb-6">
+          <p className="mb-2 text-xs uppercase tracking-[0.18em] text-[var(--muted-foreground)]">
+            Browse by tag
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {overview.topTags.slice(0, 10).map((tag) => (
+              <a
+                key={tag.tag}
+                href={`/explore?tag=${encodeURIComponent(tag.tag)}`}
+                className={`rounded-full border px-3 py-2 text-sm transition ${
+                  params.tag === tag.tag
+                    ? 'border-[var(--primary)] bg-[var(--primary)]/10'
+                    : 'border-[var(--border)] bg-[var(--card)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+                }`}
+              >
+                {tag.tag} · {tag.count}
+              </a>
+            ))}
+          </div>
         </div>
       )}
 
@@ -172,8 +177,8 @@ export default async function ExplorePage({
           <p className="font-medium text-[var(--muted-foreground)]">No robots found</p>
           <p className="mt-1 text-sm text-[var(--muted-foreground)]">
             {params.q || params.status || params.tag
-              ? 'Try different search terms'
-              : 'Be the first to connect one!'}
+              ? 'Try a different host, status, or exact tag'
+              : 'Nothing is listed yet. The first good room sets the tone.'}
           </p>
         </div>
       ) : (

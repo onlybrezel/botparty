@@ -89,31 +89,31 @@ export default function LoginPage() {
       <div className="relative mx-auto grid w-full max-w-6xl gap-8 lg:grid-cols-2">
         <section className="hidden rounded-2xl border border-[var(--border)] bg-[var(--card)]/70 p-8 backdrop-blur-sm lg:block">
           <p className="mb-4 inline-flex items-center rounded-full border border-violet-500/30 bg-violet-500/10 px-3 py-1 text-xs font-semibold text-violet-300">
-            ROBOT ACCESS
+            HOST CONTROL
           </p>
           <h1 className="text-4xl font-black leading-tight tracking-tight text-[var(--foreground)]">
-            Manage your robots.
+            Run a room people enjoy joining.
             <br />
-            Join live rooms.
+            Keep access sane.
             <br />
-            Keep it simple.
+            Keep the robot safe.
           </h1>
           <p className="mt-4 max-w-md text-sm leading-relaxed text-[var(--muted-foreground)]">
-            Sign in to manage your robots, claim tokens, and access settings.
+            Sign in to manage robots, claim clients, tune room access, and keep shared-control sessions under control.
           </p>
 
           <div className="mt-8 grid gap-3">
             <div className="rounded-xl border border-[var(--border)] bg-[var(--background)]/70 p-4">
-              <p className="text-xs uppercase tracking-wider text-[var(--muted-foreground)]">Realtime stack</p>
-              <p className="mt-1 text-sm font-semibold">Live video, chat, and queue control</p>
+              <p className="text-xs uppercase tracking-wider text-[var(--muted-foreground)]">Room flow</p>
+              <p className="mt-1 text-sm font-semibold">Video, queue state, chat, and turn-based control</p>
             </div>
             <div className="rounded-xl border border-[var(--border)] bg-[var(--background)]/70 p-4">
               <p className="text-xs uppercase tracking-wider text-[var(--muted-foreground)]">Robot setup</p>
-              <p className="mt-1 text-sm font-semibold">Claim tokens and access settings in one place</p>
+              <p className="mt-1 text-sm font-semibold">Claim tokens, access rules, and remote ops in one place</p>
             </div>
             <div className="rounded-xl border border-[var(--border)] bg-[var(--background)]/70 p-4">
-              <p className="text-xs uppercase tracking-wider text-[var(--muted-foreground)]">Viewer access</p>
-              <p className="mt-1 text-sm font-semibold">Choose who can watch, chat, and control</p>
+              <p className="text-xs uppercase tracking-wider text-[var(--muted-foreground)]">Safety defaults</p>
+              <p className="mt-1 text-sm font-semibold">Decide who can watch, chat, control, and hit E-STOP</p>
             </div>
           </div>
         </section>
@@ -130,12 +130,12 @@ export default function LoginPage() {
                 </span>
               </Link>
               <h2 className="mt-4 text-2xl font-extrabold tracking-tight">
-                {mode === 'login' ? 'Welcome back' : 'Create account'}
+                {mode === 'login' ? 'Jump back in' : 'Create your host account'}
               </h2>
               <p className="mt-1 text-sm text-[var(--muted-foreground)]">
                 {mode === 'login'
-                  ? 'Sign in to continue.'
-                  : 'Create an account to manage your robots.'}
+                  ? 'Sign in to open your rooms and settings.'
+                  : 'Create an account to host robots and manage live rooms.'}
               </p>
             </div>
 

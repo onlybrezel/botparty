@@ -14,11 +14,11 @@ const inter = Inter({
 export const metadata: Metadata = {
   metadataBase: new URL('https://botparty.live'),
   title: { default: 'BotParty', template: '%s | BotParty' },
-  description: 'Drive real robots from your browser.',
+  description: 'Watch, queue, and drive real internet-connected robots from your browser.',
   keywords: ['robot', 'teleoperation', 'webrtc', 'livekit', 'remote control', 'robotics'],
   openGraph: {
     title: 'BotParty',
-    description: 'Drive real robots from your browser.',
+    description: 'Watch, queue, and drive real internet-connected robots from your browser.',
     type: 'website',
     url: 'https://botparty.live',
     siteName: 'BotParty',
@@ -46,6 +46,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </Link>
               <Link href="/cookies" className="transition hover:text-[var(--foreground)]">
                 Cookie Notice
+              </Link>
+              <Link href="/docs" className="transition hover:text-[var(--foreground)]">
+                Docs
               </Link>
               <a
                 href="https://github.com/onlybrezel/botparty-client/blob/main/docs/index.md"

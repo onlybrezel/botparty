@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import type { PublicRobotOverview, RobotPublic } from '@botparty/shared';
 import { Trophy, Eye, Radio, Clock3 } from 'lucide-react';
 
@@ -12,7 +13,7 @@ type CreatorLeaderboardEntry = {
 
 export const metadata: Metadata = {
   title: 'Leaderboard',
-  description: 'Top robots by live viewers and activity.',
+  description: 'See which robot rooms are drawing a crowd right now.',
 };
 
 export const dynamic = 'force-dynamic';
@@ -77,7 +78,7 @@ export default async function LeaderboardPage() {
           <div>
             <h1 className="text-3xl font-black tracking-tight">Leaderboard</h1>
             <p className="text-sm text-[var(--muted-foreground)]">
-              Live ranking of robots by current audience and activity.
+              A quick look at which rooms have attention right now.
             </p>
           </div>
         </div>
@@ -111,7 +112,12 @@ export default async function LeaderboardPage() {
                 </span>
 
                 <div className="col-span-5 sm:col-span-4">
-                  <p className="truncate font-semibold">{robot.name}</p>
+                  <Link
+                    href={`/robot/${robot.slug}`}
+                    className="truncate font-semibold transition hover:text-violet-300"
+                  >
+                    {robot.name}
+                  </Link>
                   <p className="truncate text-xs text-[var(--muted-foreground)]">/{robot.slug}</p>
                 </div>
 
@@ -166,7 +172,7 @@ export default async function LeaderboardPage() {
       <section className="mt-6 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 sm:p-5">
         <div className="mb-3 flex items-center justify-between gap-2">
           <h2 className="text-lg font-bold">Top Creators (Credits)</h2>
-          <p className="text-xs text-[var(--muted-foreground)]">From user credits leaderboard</p>
+          <p className="text-xs text-[var(--muted-foreground)]">Hosts ranked by current credit totals</p>
         </div>
 
         {creators.length === 0 ? (

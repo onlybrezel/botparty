@@ -44,6 +44,10 @@ export default function RobotCard({ robot }: Props) {
     .reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
   const hue = seed % 360;
   const initial = robot.name.trim().charAt(0).toUpperCase() || 'R';
+  const summary = robot.description?.trim()
+    ? robot.description.trim().slice(0, 108)
+    : 'Live room with queue-based robot control.';
+  const isTrimmed = Boolean(robot.description?.trim() && robot.description.trim().length > 108);
 
   return (
     <Link
@@ -124,6 +128,30 @@ export default function RobotCard({ robot }: Props) {
             ))}
           </div>
         )}
+
+        <p className="mt-3 line-clamp-2 text-sm leading-relaxed text-[var(--muted-foreground)]">
+          {summary}
+          {isTrimmed ? '...' : ''}
+        </p>
+
+        <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-medium text-[var(--muted-foreground)]">
+          <span className="rounded-full border border-[var(--border)] bg-[var(--background)] px-2.5 py-1">
+            {robot.queueMode === 'VOTING'
+              ? 'Voting queue'
+              : robot.queueMode === 'DISABLED'
+                ? 'Direct control'
+                : 'Turn queue'}
+          </span>
+          <span className="rounded-full border border-[var(--border)] bg-[var(--background)] px-2.5 py-1">
+            {robot.accessMode === 'OPEN'
+              ? 'Open room'
+              : robot.accessMode === 'PASSWORD'
+                ? 'Password room'
+                : robot.accessMode === 'ALLOWED_USERS'
+                  ? 'Allow-list room'
+                  : 'Link-only room'}
+          </span>
+        </div>
       </div>
     </Link>
   );

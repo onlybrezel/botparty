@@ -180,6 +180,7 @@ export class RobotsService {
           OR: [
             { name: { contains: query, mode: 'insensitive' } },
             { description: { contains: query, mode: 'insensitive' } },
+            { tags: { has: query } },
             {
               owner: {
                 OR: [
