@@ -171,6 +171,8 @@ export default function RobotView({ robot }: Props) {
   const wsRef = useRef<WebSocket | null>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<HTMLInputElement>(null);
+  const controlsPanelRef = useRef<HTMLDivElement>(null);
+  const chatPanelRef = useRef<HTMLDivElement>(null);
   const cooldownMap = useRef<Map<string, number>>(new Map());
   const lastErrorToastRef = useRef<{ message: string; timestamp: number } | null>(null);
   const activeMotionKeysRef = useRef<Set<string>>(new Set());
@@ -719,6 +721,22 @@ export default function RobotView({ robot }: Props) {
     wsRef.current.send(JSON.stringify({ event: 'control:emergency-stop', data: { robotId: robot.id } }));
   }, [canUseEStop, robot.id]);
 
+  const scrollToPanel = useCallback((target: 'controls' | 'chat') => {
+    const element = target === 'controls' ? controlsPanelRef.current : chatPanelRef.current;
+    element?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, []);
+
+  const activateControlsPanel = useCallback(() => {
+    setFocusMode('controls');
+    scrollToPanel('controls');
+  }, [scrollToPanel]);
+
+  const activateChatPanel = useCallback(() => {
+    setFocusMode('chat');
+    scrollToPanel('chat');
+    setTimeout(() => chatInputRef.current?.focus(), 50);
+  }, [scrollToPanel]);
+
   // ─── Keyboard ─────────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -1014,6 +1032,14 @@ export default function RobotView({ robot }: Props) {
   const queueEnabled = robot.queueMode !== 'DISABLED';
   const myQueuePosition = userId ? queue.findIndex((entry) => entry.userId === userId) + 1 : 0;
   const isMyTurn = !queueEnabled || (myQueuePosition > 0 && myQueuePosition === 1);
+  const viewerLabel = connected ? `${viewers.length} viewer${viewers.length !== 1 ? 's' : ''}` : 'Disconnected';
+  const queueSummary = queueEnabled
+    ? inQueue
+      ? isMyTurn
+        ? 'Your turn is live'
+        : `Queue #${Math.max(myQueuePosition, 1)}`
+      : 'Join queue'
+    : 'Open controls';
   const canUseButton = useCallback((button: ControlButton) => {
     if (button.access === 'EVERYONE') return true;
     if (button.access === 'QUEUE_TURN') return isMyTurn;
@@ -1037,25 +1063,38 @@ export default function RobotView({ robot }: Props) {
   // ─── UI ───────────────────────────────────────────────────────────────────
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-4 sm:py-6">
+    <div className="safe-pb mx-auto max-w-7xl px-4 py-4 pb-28 sm:py-6 lg:pb-6">
       {/* Breadcrumb */}
       <div className="mb-4 flex flex-wrap items-center gap-2 text-sm text-[var(--muted-foreground)]">
         <Link href="/explore" className="hover:text-[var(--foreground)] transition-colors">Explore</Link>
         <span>/</span>
         <span className="max-w-full truncate text-[var(--foreground)]">{robot.name}</span>
-        <div className="ml-0 flex items-center gap-2 sm:ml-auto">
+        <div className="ml-0 flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 sm:ml-auto">
           <span className={`h-2 w-2 rounded-full ${connected ? 'bg-[var(--online)]' : 'bg-zinc-600'}`} />
           <span className="text-xs">
-            {connected ? `${viewers.length} viewer${viewers.length !== 1 ? 's' : ''}` : 'Disconnected'}
+            {viewerLabel}
           </span>
+        </div>
+      </div>
+
+      <div className="mb-5 grid grid-cols-2 gap-3 lg:hidden">
+        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 py-3">
+          <p className="text-[10px] uppercase tracking-[0.18em] text-[var(--muted-foreground)]">Status</p>
+          <p className="mt-2 text-sm font-semibold text-[var(--foreground)]">
+            {robotStatus.charAt(0) + robotStatus.slice(1).toLowerCase()}
+          </p>
+        </div>
+        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 py-3">
+          <p className="text-[10px] uppercase tracking-[0.18em] text-[var(--muted-foreground)]">Queue</p>
+          <p className="mt-2 text-sm font-semibold text-[var(--foreground)]">{queueSummary}</p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         {/* ─── Left column: video + controls ─── */}
-        <div className="lg:col-span-2 space-y-4">
+        <div className="space-y-4 lg:col-span-2">
           {/* Video */}
-          <div className="relative aspect-video overflow-hidden rounded-xl border border-[var(--border)] bg-black">
+          <div className="relative aspect-video overflow-hidden rounded-2xl border border-[var(--border)] bg-black shadow-[0_30px_80px_rgba(2,8,23,0.4)]">
             {(robot.accessMode === 'PASSWORD' || robot.accessMode === 'ALLOWED_USERS') && !roomAccessToken && !guestVideoAllowed ? (
               <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center text-[var(--muted-foreground)]">
                 <div className="rounded-xl border border-[var(--border)] bg-[var(--muted)] p-3">
@@ -1118,7 +1157,7 @@ export default function RobotView({ robot }: Props) {
                 {isOnline ? (
                   <>
                     <div className="rounded-xl border border-[var(--border)] bg-[var(--muted)] p-3">
-                      <Radio className="h-7 w-7 text-violet-300" />
+                      <Radio className="h-7 w-7 text-sky-300" />
                     </div>
                     {videoState === 'loading' || videoState === 'idle' ? (
                       <p className="text-sm">Connecting to video stream...</p>
@@ -1163,7 +1202,7 @@ export default function RobotView({ robot }: Props) {
           {/* Focus toggles */}
           <div className="flex flex-wrap items-center gap-2">
             <button
-              onClick={() => setFocusMode('controls')}
+              onClick={activateControlsPanel}
               className={`rounded-lg px-3 py-2 text-xs font-semibold transition-all ${
                 focusMode === 'controls'
                   ? 'bg-[var(--primary)] text-white'
@@ -1176,7 +1215,7 @@ export default function RobotView({ robot }: Props) {
               </span>
             </button>
             <button
-              onClick={() => { setFocusMode('chat'); setTimeout(() => chatInputRef.current?.focus(), 50); }}
+              onClick={activateChatPanel}
               className={`rounded-lg px-3 py-2 text-xs font-semibold transition-all ${
                 focusMode === 'chat'
                   ? 'bg-[var(--primary)] text-white'
@@ -1190,6 +1229,7 @@ export default function RobotView({ robot }: Props) {
 
           {/* Controls panel */}
           <div
+            ref={controlsPanelRef}
             className={`rounded-xl border p-5 transition-colors ${
               focusMode === 'controls'
                 ? 'border-[var(--primary)]/50 bg-[var(--card)]'
@@ -1207,7 +1247,7 @@ export default function RobotView({ robot }: Props) {
 
             <div className="flex flex-col gap-5 sm:flex-row sm:flex-wrap sm:items-start">
               {/* D-pad layout */}
-              <div className="mx-auto grid grid-cols-3 grid-rows-3 gap-1 sm:mx-0">
+              <div className="mx-auto grid grid-cols-3 grid-rows-3 gap-2 sm:mx-0">
                 {/* Row 1: top-center = W */}
                 <div />
                 {(['w'] as const).map((k) => {
@@ -1219,10 +1259,12 @@ export default function RobotView({ robot }: Props) {
                       key={k}
                       label={btn?.icon ?? k.toUpperCase()}
                       hotKey={k}
+                      command={cmd}
                       isDown={isDown}
                       isCrowd={isCrowdActive(cmd)}
                       disabled={Boolean(btn) && (btn ? !canUseButton(btn) : true)}
                       onPress={() => sendCommand(cmd, btn?.cooldownMs)}
+                      onRelease={sendImmediateStop}
                     />
                   );
                 })}
@@ -1238,10 +1280,12 @@ export default function RobotView({ robot }: Props) {
                       key={k}
                       label={btn?.icon ?? k.toUpperCase()}
                       hotKey={k}
+                      command={cmd}
                       isDown={isDown}
                       isCrowd={isCrowdActive(cmd)}
                       disabled={Boolean(btn) && (btn ? !canUseButton(btn) : true)}
                       onPress={() => sendCommand(cmd, btn?.cooldownMs)}
+                      onRelease={sendImmediateStop}
                     />
                   );
                 })}
@@ -1257,9 +1301,9 @@ export default function RobotView({ robot }: Props) {
                   .map((btn) => (
                     <button
                       key={btn.id}
-                      onMouseDown={() => sendCommand(btn.command, btn.cooldownMs)}
+                      onPointerDown={() => sendCommand(btn.command, btn.cooldownMs)}
                       style={btn.color ? { borderColor: btn.color, color: btn.color } : undefined}
-                      className={`flex min-h-11 min-w-[2.75rem] items-center justify-center gap-1 rounded-lg border px-3 py-2 text-sm font-bold transition select-none ${
+                      className={`flex min-h-12 min-w-[3.25rem] items-center justify-center gap-1 rounded-xl border px-3 py-2 text-sm font-bold transition select-none ${
                         isCrowdActive(btn.command)
                           ? 'border-amber-500 bg-amber-500/20 text-amber-300'
                           : 'border-[var(--border)] bg-[var(--muted)] hover:bg-[var(--primary)] hover:border-[var(--primary)] hover:text-white'
@@ -1277,8 +1321,8 @@ export default function RobotView({ robot }: Props) {
               {/* E-STOP */}
               {canUseEStop && (
                 <button
-                  onMouseDown={triggerEStop}
-                  className="flex h-14 w-full max-w-[10rem] flex-col items-center justify-center rounded-xl bg-[var(--destructive)] text-xs font-black text-white shadow-lg shadow-red-500/20 transition hover:brightness-110 active:scale-95 select-none sm:w-24"
+                  onPointerDown={triggerEStop}
+                  className="flex h-14 w-full max-w-[12rem] flex-col items-center justify-center rounded-xl bg-[var(--destructive)] text-xs font-black text-white shadow-lg shadow-red-500/20 transition hover:brightness-110 active:scale-95 select-none sm:w-28"
                 >
                     <AlertTriangle className="h-4 w-4" />
                   E-STOP
@@ -1336,13 +1380,13 @@ export default function RobotView({ robot }: Props) {
             <div className="mt-3 grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
               <div className="rounded-lg bg-[var(--background)] px-2 py-1.5 text-[var(--muted-foreground)]">
                 <span className="inline-flex items-center gap-1 text-[var(--foreground)]">
-                  <Video className="h-3.5 w-3.5 text-violet-300" />
+                  <Video className="h-3.5 w-3.5 text-sky-300" />
                   Live stream
                 </span>
               </div>
               <div className="rounded-lg bg-[var(--background)] px-2 py-1.5 text-[var(--muted-foreground)]">
                 <span className="inline-flex items-center gap-1 text-[var(--foreground)]">
-                  <Gamepad2 className="h-3.5 w-3.5 text-violet-300" />
+                  <Gamepad2 className="h-3.5 w-3.5 text-sky-300" />
                   Queue control
                 </span>
               </div>
@@ -1475,6 +1519,7 @@ export default function RobotView({ robot }: Props) {
 
           {/* Chat */}
           <div
+            ref={chatPanelRef}
             className={`rounded-xl border p-4 transition-colors ${
               focusMode === 'chat' ? 'border-[var(--primary)]/50 bg-[var(--card)]' : 'border-[var(--border)] bg-[var(--card)]'
             }`}
@@ -1491,7 +1536,7 @@ export default function RobotView({ robot }: Props) {
                   container.scrollHeight - container.scrollTop - container.clientHeight;
                 chatShouldStickRef.current = distanceFromBottom < 80;
               }}
-              className="mb-2 h-52 overflow-y-auto rounded-lg bg-[var(--background)] px-2 py-1.5 text-sm sm:h-44"
+                className="mb-2 h-64 overflow-y-auto rounded-lg bg-[var(--background)] px-2 py-1.5 text-sm sm:h-52"
             >
               <div className="flex min-h-full flex-col justify-end gap-1.5">
                 {messages.map((msg, i) => (
@@ -1501,7 +1546,7 @@ export default function RobotView({ robot }: Props) {
                       msg.isSystem
                         ? 'border-[var(--border)] bg-[var(--muted)]/30'
                         : msg.userId === userId
-                          ? 'border-violet-500/25 bg-violet-500/7'
+                          ? 'border-sky-500/25 bg-sky-500/7'
                           : 'border-[var(--border)] bg-[var(--card)]/70'
                     }`}
                   >
@@ -1520,7 +1565,7 @@ export default function RobotView({ robot }: Props) {
                   ) : (
                     <div className="space-y-1">
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="text-xs font-semibold text-violet-400">{msg.username}</span>
+                        <span className="text-xs font-semibold text-sky-300">{msg.username}</span>
                         <span className="text-[10px] text-[var(--muted-foreground)]">
                           {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </span>
@@ -1602,6 +1647,56 @@ export default function RobotView({ robot }: Props) {
         </div>
 
       </div>
+
+      <div className="safe-bottom fixed inset-x-4 z-40 mx-auto flex max-w-xl items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--background)]/95 p-2 shadow-2xl shadow-black/40 backdrop-blur-md lg:hidden">
+        <button
+          type="button"
+          onClick={activateControlsPanel}
+          className={`flex-1 rounded-xl px-3 py-2 text-xs font-semibold transition ${
+            focusMode === 'controls' ? 'bg-[var(--primary)] text-white' : 'bg-[var(--card)] text-[var(--foreground)]'
+          }`}
+        >
+          Controls
+        </button>
+        <button
+          type="button"
+          onClick={activateChatPanel}
+          className={`flex-1 rounded-xl px-3 py-2 text-xs font-semibold transition ${
+            focusMode === 'chat' ? 'bg-[var(--primary)] text-white' : 'bg-[var(--card)] text-[var(--foreground)]'
+          }`}
+        >
+          Chat
+        </button>
+        {queueEnabled && (
+          accessToken ? (
+            <button
+              type="button"
+              onClick={() => void toggleQueue()}
+              className={`flex-1 rounded-xl px-3 py-2 text-xs font-semibold transition ${
+                inQueue ? 'bg-[var(--card)] text-amber-300' : 'bg-[var(--card)] text-[var(--foreground)]'
+              }`}
+            >
+              {inQueue ? `#${myQueuePosition || 1}` : 'Queue'}
+            </button>
+          ) : (
+            <Link
+              href="/login"
+              className="flex-1 rounded-xl bg-[var(--card)] px-3 py-2 text-center text-xs font-semibold text-[var(--foreground)]"
+            >
+              Sign in
+            </Link>
+          )
+        )}
+        {canUseEStop && (
+          <button
+            type="button"
+            onPointerDown={triggerEStop}
+            className="rounded-xl bg-[var(--destructive)] px-3 py-2 text-xs font-black text-white"
+          >
+            STOP
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -1611,24 +1706,33 @@ export default function RobotView({ robot }: Props) {
 function ControlKey({
   label,
   hotKey,
+  command,
   isDown,
   isCrowd,
   disabled,
   onPress,
+  onRelease,
 }: {
   label: string;
   hotKey: string;
+  command: string;
   isDown: boolean;
   isCrowd: boolean;
   disabled?: boolean;
   onPress: () => void;
+  onRelease?: () => void;
 }) {
+  const isMotionKey = ['forward', 'backward', 'left', 'right'].includes(command);
+
   return (
     <button
-      onMouseDown={disabled ? undefined : onPress}
+      onPointerDown={disabled ? undefined : onPress}
+      onPointerUp={disabled || !isMotionKey ? undefined : onRelease}
+      onPointerCancel={disabled || !isMotionKey ? undefined : onRelease}
+      onPointerLeave={disabled || !isMotionKey ? undefined : onRelease}
       title={hotKey.toUpperCase()}
       disabled={disabled}
-      className={`flex h-11 w-11 items-center justify-center rounded-lg border text-sm font-bold transition select-none ${
+      className={`flex h-16 w-16 touch-none items-center justify-center rounded-2xl border text-base font-bold transition select-none sm:h-14 sm:w-14 sm:rounded-xl sm:text-sm ${
         disabled
           ? 'cursor-not-allowed border-[var(--border)] bg-[var(--background)] text-[var(--muted-foreground)] opacity-50'
           : isDown

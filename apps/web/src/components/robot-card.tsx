@@ -48,7 +48,7 @@ export default function RobotCard({ robot }: Props) {
   return (
     <Link
       href={`/robot/${robot.slug}`}
-      className="group block overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] transition duration-200 hover:border-violet-500/40 hover:-translate-y-0.5"
+      className="group block overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] transition duration-200 hover:-translate-y-0.5 hover:border-sky-400/40"
     >
       {/* Thumbnail */}
       <div className="relative aspect-video overflow-hidden bg-[var(--muted)]">
@@ -95,7 +95,7 @@ export default function RobotCard({ robot }: Props) {
       <div className="p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h3 className="truncate text-base font-semibold text-[var(--foreground)] transition-colors group-hover:text-violet-400">
+            <h3 className="truncate text-base font-semibold text-[var(--foreground)] transition-colors group-hover:text-sky-300">
               {robot.name}
             </h3>
             <p className="mt-1 text-xs text-[var(--muted-foreground)]">

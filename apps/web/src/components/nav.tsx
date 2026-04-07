@@ -77,14 +77,14 @@ export default function Nav() {
     <header className="sticky top-0 z-50 border-b border-[var(--border)] bg-[var(--background)]/92 backdrop-blur-md">
       <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         {/* Logo */}
-        <Link href="/" className="flex items-center gap-2 font-bold text-lg tracking-tight">
+        <Link href="/" className="flex items-center gap-2 text-lg font-bold tracking-tight">
           <span
             className="flex h-7 w-7 items-center justify-center rounded-lg text-sm"
             style={{ background: 'var(--primary)' }}
           >
             <Zap className="h-4 w-4 text-white" />
           </span>
-          <span className="bg-gradient-to-r from-violet-400 to-purple-300 bg-clip-text text-transparent">
+          <span className="bg-gradient-to-r from-sky-300 via-cyan-200 to-emerald-300 bg-clip-text text-transparent">
             BotParty
           </span>
         </Link>
@@ -200,7 +200,7 @@ export default function Nav() {
       </div>
 
       {menuOpen && (
-        <div className="border-t border-[var(--border)] bg-[var(--background)] px-4 py-4 shadow-2xl shadow-black/30 sm:hidden">
+        <div className="safe-pb border-t border-[var(--border)] bg-[var(--background)] px-4 py-4 shadow-2xl shadow-black/30 sm:hidden">
           <nav className="flex flex-col gap-2">
             {navLinks.map((item) => (
               <Link

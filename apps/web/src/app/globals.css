@@ -5,11 +5,11 @@
   --foreground: #f4f4f5;
   --card: #121320;
   --card-foreground: #f4f4f5;
-  --primary: #7c3aed;
-  --primary-hover: #6d28d9;
+  --primary: #0f9fda;
+  --primary-hover: #0a88ba;
   --primary-foreground: #ffffff;
   --secondary: #1a1a2e;
-  --secondary-foreground: #c4b5fd;
+  --secondary-foreground: #b8ecff;
   --accent: #f59e0b;
   --accent-foreground: #09090b;
   --muted: #1f2030;
@@ -31,6 +31,7 @@
 
 html {
   -webkit-text-size-adjust: 100%;
+  scroll-padding-top: 5.5rem;
 }
 
 body {
@@ -54,6 +55,29 @@ input,
 select,
 textarea {
   -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+button,
+[role='button'],
+input,
+select,
+textarea {
+  min-height: 44px;
+}
+
+@supports (padding: max(0px)) {
+  body {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+.safe-pb {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+.safe-bottom {
+  bottom: max(1rem, env(safe-area-inset-bottom));
 }
 
 /* Scrollbar */
