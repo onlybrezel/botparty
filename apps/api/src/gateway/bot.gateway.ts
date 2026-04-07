@@ -56,6 +56,9 @@ interface CommandMetadata {
     username: string | null;
     role: string | null;
     isGuest: boolean;
+    isRobotOwner: boolean;
+    isSiteAdmin: boolean;
+    isSiteModerator: boolean;
   };
   robotId: string;
   source: 'gateway' | 'system';
@@ -470,7 +473,7 @@ export class BotGateway
         data: {
           command: data.command,
           value: data.value,
-          metadata: this._buildCommandMetadata(client, data.robotId),
+          metadata: this._buildCommandMetadata(client, data.robotId, robot.ownerId),
           userId: client.userId,
           // Use server timestamp for robot-side latency checks to avoid clock-skew false positives.
           timestamp: Date.now(),
@@ -535,6 +538,7 @@ export class BotGateway
       return;
     }
 
+    const robot = await this.robotsService.findById(data.robotId);
     const access = await this.robotsService.getAccessPolicy(data.robotId);
     if (access.chat === 'DISABLED') {
       client.send(
@@ -621,6 +625,10 @@ export class BotGateway
       }
     }
 
+    const isRobotOwner = Boolean(client.userId) && client.userId === robot.ownerId;
+    const isSiteAdmin = client.role === 'ADMIN';
+    const isSiteModerator = client.role === 'MOD' || client.role === 'MODERATOR';
+
     this._broadcastToRoom(data.robotId, WS_EVENTS.CHAT_MESSAGE, {
       userId: client.userId,
       username: client.username,
@@ -645,10 +653,13 @@ export class BotGateway
                 username: client.username ?? null,
                 role: client.role ?? null,
                 isGuest: Boolean(client.isGuest),
+                isRobotOwner,
+                isSiteAdmin,
+                isSiteModerator,
               },
               robotId: data.robotId,
             },
-            metadata: this._buildCommandMetadata(client, data.robotId),
+            metadata: this._buildCommandMetadata(client, data.robotId, robot.ownerId),
             timestamp: now,
           },
         }),
@@ -687,6 +698,9 @@ export class BotGateway
               username: 'system',
               role: 'SYSTEM',
               isGuest: false,
+              isRobotOwner: false,
+              isSiteAdmin: false,
+              isSiteModerator: false,
             },
             robotId,
             source: 'system',
@@ -1033,13 +1047,19 @@ export class BotGateway
     }
   }
 
-  private _buildCommandMetadata(client: WsClient, robotId: string): CommandMetadata {
+  private _buildCommandMetadata(client: WsClient, robotId: string, ownerId?: string | null): CommandMetadata {
+    const isRobotOwner = Boolean(ownerId) && Boolean(client.userId) && client.userId === ownerId;
+    const isSiteAdmin = client.role === 'ADMIN';
+    const isSiteModerator = client.role === 'MOD' || client.role === 'MODERATOR';
     return {
       user: {
         id: client.userId ?? null,
         username: client.username ?? null,
         role: client.role ?? null,
         isGuest: Boolean(client.isGuest),
+        isRobotOwner,
+        isSiteAdmin,
+        isSiteModerator,
       },
       robotId,
       source: 'gateway',
