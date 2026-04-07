@@ -393,6 +393,19 @@ export class BotGateway
       }
     }
 
+    if (Number.isFinite(data.timestamp)) {
+      const commandAgeMs = Date.now() - data.timestamp;
+      if (commandAgeMs > LIMITS.MAX_CONTROL_COMMAND_AGE_MS) {
+        client.send(
+          JSON.stringify({
+            event: 'error',
+            data: { message: 'Control command expired before reaching the server' },
+          }),
+        );
+        return;
+      }
+    }
+
     // Crowd input echo: broadcast to all viewers so they see button presses
     this._broadcastToRoom(
       data.robotId,
