@@ -82,6 +82,16 @@ type CameraTrackView = {
   trackName: string;
 };
 
+type VolumePreference = {
+  volume: number;
+  isMuted: boolean;
+};
+
+const DEFAULT_VOLUME_PREFERENCE: VolumePreference = {
+  volume: 100,
+  isMuted: false,
+};
+
 function formatStat(value: string | number | null | undefined, suffix = '') {
   if (value === null || value === undefined || value === '') {
     return 'n/a';
@@ -168,6 +178,28 @@ function buildCameraTracks(trackRefs: TrackReference[], streamConfig?: StreamCon
       }
       return left.order - right.order;
     });
+}
+
+function readVolumePreference(storageKey?: string | null): VolumePreference {
+  if (!storageKey || typeof window === 'undefined') {
+    return DEFAULT_VOLUME_PREFERENCE;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(storageKey);
+    if (!raw) {
+      return DEFAULT_VOLUME_PREFERENCE;
+    }
+
+    const parsed = JSON.parse(raw) as Partial<VolumePreference>;
+    return {
+      volume:
+        typeof parsed.volume === 'number' ? Math.max(0, Math.min(parsed.volume, 100)) : DEFAULT_VOLUME_PREFERENCE.volume,
+      isMuted: Boolean(parsed.isMuted),
+    };
+  } catch {
+    return DEFAULT_VOLUME_PREFERENCE;
+  }
 }
 
 function clampFloatingPosition(
@@ -342,9 +374,11 @@ function statsToClipboardText(stats: NerdStats | null) {
 function VideoRenderer({
   onStreamStalled,
   streamConfig,
+  volumeStorageKey,
 }: {
   onStreamStalled?: () => void;
   streamConfig?: StreamConfig;
+  volumeStorageKey?: string;
 }) {
   const tracks = useTracks([{ source: Track.Source.Camera, withPlaceholder: false }]);
   const audioTracks = useTracks([{ source: Track.Source.Microphone, withPlaceholder: false }]);
@@ -356,8 +390,8 @@ function VideoRenderer({
   const [history, setHistory] = useState<StatHistoryPoint[]>([]);
   const [panelPosition, setPanelPosition] = useState<PanelPosition | null>(null);
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
-  const [volume, setVolume] = useState(100);
-  const [isMuted, setIsMuted] = useState(false);
+  const [volume, setVolume] = useState(() => readVolumePreference(volumeStorageKey).volume);
+  const [isMuted, setIsMuted] = useState(() => readVolumePreference(volumeStorageKey).isMuted);
   const [showVolumeControls, setShowVolumeControls] = useState(false);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [previewTrayPosition, setPreviewTrayPosition] = useState<PanelPosition | null>(null);
@@ -495,6 +529,20 @@ function VideoRenderer({
       }
     }
   }, [robotAudioTracks, volume, isMuted]);
+
+  useEffect(() => {
+    if (!volumeStorageKey || typeof window === 'undefined') {
+      return;
+    }
+
+    window.localStorage.setItem(
+      volumeStorageKey,
+      JSON.stringify({
+        volume,
+        isMuted,
+      } satisfies VolumePreference),
+    );
+  }, [isMuted, volume, volumeStorageKey]);
 
   useEffect(() => {
     const connected = String(room.state).toLowerCase() === 'connected';
@@ -1087,9 +1135,10 @@ interface Props {
   livekitUrl: string;
   onStreamStalled?: () => void;
   streamConfig?: StreamConfig;
+  volumeStorageKey?: string;
 }
 
-export function LiveKitPlayer({ token, livekitUrl, onStreamStalled, streamConfig }: Props) {
+export function LiveKitPlayer({ token, livekitUrl, onStreamStalled, streamConfig, volumeStorageKey }: Props) {
   return (
     <LiveKitRoom
       token={token}
@@ -1101,7 +1150,11 @@ export function LiveKitPlayer({ token, livekitUrl, onStreamStalled, streamConfig
     >
       {/* Render remote participant audio tracks into hidden audio elements. */}
       <RoomAudioRenderer />
-      <VideoRenderer onStreamStalled={onStreamStalled} streamConfig={streamConfig} />
+      <VideoRenderer
+        onStreamStalled={onStreamStalled}
+        streamConfig={streamConfig}
+        volumeStorageKey={volumeStorageKey}
+      />
     </LiveKitRoom>
   );
 }

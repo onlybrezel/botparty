@@ -211,11 +211,13 @@ export class RobotsController {
 
     const token = await this.livekitService.generateRobotToken(robot.id, robot.name);
     const stream = await this.robotsService.getStreamPolicy(robot.id);
+    const ingress = await this.livekitService.ensureRobotWhipIngress(robot.id, robot.name);
 
     return {
       robotId: robot.id,
       token,
       livekitUrl: this.livekitService.getLivekitUrl(),
+      ingress,
       stream,
     };
   }

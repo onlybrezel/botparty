@@ -15,6 +15,9 @@ room:
   empty_timeout: 300       # 5 min
   max_participants: 1000
 
+ingress:
+  whip_base_url: https://botparty.live/whip
+
 # Recording (optional – enable for session recording)
 # webhook:
 #   urls:

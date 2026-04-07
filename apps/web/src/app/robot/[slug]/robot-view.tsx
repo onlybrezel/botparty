@@ -1040,18 +1040,19 @@ export default function RobotView({ robot }: Props) {
               : 'User unbanned.',
           'success',
         );
-      } catch {
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Moderation action failed.';
         setMessages((prev) => [
           ...prev.slice(-200),
           {
             userId: 'system',
             username: 'system',
-            content: 'Moderation action failed.',
+            content: message,
             timestamp: Date.now(),
             isSystem: true,
           },
         ]);
-        pushToast('Moderation action failed.', 'error');
+        pushToast(message, 'error');
       } finally {
         setModeratingUserId(null);
       }
@@ -1256,6 +1257,7 @@ export default function RobotView({ robot }: Props) {
                 token={livekitCreds.token}
                 livekitUrl={livekitCreds.url}
                 streamConfig={robot.metadata?.stream}
+                volumeStorageKey={`botparty:robot:${robot.id}:stream-volume`}
                 onStreamStalled={() => {
                   void refreshViewerToken(true);
                 }}

@@ -1,6 +1,18 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { AccessToken, RoomServiceClient } from 'livekit-server-sdk';
+import { AccessToken, IngressClient, IngressInput, RoomServiceClient } from 'livekit-server-sdk';
+import type { IngressInfo } from '@livekit/protocol';
+
+type RobotWhipIngress = {
+  type: 'WHIP';
+  ingressId: string;
+  url: string;
+  streamKey: string;
+  endpointUrl: string;
+  participantIdentity?: string;
+  participantName?: string;
+  enableTranscoding: boolean;
+};
 
 @Injectable()
 export class LivekitService {
@@ -9,12 +21,14 @@ export class LivekitService {
   private readonly apiSecret: string;
   private readonly livekitUrl: string;
   private readonly roomService: RoomServiceClient;
+  private readonly ingressService: IngressClient;
 
   constructor(private readonly config: ConfigService) {
     this.apiKey = config.getOrThrow<string>('LIVEKIT_API_KEY');
     this.apiSecret = config.getOrThrow<string>('LIVEKIT_API_SECRET');
     this.livekitUrl = config.getOrThrow<string>('LIVEKIT_URL');
     this.roomService = new RoomServiceClient(this.livekitUrl, this.apiKey, this.apiSecret);
+    this.ingressService = new IngressClient(this.livekitUrl, this.apiKey, this.apiSecret);
   }
 
   /**
@@ -82,5 +96,74 @@ export class LivekitService {
 
   async listParticipants(roomName: string) {
     return this.roomService.listParticipants(roomName);
+  }
+
+  async ensureRobotWhipIngress(
+    robotId: string,
+    robotName: string,
+  ): Promise<RobotWhipIngress | null> {
+    const roomName = `robot-${robotId}`;
+    const participantIdentity = `robot-media-${robotId}`;
+
+    try {
+      const existing = (await this.ingressService.listIngress({ roomName })).find(
+        (entry) =>
+          entry.inputType === IngressInput.WHIP_INPUT &&
+          entry.participantIdentity === participantIdentity,
+      );
+      if (existing) {
+        return this.mapRobotWhipIngress(existing);
+      }
+
+      const created = await this.ingressService.createIngress(IngressInput.WHIP_INPUT, {
+        name: `${robotName} Camera`,
+        roomName,
+        participantIdentity,
+        participantName: `${robotName} Camera`,
+        participantMetadata: JSON.stringify({
+          kind: 'robot-media',
+          robotId,
+        }),
+        enableTranscoding: false,
+      });
+
+      return this.mapRobotWhipIngress(created);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to provision WHIP ingress for robot ${robotId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return null;
+    }
+  }
+
+  private mapRobotWhipIngress(info: IngressInfo): RobotWhipIngress | null {
+    const ingressId = info.ingressId?.trim();
+    const url = info.url?.trim();
+    const streamKey = info.streamKey?.trim();
+    if (!ingressId || !url || !streamKey) {
+      return null;
+    }
+
+    return {
+      type: 'WHIP',
+      ingressId,
+      url,
+      streamKey,
+      endpointUrl: this.buildIngressEndpointUrl(url, streamKey),
+      participantIdentity: info.participantIdentity?.trim() || undefined,
+      participantName: info.participantName?.trim() || undefined,
+      enableTranscoding: Boolean(info.enableTranscoding),
+    };
+  }
+
+  private buildIngressEndpointUrl(baseUrl: string, streamKey: string): string {
+    const normalizedBase = baseUrl.trim().replace(/\/+$/, '');
+    const normalizedKey = streamKey.trim().replace(/^\/+/, '');
+    if (!normalizedKey || normalizedBase.endsWith(`/${normalizedKey}`)) {
+      return normalizedBase;
+    }
+    return `${normalizedBase}/${normalizedKey}`;
   }
 }

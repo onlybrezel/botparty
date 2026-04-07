@@ -320,8 +320,28 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (dto.action === ModerationActionType.UNBAN) {
+      const activeBan = await this.prisma.robotModerationEntry.findFirst({
+        where: {
+          robotId,
+          userId: dto.targetUserId,
+          isActive: true,
+          action: ModerationActionType.BAN,
+          OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      if (!activeBan) {
+        throw new BadRequestException('User is not currently banned');
+      }
+
       await this.prisma.robotModerationEntry.updateMany({
-        where: { robotId, userId: dto.targetUserId, isActive: true },
+        where: {
+          robotId,
+          userId: dto.targetUserId,
+          isActive: true,
+          action: ModerationActionType.BAN,
+        },
         data: { isActive: false },
       });
       const targetLabel = this._getTargetLabel(dto.targetUserId, target);
@@ -415,6 +435,11 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
     const targetLabel = this._getTargetLabel(dto.targetUserId, null);
 
     if (dto.action === ModerationActionType.UNBAN) {
+      const existing = await this._getGuestRestriction(robotId, dto.targetUserId);
+      if (!existing || existing.action !== ModerationActionType.BAN) {
+        throw new BadRequestException('User is not currently banned');
+      }
+
       await this.redis.del(key);
       await this.redis.publish(
         `ws:moderation:${robotId}`,
