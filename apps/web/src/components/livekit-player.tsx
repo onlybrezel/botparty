@@ -343,7 +343,7 @@ function VideoRenderer({
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
   const [volume, setVolume] = useState(100);
   const [isMuted, setIsMuted] = useState(false);
-  const [showVolumeControls, setShowVolumeControls] = useState(true);
+  const [showVolumeControls, setShowVolumeControls] = useState(false);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [selectedCameraId, setSelectedCameraId] = useState<string | null>(streamConfig?.activeCameraId ?? null);
   const hadTrackRef = useRef(false);
@@ -351,6 +351,7 @@ function VideoRenderer({
   const volumeHideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const publishedTracks = tracks.filter((track) => track.publication !== undefined) as TrackReference[];
   const cameraTracks = buildCameraTracks(publishedTracks, streamConfig);
+  const hasMultipleCameras = cameraTracks.length > 1;
   const cameraTrackIdsKey = cameraTracks.map((camera) => camera.id).join('|');
   const robotTrack =
     cameraTracks.find((camera) => camera.id === selectedCameraId)?.trackRef
@@ -735,14 +736,18 @@ function VideoRenderer({
         </div>
       )}
 
-      {previewTracks.length > 0 && (
-        <div className="absolute right-3 top-3 z-10 flex w-32 flex-col gap-2 sm:w-36">
+      {hasMultipleCameras && previewTracks.length > 0 && (
+        <div className="absolute right-3 top-3 z-10 flex w-28 flex-col gap-2 sm:w-32">
           {previewTracks.map((camera) => (
             <button
               key={camera.id}
               type="button"
               onClick={() => setSelectedCameraId(camera.id)}
-              className="group overflow-hidden rounded-xl border border-white/15 bg-black/45 text-left text-white shadow-lg backdrop-blur-sm transition hover:border-cyan-300/60"
+              className={`group overflow-hidden rounded-xl border bg-black/45 text-left text-white shadow-lg backdrop-blur-sm transition ${
+                selectedCameraId === camera.id
+                  ? 'border-cyan-300/70 ring-1 ring-cyan-300/40'
+                  : 'border-white/15 hover:border-cyan-300/60'
+              }`}
               aria-label={`Show ${camera.label}`}
               title={`Show ${camera.label}`}
             >
@@ -760,8 +765,31 @@ function VideoRenderer({
         </div>
       )}
 
+      {hasMultipleCameras && (
+        <div className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/15 bg-black/45 px-2 py-1.5 text-white backdrop-blur-sm">
+          {cameraTracks.map((camera) => (
+            <button
+              key={camera.id}
+              type="button"
+              onClick={() => setSelectedCameraId(camera.id)}
+              className={`rounded-full px-3 py-1 text-[11px] font-semibold transition ${
+                selectedCameraId === camera.id
+                  ? 'bg-cyan-300 text-slate-950'
+                  : 'bg-white/10 text-white hover:bg-white/20'
+              }`}
+              aria-label={`Switch to ${camera.label}`}
+              title={`Switch to ${camera.label}`}
+            >
+              {camera.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div
-        className="absolute bottom-3 left-3 z-10 flex items-center gap-2 rounded-full border border-white/15 bg-black/45 px-3 py-2 text-white backdrop-blur-sm"
+        className={`absolute bottom-3 z-10 flex items-center gap-2 rounded-full border border-white/15 bg-black/45 px-2.5 py-2 text-white backdrop-blur-sm ${
+          hasMultipleCameras ? 'right-3' : 'left-3'
+        }`}
         onPointerEnter={revealVolumeControls}
       >
         <button
@@ -770,7 +798,7 @@ function VideoRenderer({
             revealVolumeControls();
             setIsMuted((value) => !value);
           }}
-          className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20"
           aria-label={isMuted ? 'Unmute stream audio' : 'Mute stream audio'}
           title={isMuted ? 'Unmute' : 'Mute'}
         >
@@ -778,7 +806,7 @@ function VideoRenderer({
         </button>
         <div
           className={`flex items-center gap-2 overflow-hidden transition-all duration-200 ${
-            showVolumeControls ? 'max-w-40 opacity-100' : 'max-w-0 opacity-0'
+            showVolumeControls ? 'max-w-28 opacity-100 sm:max-w-32' : 'max-w-0 opacity-0'
           }`}
           aria-hidden={!showVolumeControls}
         >
@@ -796,11 +824,11 @@ function VideoRenderer({
                 setIsMuted(false);
               }
             }}
-            className="h-1.5 w-24 accent-cyan-300"
+            className="h-1.5 w-16 accent-cyan-300 sm:w-20"
             aria-label="Stream volume"
             title={`Volume ${volume}%`}
           />
-          <span className="min-w-10 text-right text-xs tabular-nums text-white/90">{isMuted ? 0 : volume}%</span>
+          <span className="min-w-8 text-right text-[11px] tabular-nums text-white/90">{isMuted ? 0 : volume}%</span>
         </div>
       </div>
 
