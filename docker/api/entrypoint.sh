@@ -1,6 +1,6 @@
 #!/bin/sh
 # BotParty API Entrypoint
-# Runs schema push + seed on every start (idempotent), then starts the API.
+# Runs schema push, seeds only for a fully empty database, then starts the API.
 set -e
 
 echo "════════════════════════════════════════"
@@ -18,8 +18,8 @@ echo "🔄 Pushing database schema..."
   2>&1 | sed 's/^/  /'
 echo "✅ Schema up to date"
 
-# 2. Seed demo data (upsert = idempotent)
-echo "🌱 Seeding demo data..."
+# 2. Seed demo data only when the database is completely empty
+echo "🌱 Checking whether initial seed is needed..."
 ./node_modules/.bin/tsx packages/prisma/seed.ts \
   2>&1 | sed 's/^/  /'
 

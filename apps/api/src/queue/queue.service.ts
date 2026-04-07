@@ -189,6 +189,10 @@ export class QueueService {
     await this.redis.publish(`queue:${robotId}`, JSON.stringify({ type: 'clear' }));
   }
 
+  async clearAllQueues() {
+    await this.prisma.queueEntry.deleteMany();
+  }
+
   private async getQueueOrderBy(robotId: string): Promise<Prisma.QueueEntryOrderByWithRelationInput[]> {
     const robot = await this.prisma.robot.findUnique({
       where: { id: robotId },

@@ -100,6 +100,7 @@ export class BotGateway
   ) {}
 
   async onModuleInit() {
+    await this.prismaRuntimeReset();
     this.subscriber = this.redis.duplicate();
 
     this.subscriber.on('pmessage', (_pattern, channel, message) => {
@@ -134,6 +135,7 @@ export class BotGateway
     if (client.isRobot && client.robotId) {
       this.robotClients.delete(client.robotId);
       void this.clearTurnState(client.robotId);
+      void this.queueService.clearQueue(client.robotId).catch(() => {});
       this.robotsService.updateStatus(client.robotId, 'OFFLINE').catch(() => {});
       this._broadcastToRoom(client.robotId, WS_EVENTS.ROBOT_STATUS, { status: 'OFFLINE' });
       this.logger.log(`Robot disconnected: ${client.robotId}`);
@@ -904,5 +906,20 @@ export class BotGateway
       robotId,
       source: 'gateway',
     };
+  }
+
+  private async prismaRuntimeReset() {
+    try {
+      await this.queueService.clearAllQueues();
+      await this.sessionsService.endAllActiveSessions();
+      this.activeTurns.clear();
+      for (const timer of this.turnTimeouts.values()) {
+        clearTimeout(timer);
+      }
+      this.turnTimeouts.clear();
+      this.logger.log('Cleared runtime queue/session state on API startup');
+    } catch (err) {
+      this.logger.error(`Failed to reset runtime state on startup: ${(err as Error).message}`);
+    }
   }
 }

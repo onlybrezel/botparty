@@ -177,6 +177,7 @@ export default function RobotView({ robot }: Props) {
   const livekitRefreshInFlightRef = useRef(false);
   const allowListAccessAttemptedRef = useRef(false);
   const previousRobotStatusRef = useRef(robot.status);
+  const initialChatScrollDoneRef = useRef(false);
 
   // ─── Fetch controls ────────────────────────────────────────────────────────
 
@@ -234,6 +235,7 @@ export default function RobotView({ robot }: Props) {
 
   useEffect(() => {
     api.getControls(robot.id).then(setControlButtons).catch(() => {});
+    initialChatScrollDoneRef.current = false;
     
     // Load chat history from localStorage
     try {
@@ -601,6 +603,9 @@ export default function RobotView({ robot }: Props) {
         if (status === 'OFFLINE') {
           setLivekitCreds(null);
           setVideoState('idle');
+          setQueue([]);
+          setActiveSession(null);
+          setInQueue(false);
         }
         break;
       }
@@ -804,6 +809,12 @@ export default function RobotView({ robot }: Props) {
   useEffect(() => {
     const container = chatScrollRef.current;
     if (!container) return;
+
+    if (!initialChatScrollDoneRef.current) {
+      container.scrollTop = container.scrollHeight;
+      initialChatScrollDoneRef.current = true;
+      return;
+    }
 
     const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
     const shouldStickToBottom = distanceFromBottom < 48;
@@ -1286,14 +1297,14 @@ export default function RobotView({ robot }: Props) {
               </div>
               <span
                 className={`mt-0.5 flex-shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
-                  robot.status === 'ONLINE'
+                  robotStatus === 'ONLINE'
                     ? 'bg-[var(--online)]/15 text-[var(--online)]'
-                    : robot.status === 'BUSY'
+                    : robotStatus === 'BUSY'
                     ? 'bg-amber-500/15 text-amber-400'
                     : 'bg-zinc-700/50 text-zinc-400'
                 }`}
               >
-                {robot.status.charAt(0) + robot.status.slice(1).toLowerCase()}
+                {robotStatus.charAt(0) + robotStatus.slice(1).toLowerCase()}
               </span>
             </div>
 
@@ -1455,21 +1466,22 @@ export default function RobotView({ robot }: Props) {
 
             <div
               ref={chatScrollRef}
-              className="mb-3 h-52 space-y-2 overflow-y-auto rounded-lg bg-[var(--background)] p-2 text-sm leading-relaxed"
+              className="mb-2 h-44 overflow-y-auto rounded-lg bg-[var(--background)] px-2 py-1.5 text-sm"
             >
-              {messages.map((msg, i) => (
-                <div
-                  key={i}
-                  className={`animate-fade-in rounded-lg border px-3 py-2 ${
-                    msg.isSystem
-                      ? 'border-[var(--border)] bg-[var(--muted)]/40'
-                      : msg.userId === userId
-                        ? 'border-violet-500/30 bg-violet-500/8'
-                        : 'border-[var(--border)] bg-[var(--card)]/80'
-                  }`}
-                >
+              <div className="flex min-h-full flex-col justify-end gap-1.5">
+                {messages.map((msg, i) => (
+                  <div
+                    key={i}
+                    className={`animate-fade-in rounded-md border px-2.5 py-1.5 ${
+                      msg.isSystem
+                        ? 'border-[var(--border)] bg-[var(--muted)]/30'
+                        : msg.userId === userId
+                          ? 'border-violet-500/25 bg-violet-500/7'
+                          : 'border-[var(--border)] bg-[var(--card)]/70'
+                    }`}
+                  >
                   {msg.isSystem ? (
-                    <div className="space-y-1">
+                    <div className="space-y-0.5">
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--muted-foreground)]">
                           System
@@ -1478,17 +1490,17 @@ export default function RobotView({ robot }: Props) {
                           {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </span>
                       </div>
-                      <p className="italic text-[var(--muted-foreground)]">{msg.content}</p>
+                      <p className="text-xs italic text-[var(--muted-foreground)]">{msg.content}</p>
                     </div>
                   ) : (
-                    <div className="space-y-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-semibold text-violet-400">{msg.username}</span>
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-xs font-semibold text-violet-400">{msg.username}</span>
                         <span className="text-[10px] text-[var(--muted-foreground)]">
                           {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </span>
                       </div>
-                      <p className="whitespace-pre-wrap break-words text-[var(--foreground)]/90">{msg.content}</p>
+                      <p className="whitespace-pre-wrap break-words text-xs text-[var(--foreground)]/90">{msg.content}</p>
                       {canModerate &&
                         msg.userId !== 'system' &&
                         msg.userId !== userId && (
@@ -1521,8 +1533,9 @@ export default function RobotView({ robot }: Props) {
                         )}
                     </div>
                   )}
-                </div>
-              ))}
+                  </div>
+                ))}
+              </div>
             </div>
 
             <div className="flex gap-2">
@@ -1547,12 +1560,12 @@ export default function RobotView({ robot }: Props) {
               <button
                 onClick={sendChat}
                 disabled={!chatInput.trim()}
-                className="rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-medium text-white transition-all hover:bg-[var(--primary-hover)] hover:shadow-lg hover:shadow-[var(--primary)]/25 active:scale-95 disabled:opacity-50 disabled:hover:shadow-none"
+                className="rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-medium text-white transition-all hover:bg-[var(--primary-hover)] active:scale-95 disabled:opacity-50"
               >
                 Send
               </button>
             </div>
-            <p className="mt-1 text-right text-xs text-[var(--muted-foreground)]">
+            <p className="mt-1 text-right text-[10px] text-[var(--muted-foreground)]">
               {chatInput.length}/300
             </p>
             {chatRestriction && (

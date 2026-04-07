@@ -90,6 +90,17 @@ export class SessionsService {
     return this.getActiveSessionUnsafe(robotId);
   }
 
+  async endAllActiveSessions() {
+    const now = new Date();
+    await this.prisma.session.updateMany({
+      where: { status: 'ACTIVE' },
+      data: {
+        status: 'ENDED',
+        endedAt: now,
+      },
+    });
+  }
+
   private async findByRobotUnsafe(robotId: string, limit = 50) {
     return this.prisma.session.findMany({
       where: { robotId },

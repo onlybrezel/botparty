@@ -76,6 +76,26 @@ async function ensureSeedRobot(input: {
 }
 
 async function main() {
+  const tableCounts = await prisma.$transaction([
+    prisma.user.count(),
+    prisma.robot.count(),
+    prisma.robotAllowedUser.count(),
+    prisma.transaction.count(),
+    prisma.session.count(),
+    prisma.queueEntry.count(),
+    prisma.chatMessage.count(),
+    prisma.swarmGroup.count(),
+    prisma.analyticsEvent.count(),
+    prisma.controlButton.count(),
+    prisma.robotModerationEntry.count(),
+  ]);
+  const totalRows = tableCounts.reduce((sum, value) => sum + value, 0);
+
+  if (totalRows > 0) {
+    console.log(`⏭️  Seed skipped: database is not empty (${totalRows} existing rows).`);
+    return;
+  }
+
   console.log('🌱 Seeding BotParty database...');
   const appUrl = process.env.APP_URL ?? 'https://botparty.live';
 
