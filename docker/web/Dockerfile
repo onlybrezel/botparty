@@ -61,7 +61,7 @@ RUN addgroup --system --gid 1001 nodejs && \
 #   .next/standalone/node_modules/        ← traced runtime deps
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/static     ./apps/web/.next/static
-RUN mkdir -p ./apps/web/public
+COPY --from=builder --chown=nextjs:nodejs /app/apps/web/public           ./apps/web/public
 
 USER nextjs
 EXPOSE 3000
