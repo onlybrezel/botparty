@@ -886,7 +886,7 @@ function VideoRenderer({
                 event.stopPropagation();
                 setSelectedCameraId(camera.id);
               }}
-              className="group overflow-hidden rounded-xl bg-black/35 text-left text-white shadow-lg backdrop-blur-sm transition hover:scale-[1.01]"
+              className="group relative overflow-hidden rounded-xl bg-black/35 text-left text-white shadow-lg backdrop-blur-sm transition hover:scale-[1.01]"
               aria-label={`Show ${camera.label}`}
               title={`Show ${camera.label}`}
             >
@@ -896,6 +896,9 @@ function VideoRenderer({
                   className="h-full w-full object-cover transition group-hover:scale-[1.02]"
                 />
               </div>
+              <span className="pointer-events-none absolute bottom-2 left-2 rounded-full border border-white/15 bg-black/60 px-2 py-0.5 text-[10px] font-semibold text-white backdrop-blur-sm">
+                {camera.label}
+              </span>
             </button>
           ))}
         </div>
