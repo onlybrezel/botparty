@@ -181,7 +181,7 @@ export class RobotsService {
             ? [{ name: 'asc' }, { createdAt: 'desc' }]
             : [{ isFeatured: 'desc' }, { viewerCount: 'desc' }, { createdAt: 'desc' }];
 
-    return this.prisma.robot.findMany({
+    const robots = await this.prisma.robot.findMany({
       where: {
         visibility: 'PUBLIC',
         ...(filters?.status && { status: filters.status as 'ONLINE' | 'OFFLINE' | 'BUSY' | 'MAINTENANCE' }),
@@ -209,6 +209,8 @@ export class RobotsService {
         },
       },
     });
+
+    return robots.map((robot) => this.toPublicRobot(robot));
   }
 
   async findBySlug(slug: string) {
@@ -224,7 +226,7 @@ export class RobotsService {
     });
     if (!robot) throw new NotFoundException('Robot not found');
     if (robot.visibility === 'PRIVATE') throw new NotFoundException('Robot not found');
-    return robot;
+    return this.toPublicRobot(robot);
   }
 
   async findById(id: string) {
@@ -374,7 +376,7 @@ export class RobotsService {
       throw new ForbiddenException('Not allowed to access this robot');
     }
 
-    return robot;
+    return this.toPublicRobot(robot);
   }
 
   async getAllowedUsers(robotId: string, ownerId: string): Promise<AllowedUserSummary[]> {
@@ -793,7 +795,7 @@ export class RobotsService {
   async getFeatured() {
     await this.refreshStaleStatus();
 
-    return this.prisma.robot.findMany({
+    const robots = await this.prisma.robot.findMany({
       where: { isFeatured: true, visibility: 'PUBLIC' },
       include: {
         owner: {
@@ -801,6 +803,8 @@ export class RobotsService {
         },
       },
     });
+
+    return robots.map((robot) => this.toPublicRobot(robot));
   }
 
   async getPublicOverview(): Promise<PublicRobotOverview> {
@@ -1221,5 +1225,67 @@ export class RobotsService {
       ...robot,
       accessPassword: null,
     };
+  }
+
+  private toPublicRobot<
+    T extends {
+      id: string;
+      name: string;
+      slug: string;
+      description: string | null;
+      thumbnailUrl: string | null;
+      status: string;
+      visibility: string;
+      accessMode: string;
+      queueMode: string;
+      maxTurnTime: number;
+      maxViewers: number;
+      maxControllers: number;
+      metadata: unknown;
+      tags: string[];
+      viewerCount: number;
+      createdAt: Date;
+      owner?: {
+        id: string;
+        username: string;
+        displayName: string | null;
+        avatarUrl: string | null;
+      };
+    },
+  >(robot: T) {
+    return {
+      id: robot.id,
+      name: robot.name,
+      slug: robot.slug,
+      description: robot.description,
+      thumbnailUrl: robot.thumbnailUrl,
+      status: robot.status,
+      visibility: robot.visibility,
+      accessMode: robot.accessMode,
+      queueMode: robot.queueMode,
+      maxTurnTime: robot.maxTurnTime,
+      maxViewers: robot.maxViewers,
+      maxControllers: robot.maxControllers,
+      metadata:
+        robot.metadata && typeof robot.metadata === 'object' && !Array.isArray(robot.metadata)
+          ? robot.metadata
+          : null,
+      tags: robot.tags,
+      viewerCount: robot.viewerCount,
+      owner: robot.owner
+        ? {
+            id: robot.owner.id,
+            username: robot.owner.username,
+            displayName: robot.owner.displayName,
+            avatarUrl: robot.owner.avatarUrl,
+          }
+        : {
+            id: '',
+            username: 'unknown',
+            displayName: null,
+            avatarUrl: null,
+          },
+      createdAt: robot.createdAt.toISOString(),
+    } as const;
   }
 }
