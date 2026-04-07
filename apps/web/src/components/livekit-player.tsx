@@ -765,27 +765,6 @@ function VideoRenderer({
         </div>
       )}
 
-      {hasMultipleCameras && (
-        <div className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/15 bg-black/45 px-2 py-1.5 text-white backdrop-blur-sm">
-          {cameraTracks.map((camera) => (
-            <button
-              key={camera.id}
-              type="button"
-              onClick={() => setSelectedCameraId(camera.id)}
-              className={`rounded-full px-3 py-1 text-[11px] font-semibold transition ${
-                selectedCameraId === camera.id
-                  ? 'bg-cyan-300 text-slate-950'
-                  : 'bg-white/10 text-white hover:bg-white/20'
-              }`}
-              aria-label={`Switch to ${camera.label}`}
-              title={`Switch to ${camera.label}`}
-            >
-              {camera.label}
-            </button>
-          ))}
-        </div>
-      )}
-
       <div
         className={`absolute bottom-3 z-10 flex items-center gap-2 rounded-full border border-white/15 bg-black/45 px-2.5 py-2 text-white backdrop-blur-sm ${
           hasMultipleCameras ? 'right-3' : 'left-3'
