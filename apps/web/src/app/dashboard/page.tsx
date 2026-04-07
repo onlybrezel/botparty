@@ -29,6 +29,7 @@ import { ControlButtonAccess as ControlButtonAccessEnum } from '@botparty/shared
 import { useAuth } from '@/lib/store';
 import { LiveKitPlayer } from '@/components/livekit-player';
 import { pushToast } from '@/lib/toast';
+import { Select } from '@/components/ui/select';
 
 type RemoteActionType = 'restart_video' | 'restart_control' | 'restart_chat' | 'set_log_stream';
 
@@ -1041,8 +1042,8 @@ export default function DashboardPage() {
                       onChange={(event) => setEditForm((prev) => ({ ...prev, name: event.target.value }))}
                       required
                     />
-                    <select
-                      className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                    <Select
+                      className="bg-[var(--background)]"
                       value={editForm.visibility}
                       onChange={(event) =>
                         setEditForm((prev) => ({ ...prev, visibility: event.target.value as RobotFormState['visibility'] }))
@@ -1051,9 +1052,9 @@ export default function DashboardPage() {
                       <option value="PUBLIC">Visibility: Public</option>
                       <option value="UNLISTED">Visibility: Unlisted (link only)</option>
                       <option value="PRIVATE">Visibility: Private</option>
-                    </select>
-                    <select
-                      className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                    </Select>
+                    <Select
+                      className="bg-[var(--background)]"
                       value={editForm.accessMode}
                       onChange={(event) =>
                         setEditForm((prev) => ({ ...prev, accessMode: event.target.value as RobotFormState['accessMode'] }))
@@ -1063,7 +1064,7 @@ export default function DashboardPage() {
                       <option value="PASSWORD">Room Access: Password</option>
                       <option value="LINK_ONLY">Room Access: Link only</option>
                       <option value="ALLOWED_USERS">Room Access: Allow list only</option>
-                    </select>
+                    </Select>
                     <input
                       type="password"
                       className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
@@ -1073,8 +1074,8 @@ export default function DashboardPage() {
                       }
                       placeholder="Room password (only used in password mode)"
                     />
-                    <select
-                      className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                    <Select
+                      className="bg-[var(--background)]"
                       value={editForm.queueMode}
                       onChange={(event) =>
                         setEditForm((prev) => ({ ...prev, queueMode: event.target.value as RobotFormState['queueMode'] }))
@@ -1083,7 +1084,7 @@ export default function DashboardPage() {
                       <option value="FIRST_COME">Queue: First come, first served</option>
                       <option value="VOTING">Queue: Voting</option>
                       <option value="DISABLED">Queue: Disabled</option>
-                    </select>
+                    </Select>
 
                     <AclPicker
                       title="Video Access"
@@ -1366,8 +1367,8 @@ export default function DashboardPage() {
                           setControlDraft((prev) => ({ ...prev, cooldownMs: event.target.value }))
                         }
                       />
-                      <select
-                        className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                      <Select
+                        className="bg-[var(--card)]"
                         value={controlDraft.access}
                         onChange={(event) =>
                           setControlDraft((prev) => ({
@@ -1381,7 +1382,7 @@ export default function DashboardPage() {
                             Access: {option.label}
                           </option>
                         ))}
-                      </select>
+                      </Select>
                       <input
                         className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
                         placeholder="Color (optional, e.g. #22c55e)"
@@ -1452,8 +1453,8 @@ export default function DashboardPage() {
                             value={controlEditDraft.cooldownMs}
                             onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, cooldownMs: event.target.value } : prev))}
                           />
-                          <select
-                            className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                          <Select
+                            className="bg-[var(--background)]"
                             value={controlEditDraft.access}
                             onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, access: event.target.value as ControlButtonAccess } : prev))}
                           >
@@ -1462,7 +1463,7 @@ export default function DashboardPage() {
                                 Access: {option.label}
                               </option>
                             ))}
-                          </select>
+                          </Select>
                           <input
                             className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                             placeholder="Color (optional, e.g. #22c55e)"

@@ -7,6 +7,7 @@ import { Shield, Search, Ban, Clock3, Trash2, RefreshCw, Activity, Server, Users
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/store';
 import { pushToast } from '@/lib/toast';
+import { Select } from '@/components/ui/select';
 
 type StaffUser = {
   id: string;
@@ -744,18 +745,18 @@ export default function ModDashboardPage() {
               <h3 className="text-base font-bold">Robot Runtime</h3>
               <p className="text-xs text-[var(--muted-foreground)]">Select one robot to inspect instead of rendering the full fleet list.</p>
             </div>
-            <select
+            <Select
               value={selectedRuntimeRobotId}
               onChange={(event) => setSelectedRuntimeRobotId(event.target.value)}
               disabled={(runtimeOverview?.robots ?? []).length === 0}
-              className="min-w-56 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm disabled:opacity-60"
+              className="min-w-56 bg-[var(--card)] disabled:opacity-60"
             >
               {(runtimeOverview?.robots ?? []).map((robot) => (
                 <option key={robot.id} value={robot.id}>
                   {robot.name}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
 
           {selectedRuntimeRobot ? (
@@ -911,16 +912,16 @@ export default function ModDashboardPage() {
                   <h2 className="text-lg font-bold">Profanity Log</h2>
                   <p className="text-sm text-[var(--muted-foreground)]">Recent blocked messages across the fleet.</p>
                 </div>
-                <select
+                <Select
                   value={selectedRobotId}
                   onChange={(event) => setSelectedRobotId(event.target.value || 'ALL')}
-                  className="ml-auto rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-1.5 text-sm"
+                  className="ml-auto bg-[var(--background)]"
                 >
                   <option value="ALL">All robots</option>
                   {(overview?.robots ?? []).map((robot) => (
                     <option key={robot.id} value={robot.id}>{robot.name}</option>
                   ))}
-                </select>
+                </Select>
               </div>
 
               <div className="grid gap-3 lg:grid-cols-2">
@@ -1071,16 +1072,16 @@ export default function ModDashboardPage() {
                 placeholder="Display name"
                 className="rounded border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-sm"
               />
-              <select
+              <Select
                 value={userDraft.role}
                 onChange={(event) => setUserDraft((prev) => (prev ? { ...prev, role: event.target.value as UserDraft['role'] } : prev))}
                 disabled={!viewerIsAdmin}
-                className="rounded border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                className="h-[38px] rounded border bg-[var(--card)] px-2 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <option value="USER">USER</option>
                 <option value="MOD">MOD</option>
                 <option value="ADMIN">ADMIN</option>
-              </select>
+              </Select>
               <input
                 value={userDraft.credits}
                 onChange={(event) => setUserDraft((prev) => (prev ? { ...prev, credits: event.target.value } : prev))}
@@ -1196,15 +1197,15 @@ export default function ModDashboardPage() {
                 placeholder="Name"
                 className="rounded border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-sm"
               />
-              <select
+              <Select
                 value={robotDraft.visibility}
                 onChange={(event) => setRobotDraft((prev) => (prev ? { ...prev, visibility: event.target.value as RobotDraft['visibility'] } : prev))}
-                className="rounded border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-sm"
+                className="h-[38px] rounded border bg-[var(--card)] px-2 py-1.5 text-sm"
               >
                 <option value="PUBLIC">PUBLIC</option>
                 <option value="UNLISTED">UNLISTED</option>
                 <option value="PRIVATE">PRIVATE</option>
-              </select>
+              </Select>
               <input
                 value={robotDraft.tags}
                 onChange={(event) => setRobotDraft((prev) => (prev ? { ...prev, tags: event.target.value } : prev))}

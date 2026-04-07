@@ -71,7 +71,6 @@ export default function Nav() {
     { href: '/', label: 'Home', active: pathname === '/' },
     { href: '/explore', label: 'Explore', active: isActive('/explore') },
     { href: '/leaderboard', label: 'Leaderboard', active: isActive('/leaderboard') },
-    { href: '/docs', label: 'Docs', active: isActive('/docs') },
   ];
 
   return (

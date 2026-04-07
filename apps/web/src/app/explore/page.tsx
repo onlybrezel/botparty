@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import type { PublicRobotOverview, RobotPublic } from '@botparty/shared';
 import RobotCard from '@/components/robot-card';
+import { Select } from '@/components/ui/select';
 import { Search, SlidersHorizontal, Bot } from 'lucide-react';
 
 export const metadata: Metadata = {
@@ -99,31 +100,31 @@ export default async function ExplorePage({
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto] sm:items-center">
             <label className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-3 text-sm text-[var(--muted-foreground)]">
               <SlidersHorizontal className="h-4 w-4 flex-shrink-0" />
-              <select
+              <Select
                 name="status"
                 defaultValue={params.status ?? ''}
-                className="w-full bg-transparent text-sm outline-none"
+                className="w-full border-0 bg-transparent px-0 py-0 pr-7 text-sm outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
               >
                 {STATUS_OPTIONS.map((o) => (
                   <option key={o.value} value={o.value}>
                     {o.label}
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
 
             <label className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-3 text-sm text-[var(--muted-foreground)]">
-              <select
+              <Select
                 name="sort"
                 defaultValue={params.sort ?? ''}
-                className="w-full bg-transparent text-sm outline-none"
+                className="w-full border-0 bg-transparent px-0 py-0 pr-7 text-sm outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
               >
                 {SORT_OPTIONS.map((o) => (
                   <option key={o.value} value={o.value}>
                     {o.label}
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
 
             <button
