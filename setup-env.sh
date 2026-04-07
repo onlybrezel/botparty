@@ -103,14 +103,14 @@ if [[ "$IS_LOCAL" == "y" ]]; then
   LIVEKIT_URL="ws://localhost:7880"
   LIVEKIT_EXT_URL="ws://localhost:7880"
   APP_URL="http://localhost:3000"
-  SMTP_HOST="localhost"
-  SMTP_PORT="1025"
+  SMTP_HOST=""
+  SMTP_PORT="587"
   SMTP_SECURE="false"
   SMTP_USER=""
   SMTP_PASSWORD=""
   SMTP_FROM="BotParty <no-reply@localhost>"
   CORS_ORIGIN="http://localhost:3000"
-  success "Using localhost defaults."
+  success "Using localhost defaults. SMTP is disabled unless you configure it manually."
   NGINX_CONF_VALUE=./docker/nginx/nginx.conf
 else
   ask DOMAIN "Your domain (e.g. botparty.live)"
@@ -319,7 +319,7 @@ echo ""
 if [[ "$IS_LOCAL" == "y" ]]; then
   echo "  Start everything:"
   echo ""
-  echo "    docker compose up -d postgres redis livekit mailpit"
+  echo "    docker compose up -d postgres redis livekit"
   echo "    pnpm dev"
   echo ""
   echo "  Or full Docker stack:"
@@ -329,7 +329,6 @@ if [[ "$IS_LOCAL" == "y" ]]; then
   echo "  Frontend:  http://localhost:3000"
   echo "  API:       http://localhost:4000"
   echo "  Swagger:   http://localhost:4000/docs"
-  echo "  Mailpit:   http://localhost:8025"
 else
   if [[ "${USE_SSL:-n}" == "y" ]]; then
     echo "  Once certificates are in place:"

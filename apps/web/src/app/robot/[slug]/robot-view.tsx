@@ -208,7 +208,7 @@ export default function RobotView({ robot }: Props) {
         return preferredName.trim();
       }
 
-      if (targetUserId === userId) {
+      if (targetUserId === currentViewerId) {
         return 'you';
       }
 
@@ -233,7 +233,7 @@ export default function RobotView({ robot }: Props) {
 
       return targetUserId.slice(0, 8);
     },
-    [activeSession, messages, queue, userId, viewers],
+    [activeSession, currentViewerId, messages, queue, viewers],
   );
 
   useEffect(() => {
@@ -653,7 +653,7 @@ export default function RobotView({ robot }: Props) {
   const sendCommand = useCallback(
     (command: string, cooldownMs = 150) => {
       if (robot.queueMode !== 'DISABLED') {
-        const myPos = userId ? queue.findIndex((entry) => entry.userId === userId) + 1 : 0;
+        const myPos = queue.findIndex((entry) => entry.userId === currentViewerId) + 1;
         const myTurn = myPos > 0 && myPos === 1;
         if (!myTurn) {
           const now = Date.now();
@@ -1030,7 +1030,7 @@ export default function RobotView({ robot }: Props) {
 
   const isOnline = robotStatus === 'ONLINE' || robotStatus === 'BUSY';
   const queueEnabled = robot.queueMode !== 'DISABLED';
-  const myQueuePosition = userId ? queue.findIndex((entry) => entry.userId === userId) + 1 : 0;
+  const myQueuePosition = queue.findIndex((entry) => entry.userId === currentViewerId) + 1;
   const isMyTurn = !queueEnabled || (myQueuePosition > 0 && myQueuePosition === 1);
   const viewerLabel = connected ? `${viewers.length} viewer${viewers.length !== 1 ? 's' : ''}` : 'Disconnected';
   const queueSummary = queueEnabled
@@ -1051,8 +1051,8 @@ export default function RobotView({ robot }: Props) {
       setInQueue(false);
       return;
     }
-    setInQueue(queue.some((entry) => entry.userId === userId));
-  }, [queue, userId]);
+    setInQueue(queue.some((entry) => entry.userId === currentViewerId));
+  }, [currentViewerId, queue]);
 
   useEffect(() => {
     if (!isMyTurn && activeMotionKeysRef.current.size > 0) {
@@ -1546,7 +1546,7 @@ export default function RobotView({ robot }: Props) {
                     className={`animate-fade-in rounded-md border px-2.5 py-1.5 ${
                       msg.isSystem
                         ? 'border-[var(--border)] bg-[var(--muted)]/30'
-                        : msg.userId === userId
+                        : msg.userId === currentViewerId
                           ? 'border-violet-500/25 bg-violet-500/7'
                           : 'border-[var(--border)] bg-[var(--card)]/70'
                     }`}
@@ -1574,7 +1574,7 @@ export default function RobotView({ robot }: Props) {
                       <p className="whitespace-pre-wrap break-words text-xs text-[var(--foreground)]/90">{msg.content}</p>
                       {canModerate &&
                         msg.userId !== 'system' &&
-                        msg.userId !== userId && (
+                        msg.userId !== currentViewerId && (
                           <div className="inline-flex flex-wrap items-center gap-1">
                             <button
                               type="button"

@@ -112,10 +112,10 @@ nvm use
 pnpm install
 ```
 
-Start the database, cache, LiveKit, and the local dev mail inbox:
+Start the database, cache, and LiveKit:
 
 ```bash
-docker compose up -d postgres redis livekit mailpit
+docker compose up -d postgres redis livekit
 ```
 
 Set up the environment (defaults work for local dev):
@@ -142,7 +142,6 @@ pnpm dev
 - API: http://localhost:4000
 - Swagger: http://localhost:4000/docs (dev only)
 - LiveKit: ws://localhost:7880
-- Mailpit inbox: http://localhost:8025
 
 ---
 
