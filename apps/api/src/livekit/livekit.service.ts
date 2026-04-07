@@ -20,6 +20,7 @@ export class LivekitService {
   private readonly apiKey: string;
   private readonly apiSecret: string;
   private readonly livekitUrl: string;
+  private readonly livekitServiceUrl: string;
   private readonly roomService: RoomServiceClient;
   private readonly ingressService: IngressClient;
 
@@ -27,8 +28,17 @@ export class LivekitService {
     this.apiKey = config.getOrThrow<string>('LIVEKIT_API_KEY');
     this.apiSecret = config.getOrThrow<string>('LIVEKIT_API_SECRET');
     this.livekitUrl = config.getOrThrow<string>('LIVEKIT_URL');
-    this.roomService = new RoomServiceClient(this.livekitUrl, this.apiKey, this.apiSecret);
-    this.ingressService = new IngressClient(this.livekitUrl, this.apiKey, this.apiSecret);
+    this.livekitServiceUrl = this.toLivekitServiceUrl(this.livekitUrl);
+    this.roomService = new RoomServiceClient(
+      this.livekitServiceUrl,
+      this.apiKey,
+      this.apiSecret,
+    );
+    this.ingressService = new IngressClient(
+      this.livekitServiceUrl,
+      this.apiKey,
+      this.apiSecret,
+    );
   }
 
   /**
@@ -135,6 +145,20 @@ export class LivekitService {
         }`,
       );
       return null;
+    }
+  }
+
+  private toLivekitServiceUrl(url: string): string {
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol === 'ws:') {
+        parsed.protocol = 'http:';
+      } else if (parsed.protocol === 'wss:') {
+        parsed.protocol = 'https:';
+      }
+      return parsed.toString().replace(/\/$/, '');
+    } catch {
+      return url;
     }
   }
 
