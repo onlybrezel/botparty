@@ -278,6 +278,9 @@ export class BotGateway
       this.robotClients.set(robot.id, client);
 
       await this.robotsService.updateStatus(robot.id, 'ONLINE');
+      const queue = await this.queueService.getQueue(robot.id);
+      await this.syncTurnLifecycle(robot.id, queue);
+      this._broadcastToRoomLocally(robot.id, WS_EVENTS.QUEUE_UPDATE, { queue });
       this._broadcastToRoom(robot.id, WS_EVENTS.ROBOT_STATUS, { status: 'ONLINE' });
       this.logger.log(`Robot claimed: ${robot.name} (${robot.id})`);
 
@@ -741,7 +744,7 @@ export class BotGateway
       return;
     }
 
-    if (!robotRealtimeOnline || robot.status === 'OFFLINE' || robot.status === 'MAINTENANCE') {
+    if (!robotRealtimeOnline || robot.status === 'MAINTENANCE') {
       if (current) {
         await this.clearTurnState(robotId, 'clear');
       }
