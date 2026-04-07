@@ -7,6 +7,7 @@ import {
   ParseUUIDPipe,
   UseGuards,
   Query,
+  BadRequestException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ModerationService } from './moderation.service';
@@ -60,6 +61,28 @@ export class ModerationController {
   @ApiOperation({ summary: 'Get runtime, host, and LiveKit overview for staff dashboard' })
   getAdminRuntimeOverview(@CurrentUser('sub') requesterId: string) {
     return this.moderationService.getAdminRuntimeOverview(requesterId);
+  }
+
+  @Post('admin/robot/:robotId/actions')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MOD)
+  @ApiOperation({ summary: 'Queue a remote robot action from the staff dashboard' })
+  enqueueStaffRobotAction(
+    @Param('robotId', ParseUUIDPipe) robotId: string,
+    @CurrentUser('sub') requesterId: string,
+    @Body()
+    body: {
+      type?: 'restart_video' | 'restart_control' | 'restart_chat' | 'update_client' | 'set_log_stream';
+      durationSec?: number;
+    },
+  ) {
+    if (!body.type) {
+      throw new BadRequestException('type is required');
+    }
+    return this.moderationService.enqueueStaffRobotAction(robotId, requesterId, {
+      type: body.type,
+      durationSec: body.durationSec,
+    });
   }
 
   @Get('admin/profanity-overview')

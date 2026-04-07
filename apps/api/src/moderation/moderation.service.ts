@@ -13,6 +13,7 @@ import { RedisService } from '../redis/redis.service';
 import { ModerateUserDto } from './moderation.dto';
 import { ModerationActionType, WS_EVENTS } from '@botparty/shared';
 import { LivekitService } from '../livekit/livekit.service';
+import { RobotsService, type RobotActionPayload } from '../robots/robots.service';
 
 type ContainerMetricAccumulator = {
   service: string;
@@ -256,6 +257,7 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
     private readonly redis: RedisService,
     private readonly livekit: LivekitService,
     private readonly config: ConfigService,
+    private readonly robotsService: RobotsService,
   ) {}
 
   onModuleInit() {
@@ -1034,6 +1036,22 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
       },
       robots: robotRuntime,
     };
+  }
+
+  async enqueueStaffRobotAction(
+    robotId: string,
+    requesterId: string,
+    payload: RobotActionPayload,
+  ) {
+    const requester = await this.prisma.user.findUnique({
+      where: { id: requesterId },
+      select: { role: true },
+    });
+    if (!requester || !this._isStaffRole(requester.role)) {
+      throw new ForbiddenException('Access denied');
+    }
+
+    return this.robotsService.enqueueActionForRobot(robotId, payload);
   }
 
   // ─── Helpers ────────────────────────────────────────────────────────────────

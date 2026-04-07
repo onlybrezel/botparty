@@ -504,6 +504,12 @@ export class RobotsService {
       throw new ForbiddenException('Not your robot');
     }
 
+    return this.enqueueActionForRobot(robotId, payload);
+  }
+
+  async enqueueActionForRobot(robotId: string, payload: RobotActionPayload) {
+    await this.findById(robotId);
+
     const key = `robot:actions:${robotId}`;
     const queued = await this.redis.lrange(key, 0, -1);
     const existing = queued

@@ -80,6 +80,26 @@ const formatUptime = (value: number | null | undefined) => {
   return `${minutes}m`;
 };
 
+const formatClientBuild = (
+  telemetry:
+    | {
+        clientVersion: string | null;
+        gitBranch: string | null;
+        gitCommit: string | null;
+        gitDirty: boolean;
+      }
+    | null
+    | undefined,
+) => {
+  if (!telemetry) return '-';
+  const parts: string[] = [];
+  if (telemetry.clientVersion) parts.push(`v${telemetry.clientVersion}`);
+  if (telemetry.gitBranch) parts.push(telemetry.gitBranch);
+  if (telemetry.gitCommit) parts.push(telemetry.gitCommit);
+  if (telemetry.gitDirty) parts.push('dirty');
+  return parts.length > 0 ? parts.join(' • ') : '-';
+};
+
 const statusClassName = (status: 'ONLINE' | 'OFFLINE' | 'BUSY' | 'MAINTENANCE') => {
   switch (status) {
     case 'ONLINE':
@@ -112,6 +132,7 @@ export default function ModDashboardPage() {
   const [userDraft, setUserDraft] = useState<UserDraft | null>(null);
   const [editingRobotId, setEditingRobotId] = useState<string | null>(null);
   const [robotDraft, setRobotDraft] = useState<RobotDraft | null>(null);
+  const [runtimeActionLoading, setRuntimeActionLoading] = useState<string | null>(null);
 
   useEffect(() => {
     if (!hasHydrated) {
@@ -174,6 +195,25 @@ export default function ModDashboardPage() {
     if (!runtimeOverview?.robots.length) return null;
     return runtimeOverview.robots.find((robot) => robot.id === selectedRuntimeRobotId) ?? runtimeOverview.robots[0] ?? null;
   }, [runtimeOverview, selectedRuntimeRobotId]);
+
+  const handleRuntimeRobotUpdate = async () => {
+    if (!accessToken || !selectedRuntimeRobot || runtimeActionLoading) return;
+
+    setRuntimeActionLoading(selectedRuntimeRobot.id);
+    try {
+      api.setToken(accessToken);
+      const result = await api.enqueueStaffRobotAction(selectedRuntimeRobot.id, { type: 'update_client' });
+      if (result.alreadyQueued) {
+        pushToast('Client update is already queued for this robot.', 'info', 2600);
+        return;
+      }
+      pushToast('Client update queued from mod runtime.', 'success', 2600);
+    } catch (err) {
+      pushToast(err instanceof Error ? err.message : 'Failed to queue client update.', 'error');
+    } finally {
+      setRuntimeActionLoading(null);
+    }
+  };
 
   const selectedUser = useMemo(
     () => users.find((user) => user.id === editingUserId) ?? null,
@@ -775,13 +815,26 @@ export default function ModDashboardPage() {
                   <p className="mt-1 text-xs text-[var(--muted-foreground)]">
                     /{selectedRuntimeRobot.slug} · owner {selectedRuntimeRobot.owner.displayName ?? selectedRuntimeRobot.owner.username}
                   </p>
+                  <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+                    Client {formatClientBuild(selectedRuntimeRobot.telemetry)} · Python {selectedRuntimeRobot.telemetry?.pythonVersion ?? '-'}
+                  </p>
                 </div>
-                <Link
-                  href={`/robot/${selectedRuntimeRobot.slug}`}
-                  className="rounded border border-sky-500/40 px-2 py-1 text-xs text-sky-300"
-                >
-                  Preview
-                </Link>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleRuntimeRobotUpdate()}
+                    disabled={runtimeActionLoading === selectedRuntimeRobot.id}
+                    className="rounded border border-emerald-500/40 px-2 py-1 text-xs text-emerald-300 disabled:opacity-60"
+                  >
+                    {runtimeActionLoading === selectedRuntimeRobot.id ? 'Queueing...' : 'Force Update'}
+                  </button>
+                  <Link
+                    href={`/robot/${selectedRuntimeRobot.slug}`}
+                    className="rounded border border-sky-500/40 px-2 py-1 text-xs text-sky-300"
+                  >
+                    Preview
+                  </Link>
+                </div>
               </div>
 
               <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
@@ -829,6 +882,17 @@ export default function ModDashboardPage() {
                 <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
                   <p className="text-[var(--muted-foreground)]">Uptime</p>
                   <p className="mt-1 text-sm font-semibold">{formatUptime(selectedRuntimeRobot.telemetry?.uptimeSec)}</p>
+                </div>
+              </div>
+
+              <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded border border-[var(--border)] px-3 py-2 text-xs xl:col-span-2">
+                  <p className="text-[var(--muted-foreground)]">Client Build</p>
+                  <p className="mt-1 text-sm font-semibold">{formatClientBuild(selectedRuntimeRobot.telemetry)}</p>
+                </div>
+                <div className="rounded border border-[var(--border)] px-3 py-2 text-xs xl:col-span-2">
+                  <p className="text-[var(--muted-foreground)]">Python</p>
+                  <p className="mt-1 text-sm font-semibold">{selectedRuntimeRobot.telemetry?.pythonVersion ?? '-'}</p>
                 </div>
               </div>
 

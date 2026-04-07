@@ -745,6 +745,19 @@ class ApiClient {
     });
   }
 
+  async enqueueStaffRobotAction(
+    robotId: string,
+    data: { type: 'restart_video' | 'restart_control' | 'restart_chat' | 'update_client' | 'set_log_stream'; durationSec?: number },
+  ) {
+    return this.request<{ id: string; type: string; createdAt: number; alreadyQueued?: boolean }>(
+      `/moderation/admin/robot/${robotId}/actions`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
   async getPendingRobotActions(robotId: string) {
     return this.request<{ robotId: string; actions: Array<{ id: string; type: string; createdAt: number }> }>(
       `/robots/${robotId}/actions/pending`,
