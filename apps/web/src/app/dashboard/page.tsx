@@ -1041,35 +1041,50 @@ export default function DashboardPage() {
 
                 <form onSubmit={handleSave} className="space-y-3">
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <input
-                      className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                      value={editForm.name}
-                      onChange={(event) => setEditForm((prev) => ({ ...prev, name: event.target.value }))}
-                      required
-                    />
-                    <Select
-                      className="bg-[var(--background)]"
-                      value={editForm.visibility}
-                      onChange={(event) =>
-                        setEditForm((prev) => ({ ...prev, visibility: event.target.value as RobotFormState['visibility'] }))
-                      }
-                    >
-                      <option value="PUBLIC">Visibility: Public</option>
-                      <option value="UNLISTED">Visibility: Unlisted (link only)</option>
-                      <option value="PRIVATE">Visibility: Private</option>
-                    </Select>
-                    <Select
-                      className="bg-[var(--background)]"
-                      value={editForm.accessMode}
-                      onChange={(event) =>
-                        setEditForm((prev) => ({ ...prev, accessMode: event.target.value as RobotFormState['accessMode'] }))
-                      }
-                    >
-                      <option value="OPEN">Room Access: Open</option>
-                      <option value="PASSWORD">Room Access: Password</option>
-                      <option value="LINK_ONLY">Room Access: Link only</option>
-                      <option value="ALLOWED_USERS">Room Access: Allow list only</option>
-                    </Select>
+                    <div className="space-y-1">
+                      <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
+                        Robot Name
+                      </label>
+                      <input
+                        className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                        value={editForm.name}
+                        onChange={(event) => setEditForm((prev) => ({ ...prev, name: event.target.value }))}
+                        required
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
+                        Visibility
+                      </label>
+                      <Select
+                        className="bg-[var(--background)]"
+                        value={editForm.visibility}
+                        onChange={(event) =>
+                          setEditForm((prev) => ({ ...prev, visibility: event.target.value as RobotFormState['visibility'] }))
+                        }
+                      >
+                        <option value="PUBLIC">Public</option>
+                        <option value="UNLISTED">Unlisted (link only)</option>
+                        <option value="PRIVATE">Private</option>
+                      </Select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
+                        Room Access
+                      </label>
+                      <Select
+                        className="bg-[var(--background)]"
+                        value={editForm.accessMode}
+                        onChange={(event) =>
+                          setEditForm((prev) => ({ ...prev, accessMode: event.target.value as RobotFormState['accessMode'] }))
+                        }
+                      >
+                        <option value="OPEN">Open</option>
+                        <option value="PASSWORD">Password</option>
+                        <option value="LINK_ONLY">Link only</option>
+                        <option value="ALLOWED_USERS">Allow list only</option>
+                      </Select>
+                    </div>
                     {editForm.accessMode === 'PASSWORD' ? (
                       <div className="space-y-1">
                         <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
@@ -1086,17 +1101,22 @@ export default function DashboardPage() {
                         />
                       </div>
                     ) : null}
-                    <Select
-                      className="bg-[var(--background)]"
-                      value={editForm.queueMode}
-                      onChange={(event) =>
-                        setEditForm((prev) => ({ ...prev, queueMode: event.target.value as RobotFormState['queueMode'] }))
-                      }
-                    >
-                      <option value="FIRST_COME">Queue: First come, first served</option>
-                      <option value="VOTING">Queue: Voting</option>
-                      <option value="DISABLED">Queue: Disabled</option>
-                    </Select>
+                    <div className="space-y-1">
+                      <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
+                        Queue Mode
+                      </label>
+                      <Select
+                        className="bg-[var(--background)]"
+                        value={editForm.queueMode}
+                        onChange={(event) =>
+                          setEditForm((prev) => ({ ...prev, queueMode: event.target.value as RobotFormState['queueMode'] }))
+                        }
+                      >
+                        <option value="FIRST_COME">First come, first served</option>
+                        <option value="VOTING">Voting</option>
+                        <option value="DISABLED">Disabled</option>
+                      </Select>
+                    </div>
 
                     <AclPicker
                       title="Video Access"
@@ -1153,50 +1173,32 @@ export default function DashboardPage() {
                         placeholder="e.g. 60000"
                       />
                     </div>
-                    <div className="space-y-1">
-                      <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
-                        Max Viewers
-                      </label>
-                      <input
-                        type="number"
-                        className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                        value={editForm.maxViewers}
-                        onChange={(event) =>
-                          setEditForm((prev) => ({ ...prev, maxViewers: Number(event.target.value) }))
-                        }
-                        placeholder="e.g. 1000"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
-                        Max Controllers
-                      </label>
-                      <input
-                        type="number"
-                        className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                        value={editForm.maxControllers}
-                        onChange={(event) =>
-                          setEditForm((prev) => ({ ...prev, maxControllers: Number(event.target.value) }))
-                        }
-                        placeholder="e.g. 10"
-                      />
-                    </div>
                   </div>
 
-                  <textarea
-                    className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                    rows={3}
-                    value={editForm.description}
-                    onChange={(event) => setEditForm((prev) => ({ ...prev, description: event.target.value }))}
-                    placeholder="Description"
-                  />
+                  <div className="space-y-1">
+                    <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
+                      Description
+                    </label>
+                    <textarea
+                      className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                      rows={3}
+                      value={editForm.description}
+                      onChange={(event) => setEditForm((prev) => ({ ...prev, description: event.target.value }))}
+                      placeholder="Describe your robot and how viewers should use it"
+                    />
+                  </div>
 
-                  <input
-                    className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                    value={editForm.tags}
-                    onChange={(event) => setEditForm((prev) => ({ ...prev, tags: event.target.value }))}
-                    placeholder="Tags (comma separated)"
-                  />
+                  <div className="space-y-1">
+                    <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
+                      Tags
+                    </label>
+                    <input
+                      className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                      value={editForm.tags}
+                      onChange={(event) => setEditForm((prev) => ({ ...prev, tags: event.target.value }))}
+                      placeholder="comma separated, e.g. rover, camera, claw"
+                    />
+                  </div>
 
                   <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
                     <p className="mb-2 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Claim Token</p>
