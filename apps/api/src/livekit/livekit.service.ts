@@ -122,6 +122,20 @@ export class LivekitService {
           entry.participantIdentity === participantIdentity,
       );
       if (existing) {
+        if (!existing.enableTranscoding) {
+          const updated = await this.ingressService.updateIngress(existing.ingressId, {
+            name: `${robotName} Camera`,
+            roomName,
+            participantIdentity,
+            participantName: `${robotName} Camera`,
+            participantMetadata: JSON.stringify({
+              kind: 'robot-media',
+              robotId,
+            }),
+            enableTranscoding: true,
+          });
+          return this.mapRobotWhipIngress(updated);
+        }
         return this.mapRobotWhipIngress(existing);
       }
 
@@ -134,7 +148,7 @@ export class LivekitService {
           kind: 'robot-media',
           robotId,
         }),
-        enableTranscoding: false,
+        enableTranscoding: true,
       });
 
       return this.mapRobotWhipIngress(created);

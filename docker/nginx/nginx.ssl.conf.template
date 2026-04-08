@@ -48,6 +48,10 @@ http {
         server host.docker.internal:7880;
     }
 
+    upstream livekit_ingress {
+        server livekit-ingress:8080;
+    }
+
     # ─── HTTP → HTTPS redirect ───────────────────────
     server {
         listen 80;
@@ -125,6 +129,20 @@ http {
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto https;
+        }
+
+        location = /whip {
+            return 308 /whip/;
+        }
+
+        location /whip/ {
+            proxy_pass http://livekit_ingress;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto https;
+            proxy_read_timeout 86400;
         }
 
         # ─── Swagger Docs ───────────────────────────
