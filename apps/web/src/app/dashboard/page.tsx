@@ -292,7 +292,7 @@ export default function DashboardPage() {
   }, [selectedRobot?.id, accessToken]);
 
   useEffect(() => {
-    if (!accessToken || !selectedRobot || selectedRobot.accessMode !== 'ALLOWED_USERS') {
+    if (!accessToken || !selectedRobot || editForm.accessMode !== 'ALLOWED_USERS') {
       setAllowedUsers([]);
       return;
     }
@@ -321,7 +321,7 @@ export default function DashboardPage() {
     return () => {
       active = false;
     };
-  }, [selectedRobot?.id, selectedRobot?.accessMode, accessToken]);
+  }, [selectedRobot?.id, editForm.accessMode, accessToken]);
 
   const refreshPreview = useCallback(async (forceRemount = false) => {
     if (!selectedRobot || !accessToken || selectedRobot.status !== 'ONLINE') {
@@ -1070,15 +1070,22 @@ export default function DashboardPage() {
                       <option value="LINK_ONLY">Room Access: Link only</option>
                       <option value="ALLOWED_USERS">Room Access: Allow list only</option>
                     </Select>
-                    <input
-                      type="password"
-                      className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                      value={editForm.accessPassword}
-                      onChange={(event) =>
-                        setEditForm((prev) => ({ ...prev, accessPassword: event.target.value }))
-                      }
-                      placeholder="Room password (only used in password mode)"
-                    />
+                    {editForm.accessMode === 'PASSWORD' ? (
+                      <div className="space-y-1">
+                        <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
+                          Room Password
+                        </label>
+                        <input
+                          type="password"
+                          className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                          value={editForm.accessPassword}
+                          onChange={(event) =>
+                            setEditForm((prev) => ({ ...prev, accessPassword: event.target.value }))
+                          }
+                          placeholder="Room password"
+                        />
+                      </div>
+                    ) : null}
                     <Select
                       className="bg-[var(--background)]"
                       value={editForm.queueMode}
@@ -1115,45 +1122,65 @@ export default function DashboardPage() {
                       onChange={(value) => setEditForm((prev) => ({ ...prev, aclEStop: value }))}
                     />
 
-                    <input
-                      type="number"
-                      min={150}
-                      max={3000}
-                      className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                      value={editForm.targetBitrateKbps}
-                      onChange={(event) =>
-                        setEditForm((prev) => ({ ...prev, targetBitrateKbps: event.target.value }))
-                      }
-                      placeholder="Target bitrate (kbps), e.g. 1800"
-                    />
+                    <div className="space-y-1">
+                      <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
+                        Target Bitrate (kbps)
+                      </label>
+                      <input
+                        type="number"
+                        min={150}
+                        max={3000}
+                        className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                        value={editForm.targetBitrateKbps}
+                        onChange={(event) =>
+                          setEditForm((prev) => ({ ...prev, targetBitrateKbps: event.target.value }))
+                        }
+                        placeholder="e.g. 1800"
+                      />
+                    </div>
 
-                    <input
-                      type="number"
-                      className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                      value={editForm.maxTurnTime}
-                      onChange={(event) =>
-                        setEditForm((prev) => ({ ...prev, maxTurnTime: Number(event.target.value) }))
-                      }
-                      placeholder="Max turn time in ms (e.g. 60000)"
-                    />
-                    <input
-                      type="number"
-                      className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                      value={editForm.maxViewers}
-                      onChange={(event) =>
-                        setEditForm((prev) => ({ ...prev, maxViewers: Number(event.target.value) }))
-                      }
-                      placeholder="Max viewers"
-                    />
-                    <input
-                      type="number"
-                      className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                      value={editForm.maxControllers}
-                      onChange={(event) =>
-                        setEditForm((prev) => ({ ...prev, maxControllers: Number(event.target.value) }))
-                      }
-                      placeholder="Max controllers"
-                    />
+                    <div className="space-y-1">
+                      <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
+                        Max Turn Time (ms)
+                      </label>
+                      <input
+                        type="number"
+                        className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                        value={editForm.maxTurnTime}
+                        onChange={(event) =>
+                          setEditForm((prev) => ({ ...prev, maxTurnTime: Number(event.target.value) }))
+                        }
+                        placeholder="e.g. 60000"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
+                        Max Viewers
+                      </label>
+                      <input
+                        type="number"
+                        className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                        value={editForm.maxViewers}
+                        onChange={(event) =>
+                          setEditForm((prev) => ({ ...prev, maxViewers: Number(event.target.value) }))
+                        }
+                        placeholder="e.g. 1000"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
+                        Max Controllers
+                      </label>
+                      <input
+                        type="number"
+                        className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                        value={editForm.maxControllers}
+                        onChange={(event) =>
+                          setEditForm((prev) => ({ ...prev, maxControllers: Number(event.target.value) }))
+                        }
+                        placeholder="e.g. 10"
+                      />
+                    </div>
                   </div>
 
                   <textarea
@@ -1288,7 +1315,7 @@ export default function DashboardPage() {
                     </div>
                   </div>
 
-                  {selectedRobot.accessMode === 'ALLOWED_USERS' && (
+                  {editForm.accessMode === 'ALLOWED_USERS' && (
                     <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
                       <div className="mb-3">
                         <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Allow List</p>
