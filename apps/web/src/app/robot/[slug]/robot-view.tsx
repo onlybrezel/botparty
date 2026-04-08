@@ -247,7 +247,45 @@ export default function RobotView({ robot }: Props) {
   );
 
   useEffect(() => {
-    api.getControls(robot.id).then(setControlButtons).catch(() => {});
+    let active = true;
+
+    const sameButton = (a: ControlButton, b: ControlButton) =>
+      a.id === b.id &&
+      a.label === b.label &&
+      a.command === b.command &&
+      a.hotKey === b.hotKey &&
+      a.icon === b.icon &&
+      a.cooldownMs === b.cooldownMs &&
+      a.access === b.access &&
+      a.position === b.position &&
+      a.color === b.color;
+
+    const syncControls = () => {
+      api.getControls(robot.id)
+        .then((next) => {
+          if (!active) return;
+          setControlButtons((prev) => {
+            if (prev.length === next.length && prev.every((entry, index) => sameButton(entry, next[index]!))) {
+              return prev;
+            }
+            return next;
+          });
+        })
+        .catch(() => {
+          // Keep last known buttons when refresh fails.
+        });
+    };
+
+    syncControls();
+    const timer = setInterval(syncControls, 3000);
+
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [robot.id]);
+
+  useEffect(() => {
     initialChatScrollDoneRef.current = false;
     chatShouldStickRef.current = true;
     
@@ -326,11 +364,9 @@ export default function RobotView({ robot }: Props) {
   // ─── Fetch LiveKit token (auth required) ──────────────────────────────────
 
   const refreshViewerToken = useCallback(async (forceRemount = false) => {
-    if (
-      (robot.accessMode === 'PASSWORD' || robot.accessMode === 'ALLOWED_USERS') &&
-      !roomAccessToken &&
-      !guestVideoAllowed
-    ) {
+    const passwordGateMissing = robot.accessMode === 'PASSWORD' && !roomAccessToken;
+    const allowlistGateMissing = robot.accessMode === 'ALLOWED_USERS' && !roomAccessToken && !accessToken;
+    if ((passwordGateMissing || allowlistGateMissing) && !guestVideoAllowed) {
       setLivekitCreds(null);
       setVideoState('idle');
       return;
@@ -467,7 +503,9 @@ export default function RobotView({ robot }: Props) {
   // ─── WebSocket ────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    if ((robot.accessMode === 'PASSWORD' || robot.accessMode === 'ALLOWED_USERS') && !roomAccessToken) {
+    const passwordGateMissing = robot.accessMode === 'PASSWORD' && !roomAccessToken;
+    const allowlistGateMissing = robot.accessMode === 'ALLOWED_USERS' && !roomAccessToken && !accessToken;
+    if (passwordGateMissing || allowlistGateMissing) {
       setConnected(false);
       wsRef.current?.close();
       return;
