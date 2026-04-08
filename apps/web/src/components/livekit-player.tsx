@@ -128,6 +128,20 @@ function readTrackName(trackRef: TrackReference) {
   return publication?.trackName ?? publication?.name ?? '';
 }
 
+function readParticipantIdentity(trackRef: TrackReference) {
+  const participant = trackRef.participant as { identity?: string; name?: string } | undefined;
+  const publication = trackRef.publication as {
+    participant?: { identity?: string; name?: string };
+  } | undefined;
+  return (
+    participant?.identity
+    ?? publication?.participant?.identity
+    ?? participant?.name
+    ?? publication?.participant?.name
+    ?? ''
+  );
+}
+
 function parseCameraIdFromTrackName(trackName: string) {
   const trimmed = trackName.trim();
   if (!trimmed) {
@@ -146,16 +160,51 @@ function parseCameraIdFromTrackName(trackName: string) {
   return null;
 }
 
+function parseCameraIdFromParticipantIdentity(identity: string) {
+  const trimmed = identity.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const robotMediaMatch = /^robot-media:[^:]+:(.+)$/.exec(trimmed);
+  if (robotMediaMatch) {
+    return robotMediaMatch[1];
+  }
+
+  return null;
+}
+
+function parseCameraIdFromParticipantLabel(
+  identityOrName: string,
+  configuredCameras: RobotStreamCameraConfig[] = [],
+) {
+  const normalized = identityOrName.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  const match = configuredCameras.find((camera) => {
+    const label = camera.label?.trim().toLowerCase();
+    const id = camera.id?.trim().toLowerCase();
+    return Boolean((label && normalized.endsWith(label)) || (id && normalized.endsWith(id)));
+  });
+
+  return match?.id ?? null;
+}
+
 function buildCameraTracks(trackRefs: TrackReference[], streamConfig?: StreamConfig): CameraTrackView[] {
   const configuredCameras = streamConfig?.cameras ?? [];
 
   return trackRefs
     .map((trackRef, index) => {
       const trackName = readTrackName(trackRef);
-      const parsedCameraId = parseCameraIdFromTrackName(trackName);
+      const participantIdentity = readParticipantIdentity(trackRef);
+      const parsedCameraId =
+        parseCameraIdFromTrackName(trackName)
+        ?? parseCameraIdFromParticipantIdentity(participantIdentity)
+        ?? parseCameraIdFromParticipantLabel(participantIdentity, configuredCameras);
       const configured =
-        (parsedCameraId ? configuredCameras.find((camera) => camera.id === parsedCameraId) : undefined)
-        ?? configuredCameras[index];
+        (parsedCameraId ? configuredCameras.find((camera) => camera.id === parsedCameraId) : undefined);
       const id = configured?.id ?? parsedCameraId ?? `camera-${index + 1}`;
       const label = configured?.label?.trim() || prettifyCameraId(id);
       const role = configured?.role?.trim() || (index === 0 ? 'primary' : null);
@@ -375,10 +424,18 @@ function VideoRenderer({
   onStreamStalled,
   streamConfig,
   volumeStorageKey,
+  volume,
+  isMuted,
+  onVolumeChange,
+  onMutedChange,
 }: {
   onStreamStalled?: () => void;
   streamConfig?: StreamConfig;
   volumeStorageKey?: string;
+  volume: number;
+  isMuted: boolean;
+  onVolumeChange: (value: number) => void;
+  onMutedChange: (value: boolean | ((value: boolean) => boolean)) => void;
 }) {
   const tracks = useTracks([{ source: Track.Source.Camera, withPlaceholder: false }]);
   const audioTracks = useTracks([{ source: Track.Source.Microphone, withPlaceholder: false }]);
@@ -390,8 +447,6 @@ function VideoRenderer({
   const [history, setHistory] = useState<StatHistoryPoint[]>([]);
   const [panelPosition, setPanelPosition] = useState<PanelPosition | null>(null);
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
-  const [volume, setVolume] = useState(() => readVolumePreference(volumeStorageKey).volume);
-  const [isMuted, setIsMuted] = useState(() => readVolumePreference(volumeStorageKey).isMuted);
   const [showVolumeControls, setShowVolumeControls] = useState(false);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [previewTrayPosition, setPreviewTrayPosition] = useState<PanelPosition | null>(null);
@@ -519,16 +574,6 @@ function VideoRenderer({
       window.removeEventListener('keydown', onUserGesture);
     };
   }, [room]);
-
-  useEffect(() => {
-    const nextVolume = isMuted ? 0 : volume / 100;
-    for (const track of robotAudioTracks) {
-      const audioTrack = track.publication?.audioTrack as { setVolume?: (value: number) => void } | undefined;
-      if (typeof audioTrack?.setVolume === 'function') {
-        audioTrack.setVolume(nextVolume);
-      }
-    }
-  }, [robotAudioTracks, volume, isMuted]);
 
   useEffect(() => {
     if (!volumeStorageKey || typeof window === 'undefined') {
@@ -962,7 +1007,7 @@ function VideoRenderer({
           type="button"
           onClick={() => {
             revealVolumeControls();
-            setIsMuted((value) => !value);
+            onMutedChange((value) => !value);
           }}
           className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20"
           aria-label={isMuted ? 'Unmute stream audio' : 'Mute stream audio'}
@@ -985,9 +1030,9 @@ function VideoRenderer({
             onChange={(event) => {
               revealVolumeControls();
               const nextValue = Number(event.target.value);
-              setVolume(nextValue);
+              onVolumeChange(nextValue);
               if (nextValue > 0 && isMuted) {
-                setIsMuted(false);
+                onMutedChange(false);
               }
             }}
             className="h-1.5 w-16 accent-cyan-300 sm:w-20"
@@ -1139,6 +1184,9 @@ interface Props {
 }
 
 export function LiveKitPlayer({ token, livekitUrl, onStreamStalled, streamConfig, volumeStorageKey }: Props) {
+  const [volume, setVolume] = useState(() => readVolumePreference(volumeStorageKey).volume);
+  const [isMuted, setIsMuted] = useState(() => readVolumePreference(volumeStorageKey).isMuted);
+
   return (
     <LiveKitRoom
       token={token}
@@ -1149,11 +1197,15 @@ export function LiveKitPlayer({ token, livekitUrl, onStreamStalled, streamConfig
       className="relative h-full w-full"
     >
       {/* Render remote participant audio tracks into hidden audio elements. */}
-      <RoomAudioRenderer />
+      <RoomAudioRenderer volume={isMuted ? 0 : volume / 100} muted={isMuted} />
       <VideoRenderer
         onStreamStalled={onStreamStalled}
         streamConfig={streamConfig}
         volumeStorageKey={volumeStorageKey}
+        volume={volume}
+        isMuted={isMuted}
+        onVolumeChange={setVolume}
+        onMutedChange={setIsMuted}
       />
     </LiveKitRoom>
   );

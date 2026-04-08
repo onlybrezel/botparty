@@ -65,6 +65,41 @@ export class LivekitService {
     return await at.toJwt();
   }
 
+  async generateRobotPublisherTokens(
+    robotId: string,
+    robotName: string,
+    cameraIds: string[],
+  ): Promise<Record<string, string>> {
+    const roomName = `robot-${robotId}`;
+    const tokens: Record<string, string> = {};
+
+    for (const rawCameraId of cameraIds) {
+      const cameraId = rawCameraId.trim();
+      if (!cameraId) {
+        continue;
+      }
+
+      const label = cameraId.replace(/[._-]+/g, ' ').replace(/\b\w/g, (part) => part.toUpperCase());
+      const at = new AccessToken(this.apiKey, this.apiSecret, {
+        identity: `robot-media:${robotId}:${cameraId}`,
+        name: `${robotName} ${label}`.trim(),
+        ttl: '24h',
+      });
+
+      at.addGrant({
+        room: roomName,
+        roomJoin: true,
+        canPublish: true,
+        canSubscribe: false,
+        canPublishData: false,
+      });
+
+      tokens[cameraId] = await at.toJwt();
+    }
+
+    return tokens;
+  }
+
   /**
    * Generate a LiveKit token for a viewer/controller.
    * Viewers subscribe to video. Controllers can also send DataChannel commands.

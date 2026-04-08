@@ -198,7 +198,7 @@ export class RobotsController {
 
   @Post('claim')
   @ApiOperation({ summary: 'Claim a robot and get LiveKit token for hardware client' })
-  async claim(@Body() body: { claimToken?: string }) {
+  async claim(@Body() body: { claimToken?: string; publishCameraIds?: string[] }) {
     const claimToken = body.claimToken?.trim();
     if (!claimToken) {
       throw new BadRequestException('claimToken is required');
@@ -210,12 +210,21 @@ export class RobotsController {
     }
 
     const token = await this.livekitService.generateRobotToken(robot.id, robot.name);
+    const publishCameraIds = Array.isArray(body.publishCameraIds)
+      ? body.publishCameraIds
+          .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+          .filter(Boolean)
+      : [];
+    const publishTokens = publishCameraIds.length
+      ? await this.livekitService.generateRobotPublisherTokens(robot.id, robot.name, publishCameraIds)
+      : {};
     const stream = await this.robotsService.getStreamPolicy(robot.id);
     const ingress = await this.livekitService.ensureRobotWhipIngress(robot.id, robot.name);
 
     return {
       robotId: robot.id,
       token,
+      publishTokens,
       livekitUrl: this.livekitService.getLivekitUrl(),
       ingress,
       stream,
