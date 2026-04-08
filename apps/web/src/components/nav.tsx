@@ -92,6 +92,11 @@ export default function Nav() {
           <span className="bg-gradient-to-r from-violet-400 to-purple-300 bg-clip-text text-transparent">
             BotParty
           </span>
+          <span className="inline-flex items-center gap-1 pl-0.5">
+            <span className="rounded-full bg-gradient-to-r from-amber-500/20 to-orange-500/20 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-widest text-amber-300 border border-amber-500/30">
+              Alpha
+            </span>
+          </span>
         </Link>
 
         {/* Nav links */}
