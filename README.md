@@ -9,7 +9,7 @@ Spiritually inspired by LetsRobot.tv and Remo.tv. Built from scratch with a mode
 ## What works right now
 
 - **Live video** via LiveKit SFU (WebRTC) — ~150ms end-to-end on a decent connection
-- **Control commands** over WebSocket DataChannel — ~50ms round-trip locally
+- **Control commands** over the BotParty gateway WebSocket — ~50ms round-trip locally
 - **Queue system** — first-come-first-serve, configurable turn time
 - **Chat** — in-room messaging between the driver and viewers
 - **Crowd echo** — everyone sees button presses as they happen
@@ -38,7 +38,7 @@ Spiritually inspired by LetsRobot.tv and Remo.tv. Built from scratch with a mode
        ▼                   ▼
 ┌──────────────────────────────────┐
 │         LiveKit SFU              │
-│   (Video + DataChannel)          │
+│         (Video only)             │
 │   < 150ms video latency          │
 │   < 50ms control latency         │
 └──────────────┬───────────────────┘
@@ -47,8 +47,8 @@ Spiritually inspired by LetsRobot.tv and Remo.tv. Built from scratch with a mode
 ┌──────────────────────────┐
 │   Python Robot Client    │
 │   (Raspberry Pi/Jetson)  │
-│   Camera → LiveKit       │
-│   DataChannel → Motors   │
+│   Camera -> LiveKit      │
+│   Gateway -> Motors      │
 └──────────────────────────┘
 ```
 
@@ -99,7 +99,7 @@ botparty/
 ### Prerequisites
 - Node.js 24, pnpm 9.15+
 - Docker & Docker Compose
-- Python 3.11+ (robot client only)
+- Python 3.10+ (robot client only)
 
 Use `nvm use`, `asdf`, or `mise` before installing dependencies. This repository enforces the Node version from `.nvmrc` / `.node-version` and will fail installs on unsupported runtimes.
 
@@ -170,27 +170,18 @@ Important config values:
 **USB camera**: works out of the box (`device: "/dev/video0"`)
 
 **Pi Camera Module**:
-```bash
-sudo raspi-config  # Interface Options → Camera → Enable
-pip install picamera2
-# Set device: "picamera2" in config.yaml
-```
+- use the `ffmpeg_libcamera` video profile from the `botparty-client` docs
+- on current Raspberry Pi OS that is the supported camera-module path, not `device: "picamera2"`
 
-**Custom hardware** — subclass `BaseHandler`:
+**Custom hardware**:
+- copy `botparty_robot/hardware/hardware_custom_example.py` to `hardware_custom.py`
+- then set `hardware.type: "custom"` in `config.yaml`
+- current custom adapters subclass `BaseHardware`, not `BaseHandler`
 
-```python
-from botparty_robot.handlers import BaseHandler
-
-class MyRobot(BaseHandler):
-    def on_command(self, command, value=None):
-        if command == "forward":
-            # your motor code
-            pass
-
-    def emergency_stop(self):
-        # stop everything immediately
-        pass
-```
+For the current robot-client setup and config examples, use the docs in the `botparty-client` repo:
+- `/home/julien/workspace/botparty-client/README.md`
+- `/home/julien/workspace/botparty-client/docs/installation.md`
+- `/home/julien/workspace/botparty-client/docs/hardware/custom.md`
 
 ---
 
