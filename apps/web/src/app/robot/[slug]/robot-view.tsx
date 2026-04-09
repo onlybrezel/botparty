@@ -269,7 +269,7 @@ interface Props {
 
 export default function RobotView({ robot }: Props) {
   const searchParams = useSearchParams();
-  const { accessToken, userId, role } = useAuth();
+  const { accessToken, userId, role, hasHydrated } = useAuth();
 
   const [focusMode, setFocusMode] = useState<FocusMode>('controls');
   const [controlButtons, setControlButtons] = useState<ControlButton[]>([]);
@@ -316,6 +316,7 @@ export default function RobotView({ robot }: Props) {
   const activeMotionKeysRef = useRef<Set<string>>(new Set());
   const livekitRefreshInFlightRef = useRef(false);
   const allowListAccessAttemptedRef = useRef(false);
+  const linkOnlyAccessAttemptedRef = useRef(false);
   const previousRobotStatusRef = useRef(robot.status);
   const initialChatScrollDoneRef = useRef(false);
   const chatShouldStickRef = useRef(true);
@@ -443,6 +444,7 @@ export default function RobotView({ robot }: Props) {
       setRoomAccessToken(null);
       setAccessError(null);
       allowListAccessAttemptedRef.current = false;
+      linkOnlyAccessAttemptedRef.current = false;
       return;
     }
 
@@ -450,9 +452,11 @@ export default function RobotView({ robot }: Props) {
       const stored = window.sessionStorage.getItem(`botparty.room-access.${robot.id}`);
       setRoomAccessToken(stored);
       allowListAccessAttemptedRef.current = robot.accessMode === 'ALLOWED_USERS' && Boolean(stored);
+      linkOnlyAccessAttemptedRef.current = robot.accessMode === 'LINK_ONLY' && Boolean(stored);
     } catch {
       setRoomAccessToken(null);
       allowListAccessAttemptedRef.current = false;
+      linkOnlyAccessAttemptedRef.current = false;
     }
   }, [robot.accessMode, robot.id]);
 
@@ -494,7 +498,7 @@ export default function RobotView({ robot }: Props) {
   }, [accessLoading, accessToken, guestSessionId, robot.accessMode, robot.id, roomAccessToken]);
 
   useEffect(() => {
-    if (robot.accessMode !== 'LINK_ONLY' || roomAccessToken || accessLoading) {
+    if (robot.accessMode !== 'LINK_ONLY' || roomAccessToken || linkOnlyAccessAttemptedRef.current) {
       return;
     }
 
@@ -503,6 +507,7 @@ export default function RobotView({ robot }: Props) {
       return;
     }
 
+    linkOnlyAccessAttemptedRef.current = true;
     let active = true;
     setAccessLoading(true);
     setAccessError(null);
@@ -518,6 +523,7 @@ export default function RobotView({ robot }: Props) {
       })
       .catch((err) => {
         if (!active) return;
+        linkOnlyAccessAttemptedRef.current = false;
         setAccessError(err instanceof Error ? err.message : 'Invite access denied');
       })
       .finally(() => {
@@ -529,11 +535,16 @@ export default function RobotView({ robot }: Props) {
     return () => {
       active = false;
     };
-  }, [accessLoading, accessToken, guestSessionId, inviteCodeFromUrl, robot.accessMode, robot.id, roomAccessToken]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accessToken, guestSessionId, inviteCodeFromUrl, robot.accessMode, robot.id, roomAccessToken]);
 
   // ─── Fetch LiveKit token (auth required) ──────────────────────────────────
 
   const refreshViewerToken = useCallback(async (forceRemount = false) => {
+    if (!hasHydrated) {
+      return;
+    }
+
     const passwordGateMissing = robot.accessMode === 'PASSWORD' && !roomAccessToken;
     const allowlistGateMissing = robot.accessMode === 'ALLOWED_USERS' && !roomAccessToken && !accessToken;
     const linkGateMissing = robot.accessMode === 'LINK_ONLY' && !roomAccessToken;
@@ -579,7 +590,7 @@ export default function RobotView({ robot }: Props) {
     } finally {
       livekitRefreshInFlightRef.current = false;
     }
-  }, [accessToken, guestVideoAllowed, robot.accessMode, robot.id, roomAccessToken]);
+  }, [accessToken, guestVideoAllowed, hasHydrated, robot.accessMode, robot.id, roomAccessToken]);
 
   useEffect(() => {
     void refreshViewerToken(false);
