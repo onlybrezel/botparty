@@ -26,6 +26,7 @@ import { Role } from '@botparty/shared';
 import type { JwtPayload } from '@botparty/shared';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { extractBearerToken, getAccessCookieName, parseCookie } from '../auth/auth.cookies';
 
 @ApiTags('robots')
 @Controller('robots')
@@ -186,13 +187,15 @@ export class RobotsController {
   async verifyRoomAccess(
     @Param('id') id: string,
     @Headers('authorization') authorization?: string,
-    @Body() body?: { password?: string; guestSessionId?: string },
+    @Headers('cookie') cookieHeader?: string,
+    @Body() body?: { password?: string; guestSessionId?: string; inviteCode?: string },
   ) {
     return this.robotsService.issueRoomAccessGrant({
       robotId: id,
-      requesterUserId: this.resolveRequesterId(authorization),
+      requesterUserId: this.resolveRequesterId(authorization, cookieHeader),
       password: body?.password,
       guestSessionId: body?.guestSessionId,
+      inviteCode: body?.inviteCode,
     });
   }
 
@@ -357,8 +360,10 @@ export class RobotsController {
     return this.robotsService.getRobotTelemetry(id, user.sub);
   }
 
-  private resolveRequesterId(authorization?: string): string | null {
-    const token = authorization?.startsWith('Bearer ') ? authorization.slice('Bearer '.length).trim() : '';
+  private resolveRequesterId(authorization?: string, cookieHeader?: string): string | null {
+    const token =
+      extractBearerToken(authorization) ??
+      parseCookie(cookieHeader, getAccessCookieName(this.configService));
     if (!token) {
       return null;
     }

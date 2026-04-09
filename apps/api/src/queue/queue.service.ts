@@ -65,6 +65,9 @@ export class QueueService {
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
 
+    await this.removeVotingFootprint(robotId, userId);
+    await this.recomputeQueueVotes(robotId);
+
     // Publish queue update via Redis for real-time sync
     await this.redis.publish(`queue:${robotId}`, JSON.stringify({ type: 'join', entry }));
 
@@ -110,6 +113,9 @@ export class QueueService {
     if (!result.removed) {
       return result;
     }
+
+    await this.removeVotingFootprint(robotId, userId);
+    await this.recomputeQueueVotes(robotId);
 
     await this.redis.publish(`queue:${robotId}`, JSON.stringify({ type: 'leave', userId }));
     return result;
@@ -188,6 +194,17 @@ export class QueueService {
       throw new BadRequestException('You cannot vote for yourself');
     }
 
+    const robot = await this.prisma.robot.findUnique({
+      where: { id: robotId },
+      select: { queueMode: true },
+    });
+    if (!robot) {
+      throw new BadRequestException('Robot not found');
+    }
+    if (robot.queueMode !== 'VOTING') {
+      throw new BadRequestException('Voting is not enabled for this queue');
+    }
+
     const allowed = await this.robotsService.validateRoomAccess({
       robotId,
       actorId: voterUserId,
@@ -211,14 +228,17 @@ export class QueueService {
     }
 
     const cooldownKey = `queue:vote:${robotId}:${voterUserId}`;
-    const voteAllowed = await this.redis.set(cooldownKey, Date.now().toString(), 'EX', 4, 'NX');
+    const voteAllowed = await this.redis.set(cooldownKey, Date.now().toString(), 'EX', 5, 'NX');
     if (voteAllowed !== 'OK') {
       throw new ConflictException('Voting too fast. Please wait a moment.');
     }
 
-    const updated = await this.prisma.queueEntry.update({
+    await this.redis.hset(this.voteBallotKey(robotId), voterUserId, targetUserId);
+    await this.redis.expire(this.voteBallotKey(robotId), 12 * 60 * 60);
+    await this.recomputeQueueVotes(robotId);
+
+    const updated = await this.prisma.queueEntry.findUnique({
       where: { id: entry.id },
-      data: { votes: { increment: 1 } },
     });
 
     await this.redis.publish(`queue:${robotId}`, JSON.stringify({ type: 'vote', userId: targetUserId }));
@@ -227,6 +247,7 @@ export class QueueService {
 
   async clearQueue(robotId: string) {
     await this.prisma.queueEntry.deleteMany({ where: { robotId } });
+    await this.redis.del(this.voteBallotKey(robotId));
     await this.redis.publish(`queue:${robotId}`, JSON.stringify({ type: 'clear' }));
   }
 
@@ -245,5 +266,85 @@ export class QueueService {
     }
 
     return [{ isPriority: 'desc' }, { position: 'asc' }, { joinedAt: 'asc' }];
+  }
+
+  private voteBallotKey(robotId: string) {
+    return `queue:ballots:${robotId}`;
+  }
+
+  private async removeVotingFootprint(robotId: string, userId: string) {
+    const ballotKey = this.voteBallotKey(robotId);
+    const ballots = await this.redis.hgetall(ballotKey);
+    if (!Object.keys(ballots).length) {
+      return;
+    }
+
+    const pipeline = this.redis.pipeline();
+    pipeline.hdel(ballotKey, userId);
+
+    for (const [voterUserId, targetUserId] of Object.entries(ballots)) {
+      if (targetUserId === userId) {
+        pipeline.hdel(ballotKey, voterUserId);
+      }
+    }
+
+    await pipeline.exec();
+  }
+
+  private async recomputeQueueVotes(robotId: string) {
+    const robot = await this.prisma.robot.findUnique({
+      where: { id: robotId },
+      select: { queueMode: true },
+    });
+    if (!robot || robot.queueMode !== 'VOTING') {
+      await this.prisma.queueEntry.updateMany({
+        where: { robotId, votes: { not: 0 } },
+        data: { votes: 0 },
+      });
+      await this.redis.del(this.voteBallotKey(robotId));
+      return;
+    }
+
+    const entries = await this.prisma.queueEntry.findMany({
+      where: { robotId },
+      select: { id: true, userId: true, votes: true },
+    });
+    const queuedUserIds = new Set(entries.map((entry) => entry.userId));
+    const ballots = await this.redis.hgetall(this.voteBallotKey(robotId));
+    const nextVotes = new Map<string, number>();
+    const cleanupPipeline = this.redis.pipeline();
+    let hasCleanup = false;
+
+    for (const [voterUserId, targetUserId] of Object.entries(ballots)) {
+      const valid =
+        queuedUserIds.has(voterUserId) &&
+        queuedUserIds.has(targetUserId) &&
+        voterUserId !== targetUserId;
+      if (!valid) {
+        cleanupPipeline.hdel(this.voteBallotKey(robotId), voterUserId);
+        hasCleanup = true;
+        continue;
+      }
+
+      nextVotes.set(targetUserId, (nextVotes.get(targetUserId) ?? 0) + 1);
+    }
+
+    if (hasCleanup) {
+      await cleanupPipeline.exec();
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      for (const entry of entries) {
+        const voteCount = nextVotes.get(entry.userId) ?? 0;
+        if (entry.votes === voteCount) {
+          continue;
+        }
+
+        await tx.queueEntry.update({
+          where: { id: entry.id },
+          data: { votes: voteCount },
+        });
+      }
+    });
   }
 }

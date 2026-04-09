@@ -1,11 +1,9 @@
 'use client';
 
 import { create } from 'zustand';
-import { createJSONStorage, persist } from 'zustand/middleware';
 
 interface AuthState {
   accessToken: string | null;
-  refreshToken: string | null;
   username: string | null;
   userId: string | null;
   displayName: string | null;
@@ -16,61 +14,47 @@ interface AuthState {
 interface AuthActions {
   login: (data: {
     accessToken: string;
-    refreshToken: string;
     username: string;
     userId: string;
     displayName?: string | null;
     role?: 'ADMIN' | 'MOD' | 'USER' | null;
   }) => void;
   logout: () => void;
-  setAccessToken: (token: string) => void;
+  setAccessToken: (token: string | null) => void;
   setSession: (data: Partial<AuthState>) => void;
   setHasHydrated: (value: boolean) => void;
 }
 
-export const useAuth = create(
-  persist<AuthState & AuthActions>(
-    (set) => ({
+export const useAuth = create<AuthState & AuthActions>((set) => ({
+  accessToken: null,
+  username: null,
+  userId: null,
+  displayName: null,
+  role: null,
+  hasHydrated: false,
+
+  login: ({ accessToken, username, userId, displayName, role }) =>
+    set({
+      accessToken,
+      username,
+      userId,
+      displayName: displayName ?? null,
+      role: role ?? null,
+    }),
+
+  logout: () =>
+    set((state) => ({
       accessToken: null,
-      refreshToken: null,
       username: null,
       userId: null,
       displayName: null,
       role: null,
-      hasHydrated: false,
+      hasHydrated: state.hasHydrated,
+    })),
 
-      login: ({ accessToken, refreshToken, username, userId, displayName, role }) =>
-        set({
-          accessToken,
-          refreshToken,
-          username,
-          userId,
-          displayName: displayName ?? null,
-          role: role ?? null,
-        }),
+  setAccessToken: (token) => set({ accessToken: token }),
 
-      logout: () =>
-        set({
-          accessToken: null,
-          refreshToken: null,
-          username: null,
-          userId: null,
-          displayName: null,
-          role: null,
-        }),
+  setSession: (data) => set((state) => ({ ...state, ...data })),
 
-      setAccessToken: (token) => set({ accessToken: token }),
-
-      setSession: (data) => set((state) => ({ ...state, ...data })),
-
-      setHasHydrated: (value) => set({ hasHydrated: value }),
-    }),
-    {
-      name: 'botparty-auth',
-      storage: createJSONStorage(() => sessionStorage),
-      onRehydrateStorage: () => (state) => {
-        state?.setHasHydrated(true);
-      },
-    },
-  ),
-);
+  setHasHydrated: (value) => set({ hasHydrated: value }),
+}));

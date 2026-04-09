@@ -593,6 +593,32 @@ export default function DashboardPage() {
     }
   };
 
+  const buildRobotRoomHref = useCallback((robot: RobotManaged) => {
+    const inviteSuffix =
+      robot.accessMode === 'LINK_ONLY' && robot.inviteCode
+        ? `?invite=${encodeURIComponent(robot.inviteCode)}`
+        : '';
+    return `/robot/${robot.slug}${inviteSuffix}`;
+  }, []);
+
+  const copyInviteLink = async () => {
+    if (!selectedRobot || selectedRobot.accessMode !== 'LINK_ONLY' || !selectedRobot.inviteCode) {
+      return;
+    }
+
+    const href = buildRobotRoomHref(selectedRobot);
+    const fullUrl =
+      typeof window !== 'undefined' ? new URL(href, window.location.origin).toString() : href;
+    try {
+      await navigator.clipboard.writeText(fullUrl);
+      setStatus('Invite link copied to clipboard.');
+      pushToast('Invite link copied to clipboard.', 'success');
+    } catch {
+      setError('Clipboard permission denied. Copy invite link manually.');
+      pushToast('Clipboard access denied - please copy manually.', 'error');
+    }
+  };
+
   const runRobotAction = async (
     type: RemoteActionType,
     durationSec?: number,
@@ -1011,7 +1037,7 @@ export default function DashboardPage() {
                         )}
                       </div>
                       <a
-                        href={`/robot/${selectedRobot.slug}`}
+                        href={buildRobotRoomHref(selectedRobot)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-1 text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition"
@@ -1235,6 +1261,34 @@ export default function DashboardPage() {
                       </button>
                     </div>
                   </div>
+
+                  {selectedRobot.accessMode === 'LINK_ONLY' && selectedRobot.inviteCode && (
+                    <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
+                      <p className="mb-2 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Invite Link</p>
+                      <code className="block break-all text-xs text-[var(--foreground)]">
+                        {buildRobotRoomHref(selectedRobot)}
+                      </code>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={copyInviteLink}
+                          className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs"
+                        >
+                          <Copy className="h-3.5 w-3.5" />
+                          Copy invite link
+                        </button>
+                        <a
+                          href={buildRobotRoomHref(selectedRobot)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                          Open invite link
+                        </a>
+                      </div>
+                    </div>
+                  )}
 
                   <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
                     <p className="mb-2 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Remote Operations (Pi)</p>

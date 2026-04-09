@@ -23,6 +23,7 @@ import { RobotsService } from '../robots/robots.service';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import type { JwtPayload } from '@botparty/shared';
+import { extractBearerToken, getAccessCookieName, parseCookie } from '../auth/auth.cookies';
 
 @ApiTags('controls')
 @Controller('controls')
@@ -40,10 +41,11 @@ export class ControlsController {
   async getPublicButtons(
     @Param('robotId', ParseUUIDPipe) robotId: string,
     @Headers('authorization') authorization?: string,
+    @Headers('cookie') cookieHeader?: string,
     @Query('roomAccessToken') roomAccessToken?: string,
     @Query('guestSessionId') guestSessionId?: string,
   ) {
-    const requester = this.resolveRequester(authorization);
+    const requester = this.resolveRequester(authorization, cookieHeader);
     const actorId = requester?.sub ?? this.robotsService.resolveGuestActorId(guestSessionId);
     const access = await this.robotsService.getAccessPolicy(robotId);
     const hasRoomAccess =
@@ -130,10 +132,11 @@ export class ControlsController {
     return this.controlsService.reorder(robotId, dto, userId);
   }
 
-  private resolveRequester(authorization?: string): JwtPayload | null {
-    const token = authorization?.startsWith('Bearer ')
-      ? authorization.slice('Bearer '.length).trim()
-      : '';
+  private resolveRequester(authorization?: string, cookieHeader?: string): JwtPayload | null {
+    const token =
+      extractBearerToken(authorization) ??
+      parseCookie(cookieHeader, getAccessCookieName(this.configService)) ??
+      '';
     if (!token) {
       return null;
     }

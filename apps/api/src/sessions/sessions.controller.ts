@@ -6,6 +6,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { JwtPayload } from '@botparty/shared';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { extractBearerToken, getAccessCookieName, parseCookie } from '../auth/auth.cookies';
 
 @ApiTags('sessions')
 @Controller('sessions')
@@ -30,11 +31,16 @@ export class SessionsController {
     @Param('robotId') robotId: string,
     @Query('limit') limit?: string,
     @Headers('authorization') authorization?: string,
+    @Headers('cookie') cookieHeader?: string,
+    @Query('roomAccessToken') roomAccessToken?: string,
+    @Query('guestSessionId') guestSessionId?: string,
   ) {
     return this.sessionsService.findByRobotForRequester(
       robotId,
-      this.resolveRequesterId(authorization),
+      this.resolveRequesterId(authorization, cookieHeader),
       limit ? Number(limit) : 50,
+      roomAccessToken,
+      guestSessionId,
     );
   }
 
@@ -43,12 +49,22 @@ export class SessionsController {
   async getActiveSession(
     @Param('robotId') robotId: string,
     @Headers('authorization') authorization?: string,
+    @Headers('cookie') cookieHeader?: string,
+    @Query('roomAccessToken') roomAccessToken?: string,
+    @Query('guestSessionId') guestSessionId?: string,
   ) {
-    return this.sessionsService.getActiveSessionForRequester(robotId, this.resolveRequesterId(authorization));
+    return this.sessionsService.getActiveSessionForRequester(
+      robotId,
+      this.resolveRequesterId(authorization, cookieHeader),
+      roomAccessToken,
+      guestSessionId,
+    );
   }
 
-  private resolveRequesterId(authorization?: string) {
-    const token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
+  private resolveRequesterId(authorization?: string, cookieHeader?: string) {
+    const token =
+      extractBearerToken(authorization) ??
+      parseCookie(cookieHeader, getAccessCookieName(this.configService));
     if (!token) {
       return null;
     }

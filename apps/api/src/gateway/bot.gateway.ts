@@ -8,6 +8,7 @@ import {
   ConnectedSocket,
 } from '@nestjs/websockets';
 import { BeforeApplicationShutdown, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Server, WebSocket } from 'ws';
 import { WS_EVENTS, LIMITS, ControlButtonAccess } from '@botparty/shared';
@@ -18,6 +19,7 @@ import { QueueService } from '../queue/queue.service';
 import { RedisService } from '../redis/redis.service';
 import { ModerationService } from '../moderation/moderation.service';
 import { ControlsService } from '../controls/controls.service';
+import { getAccessCookieName, parseCookie } from '../auth/auth.cookies';
 import Redis from 'ioredis';
 
 interface WsClient extends WebSocket {
@@ -35,6 +37,8 @@ interface WsClient extends WebSocket {
   lastChatAt?: number;
   /** User role (for rate-limit tier) */
   role?: string;
+  cookieHeader?: string;
+  presenceJoinedAt?: number;
 }
 
 /** Lightweight presence record broadcast to the room */
@@ -65,6 +69,13 @@ interface CommandMetadata {
   source: 'gateway' | 'system';
 }
 
+type SharedPresenceSnapshot = {
+  viewerCount: number;
+  focusUserConnections: number;
+  presenceList: PresenceRecord[];
+  cleanedStaleEntries: boolean;
+};
+
 @WebSocketGateway({
   path: '/ws',
   cors: {
@@ -74,6 +85,9 @@ interface CommandMetadata {
 export class BotGateway
   implements OnGatewayConnection, OnGatewayDisconnect, OnModuleInit, OnModuleDestroy, BeforeApplicationShutdown
 {
+  private static readonly ROBOT_CLAIM_TTL_MS = 45_000;
+  private static readonly VIEWER_PRESENCE_TTL_SEC = 45;
+
   @WebSocketServer()
   server!: Server;
 
@@ -105,6 +119,7 @@ export class BotGateway
     private readonly moderationService: ModerationService,
     private readonly jwtService: JwtService,
     private readonly controlsService: ControlsService,
+    private readonly configService: ConfigService,
   ) {}
 
   async onModuleInit() {
@@ -177,8 +192,9 @@ export class BotGateway
     }
   }
 
-  handleConnection(client: WsClient) {
+  handleConnection(client: WsClient, request?: { headers?: { cookie?: string } }) {
     client.id = crypto.randomUUID();
+    client.cookieHeader = request?.headers?.cookie;
     this.clients.set(client.id, client);
     this.logger.debug(`Client connected: ${client.id}`);
   }
@@ -188,7 +204,7 @@ export class BotGateway
 
     // Leave the robot room
     if (client.watchingRobotId) {
-      this._leaveRoom(client);
+      void this._leaveRoom(client);
     }
 
     // If this was the robot hardware, mark offline
@@ -200,6 +216,7 @@ export class BotGateway
       }
 
       this.robotClients.delete(client.robotId);
+      void this.releaseRobotClaimLock(client.robotId, client.id);
       if (this.isShuttingDown) {
         this.logger.log(`Robot realtime socket closed during shutdown: ${client.robotId}`);
         return;
@@ -226,15 +243,11 @@ export class BotGateway
     },
   ) {
     if (client.watchingRobotId) {
-      this._leaveRoom(client);
+      await this._leaveRoom(client);
     }
 
     const providedAccessToken = data.accessToken?.trim();
-    const authPayload = this.resolveSocketUser(providedAccessToken);
-    if (providedAccessToken && !authPayload) {
-      client.send(JSON.stringify({ event: 'error', data: { message: 'Invalid session token' } }));
-      return;
-    }
+    const authPayload = this.resolveSocketUser(providedAccessToken, client.cookieHeader);
 
     client.watchingRobotId = data.robotId;
     const isGuest = !authPayload;
@@ -301,32 +314,46 @@ export class BotGateway
     if (!this.rooms.has(data.robotId)) this.rooms.set(data.robotId, new Set());
     this.rooms.get(data.robotId)!.add(client.id);
 
-    if (!this.presence.has(data.robotId)) this.presence.set(data.robotId, new Map());
-    this.presence.get(data.robotId)!.set(client.userId, {
-      userId: client.userId,
-      username: client.username,
-      joinedAt: Date.now(),
-    });
-
+    client.presenceJoinedAt = Date.now();
+    const presenceSnapshot = await this.refreshSharedPresenceState(client, data.robotId);
     this.robotsService
-      .setViewerCount(data.robotId, this.rooms.get(data.robotId)?.size ?? 0)
+      .setViewerCount(data.robotId, presenceSnapshot.viewerCount)
       .catch(() => {});
 
-    // Announce presence to room
-    this._broadcastToRoom(data.robotId, WS_EVENTS.PRESENCE_JOIN, {
-      userId: client.userId,
-      username: client.username,
-    }, client.id);
+    if (presenceSnapshot.focusUserConnections === 1) {
+      this._broadcastToRoom(data.robotId, WS_EVENTS.PRESENCE_JOIN, {
+        userId: client.userId,
+        username: client.username,
+      }, client.id);
+    }
 
     // Send full presence snapshot to the joining client
-    const presenceList = Array.from(this.presence.get(data.robotId)?.values() ?? []);
+    const presenceList = presenceSnapshot.presenceList;
     client.send(JSON.stringify({ event: WS_EVENTS.PRESENCE_UPDATE, data: { viewers: presenceList } }));
 
     if (pendingRestriction) {
       client.send(JSON.stringify({ event: pendingRestriction.event, data: pendingRestriction.data }));
     }
 
-    return { event: 'room:join', data: { ok: true, viewerCount: this.rooms.get(data.robotId)?.size ?? 0 } };
+    return { event: 'room:join', data: { ok: true, viewerCount: presenceSnapshot.viewerCount } };
+  }
+
+  @SubscribeMessage('room:ping')
+  async handleRoomPing(@ConnectedSocket() client: WsClient, @MessageBody() data: { robotId: string }) {
+    if (!client.watchingRobotId || client.watchingRobotId !== data.robotId || !client.userId) {
+      return;
+    }
+
+    const snapshot = await this.refreshSharedPresenceState(client, data.robotId);
+    this.robotsService
+      .setViewerCount(data.robotId, snapshot.viewerCount)
+      .catch(() => {});
+
+    if (snapshot.cleanedStaleEntries) {
+      this._broadcastToRoom(data.robotId, WS_EVENTS.PRESENCE_UPDATE, {
+        viewers: snapshot.presenceList,
+      });
+    }
   }
 
   // ─── Robot authentication ───────────────────────────────────────────────────
@@ -360,6 +387,23 @@ export class BotGateway
         return;
       }
 
+      const claimLockAcquired = await this.acquireRobotClaimLock(robot.id, client.id);
+      if (!claimLockAcquired) {
+        this.logger.warn(`Rejected cross-instance duplicate robot claim for ${robot.id}`);
+        client.send(
+          JSON.stringify({
+            event: 'error',
+            data: { message: 'Robot control channel is already connected' },
+          }),
+        );
+        try {
+          client.close(1008, 'Robot already connected');
+        } catch {
+          // Ignore close failures for rejected claims.
+        }
+        return;
+      }
+
       client.isRobot = true;
       client.robotId = robot.id;
       client.claimToken = data.claimToken;
@@ -375,6 +419,9 @@ export class BotGateway
 
       return { event: WS_EVENTS.ROBOT_CLAIM, data: { success: true, robotId: robot.id } };
     } catch (err) {
+      if (client.robotId) {
+        await this.releaseRobotClaimLock(client.robotId, client.id);
+      }
       this.logger.error('Robot claim error', err);
       return { event: 'error', data: { message: 'Claim failed' } };
     }
@@ -384,6 +431,7 @@ export class BotGateway
   handleHeartbeat(@ConnectedSocket() client: WsClient) {
     if (client.robotId) {
       this.redis.set(`robot:heartbeat:${client.robotId}`, Date.now().toString(), 'EX', 30);
+      void this.refreshRobotClaimLock(client.robotId, client.id);
       this.robotsService.touchHeartbeat(client.robotId).catch(() => {});
     }
     return { event: WS_EVENTS.ROBOT_HEARTBEAT, data: { ts: Date.now() } };
@@ -875,7 +923,7 @@ export class BotGateway
     ).catch(() => {});
   }
 
-  private _leaveRoom(client: WsClient) {
+  private async _leaveRoom(client: WsClient) {
     const robotId = client.watchingRobotId!;
     const room = this.rooms.get(robotId);
     room?.delete(client.id);
@@ -883,23 +931,173 @@ export class BotGateway
       this.rooms.delete(robotId);
     }
 
-    if (client.userId) {
-      const presence = this.presence.get(robotId);
-      presence?.delete(client.userId);
-      if (presence && presence.size === 0) {
-        this.presence.delete(robotId);
-      }
+    client.watchingRobotId = undefined;
+    if (!client.userId) {
+      return;
+    }
+
+    const snapshot = await this.removeSharedPresenceState(client, robotId);
+    if (snapshot.focusUserConnections === 0) {
       this._broadcastToRoom(robotId, WS_EVENTS.PRESENCE_LEAVE, {
         userId: client.userId,
         username: client.username,
       });
     }
-
+    if (snapshot.cleanedStaleEntries) {
+      this._broadcastToRoom(robotId, WS_EVENTS.PRESENCE_UPDATE, {
+        viewers: snapshot.presenceList,
+      });
+    }
     this.robotsService
-      .setViewerCount(robotId, this.rooms.get(robotId)?.size ?? 0)
+      .setViewerCount(robotId, snapshot.viewerCount)
       .catch(() => {});
+  }
 
-    client.watchingRobotId = undefined;
+  private async refreshSharedPresenceState(
+    client: WsClient,
+    robotId: string,
+  ): Promise<SharedPresenceSnapshot> {
+    if (!client.userId) {
+      return {
+        viewerCount: 0,
+        focusUserConnections: 0,
+        presenceList: [],
+        cleanedStaleEntries: false,
+      };
+    }
+
+    const socketKey = this.viewerSocketKey(client.id);
+    const joinedAt = client.presenceJoinedAt ?? Date.now();
+    client.presenceJoinedAt = joinedAt;
+
+    await this.redis.multi()
+      .set(
+        socketKey,
+        JSON.stringify({
+          robotId,
+          userId: client.userId,
+          username: client.username,
+          joinedAt,
+        }),
+        'EX',
+        BotGateway.VIEWER_PRESENCE_TTL_SEC,
+      )
+      .sadd(this.viewerRoomIndexKey(robotId), socketKey)
+      .expire(this.viewerRoomIndexKey(robotId), BotGateway.VIEWER_PRESENCE_TTL_SEC * 2)
+      .exec();
+
+    return this.getSharedPresenceSnapshot(robotId, client.userId);
+  }
+
+  private async removeSharedPresenceState(
+    client: WsClient,
+    robotId: string,
+  ): Promise<SharedPresenceSnapshot> {
+    await this.redis.multi()
+      .del(this.viewerSocketKey(client.id))
+      .srem(this.viewerRoomIndexKey(robotId), this.viewerSocketKey(client.id))
+      .exec();
+
+    return this.getSharedPresenceSnapshot(robotId, client.userId);
+  }
+
+  private async getSharedPresenceSnapshot(
+    robotId: string,
+    focusUserId?: string,
+  ): Promise<SharedPresenceSnapshot> {
+    const roomIndexKey = this.viewerRoomIndexKey(robotId);
+    const socketKeys = await this.redis.smembers(roomIndexKey);
+    if (socketKeys.length === 0) {
+      return {
+        viewerCount: 0,
+        focusUserConnections: 0,
+        presenceList: [],
+        cleanedStaleEntries: false,
+      };
+    }
+
+    const pipeline = this.redis.pipeline();
+    for (const socketKey of socketKeys) {
+      pipeline.get(socketKey);
+    }
+    const results = await pipeline.exec();
+    const staleSocketKeys: string[] = [];
+    const presenceByUser = new Map<string, PresenceRecord>();
+    let viewerCount = 0;
+    let focusUserConnections = 0;
+
+    for (const [index, result] of (results ?? []).entries()) {
+      const socketKey = socketKeys[index];
+      if (!socketKey) {
+        continue;
+      }
+
+      const [error, raw] = result ?? [];
+      if (error || typeof raw !== 'string') {
+        staleSocketKeys.push(socketKey);
+        continue;
+      }
+
+      try {
+        const parsed = JSON.parse(raw) as {
+          robotId?: string;
+          userId?: string;
+          username?: string;
+          joinedAt?: number;
+        };
+        if (
+          parsed.robotId !== robotId ||
+          typeof parsed.userId !== 'string' ||
+          typeof parsed.username !== 'string' ||
+          typeof parsed.joinedAt !== 'number'
+        ) {
+          staleSocketKeys.push(socketKey);
+          continue;
+        }
+
+        viewerCount += 1;
+        if (parsed.userId === focusUserId) {
+          focusUserConnections += 1;
+        }
+
+        const existing = presenceByUser.get(parsed.userId);
+        if (!existing || parsed.joinedAt < existing.joinedAt) {
+          presenceByUser.set(parsed.userId, {
+            userId: parsed.userId,
+            username: parsed.username,
+            joinedAt: parsed.joinedAt,
+          });
+        }
+      } catch {
+        staleSocketKeys.push(socketKey);
+      }
+    }
+
+    if (staleSocketKeys.length > 0) {
+      await this.redis.srem(roomIndexKey, ...staleSocketKeys);
+      if (viewerCount === 0) {
+        await this.redis.del(roomIndexKey);
+      }
+    }
+
+    return {
+      viewerCount,
+      focusUserConnections,
+      presenceList: Array.from(presenceByUser.values()),
+      cleanedStaleEntries: staleSocketKeys.length > 0,
+    };
+  }
+
+  private viewerSocketKey(clientId: string) {
+    return `ws:viewer-socket:${this.instanceId}:${clientId}`;
+  }
+
+  private viewerRoomIndexKey(robotId: string) {
+    return `ws:viewer-room:${robotId}`;
+  }
+
+  private robotClaimKey(robotId: string) {
+    return `ws:robot-claim:${robotId}`;
   }
 
   private _getOpenRobotClient(robotId: string): WsClient | undefined {
@@ -926,7 +1124,11 @@ export class BotGateway
 
       try {
         const queue = await this.queueService.getQueue(robotId);
-        await this.syncTurnLifecycle(robotId, queue);
+        if (this._getOpenRobotClient(robotId)) {
+          await this.syncTurnLifecycle(robotId, queue);
+        } else if (this.activeTurns.has(robotId)) {
+          await this.clearTurnState(robotId, 'clear');
+        }
         this._broadcastToRoomLocally(robotId, WS_EVENTS.QUEUE_UPDATE, { queue });
       } catch (err) {
         this.logger.warn(`Failed to broadcast queue update for ${robotId}: ${(err as Error).message}`);
@@ -1046,7 +1248,7 @@ export class BotGateway
         await this.clearTurnState(robotId, 'clear');
       }
       await this.robotsService.updateStatus(robotId, 'ONLINE').catch(() => {});
-      this._broadcastToRoomLocally(robotId, WS_EVENTS.ROBOT_STATUS, { status: 'ONLINE' });
+      this._broadcastToRoom(robotId, WS_EVENTS.ROBOT_STATUS, { status: 'ONLINE' });
       return;
     }
 
@@ -1068,13 +1270,13 @@ export class BotGateway
     });
 
     await this.robotsService.updateStatus(robotId, 'BUSY').catch(() => {});
-    this._broadcastToRoomLocally(robotId, WS_EVENTS.ROBOT_STATUS, { status: 'BUSY' });
-    this._broadcastToRoomLocally(robotId, WS_EVENTS.SESSION_START, {
+    this._broadcastToRoom(robotId, WS_EVENTS.ROBOT_STATUS, { status: 'BUSY' });
+    this._broadcastToRoom(robotId, WS_EVENTS.SESSION_START, {
       sessionId: session.id,
       userId: nextEntry.userId,
       expiresAt,
     });
-    this._broadcastToRoomLocally(robotId, WS_EVENTS.QUEUE_TURN_START, {
+    this._broadcastToRoom(robotId, WS_EVENTS.QUEUE_TURN_START, {
       userId: nextEntry.userId,
       username: nextEntry.user?.displayName ?? nextEntry.user?.username ?? nextEntry.userId,
       expiresAt,
@@ -1102,11 +1304,11 @@ export class BotGateway
     if (current) {
       this._sendRobotStop(robotId, `Turn ended: ${reason}`);
       await this.sessionsService.end(current.sessionId).catch(() => {});
-      this._broadcastToRoomLocally(robotId, WS_EVENTS.SESSION_END, {
+      this._broadcastToRoom(robotId, WS_EVENTS.SESSION_END, {
         sessionId: current.sessionId,
         userId: current.userId,
       });
-      this._broadcastToRoomLocally(robotId, WS_EVENTS.QUEUE_TURN_END, {
+      this._broadcastToRoom(robotId, WS_EVENTS.QUEUE_TURN_END, {
         userId: current.userId,
         reason,
       });
@@ -1163,15 +1365,66 @@ export class BotGateway
         continue;
       }
 
-      this._leaveRoom(client);
+      void this._leaveRoom(client);
       if (client.readyState === WebSocket.OPEN) {
         client.close();
       }
     }
   }
 
-  private resolveSocketUser(accessToken?: string): JwtPayload | null {
-    const token = accessToken?.trim();
+  private async acquireRobotClaimLock(robotId: string, clientId: string): Promise<boolean> {
+    const lockKey = this.robotClaimKey(robotId);
+    const existingOwner = await this.redis.get(lockKey);
+    if (existingOwner === clientId) {
+      await this.refreshRobotClaimLock(robotId, clientId);
+      return true;
+    }
+
+    const acquired = await this.redis.set(
+      lockKey,
+      clientId,
+      'PX',
+      BotGateway.ROBOT_CLAIM_TTL_MS,
+      'NX',
+    );
+    return acquired === 'OK';
+  }
+
+  private async refreshRobotClaimLock(robotId: string, clientId: string): Promise<void> {
+    const lockKey = this.robotClaimKey(robotId);
+    await this.redis.eval(
+      `
+        if redis.call("get", KEYS[1]) == ARGV[1] then
+          return redis.call("pexpire", KEYS[1], ARGV[2])
+        end
+        return 0
+      `,
+      1,
+      lockKey,
+      clientId,
+      String(BotGateway.ROBOT_CLAIM_TTL_MS),
+    );
+  }
+
+  private async releaseRobotClaimLock(robotId: string, clientId: string): Promise<void> {
+    const lockKey = this.robotClaimKey(robotId);
+    await this.redis.eval(
+      `
+        if redis.call("get", KEYS[1]) == ARGV[1] then
+          return redis.call("del", KEYS[1])
+        end
+        return 0
+      `,
+      1,
+      lockKey,
+      clientId,
+    );
+  }
+
+  private resolveSocketUser(accessToken?: string, cookieHeader?: string): JwtPayload | null {
+    const token =
+      accessToken?.trim() ||
+      parseCookie(cookieHeader, getAccessCookieName(this.configService));
     if (!token) {
       return null;
     }

@@ -145,11 +145,17 @@ export class RobotsService {
       data.accessMode === 'PASSWORD' && accessPassword
         ? await hash(accessPassword, { type: 2 })
         : null;
+    const inviteCode = await this.resolveInviteCode({
+      currentAccessMode: null,
+      currentInviteCode: null,
+      nextAccessMode: data.accessMode,
+    });
 
     const robot = await this.prisma.robot.create({
       data: {
         ...baseData,
         accessPassword: passwordHash,
+        inviteCode,
         metadata: metadata as Prisma.InputJsonValue,
         slug,
         streamKey,
@@ -250,7 +256,8 @@ export class RobotsService {
       where: { ownerId },
       orderBy: { createdAt: 'desc' },
     });
-    return robots.map((robot) => this.sanitizeManagedRobot(robot));
+    const normalizedRobots = await Promise.all(robots.map((robot) => this.ensureInviteCodeForManagedRobot(robot)));
+    return normalizedRobots.map((robot) => this.sanitizeManagedRobot(robot));
   }
 
   async update(id: string, ownerId: string, input: z.infer<typeof updateRobotSchema>) {
@@ -271,12 +278,18 @@ export class RobotsService {
           ? await hash(accessPassword, { type: 2 })
           : robot.accessPassword
         : null;
+    const nextInviteCode = await this.resolveInviteCode({
+      currentAccessMode: robot.accessMode,
+      currentInviteCode: robot.inviteCode,
+      nextAccessMode,
+    });
 
     const updated = await this.prisma.robot.update({
       where: { id },
       data: {
         ...baseData,
         accessPassword: nextAccessPassword,
+        inviteCode: nextInviteCode,
         metadata: metadata as Prisma.InputJsonValue,
       },
     });
@@ -298,7 +311,7 @@ export class RobotsService {
     this.policyCache.delete(id);
     const currentRobot = await this.prisma.robot.findUnique({
       where: { id },
-      select: { accessMode: true, accessPassword: true },
+      select: { accessMode: true, accessPassword: true, inviteCode: true },
     });
     const nextAccessMode = data.accessMode ?? currentRobot?.accessMode ?? 'OPEN';
     const nextAccessPassword =
@@ -307,12 +320,18 @@ export class RobotsService {
           ? await hash(accessPassword, { type: 2 })
           : currentRobot?.accessPassword ?? null
         : null;
+    const nextInviteCode = await this.resolveInviteCode({
+      currentAccessMode: currentRobot?.accessMode ?? null,
+      currentInviteCode: currentRobot?.inviteCode ?? null,
+      nextAccessMode,
+    });
 
     const updated = await this.prisma.robot.update({
       where: { id },
       data: {
         ...baseData,
         accessPassword: nextAccessPassword,
+        inviteCode: nextInviteCode,
         metadata: metadata as Prisma.InputJsonValue,
       },
     });
@@ -925,6 +944,7 @@ export class RobotsService {
     requesterUserId: string | null;
     guestSessionId?: string;
     password?: string;
+    inviteCode?: string;
   }): Promise<RoomAccessGrant> {
     const robot = await this.getRoomAccessContext(input.robotId, input.requesterUserId);
 
@@ -959,6 +979,17 @@ export class RobotsService {
 
       if (!matches) {
         throw new ForbiddenException('Invalid room password');
+      }
+    }
+
+    if (robot.accessMode === 'LINK_ONLY' && !isOwner && !isStaff) {
+      const inviteCode = input.inviteCode?.trim() ?? '';
+      if (!inviteCode) {
+        throw new ForbiddenException('Invite link required');
+      }
+
+      if (!robot.inviteCode || inviteCode !== robot.inviteCode) {
+        throw new ForbiddenException('Invalid invite link');
       }
     }
 
@@ -1007,11 +1038,18 @@ export class RobotsService {
       return true;
     }
 
+    if (robot.accessMode === 'LINK_ONLY' && (isOwner || isStaff)) {
+      return true;
+    }
+
     if (robot.accessMode === 'PASSWORD' && (isOwner || isStaff)) {
       return true;
     }
 
-    const requiresGrant = robot.accessMode === 'PASSWORD' || robot.accessMode === 'ALLOWED_USERS';
+    const requiresGrant =
+      robot.accessMode === 'PASSWORD' ||
+      robot.accessMode === 'ALLOWED_USERS' ||
+      robot.accessMode === 'LINK_ONLY';
 
     if (!requiresGrant) {
       return true;
@@ -1076,6 +1114,7 @@ export class RobotsService {
         visibility: true,
         accessMode: true,
         accessPassword: true,
+        inviteCode: true,
         allowedUsers: {
           where: requesterUserId ? { userId: requesterUserId } : { userId: '__none__' },
           select: { userId: true },
@@ -1265,6 +1304,25 @@ export class RobotsService {
     };
   }
 
+  private async ensureInviteCodeForManagedRobot<
+    T extends { id: string; accessMode: string; inviteCode?: string | null },
+  >(robot: T): Promise<T> {
+    if (robot.accessMode !== 'LINK_ONLY' || robot.inviteCode) {
+      return robot;
+    }
+
+    const inviteCode = await this.generateUniqueInviteCode();
+    await this.prisma.robot.update({
+      where: { id: robot.id },
+      data: { inviteCode },
+    });
+
+    return {
+      ...robot,
+      inviteCode,
+    };
+  }
+
   private toPublicRobot<
     T extends {
       id: string;
@@ -1325,5 +1383,37 @@ export class RobotsService {
           },
       createdAt: robot.createdAt.toISOString(),
     } as const;
+  }
+
+  private async resolveInviteCode(input: {
+    currentAccessMode: string | null;
+    currentInviteCode: string | null;
+    nextAccessMode: string;
+  }): Promise<string | null> {
+    if (input.nextAccessMode !== 'LINK_ONLY') {
+      return input.currentInviteCode ?? null;
+    }
+
+    if (input.currentAccessMode === 'LINK_ONLY' && input.currentInviteCode) {
+      return input.currentInviteCode;
+    }
+
+    return this.generateUniqueInviteCode();
+  }
+
+  private async generateUniqueInviteCode(): Promise<string> {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const inviteCode = randomBytes(12).toString('hex');
+      const existing = await this.prisma.robot.findUnique({
+        where: { inviteCode },
+        select: { id: true },
+      });
+
+      if (!existing) {
+        return inviteCode;
+      }
+    }
+
+    throw new Error('Failed to generate unique invite code');
   }
 }

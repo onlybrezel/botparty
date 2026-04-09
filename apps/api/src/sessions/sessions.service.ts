@@ -1,11 +1,15 @@
 import { Injectable, Logger, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { RobotsService } from '../robots/robots.service';
 
 @Injectable()
 export class SessionsService {
   private readonly logger = new Logger(SessionsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly robotsService: RobotsService,
+  ) {}
 
   async create(robotId: string, userId: string) {
     const session = await this.prisma.$transaction(async (tx) => {
@@ -100,13 +104,24 @@ export class SessionsService {
     });
   }
 
-  async findByRobotForRequester(robotId: string, requesterId: string | null, limit = 50) {
-    await this.assertCanViewRobotSessions(robotId, requesterId);
+  async findByRobotForRequester(
+    robotId: string,
+    requesterId: string | null,
+    limit = 50,
+    roomAccessToken?: string,
+    guestSessionId?: string,
+  ) {
+    await this.assertCanViewRobotSessions(robotId, requesterId, roomAccessToken, guestSessionId);
     return this.findByRobotUnsafe(robotId, limit);
   }
 
-  async getActiveSessionForRequester(robotId: string, requesterId: string | null) {
-    await this.assertCanViewRobotSessions(robotId, requesterId);
+  async getActiveSessionForRequester(
+    robotId: string,
+    requesterId: string | null,
+    roomAccessToken?: string,
+    guestSessionId?: string,
+  ) {
+    await this.assertCanViewRobotSessions(robotId, requesterId, roomAccessToken, guestSessionId);
     return this.getActiveSessionUnsafe(robotId);
   }
 
@@ -145,34 +160,31 @@ export class SessionsService {
     });
   }
 
-  private async assertCanViewRobotSessions(robotId: string, requesterId: string | null) {
+  private async assertCanViewRobotSessions(
+    robotId: string,
+    requesterId: string | null,
+    roomAccessToken?: string,
+    guestSessionId?: string,
+  ) {
     const robot = await this.prisma.robot.findUnique({
       where: { id: robotId },
-      select: { ownerId: true, visibility: true },
+      select: { id: true },
     });
 
     if (!robot) {
       throw new NotFoundException('Robot not found');
     }
 
-    if (robot.visibility === 'PUBLIC') {
-      return;
-    }
-
-    if (!requesterId) {
-      throw new ForbiddenException('Not allowed to view sessions for this robot');
-    }
-
-    if (robot.ownerId === requesterId) {
-      return;
-    }
-
-    const requester = await this.prisma.user.findUnique({
-      where: { id: requesterId },
-      select: { role: true },
+    const actorId =
+      requesterId ??
+      this.robotsService.resolveGuestActorId(guestSessionId) ??
+      'guest:anonymous';
+    const allowed = await this.robotsService.validateRoomAccess({
+      robotId,
+      actorId,
+      roomAccessToken,
     });
-
-    if (requester?.role === 'ADMIN' || requester?.role === 'MOD') {
+    if (allowed) {
       return;
     }
 

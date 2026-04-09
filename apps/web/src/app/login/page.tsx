@@ -36,34 +36,27 @@ export default function LoginPage() {
 
     try {
       if (mode === 'login') {
-        const { accessToken, refreshToken } = await api.login({ email, password });
+        const { accessToken, user } = await api.login({ email, password });
         api.setToken(accessToken);
-
-        // Fetch user info
-        const me = await api.getMe();
         login({
           accessToken,
-          refreshToken,
-          username: me.username,
-          userId: me.id,
-          displayName: me.displayName,
-          role: me.role,
+          username: user.username,
+          userId: user.id,
+          displayName: user.displayName,
+          role: user.role,
         });
 
         router.push('/explore');
       } else {
         const username = usernameRef.current!.value.trim();
-        const { accessToken, refreshToken } = await api.register({ username, email, password });
+        const { accessToken, user } = await api.register({ username, email, password });
         api.setToken(accessToken);
-
-        const me = await api.getMe();
         login({
           accessToken,
-          refreshToken,
-          username: me.username,
-          userId: me.id,
-          displayName: me.displayName,
-          role: me.role,
+          username: user.username,
+          userId: user.id,
+          displayName: user.displayName,
+          role: user.role,
         });
 
         router.push('/explore');

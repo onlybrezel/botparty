@@ -10,7 +10,7 @@ import { api } from '@/lib/api';
 
 export default function Nav() {
   const pathname = usePathname();
-  const { accessToken, username, refreshToken, logout, role } = useAuth();
+  const { accessToken, username, logout, role } = useAuth();
   const [mounted, setMounted] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -21,9 +21,7 @@ export default function Nav() {
 
     const bootstrap = async () => {
       api.syncTokenFromStore();
-      if (refreshToken) {
-        await api.restoreSession().catch(() => undefined);
-      }
+      await api.restoreSession().catch(() => undefined);
       if (!cancelled) {
         setMounted(true);
       }
@@ -34,7 +32,7 @@ export default function Nav() {
     return () => {
       cancelled = true;
     };
-  }, [refreshToken]);
+  }, []);
 
   useEffect(() => {
     if (!mounted || accessToken) return;
@@ -183,8 +181,11 @@ export default function Nav() {
                   <div className="my-1 border-t border-[var(--border)]" />
                   <button
                     onClick={() => {
-                      logout();
-                      setDropdownOpen(false);
+                      void api.logout().catch(() => undefined).finally(() => {
+                        api.setToken(null);
+                        logout();
+                        setDropdownOpen(false);
+                      });
                     }}
                     className="block w-full px-4 py-2 text-left text-sm text-red-400 hover:bg-[var(--muted)] transition"
                   >
@@ -264,8 +265,11 @@ export default function Nav() {
                   <button
                     type="button"
                     onClick={() => {
-                      logout();
-                      setMenuOpen(false);
+                      void api.logout().catch(() => undefined).finally(() => {
+                        api.setToken(null);
+                        logout();
+                        setMenuOpen(false);
+                      });
                     }}
                     className="rounded-xl border border-red-500/30 px-4 py-3 text-left text-sm font-medium text-red-300"
                   >

@@ -8,12 +8,16 @@ import { useAuth } from '@/lib/store';
 import type { RobotPublic } from '@botparty/shared';
 
 export default function PrivateRobotClient({ slug }: { slug: string }) {
-  const { accessToken } = useAuth();
+  const { accessToken, hasHydrated } = useAuth();
   const [robot, setRobot] = useState<RobotPublic | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!hasHydrated) {
+      return;
+    }
+
     if (!accessToken) {
       setLoading(false);
       setError('Sign in to access this private robot.');
@@ -41,7 +45,7 @@ export default function PrivateRobotClient({ slug }: { slug: string }) {
     return () => {
       active = false;
     };
-  }, [accessToken, slug]);
+  }, [accessToken, hasHydrated, slug]);
 
   if (loading) {
     return (

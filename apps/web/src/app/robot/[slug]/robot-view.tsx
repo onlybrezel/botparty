@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useCallback, useState, useLayoutEffect } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import type { RobotPublic } from '@botparty/shared';
 import { AlertTriangle, Bot, Radio, Video, Gamepad2 } from 'lucide-react';
 import { api } from '@/lib/api';
@@ -142,6 +143,7 @@ interface Props {
 }
 
 export default function RobotView({ robot }: Props) {
+  const searchParams = useSearchParams();
   const { accessToken, userId, role } = useAuth();
 
   const [focusMode, setFocusMode] = useState<FocusMode>('controls');
@@ -167,6 +169,7 @@ export default function RobotView({ robot }: Props) {
   const [tabSwitchOnlyWhenEmpty, setTabSwitchOnlyWhenEmpty] = useState(true);
   const [guestSessionId] = useState<string>(() => getOrCreateGuestSessionId());
   const currentViewerId = userId ? userId : `guest:${guestSessionId}`;
+  const inviteCodeFromUrl = searchParams.get('invite')?.trim() ?? '';
   const [roomAccessToken, setRoomAccessToken] = useState<string | null>(null);
   const [accessPasswordInput, setAccessPasswordInput] = useState('');
   const [accessLoading, setAccessLoading] = useState(false);
@@ -307,7 +310,7 @@ export default function RobotView({ robot }: Props) {
   }, [robot.id]);
 
   useEffect(() => {
-    if (robot.accessMode === 'OPEN' || robot.accessMode === 'LINK_ONLY') {
+    if (robot.accessMode === 'OPEN') {
       setRoomAccessToken(null);
       setAccessError(null);
       allowListAccessAttemptedRef.current = false;
@@ -317,7 +320,7 @@ export default function RobotView({ robot }: Props) {
     try {
       const stored = window.sessionStorage.getItem(`botparty.room-access.${robot.id}`);
       setRoomAccessToken(stored);
-      allowListAccessAttemptedRef.current = Boolean(stored);
+      allowListAccessAttemptedRef.current = robot.accessMode === 'ALLOWED_USERS' && Boolean(stored);
     } catch {
       setRoomAccessToken(null);
       allowListAccessAttemptedRef.current = false;
@@ -361,12 +364,51 @@ export default function RobotView({ robot }: Props) {
     };
   }, [accessLoading, accessToken, guestSessionId, robot.accessMode, robot.id, roomAccessToken]);
 
+  useEffect(() => {
+    if (robot.accessMode !== 'LINK_ONLY' || roomAccessToken || accessLoading) {
+      return;
+    }
+
+    if (!inviteCodeFromUrl) {
+      setAccessError('This room requires a valid invite link.');
+      return;
+    }
+
+    let active = true;
+    setAccessLoading(true);
+    setAccessError(null);
+    api.setToken(accessToken);
+    api.verifyRobotAccess(robot.id, {
+      guestSessionId,
+      inviteCode: inviteCodeFromUrl,
+    })
+      .then((grant) => {
+        if (!active) return;
+        setRoomAccessToken(grant.token);
+        window.sessionStorage.setItem(`botparty.room-access.${robot.id}`, grant.token);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setAccessError(err instanceof Error ? err.message : 'Invite access denied');
+      })
+      .finally(() => {
+        if (active) {
+          setAccessLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [accessLoading, accessToken, guestSessionId, inviteCodeFromUrl, robot.accessMode, robot.id, roomAccessToken]);
+
   // ─── Fetch LiveKit token (auth required) ──────────────────────────────────
 
   const refreshViewerToken = useCallback(async (forceRemount = false) => {
     const passwordGateMissing = robot.accessMode === 'PASSWORD' && !roomAccessToken;
     const allowlistGateMissing = robot.accessMode === 'ALLOWED_USERS' && !roomAccessToken && !accessToken;
-    if ((passwordGateMissing || allowlistGateMissing) && !guestVideoAllowed) {
+    const linkGateMissing = robot.accessMode === 'LINK_ONLY' && !roomAccessToken;
+    if (linkGateMissing || ((passwordGateMissing || allowlistGateMissing) && !guestVideoAllowed)) {
       setLivekitCreds(null);
       setVideoState('idle');
       return;
@@ -506,7 +548,8 @@ export default function RobotView({ robot }: Props) {
   useEffect(() => {
     const passwordGateMissing = robot.accessMode === 'PASSWORD' && !roomAccessToken;
     const allowlistGateMissing = robot.accessMode === 'ALLOWED_USERS' && !roomAccessToken && !accessToken;
-    if (passwordGateMissing || allowlistGateMissing) {
+    const linkGateMissing = robot.accessMode === 'LINK_ONLY' && !roomAccessToken;
+    if (passwordGateMissing || allowlistGateMissing || linkGateMissing) {
       setConnected(false);
       wsRef.current?.close();
       return;
@@ -534,7 +577,6 @@ export default function RobotView({ robot }: Props) {
             event: 'room:join',
             data: {
               robotId: robot.id,
-              accessToken: accessToken ?? undefined,
               guestSessionId: userId ? undefined : guestSessionId || undefined,
               roomAccessToken: roomAccessToken ?? undefined,
             },
@@ -586,6 +628,27 @@ export default function RobotView({ robot }: Props) {
       wsRef.current?.close();
     };
   }, [accessToken, guestSessionId, robot.accessMode, robot.id, roomAccessToken, userId]);
+
+  useEffect(() => {
+    if (!connected) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      if (wsRef.current?.readyState !== WebSocket.OPEN) {
+        return;
+      }
+
+      wsRef.current.send(JSON.stringify({
+        event: 'room:ping',
+        data: { robotId: robot.id },
+      }));
+    }, 15000);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [connected, robot.id]);
 
   const handleWsEvent = useCallback((event: string, data: Record<string, unknown>) => {
     switch (event) {
@@ -1047,6 +1110,7 @@ export default function RobotView({ robot }: Props) {
       const grant = await api.verifyRobotAccess(robot.id, {
         password: accessPasswordInput.trim() || undefined,
         guestSessionId,
+        inviteCode: inviteCodeFromUrl || undefined,
       });
       setRoomAccessToken(grant.token);
       window.sessionStorage.setItem(`botparty.room-access.${robot.id}`, grant.token);
@@ -1056,7 +1120,7 @@ export default function RobotView({ robot }: Props) {
     } finally {
       setAccessLoading(false);
     }
-  }, [accessPasswordInput, accessToken, guestSessionId, robot.id]);
+  }, [accessPasswordInput, accessToken, guestSessionId, inviteCodeFromUrl, robot.id]);
 
   const moderateChatUser = useCallback(
     async (targetUserId: string, action: 'TIMEOUT' | 'BAN' | 'UNBAN', preferredName?: string | null) => {
@@ -1254,7 +1318,9 @@ export default function RobotView({ robot }: Props) {
         <div className="space-y-4 lg:col-span-2">
           {/* Video */}
           <div className="relative aspect-video overflow-hidden rounded-xl border border-[var(--border)] bg-black lg:shadow-none">
-            {(robot.accessMode === 'PASSWORD' || robot.accessMode === 'ALLOWED_USERS') && !roomAccessToken && !guestVideoAllowed ? (
+            {(robot.accessMode === 'PASSWORD' || robot.accessMode === 'ALLOWED_USERS' || robot.accessMode === 'LINK_ONLY') &&
+            !roomAccessToken &&
+            (robot.accessMode === 'LINK_ONLY' || !guestVideoAllowed) ? (
               <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center text-[var(--muted-foreground)]">
                 <div className="rounded-xl border border-[var(--border)] bg-[var(--muted)] p-3">
                   <Video className="h-7 w-7 text-sky-300" />
@@ -1263,14 +1329,20 @@ export default function RobotView({ robot }: Props) {
                   <p className="text-sm font-medium text-[var(--foreground)]">
                     {robot.accessMode === 'PASSWORD'
                       ? 'This room is password protected.'
-                      : 'This room is allow-list only.'}
+                      : robot.accessMode === 'ALLOWED_USERS'
+                        ? 'This room is allow-list only.'
+                        : 'This room is invite-only.'}
                   </p>
                   <p className="mt-1 text-sm">
                     {robot.accessMode === 'PASSWORD'
                       ? 'Enter the room password to unlock video, chat, and controls.'
-                      : accessToken
-                        ? 'Verifying your room access...'
-                        : 'Sign in with an allowed account to enter this room.'}
+                      : robot.accessMode === 'ALLOWED_USERS'
+                        ? accessToken
+                          ? 'Verifying your room access...'
+                          : 'Sign in with an allowed account to enter this room.'
+                        : inviteCodeFromUrl
+                          ? 'Verifying your invite link...'
+                          : 'Open the full invite link to enter this room.'}
                   </p>
                 </div>
                 {robot.accessMode === 'PASSWORD' && (

@@ -95,7 +95,11 @@ export class AuthService {
     return this.generateTokens(user);
   }
 
-  async refreshToken(refreshToken: string) {
+  async refreshToken(refreshToken: string | null | undefined) {
+    if (!refreshToken?.trim()) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
     try {
       const payload = this.jwt.verify<RefreshTokenPayload>(refreshToken, {
         secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
@@ -120,6 +124,38 @@ export class AuthService {
       where: { id: userId },
       data: { tokenVersion: { increment: 1 } },
     });
+  }
+
+  resolveAccessTokenSubject(accessToken?: string | null) {
+    const token = accessToken?.trim();
+    if (!token) {
+      return null;
+    }
+
+    try {
+      const payload = this.jwt.verify<JwtPayload>(token, {
+        secret: this.config.getOrThrow<string>('JWT_SECRET'),
+      });
+      return typeof payload.sub === 'string' ? payload.sub : null;
+    } catch {
+      return null;
+    }
+  }
+
+  resolveRefreshTokenSubject(refreshToken?: string | null) {
+    const token = refreshToken?.trim();
+    if (!token) {
+      return null;
+    }
+
+    try {
+      const payload = this.jwt.verify<RefreshTokenPayload>(token, {
+        secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
+      });
+      return typeof payload.sub === 'string' ? payload.sub : null;
+    } catch {
+      return null;
+    }
   }
 
   async requestPasswordReset(input: ForgotPasswordInput) {

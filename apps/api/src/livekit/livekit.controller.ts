@@ -60,12 +60,28 @@ export class LivekitController {
   @ApiOperation({ summary: 'Get guest LiveKit viewer token (ACL-aware)' })
   async getPublicViewerToken(
     @Param('robotId') robotId: string,
-    @Query('guestSessionId') _guestSessionId?: string,
-    @Query('roomAccessToken') _roomAccessToken?: string,
+    @Query('guestSessionId') guestSessionId?: string,
+    @Query('roomAccessToken') roomAccessToken?: string,
   ) {
     const robot = await this.robotsService.findById(robotId);
     if (robot.visibility === 'PRIVATE') {
       throw new ForbiddenException('Guest video access is unavailable for private robots');
+    }
+
+    if (robot.accessMode === 'LINK_ONLY') {
+      const actorId = this.robotsService.resolveGuestActorId(guestSessionId);
+      if (!actorId) {
+        throw new ForbiddenException('Invite verification required');
+      }
+
+      const allowed = await this.robotsService.validateRoomAccess({
+        robotId,
+        actorId,
+        roomAccessToken,
+      });
+      if (!allowed) {
+        throw new ForbiddenException('Invite verification required');
+      }
     }
 
     const access = this.readVideoAccess(robot.metadata);

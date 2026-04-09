@@ -19,6 +19,7 @@ class ApiError extends Error {
 
 export interface RobotManaged extends RobotPublic {
   claimToken: string;
+  inviteCode: string | null;
   streamKey: string;
   metadata: {
     access?: {
@@ -256,6 +257,11 @@ export interface ActiveSessionRecord {
   };
 }
 
+type AuthSessionResponse = {
+  accessToken: string;
+  user: UserPublic;
+};
+
 function buildQueryString(params?: Record<string, string | number | boolean | null | undefined>) {
   if (!params) {
     return '';
@@ -341,47 +347,28 @@ class ApiClient {
       return this.refreshPromise;
     }
 
-    const auth = useAuth.getState();
-    if (!auth.refreshToken) {
-      auth.logout();
-      this.setToken(null);
-      return null;
-    }
-
     this.refreshPromise = (async () => {
       const refreshRes = await fetch(`${this.baseUrl}/auth/refresh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refreshToken: auth.refreshToken }),
+        body: '{}',
+        credentials: 'include',
       });
 
       if (!refreshRes.ok) {
-        auth.logout();
+        useAuth.getState().logout();
         this.setToken(null);
         return null;
       }
 
-      const refreshed = await refreshRes.json() as { accessToken: string; refreshToken: string };
+      const refreshed = await refreshRes.json() as AuthSessionResponse;
       this.setToken(refreshed.accessToken);
-
-      const meRes = await fetch(`${this.baseUrl}/users/me`, {
-        headers: { Authorization: `Bearer ${refreshed.accessToken}` },
-      });
-
-      if (!meRes.ok) {
-        auth.logout();
-        this.setToken(null);
-        return null;
-      }
-
-      const me = await meRes.json() as UserPublic;
       useAuth.getState().login({
         accessToken: refreshed.accessToken,
-        refreshToken: refreshed.refreshToken,
-        username: me.username,
-        userId: me.id,
-        displayName: me.displayName,
-        role: me.role,
+        username: refreshed.user.username,
+        userId: refreshed.user.id,
+        displayName: refreshed.user.displayName,
+        role: refreshed.user.role,
       });
 
       return refreshed.accessToken;
@@ -393,7 +380,9 @@ class ApiClient {
   }
 
   async restoreSession(): Promise<boolean> {
-    return Boolean(await this.refreshSession());
+    const restored = Boolean(await this.refreshSession());
+    useAuth.getState().setHasHydrated(true);
+    return restored;
   }
 
   private async request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -409,7 +398,8 @@ class ApiClient {
       headers['Authorization'] = `Bearer ${this.accessToken}`;
     }
 
-    const makeRequest = () => fetch(`${this.baseUrl}${path}`, { ...options, headers });
+    const makeRequest = () =>
+      fetch(`${this.baseUrl}${path}`, { ...options, headers, credentials: 'include' });
 
     let res = await makeRequest();
 
@@ -439,23 +429,30 @@ class ApiClient {
   // ─── Auth ──────────────────────────────────────────────────────────────────
 
   async register(data: { username: string; email: string; password: string; displayName?: string }) {
-    return this.request<{ accessToken: string; refreshToken: string }>('/auth/register', {
+    return this.request<AuthSessionResponse>('/auth/register', {
       method: 'POST',
       body: JSON.stringify(data),
     });
   }
 
   async login(data: { email: string; password: string }) {
-    return this.request<{ accessToken: string; refreshToken: string }>('/auth/login', {
+    return this.request<AuthSessionResponse>('/auth/login', {
       method: 'POST',
       body: JSON.stringify(data),
     });
   }
 
-  async refresh(refreshToken: string) {
-    return this.request<{ accessToken: string; refreshToken: string }>('/auth/refresh', {
+  async refresh(refreshToken?: string) {
+    return this.request<AuthSessionResponse>('/auth/refresh', {
       method: 'POST',
-      body: JSON.stringify({ refreshToken }),
+      body: JSON.stringify(refreshToken ? { refreshToken } : {}),
+    });
+  }
+
+  async logout() {
+    return this.request<{ message: string }>('/auth/logout', {
+      method: 'POST',
+      body: '{}',
     });
   }
 
@@ -646,7 +643,7 @@ class ApiClient {
 
   async verifyRobotAccess(
     robotId: string,
-    data?: { password?: string; guestSessionId?: string },
+    data?: { password?: string; guestSessionId?: string; inviteCode?: string },
   ) {
     return this.request<RoomAccessGrant>(`/robots/${robotId}/access/verify`, {
       method: 'POST',
@@ -775,7 +772,13 @@ class ApiClient {
   }
 
   async getActiveSession(robotId: string) {
-    return this.request<ActiveSessionRecord | null>(`/sessions/robot/${robotId}/active`);
+    const roomAccessToken =
+      typeof window !== 'undefined' ? window.sessionStorage.getItem(`botparty.room-access.${robotId}`) : null;
+    const guestSessionId =
+      typeof window !== 'undefined' ? window.localStorage.getItem('botparty.guestSessionId.v1') : null;
+    return this.request<ActiveSessionRecord | null>(
+      `/sessions/robot/${robotId}/active${buildQueryString({ roomAccessToken, guestSessionId })}`,
+    );
   }
 
   // ─── Queue ─────────────────────────────────────────────────────────────────
