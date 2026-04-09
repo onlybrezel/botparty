@@ -33,11 +33,29 @@ import { Select } from '@/components/ui/select';
 
 type RemoteActionType = 'restart_video' | 'restart_control' | 'restart_chat' | 'update_client' | 'set_log_stream';
 
+type ControlPresetKey = 'ptz-pan' | 'ptz-tilt' | 'drive-speed' | 'gripper' | 'arm-xy';
+
 type ControlButtonDraft = {
   label: string;
   command: string;
   hotKey: string;
   icon: string;
+  controlKind: 'button' | 'slider' | 'xy';
+  sliderMin: string;
+  sliderMax: string;
+  sliderStart: string;
+  sliderStep: string;
+  sliderDirection: 'horizontal' | 'vertical';
+  widgetReturn: 'none' | 'center';
+  resetOnQueueLoss: boolean;
+  resetOnOffline: boolean;
+  resetAfterMs: string;
+  xyXMin: string;
+  xyXMax: string;
+  xyXStart: string;
+  xyYMin: string;
+  xyYMax: string;
+  xyYStart: string;
   cooldownMs: string;
   access: ControlButtonAccess;
   color: string;
@@ -85,6 +103,22 @@ const DEFAULT_CONTROL_DRAFT: ControlButtonDraft = {
   command: '',
   hotKey: '',
   icon: '',
+  controlKind: 'button',
+  sliderMin: '-100',
+  sliderMax: '100',
+  sliderStart: '0',
+  sliderStep: '1',
+  sliderDirection: 'horizontal',
+  widgetReturn: 'none',
+  resetOnQueueLoss: false,
+  resetOnOffline: true,
+  resetAfterMs: '',
+  xyXMin: '-100',
+  xyXMax: '100',
+  xyXStart: '0',
+  xyYMin: '-100',
+  xyYMax: '100',
+  xyYStart: '0',
   cooldownMs: '200',
   access: ControlButtonAccessEnum.QUEUE_TURN,
   color: '',
@@ -110,6 +144,90 @@ const controlAccessOptions: Array<{ value: ControlButtonAccess; label: string }>
   { value: ControlButtonAccessEnum.MODERATOR, label: 'Moderator' },
   { value: ControlButtonAccessEnum.OWNER, label: 'Owner' },
 ];
+
+const CONTROL_PRESETS: Array<{ key: ControlPresetKey; label: string }> = [
+  { key: 'ptz-pan', label: 'PTZ Pan (Horizontal slider)' },
+  { key: 'ptz-tilt', label: 'PTZ Tilt (Vertical slider)' },
+  { key: 'drive-speed', label: 'Drive Speed (0..100 slider)' },
+  { key: 'gripper', label: 'Gripper (Center slider)' },
+  { key: 'arm-xy', label: 'Arm XY Pad' },
+];
+
+function applyControlPreset(draft: ControlButtonDraft, preset: ControlPresetKey): ControlButtonDraft {
+  const base = {
+    ...draft,
+    icon: '',
+    resetAfterMs: '',
+    resetOnQueueLoss: false,
+    resetOnOffline: true,
+    widgetReturn: 'none' as const,
+  };
+
+  switch (preset) {
+    case 'ptz-pan':
+      return {
+        ...base,
+        label: base.label || 'Pan',
+        command: base.command || 'ptz_pan',
+        controlKind: 'slider',
+        sliderMin: '-100',
+        sliderMax: '100',
+        sliderStart: '0',
+        sliderStep: '1',
+        sliderDirection: 'horizontal',
+      };
+    case 'ptz-tilt':
+      return {
+        ...base,
+        label: base.label || 'Tilt',
+        command: base.command || 'ptz_tilt',
+        controlKind: 'slider',
+        sliderMin: '-100',
+        sliderMax: '100',
+        sliderStart: '0',
+        sliderStep: '1',
+        sliderDirection: 'vertical',
+      };
+    case 'drive-speed':
+      return {
+        ...base,
+        label: base.label || 'Speed',
+        command: base.command || 'set_speed',
+        controlKind: 'slider',
+        sliderMin: '0',
+        sliderMax: '100',
+        sliderStart: '50',
+        sliderStep: '1',
+        sliderDirection: 'horizontal',
+      };
+    case 'gripper':
+      return {
+        ...base,
+        label: base.label || 'Gripper',
+        command: base.command || 'gripper',
+        controlKind: 'slider',
+        sliderMin: '-100',
+        sliderMax: '100',
+        sliderStart: '0',
+        sliderStep: '1',
+        sliderDirection: 'horizontal',
+        widgetReturn: 'center',
+      };
+    case 'arm-xy':
+      return {
+        ...base,
+        label: base.label || 'Arm XY',
+        command: base.command || 'arm_xy',
+        controlKind: 'xy',
+        xyXMin: '-100',
+        xyXMax: '100',
+        xyXStart: '0',
+        xyYMin: '-100',
+        xyYMax: '100',
+        xyYStart: '0',
+      };
+  }
+}
 
 function toUpdatePayload(form: RobotFormState) {
   const bitrate = Number(form.targetBitrateKbps);
@@ -165,6 +283,108 @@ function formFromRobot(robot: RobotManaged): RobotFormState {
   };
 }
 
+function buildWidgetSpec(draft: ControlButtonDraft): string | undefined {
+  if (draft.controlKind === 'button') {
+    return draft.icon.trim() || undefined;
+  }
+
+  const resetAfterMs = Number(draft.resetAfterMs);
+  const ttl = Number.isFinite(resetAfterMs) && resetAfterMs >= 100 ? String(Math.round(resetAfterMs)) : null;
+
+  if (draft.controlKind === 'slider') {
+    return [
+      'widget:s',
+      `min=${Number(draft.sliderMin)}`,
+      `max=${Number(draft.sliderMax)}`,
+      `start=${Number(draft.sliderStart)}`,
+      `step=${Number(draft.sliderStep)}`,
+      `dir=${draft.sliderDirection === 'vertical' ? 'v' : 'h'}`,
+      `r=${draft.widgetReturn === 'center' ? 'c' : 'n'}`,
+      `rq=${draft.resetOnQueueLoss ? 1 : 0}`,
+      `ro=${draft.resetOnOffline ? 1 : 0}`,
+      ttl ? `ttl=${ttl}` : null,
+    ]
+      .filter((entry): entry is string => Boolean(entry))
+      .join(':');
+  }
+
+  return [
+    'widget:xy',
+    `xn=${Number(draft.xyXMin)}`,
+    `xx=${Number(draft.xyXMax)}`,
+    `x0=${Number(draft.xyXStart)}`,
+    `yn=${Number(draft.xyYMin)}`,
+    `yx=${Number(draft.xyYMax)}`,
+    `y0=${Number(draft.xyYStart)}`,
+    `r=${draft.widgetReturn === 'center' ? 'c' : 'n'}`,
+    `rq=${draft.resetOnQueueLoss ? 1 : 0}`,
+    `ro=${draft.resetOnOffline ? 1 : 0}`,
+    ttl ? `ttl=${ttl}` : null,
+  ]
+    .filter((entry): entry is string => Boolean(entry))
+    .join(':');
+}
+
+function draftFromControl(button: ControlButtonRecord): ControlButtonDraft {
+  const draft: ControlButtonDraft = {
+    ...DEFAULT_CONTROL_DRAFT,
+    label: button.label,
+    command: button.command,
+    hotKey: button.hotKey ?? '',
+    cooldownMs: String(button.cooldownMs),
+    access: button.access,
+    color: button.color ?? '',
+  };
+
+  const icon = button.icon ?? '';
+  if (!icon.startsWith('widget:')) {
+    draft.icon = icon;
+    draft.controlKind = 'button';
+    return draft;
+  }
+
+  const parts = icon.split(':').map((part) => part.trim()).filter(Boolean);
+  const kind = parts[1]?.toLowerCase();
+  const kv = new Map<string, string>();
+  for (const segment of parts.slice(2)) {
+    const idx = segment.indexOf('=');
+    if (idx <= 0) continue;
+    kv.set(segment.slice(0, idx).toLowerCase(), segment.slice(idx + 1));
+  }
+
+  const get = (keys: string[], fallback: string) => {
+    for (const key of keys) {
+      const found = kv.get(key);
+      if (found !== undefined) return found;
+    }
+    return fallback;
+  };
+
+  draft.widgetReturn = get(['r', 'return'], 'n').toLowerCase() === 'c' ? 'center' : 'none';
+  draft.resetOnQueueLoss = get(['rq'], '0') === '1';
+  draft.resetOnOffline = get(['ro'], '1') !== '0';
+  draft.resetAfterMs = get(['ttl'], '');
+
+  if (kind === 's' || kind === 'slider') {
+    draft.controlKind = 'slider';
+    draft.sliderMin = get(['min'], '-100');
+    draft.sliderMax = get(['max'], '100');
+    draft.sliderStart = get(['start', 'v0', 'c'], '0');
+    draft.sliderStep = get(['step'], '1');
+    draft.sliderDirection = get(['dir'], 'h').toLowerCase() === 'v' ? 'vertical' : 'horizontal';
+    return draft;
+  }
+
+  draft.controlKind = 'xy';
+  draft.xyXMin = get(['xn', 'xmin'], '-100');
+  draft.xyXMax = get(['xx', 'xmax'], '100');
+  draft.xyXStart = get(['x0', 'xstart'], '0');
+  draft.xyYMin = get(['yn', 'ymin'], '-100');
+  draft.xyYMax = get(['yx', 'ymax'], '100');
+  draft.xyYStart = get(['y0', 'ystart'], '0');
+  return draft;
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const { accessToken, hasHydrated } = useAuth();
@@ -201,8 +421,10 @@ export default function DashboardPage() {
   const [controlButtons, setControlButtons] = useState<ControlButtonRecord[]>([]);
   const [controlsLoading, setControlsLoading] = useState(false);
   const [controlDraft, setControlDraft] = useState<ControlButtonDraft>(DEFAULT_CONTROL_DRAFT);
+  const [controlPreset, setControlPreset] = useState<ControlPresetKey>('ptz-pan');
   const [editingControlId, setEditingControlId] = useState<string | null>(null);
   const [controlEditDraft, setControlEditDraft] = useState<ControlButtonDraft | null>(null);
+  const [controlEditPreset, setControlEditPreset] = useState<ControlPresetKey>('ptz-pan');
   const [creatingControl, setCreatingControl] = useState(false);
   const [controlOp, setControlOp] = useState<string | null>(null);
   const [allowedUsers, setAllowedUsers] = useState<AllowedUserRecord[]>([]);
@@ -696,7 +918,7 @@ export default function DashboardPage() {
         label,
         command,
         hotKey: controlDraft.hotKey.trim() || undefined,
-        icon: controlDraft.icon.trim() || undefined,
+        icon: buildWidgetSpec(controlDraft),
         cooldownMs: Number(controlDraft.cooldownMs),
         access: controlDraft.access,
         color: controlDraft.color.trim() || undefined,
@@ -735,15 +957,25 @@ export default function DashboardPage() {
 
   const startEditControl = (button: ControlButtonRecord) => {
     setEditingControlId(button.id);
-    setControlEditDraft({
-      label: button.label,
-      command: button.command,
-      hotKey: button.hotKey ?? '',
-      icon: button.icon ?? '',
-      cooldownMs: String(button.cooldownMs),
-      access: button.access,
-      color: button.color ?? '',
-    });
+    const draft = draftFromControl(button);
+    setControlEditDraft(draft);
+    if (draft.controlKind === 'xy') {
+      setControlEditPreset('arm-xy');
+      return;
+    }
+    if (draft.controlKind === 'slider' && draft.sliderDirection === 'vertical') {
+      setControlEditPreset('ptz-tilt');
+      return;
+    }
+    if (draft.command === 'set_speed') {
+      setControlEditPreset('drive-speed');
+      return;
+    }
+    if (draft.command === 'gripper') {
+      setControlEditPreset('gripper');
+      return;
+    }
+    setControlEditPreset('ptz-pan');
   };
 
   const saveControlEdit = async () => {
@@ -763,7 +995,7 @@ export default function DashboardPage() {
         label,
         command,
         hotKey: controlEditDraft.hotKey.trim() || undefined,
-        icon: controlEditDraft.icon.trim() || undefined,
+        icon: buildWidgetSpec(controlEditDraft),
         cooldownMs: Number(controlEditDraft.cooldownMs),
         access: controlEditDraft.access,
         color: controlEditDraft.color.trim() || null,
@@ -1448,6 +1680,24 @@ export default function DashboardPage() {
                     </div>
 
                     <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <Select
+                        className="bg-[var(--card)]"
+                        value={controlPreset}
+                        onChange={(event) => setControlPreset(event.target.value as ControlPresetKey)}
+                      >
+                        {CONTROL_PRESETS.map((preset) => (
+                          <option key={preset.key} value={preset.key}>
+                            Preset: {preset.label}
+                          </option>
+                        ))}
+                      </Select>
+                      <button
+                        type="button"
+                        onClick={() => setControlDraft((prev) => applyControlPreset(prev, controlPreset))}
+                        className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm"
+                      >
+                        Apply preset
+                      </button>
                       <input
                         className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
                         placeholder="Label"
@@ -1473,14 +1723,132 @@ export default function DashboardPage() {
                           setControlDraft((prev) => ({ ...prev, hotKey: event.target.value }))
                         }
                       />
-                      <input
-                        className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-                        placeholder="Widget spec (optional), e.g. widget:s:min=-100:max=100:start=0:r=c"
-                        value={controlDraft.icon}
+                      <Select
+                        className="bg-[var(--card)]"
+                        value={controlDraft.controlKind}
                         onChange={(event) =>
-                          setControlDraft((prev) => ({ ...prev, icon: event.target.value }))
+                          setControlDraft((prev) => ({
+                            ...prev,
+                            controlKind: event.target.value as ControlButtonDraft['controlKind'],
+                          }))
                         }
-                      />
+                      >
+                        <option value="button">Type: Button</option>
+                        <option value="slider">Type: Slider</option>
+                        <option value="xy">Type: XY Pad</option>
+                      </Select>
+                      {controlDraft.controlKind === 'button' ? (
+                        <input
+                          className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                          placeholder="Icon/emoji (optional)"
+                          value={controlDraft.icon}
+                          onChange={(event) =>
+                            setControlDraft((prev) => ({ ...prev, icon: event.target.value }))
+                          }
+                        />
+                      ) : controlDraft.controlKind === 'slider' ? (
+                        <>
+                          <input
+                            type="number"
+                            className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                            placeholder="Slider min"
+                            value={controlDraft.sliderMin}
+                            onChange={(event) => setControlDraft((prev) => ({ ...prev, sliderMin: event.target.value }))}
+                          />
+                          <input
+                            type="number"
+                            className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                            placeholder="Slider max"
+                            value={controlDraft.sliderMax}
+                            onChange={(event) => setControlDraft((prev) => ({ ...prev, sliderMax: event.target.value }))}
+                          />
+                          <input
+                            type="number"
+                            className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                            placeholder="Start value"
+                            value={controlDraft.sliderStart}
+                            onChange={(event) => setControlDraft((prev) => ({ ...prev, sliderStart: event.target.value }))}
+                          />
+                          <input
+                            type="number"
+                            className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                            placeholder="Step"
+                            value={controlDraft.sliderStep}
+                            onChange={(event) => setControlDraft((prev) => ({ ...prev, sliderStep: event.target.value }))}
+                          />
+                          <Select
+                            className="bg-[var(--card)]"
+                            value={controlDraft.sliderDirection}
+                            onChange={(event) =>
+                              setControlDraft((prev) => ({
+                                ...prev,
+                                sliderDirection: event.target.value as ControlButtonDraft['sliderDirection'],
+                              }))
+                            }
+                          >
+                            <option value="horizontal">Slider: Horizontal</option>
+                            <option value="vertical">Slider: Vertical</option>
+                          </Select>
+                          <Select
+                            className="bg-[var(--card)]"
+                            value={controlDraft.widgetReturn}
+                            onChange={(event) =>
+                              setControlDraft((prev) => ({
+                                ...prev,
+                                widgetReturn: event.target.value as ControlButtonDraft['widgetReturn'],
+                              }))
+                            }
+                          >
+                            <option value="none">Release: Keep value</option>
+                            <option value="center">Release: Return to start</option>
+                          </Select>
+                        </>
+                      ) : (
+                        <>
+                          <input
+                            type="number"
+                            className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                            placeholder="X min"
+                            value={controlDraft.xyXMin}
+                            onChange={(event) => setControlDraft((prev) => ({ ...prev, xyXMin: event.target.value }))}
+                          />
+                          <input
+                            type="number"
+                            className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                            placeholder="X max"
+                            value={controlDraft.xyXMax}
+                            onChange={(event) => setControlDraft((prev) => ({ ...prev, xyXMax: event.target.value }))}
+                          />
+                          <input
+                            type="number"
+                            className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                            placeholder="X start"
+                            value={controlDraft.xyXStart}
+                            onChange={(event) => setControlDraft((prev) => ({ ...prev, xyXStart: event.target.value }))}
+                          />
+                          <input
+                            type="number"
+                            className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                            placeholder="Y min"
+                            value={controlDraft.xyYMin}
+                            onChange={(event) => setControlDraft((prev) => ({ ...prev, xyYMin: event.target.value }))}
+                          />
+                          <input
+                            type="number"
+                            className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                            placeholder="Y max"
+                            value={controlDraft.xyYMax}
+                            onChange={(event) => setControlDraft((prev) => ({ ...prev, xyYMax: event.target.value }))}
+                          />
+                          <input
+                            type="number"
+                            className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                            placeholder="Y start"
+                            value={controlDraft.xyYStart}
+                            onChange={(event) => setControlDraft((prev) => ({ ...prev, xyYStart: event.target.value }))}
+                          />
+                        </>
+                      )}
                       <input
                         type="number"
                         min={50}
@@ -1516,9 +1884,33 @@ export default function DashboardPage() {
                           setControlDraft((prev) => ({ ...prev, color: event.target.value }))
                         }
                       />
-                      <p className="sm:col-span-2 text-[10px] text-[var(--muted-foreground)]">
-                        Widget specs: slider = widget:s:min=-100:max=100:start=0:step=1:r=c, XY pad = widget:xy:xn=-100:xx=100:x0=0:yn=-100:yx=100:y0=0:r=c.
-                      </p>
+                      <input
+                        type="number"
+                        min={100}
+                        className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                        placeholder="Auto reset after ms (optional)"
+                        value={controlDraft.resetAfterMs}
+                        onChange={(event) => setControlDraft((prev) => ({ ...prev, resetAfterMs: event.target.value }))}
+                      />
+                      <label className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
+                        <input
+                          type="checkbox"
+                          checked={controlDraft.resetOnQueueLoss}
+                          onChange={(event) => setControlDraft((prev) => ({ ...prev, resetOnQueueLoss: event.target.checked }))}
+                        />
+                        Reset on queue loss
+                      </label>
+                      <label className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2 text-xs text-[var(--muted-foreground)] sm:col-span-2">
+                        <input
+                          type="checkbox"
+                          checked={controlDraft.resetOnOffline}
+                          onChange={(event) => setControlDraft((prev) => ({ ...prev, resetOnOffline: event.target.checked }))}
+                        />
+                        Reset when robot goes offline/restarts
+                      </label>
+                      <div className="sm:col-span-2">
+                        <ControlBuilderPreview draft={controlDraft} />
+                      </div>
                       <div className="sm:col-span-2">
                         <button
                           type="button"
@@ -1553,6 +1945,26 @@ export default function DashboardPage() {
                           </button>
                         </div>
                         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                          <Select
+                            className="bg-[var(--background)]"
+                            value={controlEditPreset}
+                            onChange={(event) => setControlEditPreset(event.target.value as ControlPresetKey)}
+                          >
+                            {CONTROL_PRESETS.map((preset) => (
+                              <option key={preset.key} value={preset.key}>
+                                Preset: {preset.label}
+                              </option>
+                            ))}
+                          </Select>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setControlEditDraft((prev) => (prev ? applyControlPreset(prev, controlEditPreset) : prev))
+                            }
+                            className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm"
+                          >
+                            Apply preset
+                          </button>
                           <input
                             className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
                             placeholder="Label"
@@ -1572,12 +1984,142 @@ export default function DashboardPage() {
                             value={controlEditDraft.hotKey}
                             onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, hotKey: event.target.value } : prev))}
                           />
-                          <input
-                            className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                            placeholder="Widget spec (optional)"
-                            value={controlEditDraft.icon}
-                            onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, icon: event.target.value } : prev))}
-                          />
+                          <Select
+                            className="bg-[var(--background)]"
+                            value={controlEditDraft.controlKind}
+                            onChange={(event) =>
+                              setControlEditDraft((prev) =>
+                                prev
+                                  ? {
+                                      ...prev,
+                                      controlKind: event.target.value as ControlButtonDraft['controlKind'],
+                                    }
+                                  : prev,
+                              )
+                            }
+                          >
+                            <option value="button">Type: Button</option>
+                            <option value="slider">Type: Slider</option>
+                            <option value="xy">Type: XY Pad</option>
+                          </Select>
+                          {controlEditDraft.controlKind === 'button' ? (
+                            <input
+                              className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                              placeholder="Icon/emoji (optional)"
+                              value={controlEditDraft.icon}
+                              onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, icon: event.target.value } : prev))}
+                            />
+                          ) : controlEditDraft.controlKind === 'slider' ? (
+                            <>
+                              <input
+                                type="number"
+                                className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                                placeholder="Slider min"
+                                value={controlEditDraft.sliderMin}
+                                onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, sliderMin: event.target.value } : prev))}
+                              />
+                              <input
+                                type="number"
+                                className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                                placeholder="Slider max"
+                                value={controlEditDraft.sliderMax}
+                                onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, sliderMax: event.target.value } : prev))}
+                              />
+                              <input
+                                type="number"
+                                className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                                placeholder="Start value"
+                                value={controlEditDraft.sliderStart}
+                                onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, sliderStart: event.target.value } : prev))}
+                              />
+                              <input
+                                type="number"
+                                className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                                placeholder="Step"
+                                value={controlEditDraft.sliderStep}
+                                onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, sliderStep: event.target.value } : prev))}
+                              />
+                              <Select
+                                className="bg-[var(--background)]"
+                                value={controlEditDraft.sliderDirection}
+                                onChange={(event) =>
+                                  setControlEditDraft((prev) =>
+                                    prev
+                                      ? {
+                                          ...prev,
+                                          sliderDirection: event.target.value as ControlButtonDraft['sliderDirection'],
+                                        }
+                                      : prev,
+                                  )
+                                }
+                              >
+                                <option value="horizontal">Slider: Horizontal</option>
+                                <option value="vertical">Slider: Vertical</option>
+                              </Select>
+                              <Select
+                                className="bg-[var(--background)]"
+                                value={controlEditDraft.widgetReturn}
+                                onChange={(event) =>
+                                  setControlEditDraft((prev) =>
+                                    prev
+                                      ? {
+                                          ...prev,
+                                          widgetReturn: event.target.value as ControlButtonDraft['widgetReturn'],
+                                        }
+                                      : prev,
+                                  )
+                                }
+                              >
+                                <option value="none">Release: Keep value</option>
+                                <option value="center">Release: Return to start</option>
+                              </Select>
+                            </>
+                          ) : (
+                            <>
+                              <input
+                                type="number"
+                                className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                                placeholder="X min"
+                                value={controlEditDraft.xyXMin}
+                                onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, xyXMin: event.target.value } : prev))}
+                              />
+                              <input
+                                type="number"
+                                className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                                placeholder="X max"
+                                value={controlEditDraft.xyXMax}
+                                onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, xyXMax: event.target.value } : prev))}
+                              />
+                              <input
+                                type="number"
+                                className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                                placeholder="X start"
+                                value={controlEditDraft.xyXStart}
+                                onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, xyXStart: event.target.value } : prev))}
+                              />
+                              <input
+                                type="number"
+                                className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                                placeholder="Y min"
+                                value={controlEditDraft.xyYMin}
+                                onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, xyYMin: event.target.value } : prev))}
+                              />
+                              <input
+                                type="number"
+                                className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                                placeholder="Y max"
+                                value={controlEditDraft.xyYMax}
+                                onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, xyYMax: event.target.value } : prev))}
+                              />
+                              <input
+                                type="number"
+                                className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                                placeholder="Y start"
+                                value={controlEditDraft.xyYStart}
+                                onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, xyYStart: event.target.value } : prev))}
+                              />
+                            </>
+                          )}
                           <input
                             type="number"
                             min={50}
@@ -1604,9 +2146,37 @@ export default function DashboardPage() {
                             value={controlEditDraft.color}
                             onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, color: event.target.value } : prev))}
                           />
-                          <p className="sm:col-span-2 text-[10px] text-[var(--muted-foreground)]">
-                            Keep widget spec empty for normal buttons.
-                          </p>
+                          <input
+                            type="number"
+                            min={100}
+                            className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                            placeholder="Auto reset after ms (optional)"
+                            value={controlEditDraft.resetAfterMs}
+                            onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, resetAfterMs: event.target.value } : prev))}
+                          />
+                          <label className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
+                            <input
+                              type="checkbox"
+                              checked={controlEditDraft.resetOnQueueLoss}
+                              onChange={(event) =>
+                                setControlEditDraft((prev) => (prev ? { ...prev, resetOnQueueLoss: event.target.checked } : prev))
+                              }
+                            />
+                            Reset on queue loss
+                          </label>
+                          <label className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2 text-xs text-[var(--muted-foreground)] sm:col-span-2">
+                            <input
+                              type="checkbox"
+                              checked={controlEditDraft.resetOnOffline}
+                              onChange={(event) =>
+                                setControlEditDraft((prev) => (prev ? { ...prev, resetOnOffline: event.target.checked } : prev))
+                              }
+                            />
+                            Reset when robot goes offline/restarts
+                          </label>
+                          <div className="sm:col-span-2">
+                            <ControlBuilderPreview draft={controlEditDraft} />
+                          </div>
                         </div>
                         <div className="mt-3">
                           <button
@@ -1877,6 +2447,100 @@ function TelemetryBars({
               title={`${Math.round(value)}${suffix}`}
             />
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ControlBuilderPreview({ draft }: { draft: ControlButtonDraft }) {
+  const [sliderValue, setSliderValue] = useState<number>(() => Number(draft.sliderStart) || 0);
+  const [xyValue, setXyValue] = useState<{ x: number; y: number }>(() => ({
+    x: Number(draft.xyXStart) || 0,
+    y: Number(draft.xyYStart) || 0,
+  }));
+
+  useEffect(() => {
+    setSliderValue(Number(draft.sliderStart) || 0);
+  }, [draft.sliderStart, draft.controlKind]);
+
+  useEffect(() => {
+    setXyValue({ x: Number(draft.xyXStart) || 0, y: Number(draft.xyYStart) || 0 });
+  }, [draft.xyXStart, draft.xyYStart, draft.controlKind]);
+
+  const sliderMin = Number(draft.sliderMin);
+  const sliderMax = Number(draft.sliderMax);
+  const sliderStep = Number(draft.sliderStep) || 1;
+
+  const xMin = Number(draft.xyXMin);
+  const xMax = Number(draft.xyXMax);
+  const yMin = Number(draft.xyYMin);
+  const yMax = Number(draft.xyYMax);
+
+  const xRange = xMax - xMin;
+  const yRange = yMax - yMin;
+  const xPercent = xRange > 0 ? ((xyValue.x - xMin) / xRange) * 100 : 50;
+  const yPercent = yRange > 0 ? ((xyValue.y - yMin) / yRange) * 100 : 50;
+
+  return (
+    <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
+      <p className="mb-2 text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">Live Preview</p>
+
+      {draft.controlKind === 'button' ? (
+        <button
+          type="button"
+          className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--muted)] px-3 py-2 text-sm font-semibold"
+          style={draft.color.trim() ? { borderColor: draft.color.trim(), color: draft.color.trim() } : undefined}
+        >
+          {draft.icon.trim() ? <span>{draft.icon.trim()}</span> : null}
+          {draft.label.trim() || 'Button'}
+        </button>
+      ) : draft.controlKind === 'slider' ? (
+        <div className="flex items-center gap-3">
+          <input
+            type="range"
+            min={Number.isFinite(sliderMin) ? sliderMin : -100}
+            max={Number.isFinite(sliderMax) ? sliderMax : 100}
+            step={sliderStep}
+            value={sliderValue}
+            onChange={(event) => setSliderValue(Number(event.target.value))}
+            className={`accent-[var(--primary)] ${
+              draft.sliderDirection === 'vertical'
+                ? 'h-24 w-6 [writing-mode:vertical-lr] [-webkit-appearance:slider-vertical]'
+                : 'w-full'
+            }`}
+          />
+          <div className="text-xs text-[var(--muted-foreground)]">
+            <p className="font-semibold text-[var(--foreground)]">{draft.label.trim() || 'Slider'}</p>
+            <p>{sliderValue.toFixed(0)}</p>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center gap-3">
+          <div
+            className="relative h-24 w-24 rounded border border-[var(--border)] bg-[var(--background)]"
+            onPointerDown={(event) => {
+              const target = event.currentTarget;
+              const rect = target.getBoundingClientRect();
+              const nx = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+              const ny = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
+              const nextX = xMin + nx * (xMax - xMin);
+              const nextY = yMax - ny * (yMax - yMin);
+              setXyValue({ x: nextX, y: nextY });
+            }}
+          >
+            <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-[var(--border)]" />
+            <div className="absolute left-0 top-1/2 h-px w-full -translate-y-1/2 bg-[var(--border)]" />
+            <div
+              className="absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--primary)]"
+              style={{ left: `${xPercent}%`, top: `${100 - yPercent}%` }}
+            />
+          </div>
+          <div className="text-xs text-[var(--muted-foreground)]">
+            <p className="font-semibold text-[var(--foreground)]">{draft.label.trim() || 'XY Pad'}</p>
+            <p>x: {xyValue.x.toFixed(0)}</p>
+            <p>y: {xyValue.y.toFixed(0)}</p>
+          </div>
         </div>
       )}
     </div>

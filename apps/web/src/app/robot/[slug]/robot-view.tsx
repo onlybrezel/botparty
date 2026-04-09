@@ -51,7 +51,11 @@ type SliderWidgetConfig = {
   max: number;
   start: number;
   step: number;
+  direction: 'horizontal' | 'vertical';
   returnMode: 'center' | 'none';
+  resetOnQueueLoss: boolean;
+  resetOnOffline: boolean;
+  resetAfterMs: number | null;
 };
 
 type XYWidgetConfig = {
@@ -63,6 +67,9 @@ type XYWidgetConfig = {
   yMax: number;
   yStart: number;
   returnMode: 'center' | 'none';
+  resetOnQueueLoss: boolean;
+  resetOnOffline: boolean;
+  resetAfterMs: number | null;
 };
 
 type WidgetConfig = SliderWidgetConfig | XYWidgetConfig;
@@ -201,8 +208,29 @@ function parseWidgetConfig(icon: string | null): WidgetConfig | null {
     return fallback;
   };
 
+  const bool = (keys: string[], fallback: boolean) => {
+    for (const key of keys) {
+      const value = kv.get(key);
+      if (value === undefined) {
+        continue;
+      }
+      const normalized = value.toLowerCase();
+      if (['1', 'true', 'yes', 'y', 'on'].includes(normalized)) {
+        return true;
+      }
+      if (['0', 'false', 'no', 'n', 'off'].includes(normalized)) {
+        return false;
+      }
+    }
+    return fallback;
+  };
+
   const returnRaw = (kv.get('r') ?? kv.get('return') ?? kv.get('mode') ?? 'c').toLowerCase();
   const returnMode: 'center' | 'none' = returnRaw === 'n' || returnRaw === 'none' ? 'none' : 'center';
+  const resetOnQueueLoss = bool(['rq', 'resetqueue', 'reset_on_queue'], false);
+  const resetOnOffline = bool(['ro', 'resetoffline', 'reset_on_offline'], true);
+  const resetAfterRaw = num(['ttl', 'resetafter', 'reset_after_ms'], -1);
+  const resetAfterMs = resetAfterRaw >= 100 ? Math.round(resetAfterRaw) : null;
 
   if (kind === 's' || kind === 'slider') {
     const min = num(['min', 'n'], -100);
@@ -212,7 +240,9 @@ function parseWidgetConfig(icon: string | null): WidgetConfig | null {
     }
     const start = clamp(num(['start', 'v0', 'center', 'c'], 0), min, max);
     const step = Math.max(0.01, num(['step', 'st'], 1));
-    return { kind: 'slider', min, max, start, step, returnMode };
+    const dirRaw = (kv.get('dir') ?? kv.get('d') ?? 'h').toLowerCase();
+    const direction: 'horizontal' | 'vertical' = dirRaw === 'v' || dirRaw === 'vertical' ? 'vertical' : 'horizontal';
+    return { kind: 'slider', min, max, start, step, direction, returnMode, resetOnQueueLoss, resetOnOffline, resetAfterMs };
   }
 
   if (kind === 'xy' || kind === 'xypad') {
@@ -225,7 +255,7 @@ function parseWidgetConfig(icon: string | null): WidgetConfig | null {
     }
     const xStart = clamp(num(['xstart', 'x0'], 0), xMin, xMax);
     const yStart = clamp(num(['ystart', 'y0'], 0), yMin, yMax);
-    return { kind: 'xy', xMin, xMax, xStart, yMin, yMax, yStart, returnMode };
+    return { kind: 'xy', xMin, xMax, xStart, yMin, yMax, yStart, returnMode, resetOnQueueLoss, resetOnOffline, resetAfterMs };
   }
 
   return null;
@@ -273,6 +303,8 @@ export default function RobotView({ robot }: Props) {
   const [turnCountdownMs, setTurnCountdownMs] = useState<number | null>(null);
   const [reconnectNotice, setReconnectNotice] = useState<ReconnectNotice | null>(null);
   const [reconnectCountdownMs, setReconnectCountdownMs] = useState<number | null>(null);
+  const [widgetQueueResetEpoch, setWidgetQueueResetEpoch] = useState(0);
+  const [widgetOfflineResetEpoch, setWidgetOfflineResetEpoch] = useState(0);
 
   const wsRef = useRef<WebSocket | null>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
@@ -289,6 +321,8 @@ export default function RobotView({ robot }: Props) {
   const chatShouldStickRef = useRef(true);
   const shutdownNoticeAtRef = useRef(0);
   const reconnectRetryAfterRef = useRef<number | null>(null);
+  const wasMyTurnRef = useRef(false);
+  const wasOnlineRef = useRef(robot.status === 'ONLINE' || robot.status === 'BUSY');
 
   // ─── Fetch controls ────────────────────────────────────────────────────────
 
@@ -1360,9 +1394,8 @@ export default function RobotView({ robot }: Props) {
   const extraControls = useMemo(
     () =>
       buttons
-        .filter((button) => !['w', 'a', 's', 'd'].includes((button.hotKey ?? '').toLowerCase()))
-        .filter((button) => canUseButton(button)),
-    [buttons, canUseButton],
+        .filter((button) => !['w', 'a', 's', 'd'].includes((button.hotKey ?? '').toLowerCase())),
+    [buttons],
   );
   const extraButtonControls = useMemo(
     () => extraControls.filter((button) => parseWidgetConfig(button.icon ?? null) === null),
@@ -1396,6 +1429,22 @@ export default function RobotView({ robot }: Props) {
       releaseLocalControls(true);
     }
   }, [isMyTurn, releaseLocalControls]);
+
+  useEffect(() => {
+    const wasMyTurn = wasMyTurnRef.current;
+    if (wasMyTurn && !isMyTurn) {
+      setWidgetQueueResetEpoch((value) => value + 1);
+    }
+    wasMyTurnRef.current = isMyTurn;
+  }, [isMyTurn]);
+
+  useEffect(() => {
+    const wasOnline = wasOnlineRef.current;
+    if (wasOnline && !isOnline) {
+      setWidgetOfflineResetEpoch((value) => value + 1);
+    }
+    wasOnlineRef.current = isOnline;
+  }, [isOnline]);
 
   // ─── UI ───────────────────────────────────────────────────────────────────
 
@@ -1695,6 +1744,7 @@ export default function RobotView({ robot }: Props) {
                   <button
                     key={btn.id}
                     onPointerDown={() => sendCommand(btn.command, { cooldownMs: btn.cooldownMs, access: btn.access })}
+                    disabled={!canUseButton(btn)}
                     style={btn.color ? { borderColor: btn.color, color: btn.color } : undefined}
                     className={`flex min-h-12 min-w-[3.25rem] items-center justify-center gap-1 rounded-lg border px-3 py-2 text-sm font-bold transition select-none lg:min-h-11 lg:min-w-[2.75rem] ${
                       isCrowdActive(btn.command)
@@ -1718,6 +1768,9 @@ export default function RobotView({ robot }: Props) {
                     cooldownMs={button.cooldownMs}
                     access={button.access}
                     isCrowd={isCrowdActive(button.command)}
+                    disabled={!canUseButton(button)}
+                    queueResetEpoch={widgetQueueResetEpoch}
+                    offlineResetEpoch={widgetOfflineResetEpoch}
                     onSendValue={(value) => sendCommand(button.command, {
                       cooldownMs: button.cooldownMs,
                       access: button.access,
@@ -1736,6 +1789,9 @@ export default function RobotView({ robot }: Props) {
                     cooldownMs={button.cooldownMs}
                     access={button.access}
                     isCrowd={isCrowdActive(button.command)}
+                    disabled={!canUseButton(button)}
+                    queueResetEpoch={widgetQueueResetEpoch}
+                    offlineResetEpoch={widgetOfflineResetEpoch}
                     onSendValue={(value) => sendCommand(button.command, {
                       cooldownMs: button.cooldownMs,
                       access: button.access,
@@ -2140,6 +2196,9 @@ function SliderControl({
   cooldownMs,
   access,
   isCrowd,
+  disabled,
+  queueResetEpoch,
+  offlineResetEpoch,
   onSendValue,
 }: {
   label: string;
@@ -2149,13 +2208,57 @@ function SliderControl({
   cooldownMs: number;
   access: ControlButton['access'];
   isCrowd: boolean;
+  disabled: boolean;
+  queueResetEpoch: number;
+  offlineResetEpoch: number;
   onSendValue: (value: number) => void;
 }) {
   const [value, setValue] = useState<number>(config.start);
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     setValue(config.start);
   }, [config.start, config.min, config.max, command]);
+
+  useEffect(() => {
+    if (!config.resetOnQueueLoss || queueResetEpoch === 0) {
+      return;
+    }
+    setValue(config.start);
+    onSendValue(config.start);
+  }, [config.resetOnQueueLoss, config.start, onSendValue, queueResetEpoch]);
+
+  useEffect(() => {
+    if (!config.resetOnOffline || offlineResetEpoch === 0) {
+      return;
+    }
+    setValue(config.start);
+    onSendValue(config.start);
+  }, [config.resetOnOffline, config.start, onSendValue, offlineResetEpoch]);
+
+  useEffect(() => {
+    if (resetTimerRef.current) {
+      clearTimeout(resetTimerRef.current);
+      resetTimerRef.current = null;
+    }
+
+    if (config.resetAfterMs === null || value === config.start) {
+      return;
+    }
+
+    resetTimerRef.current = setTimeout(() => {
+      setValue(config.start);
+      onSendValue(config.start);
+      resetTimerRef.current = null;
+    }, config.resetAfterMs);
+
+    return () => {
+      if (resetTimerRef.current) {
+        clearTimeout(resetTimerRef.current);
+        resetTimerRef.current = null;
+      }
+    };
+  }, [config.resetAfterMs, config.start, onSendValue, value]);
 
   const emit = useCallback(
     (nextValue: number) => {
@@ -2180,6 +2283,7 @@ function SliderControl({
         min={config.min}
         max={config.max}
         step={config.step}
+        disabled={disabled}
         value={value}
         onChange={(event) => {
           const next = Number(event.target.value);
@@ -2193,11 +2297,13 @@ function SliderControl({
           setValue(config.start);
           emit(config.start);
         }}
-        className="w-full accent-[var(--primary)]"
+        className={`accent-[var(--primary)] ${config.direction === 'vertical' ? 'h-28 w-6 [writing-mode:vertical-lr] [-webkit-appearance:slider-vertical]' : 'w-full'}`}
       />
       <div className="mt-1 flex items-center justify-between text-[10px] text-[var(--muted-foreground)]">
         <span>{config.min}</span>
-        <span className="opacity-80">{command} · {access} · {cooldownMs}ms</span>
+        <span className="opacity-80">
+          {command} · {access} · {cooldownMs}ms{config.resetAfterMs ? ` · reset ${config.resetAfterMs}ms` : ''}
+        </span>
         <span>{config.max}</span>
       </div>
     </div>
@@ -2212,6 +2318,9 @@ function XYPadControl({
   cooldownMs,
   access,
   isCrowd,
+  disabled,
+  queueResetEpoch,
+  offlineResetEpoch,
   onSendValue,
 }: {
   label: string;
@@ -2221,14 +2330,62 @@ function XYPadControl({
   cooldownMs: number;
   access: ControlButton['access'];
   isCrowd: boolean;
+  disabled: boolean;
+  queueResetEpoch: number;
+  offlineResetEpoch: number;
   onSendValue: (value: { x: number; y: number }) => void;
 }) {
   const padRef = useRef<HTMLDivElement>(null);
   const [point, setPoint] = useState<{ x: number; y: number }>({ x: config.xStart, y: config.yStart });
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     setPoint({ x: config.xStart, y: config.yStart });
   }, [config.xStart, config.yStart, config.xMin, config.xMax, config.yMin, config.yMax, command]);
+
+  useEffect(() => {
+    if (!config.resetOnQueueLoss || queueResetEpoch === 0) {
+      return;
+    }
+    const nextPoint = { x: config.xStart, y: config.yStart };
+    setPoint(nextPoint);
+    onSendValue(nextPoint);
+  }, [config.resetOnQueueLoss, config.xStart, config.yStart, onSendValue, queueResetEpoch]);
+
+  useEffect(() => {
+    if (!config.resetOnOffline || offlineResetEpoch === 0) {
+      return;
+    }
+    const nextPoint = { x: config.xStart, y: config.yStart };
+    setPoint(nextPoint);
+    onSendValue(nextPoint);
+  }, [config.resetOnOffline, config.xStart, config.yStart, onSendValue, offlineResetEpoch]);
+
+  useEffect(() => {
+    if (resetTimerRef.current) {
+      clearTimeout(resetTimerRef.current);
+      resetTimerRef.current = null;
+    }
+
+    const isAtStart = point.x === config.xStart && point.y === config.yStart;
+    if (config.resetAfterMs === null || isAtStart) {
+      return;
+    }
+
+    resetTimerRef.current = setTimeout(() => {
+      const nextPoint = { x: config.xStart, y: config.yStart };
+      setPoint(nextPoint);
+      onSendValue(nextPoint);
+      resetTimerRef.current = null;
+    }, config.resetAfterMs);
+
+    return () => {
+      if (resetTimerRef.current) {
+        clearTimeout(resetTimerRef.current);
+        resetTimerRef.current = null;
+      }
+    };
+  }, [config.resetAfterMs, config.xStart, config.yStart, onSendValue, point.x, point.y]);
 
   const toPercent = (value: number, min: number, max: number) => ((value - min) / (max - min)) * 100;
 
@@ -2291,10 +2448,16 @@ function XYPadControl({
         ref={padRef}
         className="relative h-32 w-32 touch-none rounded border border-[var(--border)] bg-[var(--background)]"
         onPointerDown={(event) => {
+          if (disabled) {
+            return;
+          }
           (event.currentTarget as HTMLDivElement).setPointerCapture(event.pointerId);
           updateFromPointer(event.clientX, event.clientY);
         }}
         onPointerMove={(event) => {
+          if (disabled) {
+            return;
+          }
           if ((event.buttons & 1) === 0) {
             return;
           }
@@ -2311,7 +2474,7 @@ function XYPadControl({
         />
       </div>
       <div className="mt-1 text-[10px] text-[var(--muted-foreground)]">
-        {command} · {access} · {cooldownMs}ms
+        {command} · {access} · {cooldownMs}ms{config.resetAfterMs ? ` · reset ${config.resetAfterMs}ms` : ''}
       </div>
     </div>
   );
