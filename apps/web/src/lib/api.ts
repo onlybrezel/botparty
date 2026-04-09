@@ -781,6 +781,10 @@ class ApiClient {
   // ─── Queue ─────────────────────────────────────────────────────────────────
 
   async getQueue(robotId: string) {
+    const roomAccessToken =
+      typeof window !== 'undefined' ? window.sessionStorage.getItem(`botparty.room-access.${robotId}`) : null;
+    const guestSessionId =
+      typeof window !== 'undefined' ? window.localStorage.getItem('botparty.guestSessionId.v1') : null;
     const rows = await this.request<
       Array<{
         userId: string;
@@ -789,7 +793,7 @@ class ApiClient {
         votes?: number;
         user?: { username?: string; displayName?: string | null };
       }>
-    >(`/queue/${robotId}`);
+    >(`/queue/${robotId}${buildQueryString({ roomAccessToken, guestSessionId })}`);
 
     return rows.map((row) => ({
       userId: row.userId,

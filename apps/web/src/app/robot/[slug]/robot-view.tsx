@@ -432,8 +432,9 @@ export default function RobotView({ robot }: Props) {
   // ─── Fetch queue ──────────────────────────────────────────────────────────
 
   useEffect(() => {
+    api.setToken(accessToken);
     api.getQueue(robot.id).then((rows) => setQueue(normalizeQueueEntries(rows as QueueEntryWire[]))).catch(() => {});
-  }, [robot.id]);
+  }, [accessToken, robot.id, roomAccessToken]);
 
   useEffect(() => {
     let active = true;

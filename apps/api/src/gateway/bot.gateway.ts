@@ -95,6 +95,7 @@ export class BotGateway
   private readonly presence = new Map<string, Map<string, PresenceRecord>>();
   private readonly activeTurns = new Map<string, ActiveTurnState>();
   private readonly turnTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly controlCooldowns = new Map<string, number>();
 
   constructor(
     private readonly robotsService: RobotsService,
@@ -192,6 +193,12 @@ export class BotGateway
 
     // If this was the robot hardware, mark offline
     if (client.isRobot && client.robotId) {
+      const activeRobotClient = this.robotClients.get(client.robotId);
+      if (activeRobotClient !== client) {
+        this.logger.debug(`Stale robot socket disconnected: ${client.robotId}`);
+        return;
+      }
+
       this.robotClients.delete(client.robotId);
       if (this.isShuttingDown) {
         this.logger.log(`Robot realtime socket closed during shutdown: ${client.robotId}`);
@@ -336,6 +343,23 @@ export class BotGateway
         return;
       }
 
+      const existingRobotClient = this._getOpenRobotClient(robot.id);
+      if (existingRobotClient && existingRobotClient !== client) {
+        this.logger.warn(`Rejected duplicate robot claim for ${robot.id}`);
+        client.send(
+          JSON.stringify({
+            event: 'error',
+            data: { message: 'Robot control channel is already connected' },
+          }),
+        );
+        try {
+          client.close(1008, 'Robot already connected');
+        } catch {
+          // Ignore close failures for rejected claims.
+        }
+        return;
+      }
+
       client.isRobot = true;
       client.robotId = robot.id;
       client.claimToken = data.claimToken;
@@ -406,6 +430,12 @@ export class BotGateway
     @MessageBody()
     data: { robotId: string; command: string; value?: unknown; timestamp: number },
   ) {
+    const command = typeof data.command === 'string' ? data.command.trim() : '';
+    if (!command) {
+      client.send(JSON.stringify({ event: 'error', data: { message: 'Invalid control command' } }));
+      return;
+    }
+
     if (client.watchingRobotId !== data.robotId) {
       client.send(JSON.stringify({ event: 'error', data: { message: 'Join the room before sending controls' } }));
       return;
@@ -434,11 +464,15 @@ export class BotGateway
     const commandAccess = await this.authorizeControlCommand({
       robot,
       client,
-      command: data.command,
+      command,
       currentControllerUserId,
     });
     if (!commandAccess.allowed) {
       client.send(JSON.stringify({ event: 'error', data: { message: commandAccess.message } }));
+      return;
+    }
+
+    if (!this.consumeControlCooldown(client, data.robotId, command, commandAccess.cooldownMs)) {
       return;
     }
 
@@ -457,7 +491,7 @@ export class BotGateway
     this._broadcastToRoom(
       data.robotId,
       WS_EVENTS.CROWD_INPUT,
-      { userId: client.userId, username: client.username, command: data.command },
+      { userId: client.userId, username: client.username, command },
       client.id, // exclude sender
     );
 
@@ -474,7 +508,7 @@ export class BotGateway
       JSON.stringify({
         event: WS_EVENTS.CONTROL_COMMAND,
         data: {
-          command: data.command,
+          command,
           value: data.value,
           metadata: this._buildCommandMetadata(client, data.robotId, robot.ownerId),
           userId: client.userId,
@@ -508,7 +542,7 @@ export class BotGateway
     client: WsClient;
     command: string;
     currentControllerUserId: string | null;
-  }): Promise<{ allowed: boolean; message: string }> {
+  }): Promise<{ allowed: boolean; message: string; cooldownMs: number }> {
     const { robot, client, command, currentControllerUserId } = input;
     const normalizedCommand = command.trim();
     const queueDisabled = robot.queueMode === 'DISABLED';
@@ -518,78 +552,114 @@ export class BotGateway
     if (enabledButtons.length === 0) {
       const fallbackCommands = new Set(['forward', 'backward', 'left', 'right', 'stop']);
       if (!fallbackCommands.has(normalizedCommand)) {
-        return { allowed: false, message: 'Unknown or disabled control' };
+        return { allowed: false, message: 'Unknown or disabled control', cooldownMs: 0 };
       }
 
       if (!queueDisabled && !isCurrentController) {
-        return { allowed: false, message: 'Wait for your turn in the queue before sending controls' };
+        return {
+          allowed: false,
+          message: 'Wait for your turn in the queue before sending controls',
+          cooldownMs: 0,
+        };
       }
 
-      return { allowed: true, message: '' };
+      return {
+        allowed: true,
+        message: '',
+        cooldownMs: normalizedCommand === 'stop' ? 0 : LIMITS.DEFAULT_CONTROL_COOLDOWN_MS,
+      };
     }
 
     if (normalizedCommand === 'stop') {
       if (queueDisabled || isCurrentController || this.isRoomModerator(client, robot.ownerId)) {
-        return { allowed: true, message: '' };
+        return { allowed: true, message: '', cooldownMs: 0 };
       }
 
-      return { allowed: false, message: 'Wait for your turn in the queue before sending controls' };
+      return {
+        allowed: false,
+        message: 'Wait for your turn in the queue before sending controls',
+        cooldownMs: 0,
+      };
     }
 
     const matchingButtons = enabledButtons.filter((button) => button.command === normalizedCommand);
     if (matchingButtons.length === 0) {
-      return { allowed: false, message: 'Unknown or disabled control' };
+      return { allowed: false, message: 'Unknown or disabled control', cooldownMs: 0 };
     }
 
-    if (
-      matchingButtons.some((button) =>
-        this.canUseConfiguredButton({
-          buttonAccess: button.access,
-          client,
-          ownerId: robot.ownerId,
-          isCurrentController,
-          queueDisabled,
-        }),
-      )
-    ) {
-      return { allowed: true, message: '' };
+    const allowedButtons = matchingButtons.filter((button) =>
+      this.canUseConfiguredButton({
+        buttonAccess: button.access,
+        client,
+        ownerId: robot.ownerId,
+        isCurrentController,
+        queueDisabled,
+      }),
+    );
+
+    if (allowedButtons.length > 0) {
+      return {
+        allowed: true,
+        message: '',
+        cooldownMs: Math.max(
+          0,
+          Math.min(...allowedButtons.map((button) => Math.max(0, button.cooldownMs))),
+        ),
+      };
     }
 
     if (matchingButtons.some((button) => button.access === ControlButtonAccess.OWNER)) {
-      return { allowed: false, message: 'This control is reserved for the robot owner' };
+      return {
+        allowed: false,
+        message: 'This control is reserved for the robot owner',
+        cooldownMs: 0,
+      };
     }
 
     if (matchingButtons.some((button) => button.access === ControlButtonAccess.MODERATOR)) {
-      return { allowed: false, message: 'This control is reserved for moderators' };
+      return {
+        allowed: false,
+        message: 'This control is reserved for moderators',
+        cooldownMs: 0,
+      };
     }
 
-    return { allowed: false, message: 'Wait for your turn in the queue before sending controls' };
+    return {
+      allowed: false,
+      message: 'Wait for your turn in the queue before sending controls',
+      cooldownMs: 0,
+    };
   }
 
   @SubscribeMessage(WS_EVENTS.CONTROL_EMERGENCY_STOP)
-  handleEmergencyStopMessage(
+  async handleEmergencyStopMessage(
     @ConnectedSocket() client: WsClient,
     @MessageBody() data: { robotId: string },
   ) {
-    this.robotsService
-      .getAccessPolicy(data.robotId)
-      .then((access) => {
-        if (access.estop === 'DISABLED') {
-          client.send(JSON.stringify({ event: 'error', data: { message: 'E-STOP is disabled for this room' } }));
-          return;
-        }
-        if (access.estop === 'AUTHENTICATED' && client.isGuest) {
-          client.send(
-            JSON.stringify({ event: 'error', data: { message: 'Please sign in to use E-STOP' } }),
-          );
-          return;
-        }
+    if (client.watchingRobotId !== data.robotId || !client.userId) {
+      client.send(
+        JSON.stringify({ event: 'error', data: { message: 'Join the room before using E-STOP' } }),
+      );
+      return;
+    }
 
-        this._triggerEmergencyStop(data.robotId, `Manual E-STOP by ${client.userId ?? 'anonymous'}`);
-      })
-      .catch(() => {
-        client.send(JSON.stringify({ event: 'error', data: { message: 'Failed to validate E-STOP access' } }));
-      });
+    try {
+      const access = await this.robotsService.getAccessPolicy(data.robotId);
+      if (access.estop === 'DISABLED') {
+        client.send(JSON.stringify({ event: 'error', data: { message: 'E-STOP is disabled for this room' } }));
+        return;
+      }
+      if (access.estop === 'AUTHENTICATED' && client.isGuest) {
+        client.send(
+          JSON.stringify({ event: 'error', data: { message: 'Please sign in to use E-STOP' } }),
+        );
+        return;
+      }
+
+      this._triggerEmergencyStop(data.robotId, `Manual E-STOP by ${client.userId}`);
+    } catch {
+      client.send(JSON.stringify({ event: 'error', data: { message: 'Failed to validate E-STOP access' } }));
+    }
   }
 
   // ─── Chat ───────────────────────────────────────────────────────────────────
@@ -1144,6 +1214,41 @@ export class BotGateway
       client.role === 'MOD' ||
       client.role === 'MODERATOR',
     );
+  }
+
+  private consumeControlCooldown(
+    client: WsClient,
+    robotId: string,
+    command: string,
+    cooldownMs: number,
+  ): boolean {
+    if (cooldownMs <= 0) {
+      return true;
+    }
+
+    const actorKey = client.userId ?? client.id;
+    const normalizedCommand = command.trim().toLowerCase();
+    if (!actorKey || !normalizedCommand) {
+      return true;
+    }
+
+    const key = `${actorKey}:${robotId}:${normalizedCommand}`;
+    const now = Date.now();
+    const nextAllowedAt = this.controlCooldowns.get(key) ?? 0;
+    if (nextAllowedAt > now) {
+      return false;
+    }
+
+    if (this.controlCooldowns.size > 4096) {
+      for (const [entryKey, expiresAt] of this.controlCooldowns.entries()) {
+        if (expiresAt <= now) {
+          this.controlCooldowns.delete(entryKey);
+        }
+      }
+    }
+
+    this.controlCooldowns.set(key, now + cooldownMs);
+    return true;
   }
 
   private _buildCommandMetadata(client: WsClient, robotId: string, ownerId?: string | null): CommandMetadata {

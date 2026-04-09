@@ -73,39 +73,46 @@ export class QueueService {
   }
 
   async leave(robotId: string, userId: string) {
-    const existing = await this.prisma.queueEntry.findUnique({
-      where: { robotId_userId: { robotId, userId } },
-      select: { id: true },
-    });
-
-    if (!existing) {
-      return { removed: false };
-    }
-
-    await this.prisma.queueEntry.delete({
-      where: { robotId_userId: { robotId, userId } },
-    });
-
-    // Reorder remaining entries in a single transaction to avoid N+1 queries
     const orderBy = await this.getQueueOrderBy(robotId);
-    const entries = await this.prisma.queueEntry.findMany({
-      where: { robotId },
-      orderBy,
-    });
+    const result = await this.prisma.$transaction(
+      async (tx) => {
+        const existing = await tx.queueEntry.findUnique({
+          where: { robotId_userId: { robotId, userId } },
+          select: { id: true },
+        });
 
-    if (entries.length > 0) {
-      await this.prisma.$transaction(
-        entries.map((entry, i) =>
-          this.prisma.queueEntry.update({
+        if (!existing) {
+          return { removed: false };
+        }
+
+        await tx.queueEntry.delete({
+          where: { robotId_userId: { robotId, userId } },
+        });
+
+        const entries = await tx.queueEntry.findMany({
+          where: { robotId },
+          orderBy,
+          select: { id: true },
+        });
+
+        for (const [index, entry] of entries.entries()) {
+          await tx.queueEntry.update({
             where: { id: entry.id },
-            data: { position: i + 1 },
-          }),
-        ),
-      );
+            data: { position: index + 1 },
+          });
+        }
+
+        return { removed: true };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+
+    if (!result.removed) {
+      return result;
     }
 
     await this.redis.publish(`queue:${robotId}`, JSON.stringify({ type: 'leave', userId }));
-    return { removed: true };
+    return result;
   }
 
   async getQueue(robotId: string) {
@@ -119,6 +126,37 @@ export class QueueService {
         },
       },
     });
+  }
+
+  async getQueueForRequester(
+    robotId: string,
+    requesterUserId: string | null,
+    roomAccessToken?: string,
+    guestSessionId?: string,
+  ) {
+    const robot = await this.robotsService.findById(robotId);
+    const actorId = requesterUserId ?? this.robotsService.resolveGuestActorId(guestSessionId);
+    const accessRequiresVerification =
+      robot.visibility === 'PRIVATE' ||
+      robot.accessMode === 'PASSWORD' ||
+      robot.accessMode === 'ALLOWED_USERS';
+
+    if (accessRequiresVerification) {
+      if (!actorId) {
+        throw new ForbiddenException('Room access verification required');
+      }
+
+      const allowed = await this.robotsService.validateRoomAccess({
+        robotId,
+        actorId,
+        roomAccessToken,
+      });
+      if (!allowed) {
+        throw new ForbiddenException('Room access verification required');
+      }
+    }
+
+    return this.getQueue(robotId);
   }
 
   async getNextInQueue(robotId: string) {

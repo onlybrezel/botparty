@@ -1,19 +1,35 @@
-import { Controller, Post, Delete, Get, Param, UseGuards, Body } from '@nestjs/common';
+import { Controller, Post, Delete, Get, Param, UseGuards, Body, Headers, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { QueueService } from './queue.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { JwtPayload } from '@botparty/shared';
+import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
 
 @ApiTags('queue')
 @Controller('queue')
 export class QueueController {
-  constructor(private readonly queueService: QueueService) {}
+  constructor(
+    private readonly queueService: QueueService,
+    private readonly jwtService: JwtService,
+    private readonly configService: ConfigService,
+  ) {}
 
   @Get(':robotId')
   @ApiOperation({ summary: 'Get queue for a robot' })
-  async getQueue(@Param('robotId') robotId: string) {
-    return this.queueService.getQueue(robotId);
+  async getQueue(
+    @Param('robotId') robotId: string,
+    @Headers('authorization') authorization?: string,
+    @Query('roomAccessToken') roomAccessToken?: string,
+    @Query('guestSessionId') guestSessionId?: string,
+  ) {
+    return this.queueService.getQueueForRequester(
+      robotId,
+      this.resolveRequesterId(authorization),
+      roomAccessToken,
+      guestSessionId,
+    );
   }
 
   @Post(':robotId/join')
@@ -48,5 +64,21 @@ export class QueueController {
     @Body() body?: { roomAccessToken?: string },
   ) {
     return this.queueService.vote(robotId, targetUserId, user.sub, body?.roomAccessToken);
+  }
+
+  private resolveRequesterId(authorization?: string) {
+    const token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
+    if (!token) {
+      return null;
+    }
+
+    try {
+      const payload = this.jwtService.verify<{ sub?: string }>(token, {
+        secret: this.configService.getOrThrow<string>('JWT_SECRET'),
+      });
+      return typeof payload.sub === 'string' ? payload.sub : null;
+    } catch {
+      return null;
+    }
   }
 }
