@@ -37,6 +37,7 @@ type ControlButtonDraft = {
   label: string;
   command: string;
   hotKey: string;
+  icon: string;
   cooldownMs: string;
   access: ControlButtonAccess;
   color: string;
@@ -83,6 +84,7 @@ const DEFAULT_CONTROL_DRAFT: ControlButtonDraft = {
   label: '',
   command: '',
   hotKey: '',
+  icon: '',
   cooldownMs: '200',
   access: ControlButtonAccessEnum.QUEUE_TURN,
   color: '',
@@ -694,6 +696,7 @@ export default function DashboardPage() {
         label,
         command,
         hotKey: controlDraft.hotKey.trim() || undefined,
+        icon: controlDraft.icon.trim() || undefined,
         cooldownMs: Number(controlDraft.cooldownMs),
         access: controlDraft.access,
         color: controlDraft.color.trim() || undefined,
@@ -736,6 +739,7 @@ export default function DashboardPage() {
       label: button.label,
       command: button.command,
       hotKey: button.hotKey ?? '',
+      icon: button.icon ?? '',
       cooldownMs: String(button.cooldownMs),
       access: button.access,
       color: button.color ?? '',
@@ -759,6 +763,7 @@ export default function DashboardPage() {
         label,
         command,
         hotKey: controlEditDraft.hotKey.trim() || undefined,
+        icon: controlEditDraft.icon.trim() || undefined,
         cooldownMs: Number(controlEditDraft.cooldownMs),
         access: controlEditDraft.access,
         color: controlEditDraft.color.trim() || null,
@@ -1469,6 +1474,14 @@ export default function DashboardPage() {
                         }
                       />
                       <input
+                        className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                        placeholder="Widget spec (optional), e.g. widget:s:min=-100:max=100:start=0:r=c"
+                        value={controlDraft.icon}
+                        onChange={(event) =>
+                          setControlDraft((prev) => ({ ...prev, icon: event.target.value }))
+                        }
+                      />
+                      <input
                         type="number"
                         min={50}
                         max={10000}
@@ -1503,6 +1516,9 @@ export default function DashboardPage() {
                           setControlDraft((prev) => ({ ...prev, color: event.target.value }))
                         }
                       />
+                      <p className="sm:col-span-2 text-[10px] text-[var(--muted-foreground)]">
+                        Widget specs: slider = widget:s:min=-100:max=100:start=0:step=1:r=c, XY pad = widget:xy:xn=-100:xx=100:x0=0:yn=-100:yx=100:y0=0:r=c.
+                      </p>
                       <div className="sm:col-span-2">
                         <button
                           type="button"
@@ -1557,6 +1573,12 @@ export default function DashboardPage() {
                             onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, hotKey: event.target.value } : prev))}
                           />
                           <input
+                            className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                            placeholder="Widget spec (optional)"
+                            value={controlEditDraft.icon}
+                            onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, icon: event.target.value } : prev))}
+                          />
+                          <input
                             type="number"
                             min={50}
                             max={10000}
@@ -1582,6 +1604,9 @@ export default function DashboardPage() {
                             value={controlEditDraft.color}
                             onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, color: event.target.value } : prev))}
                           />
+                          <p className="sm:col-span-2 text-[10px] text-[var(--muted-foreground)]">
+                            Keep widget spec empty for normal buttons.
+                          </p>
                         </div>
                         <div className="mt-3">
                           <button
@@ -1631,6 +1656,7 @@ export default function DashboardPage() {
                                 <p className="mt-1 text-xs text-[var(--muted-foreground)]">
                                   Access: {button.access} · Cooldown: {button.cooldownMs}ms
                                   {button.hotKey ? ` · Hotkey: ${button.hotKey}` : ''}
+                                  {button.icon?.startsWith('widget:') ? ` · Widget: ${button.icon}` : ''}
                                   {button.color ? ` · Color: ${button.color}` : ''}
                                 </p>
                               </div>

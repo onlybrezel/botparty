@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useCallback, useState, useLayoutEffect } from 'react';
+import { useEffect, useRef, useCallback, useState, useLayoutEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import type { RobotPublic } from '@botparty/shared';
@@ -44,6 +44,28 @@ interface QueueEntry {
   position: number;
   votes?: number;
 }
+
+type SliderWidgetConfig = {
+  kind: 'slider';
+  min: number;
+  max: number;
+  start: number;
+  step: number;
+  returnMode: 'center' | 'none';
+};
+
+type XYWidgetConfig = {
+  kind: 'xy';
+  xMin: number;
+  xMax: number;
+  xStart: number;
+  yMin: number;
+  yMax: number;
+  yStart: number;
+  returnMode: 'center' | 'none';
+};
+
+type WidgetConfig = SliderWidgetConfig | XYWidgetConfig;
 
 type QueueEntryWire = {
   userId: string;
@@ -134,6 +156,79 @@ function normalizeQueueEntries(rows: QueueEntryWire[] | undefined): QueueEntry[]
     position: row.position,
     votes: typeof row.votes === 'number' ? row.votes : 0,
   }));
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function parseWidgetConfig(icon: string | null): WidgetConfig | null {
+  if (!icon) {
+    return null;
+  }
+
+  const raw = icon.trim();
+  if (!raw.startsWith('widget:')) {
+    return null;
+  }
+
+  const parts = raw.split(':').map((part) => part.trim()).filter(Boolean);
+  if (parts.length < 2) {
+    return null;
+  }
+
+  const kind = parts[1]?.toLowerCase();
+  const kv = new Map<string, string>();
+  for (const segment of parts.slice(2)) {
+    const eq = segment.indexOf('=');
+    if (eq <= 0) {
+      continue;
+    }
+    kv.set(segment.slice(0, eq).trim().toLowerCase(), segment.slice(eq + 1).trim());
+  }
+
+  const num = (keys: string[], fallback: number) => {
+    for (const key of keys) {
+      const value = kv.get(key);
+      if (value === undefined) {
+        continue;
+      }
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+    return fallback;
+  };
+
+  const returnRaw = (kv.get('r') ?? kv.get('return') ?? kv.get('mode') ?? 'c').toLowerCase();
+  const returnMode: 'center' | 'none' = returnRaw === 'n' || returnRaw === 'none' ? 'none' : 'center';
+
+  if (kind === 's' || kind === 'slider') {
+    const min = num(['min', 'n'], -100);
+    const max = num(['max', 'x'], 100);
+    if (max <= min) {
+      return null;
+    }
+    const start = clamp(num(['start', 'v0', 'center', 'c'], 0), min, max);
+    const step = Math.max(0.01, num(['step', 'st'], 1));
+    return { kind: 'slider', min, max, start, step, returnMode };
+  }
+
+  if (kind === 'xy' || kind === 'xypad') {
+    const xMin = num(['xmin', 'xn'], -100);
+    const xMax = num(['xmax', 'xx'], 100);
+    const yMin = num(['ymin', 'yn'], -100);
+    const yMax = num(['ymax', 'yx'], 100);
+    if (xMax <= xMin || yMax <= yMin) {
+      return null;
+    }
+    const xStart = clamp(num(['xstart', 'x0'], 0), xMin, xMax);
+    const yStart = clamp(num(['ystart', 'y0'], 0), yMin, yMax);
+    return { kind: 'xy', xMin, xMax, xStart, yMin, yMax, yStart, returnMode };
+  }
+
+  return null;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -830,7 +925,7 @@ export default function RobotView({ robot }: Props) {
   const sendCommand = useCallback(
     (
       command: string,
-      options?: { cooldownMs?: number; access?: ControlButton['access'] },
+      options?: { cooldownMs?: number; access?: ControlButton['access']; value?: unknown },
     ) => {
       const cooldownMs = options?.cooldownMs ?? 150;
       const buttonAccess = options?.access ?? 'QUEUE_TURN';
@@ -868,7 +963,17 @@ export default function RobotView({ robot }: Props) {
       const lastAt = cooldownMap.current.get(command) ?? 0;
       if (Date.now() - lastAt < cooldownMs) return;
       cooldownMap.current.set(command, Date.now());
-      wsRef.current.send(JSON.stringify({ event: 'control:command', data: { robotId: robot.id, command, timestamp: Date.now() } }));
+      wsRef.current.send(
+        JSON.stringify({
+          event: 'control:command',
+          data: {
+            robotId: robot.id,
+            command,
+            value: options?.value,
+            timestamp: Date.now(),
+          },
+        }),
+      );
     },
     [currentViewerId, queue, robot.id, robot.queueMode],
   );
@@ -1252,6 +1357,31 @@ export default function RobotView({ robot }: Props) {
     if (button.access === 'MODERATOR') return canModerate;
     return Boolean(userId && userId === robot.owner.id);
   }, [canModerate, isMyTurn, robot.owner.id, userId]);
+  const extraControls = useMemo(
+    () =>
+      buttons
+        .filter((button) => !['w', 'a', 's', 'd'].includes((button.hotKey ?? '').toLowerCase()))
+        .filter((button) => canUseButton(button)),
+    [buttons, canUseButton],
+  );
+  const extraButtonControls = useMemo(
+    () => extraControls.filter((button) => parseWidgetConfig(button.icon ?? null) === null),
+    [extraControls],
+  );
+  const sliderControls = useMemo(
+    () =>
+      extraControls
+        .map((button) => ({ button, widget: parseWidgetConfig(button.icon ?? null) }))
+        .filter((entry): entry is { button: ControlButton; widget: SliderWidgetConfig } => entry.widget?.kind === 'slider'),
+    [extraControls],
+  );
+  const xyControls = useMemo(
+    () =>
+      extraControls
+        .map((button) => ({ button, widget: parseWidgetConfig(button.icon ?? null) }))
+        .filter((entry): entry is { button: ControlButton; widget: XYWidgetConfig } => entry.widget?.kind === 'xy'),
+    [extraControls],
+  );
 
   useEffect(() => {
     if (!userId) {
@@ -1553,32 +1683,66 @@ export default function RobotView({ robot }: Props) {
                 <div /><div /><div />
               </div>
 
-              {/* Extra buttons */}
-              <div className="flex flex-wrap gap-2">
+              {/* Extra controls */}
+              <div className="flex flex-wrap items-start gap-3">
                 {buttons.length === 0 && (
                   <div className="rounded-lg border border-[var(--border)] bg-[var(--muted)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
                     No controls are available for your current access level.
                   </div>
                 )}
-                {buttons
-                  .filter((b) => !['w', 'a', 's', 'd'].includes(b.hotKey ?? ''))
-                  .filter((b) => canUseButton(b))
-                  .map((btn) => (
-                    <button
-                      key={btn.id}
-                      onPointerDown={() => sendCommand(btn.command, { cooldownMs: btn.cooldownMs, access: btn.access })}
-                      style={btn.color ? { borderColor: btn.color, color: btn.color } : undefined}
-                      className={`flex min-h-12 min-w-[3.25rem] items-center justify-center gap-1 rounded-lg border px-3 py-2 text-sm font-bold transition select-none lg:min-h-11 lg:min-w-[2.75rem] ${
-                        isCrowdActive(btn.command)
-                          ? 'border-amber-500 bg-amber-500/20 text-amber-300'
-                          : 'border-[var(--border)] bg-[var(--muted)] hover:bg-[var(--primary)] hover:border-[var(--primary)] hover:text-white'
-                      }`}
-                    >
-                      {btn.icon && <span>{btn.icon}</span>}
-                      {btn.label}
-                      {btn.hotKey && <span className="ml-1 text-xs opacity-40">[{btn.hotKey}]</span>}
-                    </button>
-                  ))}
+
+                {extraButtonControls.map((btn) => (
+                  <button
+                    key={btn.id}
+                    onPointerDown={() => sendCommand(btn.command, { cooldownMs: btn.cooldownMs, access: btn.access })}
+                    style={btn.color ? { borderColor: btn.color, color: btn.color } : undefined}
+                    className={`flex min-h-12 min-w-[3.25rem] items-center justify-center gap-1 rounded-lg border px-3 py-2 text-sm font-bold transition select-none lg:min-h-11 lg:min-w-[2.75rem] ${
+                      isCrowdActive(btn.command)
+                        ? 'border-amber-500 bg-amber-500/20 text-amber-300'
+                        : 'border-[var(--border)] bg-[var(--muted)] hover:bg-[var(--primary)] hover:border-[var(--primary)] hover:text-white'
+                    }`}
+                  >
+                    {btn.icon && !btn.icon.startsWith('widget:') && <span>{btn.icon}</span>}
+                    {btn.label}
+                    {btn.hotKey && <span className="ml-1 text-xs opacity-40">[{btn.hotKey}]</span>}
+                  </button>
+                ))}
+
+                {sliderControls.map(({ button, widget }) => (
+                  <SliderControl
+                    key={button.id}
+                    label={button.label}
+                    command={button.command}
+                    config={widget}
+                    color={button.color ?? null}
+                    cooldownMs={button.cooldownMs}
+                    access={button.access}
+                    isCrowd={isCrowdActive(button.command)}
+                    onSendValue={(value) => sendCommand(button.command, {
+                      cooldownMs: button.cooldownMs,
+                      access: button.access,
+                      value,
+                    })}
+                  />
+                ))}
+
+                {xyControls.map(({ button, widget }) => (
+                  <XYPadControl
+                    key={button.id}
+                    label={button.label}
+                    command={button.command}
+                    config={widget}
+                    color={button.color ?? null}
+                    cooldownMs={button.cooldownMs}
+                    access={button.access}
+                    isCrowd={isCrowdActive(button.command)}
+                    onSendValue={(value) => sendCommand(button.command, {
+                      cooldownMs: button.cooldownMs,
+                      access: button.access,
+                      value,
+                    })}
+                  />
+                ))}
               </div>
 
               <div className="hidden h-11 w-px self-center bg-[var(--border)] sm:block" />
@@ -1961,6 +2125,193 @@ export default function RobotView({ robot }: Props) {
             STOP
           </button>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Advanced controls ───────────────────────────────────────────────────────
+
+function SliderControl({
+  label,
+  command,
+  config,
+  color,
+  cooldownMs,
+  access,
+  isCrowd,
+  onSendValue,
+}: {
+  label: string;
+  command: string;
+  config: SliderWidgetConfig;
+  color: string | null;
+  cooldownMs: number;
+  access: ControlButton['access'];
+  isCrowd: boolean;
+  onSendValue: (value: number) => void;
+}) {
+  const [value, setValue] = useState<number>(config.start);
+
+  useEffect(() => {
+    setValue(config.start);
+  }, [config.start, config.min, config.max, command]);
+
+  const emit = useCallback(
+    (nextValue: number) => {
+      onSendValue(nextValue);
+    },
+    [onSendValue],
+  );
+
+  return (
+    <div
+      className={`min-w-[14rem] rounded-lg border px-3 py-2 ${
+        isCrowd ? 'border-amber-500 bg-amber-500/10' : 'border-[var(--border)] bg-[var(--muted)]'
+      }`}
+      style={color ? { borderColor: color } : undefined}
+    >
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <p className="text-xs font-semibold text-[var(--foreground)]">{label}</p>
+        <span className="text-[10px] text-[var(--muted-foreground)]">{value.toFixed(0)}</span>
+      </div>
+      <input
+        type="range"
+        min={config.min}
+        max={config.max}
+        step={config.step}
+        value={value}
+        onChange={(event) => {
+          const next = Number(event.target.value);
+          setValue(next);
+          emit(next);
+        }}
+        onPointerUp={() => {
+          if (config.returnMode !== 'center') {
+            return;
+          }
+          setValue(config.start);
+          emit(config.start);
+        }}
+        className="w-full accent-[var(--primary)]"
+      />
+      <div className="mt-1 flex items-center justify-between text-[10px] text-[var(--muted-foreground)]">
+        <span>{config.min}</span>
+        <span className="opacity-80">{command} · {access} · {cooldownMs}ms</span>
+        <span>{config.max}</span>
+      </div>
+    </div>
+  );
+}
+
+function XYPadControl({
+  label,
+  command,
+  config,
+  color,
+  cooldownMs,
+  access,
+  isCrowd,
+  onSendValue,
+}: {
+  label: string;
+  command: string;
+  config: XYWidgetConfig;
+  color: string | null;
+  cooldownMs: number;
+  access: ControlButton['access'];
+  isCrowd: boolean;
+  onSendValue: (value: { x: number; y: number }) => void;
+}) {
+  const padRef = useRef<HTMLDivElement>(null);
+  const [point, setPoint] = useState<{ x: number; y: number }>({ x: config.xStart, y: config.yStart });
+
+  useEffect(() => {
+    setPoint({ x: config.xStart, y: config.yStart });
+  }, [config.xStart, config.yStart, config.xMin, config.xMax, config.yMin, config.yMax, command]);
+
+  const toPercent = (value: number, min: number, max: number) => ((value - min) / (max - min)) * 100;
+
+  const sendPoint = useCallback(
+    (nextPoint: { x: number; y: number }) => {
+      onSendValue(nextPoint);
+    },
+    [onSendValue],
+  );
+
+  const updateFromPointer = useCallback(
+    (clientX: number, clientY: number) => {
+      const rect = padRef.current?.getBoundingClientRect();
+      if (!rect) {
+        return;
+      }
+
+      const nx = clamp((clientX - rect.left) / rect.width, 0, 1);
+      const ny = clamp((clientY - rect.top) / rect.height, 0, 1);
+
+      const x = config.xMin + nx * (config.xMax - config.xMin);
+      const y = config.yMax - ny * (config.yMax - config.yMin);
+      const nextPoint = {
+        x: Math.round(x * 100) / 100,
+        y: Math.round(y * 100) / 100,
+      };
+
+      setPoint(nextPoint);
+      sendPoint(nextPoint);
+    },
+    [config.xMax, config.xMin, config.yMax, config.yMin, sendPoint],
+  );
+
+  const resetToStart = useCallback(() => {
+    if (config.returnMode !== 'center') {
+      return;
+    }
+    const nextPoint = { x: config.xStart, y: config.yStart };
+    setPoint(nextPoint);
+    sendPoint(nextPoint);
+  }, [config.returnMode, config.xStart, config.yStart, sendPoint]);
+
+  const cx = toPercent(point.x, config.xMin, config.xMax);
+  const cy = 100 - toPercent(point.y, config.yMin, config.yMax);
+
+  return (
+    <div
+      className={`rounded-lg border px-3 py-2 ${
+        isCrowd ? 'border-amber-500 bg-amber-500/10' : 'border-[var(--border)] bg-[var(--muted)]'
+      }`}
+      style={color ? { borderColor: color } : undefined}
+    >
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <p className="text-xs font-semibold text-[var(--foreground)]">{label}</p>
+        <span className="text-[10px] text-[var(--muted-foreground)]">
+          x {point.x.toFixed(0)} · y {point.y.toFixed(0)}
+        </span>
+      </div>
+      <div
+        ref={padRef}
+        className="relative h-32 w-32 touch-none rounded border border-[var(--border)] bg-[var(--background)]"
+        onPointerDown={(event) => {
+          (event.currentTarget as HTMLDivElement).setPointerCapture(event.pointerId);
+          updateFromPointer(event.clientX, event.clientY);
+        }}
+        onPointerMove={(event) => {
+          if ((event.buttons & 1) === 0) {
+            return;
+          }
+          updateFromPointer(event.clientX, event.clientY);
+        }}
+        onPointerUp={resetToStart}
+        onPointerCancel={resetToStart}
+      >
+        <div className="absolute left-1/2 top-1/2 h-px w-full -translate-x-1/2 bg-[var(--border)]" />
+        <div className="absolute left-1/2 top-1/2 h-full w-px -translate-y-1/2 bg-[var(--border)]" />
+        <div
+          className="absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--primary)]"
+          style={{ left: `${cx}%`, top: `${cy}%` }}
+        />
+      </div>
+      <div className="mt-1 text-[10px] text-[var(--muted-foreground)]">
+        {command} · {access} · {cooldownMs}ms
       </div>
     </div>
   );
