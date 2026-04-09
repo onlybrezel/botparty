@@ -21,6 +21,7 @@ import { ModerationService } from '../moderation/moderation.service';
 import { ControlsService } from '../controls/controls.service';
 import { getAccessCookieName, parseCookie } from '../auth/auth.cookies';
 import Redis from 'ioredis';
+import { createHash } from 'crypto';
 
 interface WsClient extends WebSocket {
   id: string;
@@ -32,7 +33,6 @@ interface WsClient extends WebSocket {
   /** True if this socket is the robot hardware client */
   isRobot?: boolean;
   robotId?: string;
-  claimToken?: string;
   /** Timestamp of last chat message (for rate limiting) */
   lastChatAt?: number;
   /** User role (for rate-limit tier) */
@@ -344,16 +344,7 @@ export class BotGateway
       return;
     }
 
-    const snapshot = await this.refreshSharedPresenceState(client, data.robotId);
-    this.robotsService
-      .setViewerCount(data.robotId, snapshot.viewerCount)
-      .catch(() => {});
-
-    if (snapshot.cleanedStaleEntries) {
-      this._broadcastToRoom(data.robotId, WS_EVENTS.PRESENCE_UPDATE, {
-        viewers: snapshot.presenceList,
-      });
-    }
+    await this.touchSharedPresenceState(client, data.robotId);
   }
 
   // ─── Robot authentication ───────────────────────────────────────────────────
@@ -361,14 +352,20 @@ export class BotGateway
   @SubscribeMessage(WS_EVENTS.ROBOT_CLAIM)
   async handleRobotClaim(
     @ConnectedSocket() client: WsClient,
-    @MessageBody() data: { claimToken: string },
+    @MessageBody() data: { robotAuthToken?: string },
   ) {
     try {
-      const robot = await this.robotsService.findByClaimToken(data.claimToken);
-      if (!robot) {
-        client.send(JSON.stringify({ event: 'error', data: { message: 'Invalid claim token' } }));
+      const robotId = this.resolveRobotSocketIdentity(data.robotAuthToken);
+      if (!robotId) {
+        client.send(JSON.stringify({ event: 'error', data: { message: 'Invalid robot authorization' } }));
+        try {
+          client.close(1008, 'Invalid robot authorization');
+        } catch {
+          // Ignore close failures for rejected claims.
+        }
         return;
       }
+      const robot = await this.robotsService.findById(robotId);
 
       const existingRobotClient = this._getOpenRobotClient(robot.id);
       if (existingRobotClient && existingRobotClient !== client) {
@@ -406,7 +403,6 @@ export class BotGateway
 
       client.isRobot = true;
       client.robotId = robot.id;
-      client.claimToken = data.claimToken;
       client.watchingRobotId = robot.id;
       this.robotClients.set(robot.id, client);
 
@@ -442,12 +438,12 @@ export class BotGateway
     @ConnectedSocket() client: WsClient,
     @MessageBody() data: Record<string, unknown>,
   ) {
-    if (!client.isRobot || !client.claimToken) {
+    if (!client.isRobot || !client.robotId) {
       client.send(JSON.stringify({ event: 'error', data: { message: 'Only robot clients can send telemetry' } }));
       return;
     }
     try {
-      await this.robotsService.ingestRobotTelemetry(client.claimToken, data);
+      await this.robotsService.ingestRobotTelemetryByRobotId(client.robotId, data);
     } catch (err) {
       this.logger.warn(`Telemetry ingest failed for robot ${client.robotId}: ${(err as Error).message}`);
     }
@@ -989,6 +985,26 @@ export class BotGateway
     return this.getSharedPresenceSnapshot(robotId, client.userId);
   }
 
+  private async touchSharedPresenceState(client: WsClient, robotId: string): Promise<void> {
+    if (!client.userId) {
+      return;
+    }
+
+    const joinedAt = client.presenceJoinedAt ?? Date.now();
+    client.presenceJoinedAt = joinedAt;
+    await this.redis.set(
+      this.viewerSocketKey(client.id),
+      JSON.stringify({
+        robotId,
+        userId: client.userId,
+        username: client.username,
+        joinedAt,
+      }),
+      'EX',
+      BotGateway.VIEWER_PRESENCE_TTL_SEC,
+    );
+  }
+
   private async removeSharedPresenceState(
     client: WsClient,
     robotId: string,
@@ -1434,6 +1450,35 @@ export class BotGateway
     } catch {
       return null;
     }
+  }
+
+  private resolveRobotSocketIdentity(robotAuthToken?: string): string | null {
+    const token = robotAuthToken?.trim();
+    if (!token) {
+      return null;
+    }
+
+    try {
+      const payload = this.jwtService.verify<{ sub?: string; scope?: string; deviceHash?: string }>(token, {
+        secret: this.getRobotJwtSecret(),
+      });
+      if (payload.scope !== 'robot' || typeof payload.sub !== 'string' || !payload.sub.trim()) {
+        return null;
+      }
+      if (typeof payload.deviceHash !== 'string' || !/^[a-f0-9]{64}$/i.test(payload.deviceHash)) {
+        return null;
+      }
+      return payload.sub;
+    } catch {
+      return null;
+    }
+  }
+
+  private getRobotJwtSecret() {
+    return (
+      this.configService.get<string>('ROBOT_JWT_SECRET') ??
+      createHash('sha256').update(this.configService.getOrThrow<string>('JWT_SECRET')).digest('hex')
+    );
   }
 
   private canUseConfiguredButton(input: {

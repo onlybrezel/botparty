@@ -7,7 +7,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { createRobotSchema, updateRobotSchema } from '@botparty/shared';
-import { randomBytes } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import { hash, verify } from 'argon2';
 import type { z } from 'zod';
 import type { Prisma } from '@botparty/prisma';
@@ -33,6 +33,14 @@ type RobotStreamCameraDescriptor = {
   role?: string;
   enabled?: boolean;
   publishMode?: string;
+};
+
+type PublicRobotStatus = 'ONLINE' | 'OFFLINE' | 'BUSY' | 'MAINTENANCE';
+
+type RobotAuthMetadata = {
+  auth?: {
+    boundDeviceHash?: string;
+  };
 };
 
 export interface PublicRobotOverview {
@@ -174,8 +182,6 @@ export class RobotsService {
   }
 
   async findAll(filters?: { visibility?: string; status?: string; tag?: string; q?: string; sort?: string }) {
-    await this.refreshStaleStatus();
-
     const query = filters?.q?.trim();
     const sort = filters?.sort?.trim().toLowerCase();
 
@@ -191,7 +197,6 @@ export class RobotsService {
     const robots = await this.prisma.robot.findMany({
       where: {
         visibility: 'PUBLIC',
-        ...(filters?.status && { status: filters.status as 'ONLINE' | 'OFFLINE' | 'BUSY' | 'MAINTENANCE' }),
         ...(filters?.tag && { tags: { has: filters.tag } }),
         ...(query && {
           OR: [
@@ -217,12 +222,12 @@ export class RobotsService {
       },
     });
 
-    return robots.map((robot) => this.toPublicRobot(robot));
+    return robots
+      .map((robot) => this.toPublicRobot(robot))
+      .filter((robot) => !filters?.status || robot.status === filters.status);
   }
 
   async findBySlug(slug: string) {
-    await this.refreshStaleStatus();
-
     const robot = await this.prisma.robot.findUnique({
       where: { slug },
       include: {
@@ -250,8 +255,6 @@ export class RobotsService {
   }
 
   async findByOwner(ownerId: string) {
-    await this.refreshStaleStatus();
-
     const robots = await this.prisma.robot.findMany({
       where: { ownerId },
       orderBy: { createdAt: 'desc' },
@@ -363,7 +366,10 @@ export class RobotsService {
     const claimToken = randomBytes(32).toString('hex');
     return this.prisma.robot.update({
       where: { id },
-      data: { claimToken },
+      data: {
+        claimToken,
+        metadata: this.clearBoundDeviceMetadata(robot.metadata) as Prisma.InputJsonValue,
+      },
       select: { id: true, claimToken: true },
     });
   }
@@ -513,6 +519,38 @@ export class RobotsService {
     return { id };
   }
 
+  async validateOrBindRobotDevice(robotId: string, deviceKey?: string | null) {
+    const normalizedDeviceKey = deviceKey?.trim() ?? '';
+    if (normalizedDeviceKey.length < 32) {
+      throw new ForbiddenException('Valid robot device key required');
+    }
+
+    const robot = await this.prisma.robot.findUnique({
+      where: { id: robotId },
+      select: { id: true, metadata: true },
+    });
+    if (!robot) {
+      throw new NotFoundException('Robot not found');
+    }
+
+    const deviceHash = this.hashDeviceKey(normalizedDeviceKey);
+    const currentHash = this.readBoundDeviceHash(robot.metadata);
+    if (currentHash && currentHash !== deviceHash) {
+      throw new ForbiddenException('Claim token is bound to a different robot device');
+    }
+
+    if (!currentHash) {
+      await this.prisma.robot.update({
+        where: { id: robotId },
+        data: {
+          metadata: this.setBoundDeviceMetadata(robot.metadata, deviceHash) as Prisma.InputJsonValue,
+        },
+      });
+    }
+
+    return { robotId, deviceHash };
+  }
+
   async findByClaimToken(claimToken: string) {
     return this.prisma.robot.findUnique({ where: { claimToken } });
   }
@@ -587,15 +625,6 @@ export class RobotsService {
     return { robotId, actions };
   }
 
-  async consumeActionsByClaimToken(claimToken: string) {
-    const robot = await this.findByClaimToken(claimToken);
-    if (!robot) {
-      throw new ForbiddenException('Invalid claim token');
-    }
-
-    return this.consumeActionsByRobotId(robot.id);
-  }
-
   async consumeActionsByRobotId(robotId: string) {
     const robot = await this.findById(robotId);
 
@@ -626,17 +655,14 @@ export class RobotsService {
     return { robotId: robot.id, stream, actions };
   }
 
-  async ingestRobotLogs(claimToken: string, lines: string[]) {
-    const robot = await this.findByClaimToken(claimToken);
-    if (!robot) {
-      throw new ForbiddenException('Invalid claim token');
-    }
+  async ingestRobotLogsByRobotId(robotId: string, lines: string[]) {
+    await this.findById(robotId);
 
     if (lines.length === 0) {
       return { ok: true };
     }
 
-    const key = `robot:logs:${robot.id}`;
+    const key = `robot:logs:${robotId}`;
     const now = Date.now();
     const pipeline = this.redis.pipeline();
 
@@ -656,8 +682,8 @@ export class RobotsService {
     return { ok: true };
   }
 
-  async ingestRobotTelemetry(
-    claimToken: string,
+  async ingestRobotTelemetryByRobotId(
+    robotId: string,
     payload: {
       clientVersion?: string;
       gitBranch?: string;
@@ -674,10 +700,7 @@ export class RobotsService {
       cameraFrames?: number;
     },
   ) {
-    const robot = await this.findByClaimToken(claimToken);
-    if (!robot) {
-      throw new ForbiddenException('Invalid claim token');
-    }
+    await this.findById(robotId);
 
     const telemetry = {
       ts: Date.now(),
@@ -726,8 +749,8 @@ export class RobotsService {
           : 0,
     };
 
-    const latestKey = `robot:telemetry:${robot.id}:latest`;
-    const historyKey = `robot:telemetry:${robot.id}:history`;
+    const latestKey = `robot:telemetry:${robotId}:latest`;
+    const historyKey = `robot:telemetry:${robotId}:history`;
     const pipeline = this.redis.pipeline();
     pipeline.set(latestKey, JSON.stringify(telemetry), 'EX', 300);
     pipeline.rpush(historyKey, JSON.stringify(telemetry));
@@ -841,8 +864,6 @@ export class RobotsService {
   }
 
   async getFeatured() {
-    await this.refreshStaleStatus();
-
     const robots = await this.prisma.robot.findMany({
       where: { isFeatured: true, visibility: 'PUBLIC' },
       include: {
@@ -856,8 +877,6 @@ export class RobotsService {
   }
 
   async getPublicOverview(): Promise<PublicRobotOverview> {
-    await this.refreshStaleStatus();
-
     const publicRobots = await this.prisma.robot.findMany({
       where: { visibility: 'PUBLIC' },
       select: {
@@ -866,6 +885,7 @@ export class RobotsService {
         slug: true,
         status: true,
         viewerCount: true,
+        lastOnlineAt: true,
         queueMode: true,
         isFeatured: true,
         tags: true,
@@ -879,12 +899,17 @@ export class RobotsService {
       orderBy: [{ isFeatured: 'desc' }, { viewerCount: 'desc' }, { createdAt: 'desc' }],
     });
 
+    const normalizedRobots = publicRobots.map((robot) => ({
+      ...robot,
+      status: this.normalizeStatus(robot.status, robot.lastOnlineAt),
+      viewerCount: this.normalizeViewerCount(robot.status, robot.lastOnlineAt, robot.viewerCount),
+    }));
     const liveStatuses = new Set<string>(['ONLINE', 'BUSY']);
-    const liveRobots = publicRobots.filter((robot) => liveStatuses.has(robot.status as string));
-    const featuredRobots = publicRobots.filter((robot) => robot.isFeatured);
+    const liveRobots = normalizedRobots.filter((robot) => liveStatuses.has(robot.status as string));
+    const featuredRobots = normalizedRobots.filter((robot) => robot.isFeatured);
     const topTags = new Map<string, number>();
 
-    for (const robot of publicRobots) {
+    for (const robot of normalizedRobots) {
       for (const tag of robot.tags) {
         const normalized = tag.trim();
         if (!normalized) {
@@ -901,17 +926,17 @@ export class RobotsService {
 
     return {
       totals: {
-        publicRobots: publicRobots.length,
+        publicRobots: normalizedRobots.length,
         liveRobots: liveRobots.length,
         featuredRobots: featuredRobots.length,
-        totalViewers: publicRobots.reduce((sum, robot) => sum + robot.viewerCount, 0),
+        totalViewers: normalizedRobots.reduce((sum, robot) => sum + robot.viewerCount, 0),
         queueEntries,
       },
       statusBreakdown: {
-        online: publicRobots.filter((robot) => robot.status === 'ONLINE').length,
-        busy: publicRobots.filter((robot) => robot.status === 'BUSY').length,
-        offline: publicRobots.filter((robot) => robot.status === 'OFFLINE').length,
-        maintenance: publicRobots.filter((robot) => robot.status === 'MAINTENANCE').length,
+        online: normalizedRobots.filter((robot) => robot.status === 'ONLINE').length,
+        busy: normalizedRobots.filter((robot) => robot.status === 'BUSY').length,
+        offline: normalizedRobots.filter((robot) => robot.status === 'OFFLINE').length,
+        maintenance: normalizedRobots.filter((robot) => robot.status === 'MAINTENANCE').length,
       },
       featured: featuredRobots.slice(0, 6).map((robot) => ({
         id: robot.id,
@@ -1079,20 +1104,6 @@ export class RobotsService {
         viewerCount: Math.max(0, viewerCount),
       },
       select: { id: true },
-    });
-  }
-
-  private async refreshStaleStatus() {
-    const staleBefore = new Date(Date.now() - 45_000);
-    await this.prisma.robot.updateMany({
-      where: {
-        status: { in: ['ONLINE', 'BUSY'] },
-        OR: [{ lastOnlineAt: null }, { lastOnlineAt: { lt: staleBefore } }],
-      },
-      data: {
-        status: 'OFFLINE',
-        viewerCount: 0,
-      },
     });
   }
 
@@ -1331,6 +1342,7 @@ export class RobotsService {
       description: string | null;
       thumbnailUrl: string | null;
       status: string;
+      lastOnlineAt?: Date | null;
       visibility: string;
       accessMode: string;
       queueMode: string;
@@ -1355,7 +1367,6 @@ export class RobotsService {
       slug: robot.slug,
       description: robot.description,
       thumbnailUrl: robot.thumbnailUrl,
-      status: robot.status,
       visibility: robot.visibility,
       accessMode: robot.accessMode,
       queueMode: robot.queueMode,
@@ -1367,7 +1378,12 @@ export class RobotsService {
           ? robot.metadata
           : null,
       tags: robot.tags,
-      viewerCount: robot.viewerCount,
+      status: this.normalizeStatus(robot.status, 'lastOnlineAt' in robot ? (robot as { lastOnlineAt?: Date | null }).lastOnlineAt ?? null : null),
+      viewerCount: this.normalizeViewerCount(
+        robot.status,
+        'lastOnlineAt' in robot ? (robot as { lastOnlineAt?: Date | null }).lastOnlineAt ?? null : null,
+        robot.viewerCount,
+      ),
       owner: robot.owner
         ? {
             id: robot.owner.id,
@@ -1415,5 +1431,70 @@ export class RobotsService {
     }
 
     throw new Error('Failed to generate unique invite code');
+  }
+
+  private staleRobotCutoff(): Date {
+    return new Date(Date.now() - 45_000);
+  }
+
+  private normalizeStatus(status: string, lastOnlineAt: Date | null | undefined): PublicRobotStatus {
+    if (
+      (status === 'ONLINE' || status === 'BUSY') &&
+      (!lastOnlineAt || lastOnlineAt < this.staleRobotCutoff())
+    ) {
+      return 'OFFLINE';
+    }
+    if (status === 'ONLINE' || status === 'OFFLINE' || status === 'BUSY' || status === 'MAINTENANCE') {
+      return status;
+    }
+    return 'OFFLINE';
+  }
+
+  private normalizeViewerCount(status: string, lastOnlineAt: Date | null | undefined, viewerCount: number) {
+    return this.normalizeStatus(status, lastOnlineAt) === 'OFFLINE' ? 0 : Math.max(0, viewerCount);
+  }
+
+  private hashDeviceKey(deviceKey: string) {
+    return createHash('sha256').update(deviceKey).digest('hex');
+  }
+
+  private readBoundDeviceHash(metadata: unknown): string | null {
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+      return null;
+    }
+
+    const auth = (metadata as RobotAuthMetadata).auth;
+    return typeof auth?.boundDeviceHash === 'string' && auth.boundDeviceHash.trim()
+      ? auth.boundDeviceHash.trim()
+      : null;
+  }
+
+  private setBoundDeviceMetadata(metadata: unknown, deviceHash: string): Record<string, unknown> {
+    const existing =
+      metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+        ? { ...(metadata as Record<string, unknown>) }
+        : {};
+    const auth =
+      existing.auth && typeof existing.auth === 'object' && !Array.isArray(existing.auth)
+        ? { ...(existing.auth as Record<string, unknown>) }
+        : {};
+    auth.boundDeviceHash = deviceHash;
+    existing.auth = auth;
+    return existing;
+  }
+
+  private clearBoundDeviceMetadata(metadata: unknown): Record<string, unknown> {
+    const existing =
+      metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+        ? { ...(metadata as Record<string, unknown>) }
+        : {};
+    if (!existing.auth || typeof existing.auth !== 'object' || Array.isArray(existing.auth)) {
+      return existing;
+    }
+
+    const auth = { ...(existing.auth as Record<string, unknown>) };
+    delete auth.boundDeviceHash;
+    existing.auth = auth;
+    return existing;
   }
 }

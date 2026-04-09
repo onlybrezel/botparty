@@ -24,8 +24,9 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { LivekitService } from '../livekit/livekit.service';
 import { Role } from '@botparty/shared';
 import type { JwtPayload } from '@botparty/shared';
-import { JwtService } from '@nestjs/jwt';
+import { JwtService, type JwtSignOptions } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { createHash } from 'crypto';
 import { extractBearerToken, getAccessCookieName, parseCookie } from '../auth/auth.cookies';
 
 @ApiTags('robots')
@@ -201,7 +202,7 @@ export class RobotsController {
 
   @Post('claim')
   @ApiOperation({ summary: 'Claim a robot and get LiveKit token for hardware client' })
-  async claim(@Body() body: { claimToken?: string; publishCameraIds?: string[] }) {
+  async claim(@Body() body: { claimToken?: string; deviceKey?: string; publishCameraIds?: string[] }) {
     const claimToken = body.claimToken?.trim();
     if (!claimToken) {
       throw new BadRequestException('claimToken is required');
@@ -211,6 +212,24 @@ export class RobotsController {
     if (!robot) {
       throw new UnauthorizedException('Invalid claim token');
     }
+
+    const { deviceHash } = await this.robotsService.validateOrBindRobotDevice(robot.id, body.deviceKey);
+    const robotJwtOptions: JwtSignOptions = {
+      secret: this.getRobotJwtSecret(),
+    };
+    const configuredRobotExpiry = this.configService.get<string>('ROBOT_JWT_EXPIRES_IN')?.trim();
+    if (configuredRobotExpiry) {
+      robotJwtOptions.expiresIn = configuredRobotExpiry as JwtSignOptions['expiresIn'];
+    }
+
+    const robotAuthToken = this.jwtService.sign(
+      {
+        sub: robot.id,
+        scope: 'robot',
+        deviceHash,
+      },
+      robotJwtOptions,
+    );
 
     const token = await this.livekitService.generateRobotToken(robot.id, robot.name);
     const publishCameraIds = Array.isArray(body.publishCameraIds)
@@ -227,6 +246,7 @@ export class RobotsController {
     return {
       robotId: robot.id,
       token,
+      robotAuthToken,
       publishTokens,
       livekitUrl: this.livekitService.getLivekitUrl(),
       ingress,
@@ -236,12 +256,8 @@ export class RobotsController {
 
   @Post('heartbeat')
   @ApiOperation({ summary: 'Heartbeat from robot hardware client' })
-  async heartbeat(@Body() body: { robotId?: string }) {
-    const robotId = body.robotId?.trim();
-    if (!robotId) {
-      throw new BadRequestException('robotId is required');
-    }
-
+  async heartbeat(@Headers('authorization') authorization?: string) {
+    const robotId = this.requireRobotAuth(authorization);
     await this.robotsService.touchHeartbeat(robotId);
     return { ok: true };
   }
@@ -285,34 +301,29 @@ export class RobotsController {
   }
 
   @Post('actions/poll')
-  @ApiOperation({ summary: 'Robot polls pending remote actions using claim token' })
-  async pollActions(@Body() body: { claimToken?: string }) {
-    const claimToken = body.claimToken?.trim();
-    if (!claimToken) {
-      throw new BadRequestException('claimToken is required');
-    }
-    return this.robotsService.consumeActionsByClaimToken(claimToken);
+  @ApiOperation({ summary: 'Robot polls pending remote actions using robot bearer auth' })
+  async pollActions(@Headers('authorization') authorization?: string) {
+    return this.robotsService.consumeActionsByRobotId(this.requireRobotAuth(authorization));
   }
 
   @Post('logs')
-  @ApiOperation({ summary: 'Robot uploads temporary diagnostics logs using claim token' })
-  async pushLogs(@Body() body: { claimToken?: string; lines?: string[] }) {
-    const claimToken = body.claimToken?.trim();
-    if (!claimToken) {
-      throw new BadRequestException('claimToken is required');
-    }
+  @ApiOperation({ summary: 'Robot uploads temporary diagnostics logs using robot bearer auth' })
+  async pushLogs(
+    @Headers('authorization') authorization: string | undefined,
+    @Body() body: { lines?: string[] },
+  ) {
     if (!Array.isArray(body.lines)) {
       throw new BadRequestException('lines must be an array');
     }
-    return this.robotsService.ingestRobotLogs(claimToken, body.lines);
+    return this.robotsService.ingestRobotLogsByRobotId(this.requireRobotAuth(authorization), body.lines);
   }
 
   @Post('telemetry')
-  @ApiOperation({ summary: 'Robot uploads temporary runtime telemetry using claim token' })
+  @ApiOperation({ summary: 'Robot uploads temporary runtime telemetry using robot bearer auth' })
   async pushTelemetry(
+    @Headers('authorization') authorization: string | undefined,
     @Body()
     body: {
-      claimToken?: string;
       clientVersion?: string;
       gitBranch?: string;
       gitCommit?: string;
@@ -328,12 +339,7 @@ export class RobotsController {
       cameraFrames?: number;
     },
   ) {
-    const claimToken = body.claimToken?.trim();
-    if (!claimToken) {
-      throw new BadRequestException('claimToken is required');
-    }
-
-    return this.robotsService.ingestRobotTelemetry(claimToken, body);
+    return this.robotsService.ingestRobotTelemetryByRobotId(this.requireRobotAuth(authorization), body);
   }
 
   @Get(':id/logs')
@@ -376,5 +382,34 @@ export class RobotsController {
     } catch {
       return null;
     }
+  }
+
+  private requireRobotAuth(authorization?: string): string {
+    const token = extractBearerToken(authorization);
+    if (!token) {
+      throw new UnauthorizedException('Robot authorization required');
+    }
+
+    try {
+      const payload = this.jwtService.verify<{ sub?: string; scope?: string; deviceHash?: string }>(token, {
+        secret: this.getRobotJwtSecret(),
+      });
+      if (payload.scope !== 'robot' || typeof payload.sub !== 'string' || !payload.sub.trim()) {
+        throw new UnauthorizedException('Invalid robot authorization');
+      }
+      if (typeof payload.deviceHash !== 'string' || !/^[a-f0-9]{64}$/i.test(payload.deviceHash)) {
+        throw new UnauthorizedException('Invalid robot authorization');
+      }
+      return payload.sub;
+    } catch {
+      throw new UnauthorizedException('Invalid robot authorization');
+    }
+  }
+
+  private getRobotJwtSecret() {
+    return (
+      this.configService.get<string>('ROBOT_JWT_SECRET') ??
+      createHash('sha256').update(this.configService.getOrThrow<string>('JWT_SECRET')).digest('hex')
+    );
   }
 }
