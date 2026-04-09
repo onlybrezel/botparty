@@ -304,8 +304,11 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
       return this._moderateGuest(robotId, dto, moderatorId);
     }
 
-    // Deactivate existing active entries for same robot+user (we replace them)
-    if (dto.action !== ModerationActionType.UNBAN) {
+    const createsActiveRestriction =
+      dto.action === ModerationActionType.BAN || dto.action === ModerationActionType.TIMEOUT;
+
+    // Deactivate existing active entries only when replacing a live restriction.
+    if (createsActiveRestriction) {
       await this.prisma.robotModerationEntry.updateMany({
         where: { robotId, userId: dto.targetUserId, isActive: true },
         data: { isActive: false },
@@ -368,7 +371,7 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
         action: dto.action,
         reason: dto.reason,
         expiresAt,
-        isActive: true,
+        isActive: createsActiveRestriction,
         moderatorId,
       },
     });
@@ -412,7 +415,7 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
         robotId,
         userId,
         isActive: true,
-        action: { in: ['BAN', 'TIMEOUT', 'KICK'] },
+        action: { in: ['BAN', 'TIMEOUT'] },
         OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
       },
       orderBy: { createdAt: 'desc' },
@@ -457,9 +460,13 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
     }
 
     let expiresAtMs: number | null = null;
+    let persistsRestriction = false;
     if (dto.action === ModerationActionType.TIMEOUT) {
       if (!dto.durationSec) throw new BadRequestException('durationSec required for TIMEOUT');
       expiresAtMs = Date.now() + dto.durationSec * 1000;
+      persistsRestriction = true;
+    } else if (dto.action === ModerationActionType.BAN) {
+      persistsRestriction = true;
     }
 
     const payload = {
@@ -470,13 +477,13 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
       moderatorId,
       createdAt: new Date().toISOString(),
       expiresAt: expiresAtMs ? new Date(expiresAtMs).toISOString() : null,
-      isActive: true,
+      isActive: persistsRestriction,
     };
 
     if (expiresAtMs) {
       const ttlSec = Math.max(1, Math.floor((expiresAtMs - Date.now()) / 1000));
       await this.redis.set(key, JSON.stringify(payload), 'EX', ttlSec);
-    } else {
+    } else if (dto.action === ModerationActionType.BAN) {
       // Keep bans persistent but not forever to avoid unbounded stale keys.
       await this.redis.set(key, JSON.stringify(payload), 'EX', 60 * 60 * 24 * 30);
     }

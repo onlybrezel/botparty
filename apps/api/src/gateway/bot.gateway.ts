@@ -10,13 +10,14 @@ import {
 import { BeforeApplicationShutdown, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Server, WebSocket } from 'ws';
-import { WS_EVENTS, LIMITS } from '@botparty/shared';
+import { WS_EVENTS, LIMITS, ControlButtonAccess } from '@botparty/shared';
 import type { JwtPayload } from '@botparty/shared';
 import { RobotsService } from '../robots/robots.service';
 import { SessionsService } from '../sessions/sessions.service';
 import { QueueService } from '../queue/queue.service';
 import { RedisService } from '../redis/redis.service';
 import { ModerationService } from '../moderation/moderation.service';
+import { ControlsService } from '../controls/controls.service';
 import Redis from 'ioredis';
 
 interface WsClient extends WebSocket {
@@ -102,10 +103,10 @@ export class BotGateway
     private readonly redis: RedisService,
     private readonly moderationService: ModerationService,
     private readonly jwtService: JwtService,
+    private readonly controlsService: ControlsService,
   ) {}
 
   async onModuleInit() {
-    await this.prismaRuntimeReset();
     this.subscriber = this.redis.duplicate();
 
     this.subscriber.on('pmessage', (_pattern, channel, message) => {
@@ -192,6 +193,10 @@ export class BotGateway
     // If this was the robot hardware, mark offline
     if (client.isRobot && client.robotId) {
       this.robotClients.delete(client.robotId);
+      if (this.isShuttingDown) {
+        this.logger.log(`Robot realtime socket closed during shutdown: ${client.robotId}`);
+        return;
+      }
       void this.clearTurnState(client.robotId);
       void this.queueService.clearQueue(client.robotId).catch(() => {});
       this.robotsService.updateStatus(client.robotId, 'OFFLINE').catch(() => {});
@@ -408,23 +413,6 @@ export class BotGateway
 
     const robot = await this.robotsService.findById(data.robotId);
 
-    if (robot.queueMode !== 'DISABLED') {
-      if (!client.userId || client.isGuest) {
-        client.send(
-          JSON.stringify({ event: 'error', data: { message: 'Please sign in and join the queue to control this robot' } }),
-        );
-        return;
-      }
-
-      const currentControllerUserId = await this.queueService.getCurrentControllerUserId(data.robotId);
-      if (!currentControllerUserId || currentControllerUserId !== client.userId) {
-        client.send(
-          JSON.stringify({ event: 'error', data: { message: 'Wait for your turn in the queue before sending controls' } }),
-        );
-        return;
-      }
-    }
-
     const access = await this.robotsService.getAccessPolicy(data.robotId);
     if (access.control === 'DISABLED') {
       client.send(
@@ -436,6 +424,21 @@ export class BotGateway
       client.send(
         JSON.stringify({ event: 'error', data: { message: 'Please sign in to control this robot' } }),
       );
+      return;
+    }
+
+    const currentControllerUserId =
+      robot.queueMode === 'DISABLED'
+        ? null
+        : await this.queueService.getCurrentControllerUserId(data.robotId);
+    const commandAccess = await this.authorizeControlCommand({
+      robot,
+      client,
+      command: data.command,
+      currentControllerUserId,
+    });
+    if (!commandAccess.allowed) {
+      client.send(JSON.stringify({ event: 'error', data: { message: commandAccess.message } }));
       return;
     }
 
@@ -498,6 +501,69 @@ export class BotGateway
         );
       }
     }
+  }
+
+  private async authorizeControlCommand(input: {
+    robot: Awaited<ReturnType<RobotsService['findById']>>;
+    client: WsClient;
+    command: string;
+    currentControllerUserId: string | null;
+  }): Promise<{ allowed: boolean; message: string }> {
+    const { robot, client, command, currentControllerUserId } = input;
+    const normalizedCommand = command.trim();
+    const queueDisabled = robot.queueMode === 'DISABLED';
+    const isCurrentController = Boolean(client.userId && currentControllerUserId === client.userId);
+    const enabledButtons = await this.controlsService.getEnabledButtonsForRobot(robot.id);
+
+    if (enabledButtons.length === 0) {
+      const fallbackCommands = new Set(['forward', 'backward', 'left', 'right', 'stop']);
+      if (!fallbackCommands.has(normalizedCommand)) {
+        return { allowed: false, message: 'Unknown or disabled control' };
+      }
+
+      if (!queueDisabled && !isCurrentController) {
+        return { allowed: false, message: 'Wait for your turn in the queue before sending controls' };
+      }
+
+      return { allowed: true, message: '' };
+    }
+
+    if (normalizedCommand === 'stop') {
+      if (queueDisabled || isCurrentController || this.isRoomModerator(client, robot.ownerId)) {
+        return { allowed: true, message: '' };
+      }
+
+      return { allowed: false, message: 'Wait for your turn in the queue before sending controls' };
+    }
+
+    const matchingButtons = enabledButtons.filter((button) => button.command === normalizedCommand);
+    if (matchingButtons.length === 0) {
+      return { allowed: false, message: 'Unknown or disabled control' };
+    }
+
+    if (
+      matchingButtons.some((button) =>
+        this.canUseConfiguredButton({
+          buttonAccess: button.access,
+          client,
+          ownerId: robot.ownerId,
+          isCurrentController,
+          queueDisabled,
+        }),
+      )
+    ) {
+      return { allowed: true, message: '' };
+    }
+
+    if (matchingButtons.some((button) => button.access === ControlButtonAccess.OWNER)) {
+      return { allowed: false, message: 'This control is reserved for the robot owner' };
+    }
+
+    if (matchingButtons.some((button) => button.access === ControlButtonAccess.MODERATOR)) {
+      return { allowed: false, message: 'This control is reserved for moderators' };
+    }
+
+    return { allowed: false, message: 'Wait for your turn in the queue before sending controls' };
   }
 
   @SubscribeMessage(WS_EVENTS.CONTROL_EMERGENCY_STOP)
@@ -1047,6 +1113,39 @@ export class BotGateway
     }
   }
 
+  private canUseConfiguredButton(input: {
+    buttonAccess: ControlButtonAccess;
+    client: WsClient;
+    ownerId: string | null;
+    isCurrentController: boolean;
+    queueDisabled: boolean;
+  }): boolean {
+    const { buttonAccess, client, ownerId, isCurrentController, queueDisabled } = input;
+
+    if (buttonAccess === ControlButtonAccess.EVERYONE) {
+      return true;
+    }
+
+    if (buttonAccess === ControlButtonAccess.QUEUE_TURN) {
+      return queueDisabled || isCurrentController;
+    }
+
+    if (buttonAccess === ControlButtonAccess.MODERATOR) {
+      return this.isRoomModerator(client, ownerId);
+    }
+
+    return Boolean(ownerId && client.userId && client.userId === ownerId);
+  }
+
+  private isRoomModerator(client: WsClient, ownerId?: string | null): boolean {
+    return Boolean(
+      (ownerId && client.userId && client.userId === ownerId) ||
+      client.role === 'ADMIN' ||
+      client.role === 'MOD' ||
+      client.role === 'MODERATOR',
+    );
+  }
+
   private _buildCommandMetadata(client: WsClient, robotId: string, ownerId?: string | null): CommandMetadata {
     const isRobotOwner = Boolean(ownerId) && Boolean(client.userId) && client.userId === ownerId;
     const isSiteAdmin = client.role === 'ADMIN';
@@ -1066,18 +1165,4 @@ export class BotGateway
     };
   }
 
-  private async prismaRuntimeReset() {
-    try {
-      await this.queueService.clearAllQueues();
-      await this.sessionsService.endAllActiveSessions();
-      this.activeTurns.clear();
-      for (const timer of this.turnTimeouts.values()) {
-        clearTimeout(timer);
-      }
-      this.turnTimeouts.clear();
-      this.logger.log('Cleared runtime queue/session state on API startup');
-    } catch (err) {
-      this.logger.error(`Failed to reset runtime state on startup: ${(err as Error).message}`);
-    }
-  }
 }

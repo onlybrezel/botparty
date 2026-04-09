@@ -283,7 +283,7 @@ export default function RobotView({ robot }: Props) {
       active = false;
       clearInterval(timer);
     };
-  }, [robot.id]);
+  }, [accessToken, robot.id, roomAccessToken]);
 
   useEffect(() => {
     initialChatScrollDoneRef.current = false;
@@ -656,24 +656,31 @@ export default function RobotView({ robot }: Props) {
         });
         break;
       case 'mod:timeout':
-      case 'mod:ban':
-      case 'mod:kick': {
+      case 'mod:ban': {
         const targetUserId = typeof data.userId === 'string' ? data.userId : null;
         if (!targetUserId || targetUserId !== currentViewerId) {
           break;
         }
 
-        const action = event === 'mod:ban' ? 'BAN' : event === 'mod:kick' ? 'KICK' : 'TIMEOUT';
+        const action = event === 'mod:ban' ? 'BAN' : 'TIMEOUT';
         const expiresAt =
           typeof data.expiresAt === 'string' && data.expiresAt.length > 0 ? data.expiresAt : null;
         const until = expiresAt ? ` Until ${new Date(expiresAt).toLocaleTimeString()}.` : '';
         setChatRestriction(
           action === 'BAN'
             ? 'You are banned from this room. Your turn ended immediately and you were removed from the control queue.'
-            : action === 'KICK'
-              ? 'You were removed from control immediately and taken out of the control queue.'
-              : `You are temporarily restricted in this room. Your turn ended immediately and you were removed from the control queue.${until}`,
+            : `You are temporarily restricted in this room. Your turn ended immediately and you were removed from the control queue.${until}`,
         );
+        break;
+      }
+      case 'mod:kick': {
+        const targetUserId = typeof data.userId === 'string' ? data.userId : null;
+        if (!targetUserId || targetUserId !== currentViewerId) {
+          break;
+        }
+
+        setChatRestriction(null);
+        pushToast('You were removed from control and from the queue.', 'error', 2600);
         break;
       }
       case 'mod:unban': {
@@ -757,8 +764,14 @@ export default function RobotView({ robot }: Props) {
   // ─── Controls ─────────────────────────────────────────────────────────────
 
   const sendCommand = useCallback(
-    (command: string, cooldownMs = 150) => {
-      if (robot.queueMode !== 'DISABLED') {
+    (
+      command: string,
+      options?: { cooldownMs?: number; access?: ControlButton['access'] },
+    ) => {
+      const cooldownMs = options?.cooldownMs ?? 150;
+      const buttonAccess = options?.access ?? 'QUEUE_TURN';
+
+      if (robot.queueMode !== 'DISABLED' && buttonAccess === 'QUEUE_TURN') {
         const myPos = queue.findIndex((entry) => entry.userId === currentViewerId) + 1;
         const myTurn = myPos > 0 && myPos === 1;
         if (!myTurn) {
@@ -793,7 +806,7 @@ export default function RobotView({ robot }: Props) {
       cooldownMap.current.set(command, Date.now());
       wsRef.current.send(JSON.stringify({ event: 'control:command', data: { robotId: robot.id, command, timestamp: Date.now() } }));
     },
-    [queue, robot.id, robot.queueMode, userId],
+    [currentViewerId, queue, robot.id, robot.queueMode],
   );
 
   const sendImmediateStop = useCallback(() => {
@@ -820,7 +833,7 @@ export default function RobotView({ robot }: Props) {
 
     const interval = window.setInterval(() => {
       for (const command of heldMotionCommands) {
-        sendCommand(command, 0);
+        sendCommand(command, { cooldownMs: 0, access: 'QUEUE_TURN' });
       }
     }, 400);
 
@@ -902,17 +915,21 @@ export default function RobotView({ robot }: Props) {
       const key = e.key.toLowerCase();
       if (WASD[key] && !e.repeat) {
         e.preventDefault();
-        const command = WASD[key];
+        const btn = keyToBtn.get(key) ?? null;
+        const command = btn?.command ?? WASD[key];
         setActiveKeys((s) => new Set(s).add(key));
         setActiveCommands((s) => new Set(s).add(command));
         activeMotionKeysRef.current.add(key);
-        sendCommand(command);
+        sendCommand(command, {
+          cooldownMs: btn?.cooldownMs,
+          access: btn?.access ?? 'QUEUE_TURN',
+        });
       }
-      if (keyToBtn.has(key) && !e.repeat) {
+      else if (keyToBtn.has(key) && !e.repeat) {
         e.preventDefault();
         const btn = keyToBtn.get(key)!;
         setActiveKeys((s) => new Set(s).add(key));
-        sendCommand(btn.command, btn.cooldownMs);
+        sendCommand(btn.command, { cooldownMs: btn.cooldownMs, access: btn.access });
       }
     };
 
@@ -934,7 +951,7 @@ export default function RobotView({ robot }: Props) {
         });
         activeMotionKeysRef.current.delete(key);
         if (activeMotionKeysRef.current.size === 0) {
-          sendCommand('stop', 0);
+          sendCommand('stop', { cooldownMs: 0, access: 'QUEUE_TURN' });
         }
       }
     };
@@ -1145,13 +1162,7 @@ export default function RobotView({ robot }: Props) {
 
   const isCrowdActive = (command: string) => Date.now() - (crowdInputs.get(command) ?? 0) < 600;
 
-  const defaultButtons: ControlButton[] = [
-    { id: 'w', label: 'W', command: 'forward', hotKey: 'w', icon: '▲', cooldownMs: 100, access: 'QUEUE_TURN', position: 0, color: null },
-    { id: 'a', label: 'A', command: 'left',    hotKey: 'a', icon: '◀', cooldownMs: 100, access: 'QUEUE_TURN', position: 1, color: null },
-    { id: 's', label: 'S', command: 'backward', hotKey: 's', icon: '▼', cooldownMs: 100, access: 'QUEUE_TURN', position: 2, color: null },
-    { id: 'd', label: 'D', command: 'right',   hotKey: 'd', icon: '▶', cooldownMs: 100, access: 'QUEUE_TURN', position: 3, color: null },
-  ];
-  const buttons = controlButtons.length > 0 ? controlButtons : defaultButtons;
+  const buttons = controlButtons;
 
   const isOnline = robotStatus === 'ONLINE' || robotStatus === 'BUSY';
   const queueEnabled = robot.queueMode !== 'DISABLED';
@@ -1173,8 +1184,9 @@ export default function RobotView({ robot }: Props) {
   const canUseButton = useCallback((button: ControlButton) => {
     if (button.access === 'EVERYONE') return true;
     if (button.access === 'QUEUE_TURN') return isMyTurn;
-    return canModerate;
-  }, [canModerate, isMyTurn]);
+    if (button.access === 'MODERATOR') return canModerate;
+    return Boolean(userId && userId === robot.owner.id);
+  }, [canModerate, isMyTurn, robot.owner.id, userId]);
 
   useEffect(() => {
     if (!userId) {
@@ -1400,20 +1412,24 @@ export default function RobotView({ robot }: Props) {
                 <div />
                 {(['w'] as const).map((k) => {
                   const btn = buttons.find((b) => b.hotKey === k);
-                  const cmd = btn?.command ?? 'forward';
+                  if (!btn) {
+                    return <div key={`${k}-placeholder`} />;
+                  }
+
+                  const cmd = btn.command;
                   const isDown = activeCommands.has(cmd);
                   return (
                     <ControlKey
                       key={k}
-                      label={btn?.icon ?? k.toUpperCase()}
+                      label={btn.icon ?? k.toUpperCase()}
                       hotKey={k}
                       command={cmd}
                       isDown={isDown}
                       isCrowd={isCrowdActive(cmd)}
-                      disabled={Boolean(btn) && (btn ? !canUseButton(btn) : true)}
+                      disabled={!canUseButton(btn)}
                       onPress={() => {
                         setActiveCommands((s) => new Set(s).add(cmd));
-                        sendCommand(cmd, btn?.cooldownMs);
+                        sendCommand(cmd, { cooldownMs: btn.cooldownMs, access: btn.access });
                       }}
                       onRelease={() => {
                         setActiveCommands((s) => {
@@ -1430,21 +1446,24 @@ export default function RobotView({ robot }: Props) {
                 {/* Row 2: A S D */}
                 {(['a', 's', 'd'] as const).map((k) => {
                   const btn = buttons.find((b) => b.hotKey === k);
-                  const fallback = k === 'a' ? 'left' : k === 's' ? 'backward' : 'right';
-                  const cmd = btn?.command ?? fallback;
+                  if (!btn) {
+                    return <div key={`${k}-placeholder`} />;
+                  }
+
+                  const cmd = btn.command;
                   const isDown = activeCommands.has(cmd);
                   return (
                     <ControlKey
                       key={k}
-                      label={btn?.icon ?? k.toUpperCase()}
+                      label={btn.icon ?? k.toUpperCase()}
                       hotKey={k}
                       command={cmd}
                       isDown={isDown}
                       isCrowd={isCrowdActive(cmd)}
-                      disabled={Boolean(btn) && (btn ? !canUseButton(btn) : true)}
+                      disabled={!canUseButton(btn)}
                       onPress={() => {
                         setActiveCommands((s) => new Set(s).add(cmd));
-                        sendCommand(cmd, btn?.cooldownMs);
+                        sendCommand(cmd, { cooldownMs: btn.cooldownMs, access: btn.access });
                       }}
                       onRelease={() => {
                         setActiveCommands((s) => {
@@ -1463,13 +1482,18 @@ export default function RobotView({ robot }: Props) {
 
               {/* Extra buttons */}
               <div className="flex flex-wrap gap-2">
+                {buttons.length === 0 && (
+                  <div className="rounded-lg border border-[var(--border)] bg-[var(--muted)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
+                    No controls are available for your current access level.
+                  </div>
+                )}
                 {buttons
                   .filter((b) => !['w', 'a', 's', 'd'].includes(b.hotKey ?? ''))
                   .filter((b) => canUseButton(b))
                   .map((btn) => (
                     <button
                       key={btn.id}
-                      onPointerDown={() => sendCommand(btn.command, btn.cooldownMs)}
+                      onPointerDown={() => sendCommand(btn.command, { cooldownMs: btn.cooldownMs, access: btn.access })}
                       style={btn.color ? { borderColor: btn.color, color: btn.color } : undefined}
                       className={`flex min-h-12 min-w-[3.25rem] items-center justify-center gap-1 rounded-lg border px-3 py-2 text-sm font-bold transition select-none lg:min-h-11 lg:min-w-[2.75rem] ${
                         isCrowdActive(btn.command)

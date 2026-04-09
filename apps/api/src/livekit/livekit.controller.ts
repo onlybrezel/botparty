@@ -28,7 +28,8 @@ export class LivekitController {
     @Query('control') control?: string,
     @Query('roomAccessToken') roomAccessToken?: string,
   ) {
-    const access = await this.getVideoAccess(robotId);
+    const robot = await this.robotsService.findById(robotId);
+    const access = this.readVideoAccess(robot.metadata);
     if (access.video === 'DISABLED') {
       throw new ForbiddenException('Video is disabled for this robot');
     }
@@ -62,7 +63,12 @@ export class LivekitController {
     @Query('guestSessionId') _guestSessionId?: string,
     @Query('roomAccessToken') _roomAccessToken?: string,
   ) {
-    const access = await this.getVideoAccess(robotId);
+    const robot = await this.robotsService.findById(robotId);
+    if (robot.visibility === 'PRIVATE') {
+      throw new ForbiddenException('Guest video access is unavailable for private robots');
+    }
+
+    const access = this.readVideoAccess(robot.metadata);
     if (access.video !== 'ALL') {
       throw new ForbiddenException('Guest video access is disabled');
     }
@@ -108,14 +114,12 @@ export class LivekitController {
     return currentControllerUserId === user.sub;
   }
 
-  private async getVideoAccess(robotId: string): Promise<{ video: GuestAccess }> {
-    const robot = await this.robotsService.findById(robotId);
-
-    if (!robot.metadata || typeof robot.metadata !== 'object' || Array.isArray(robot.metadata)) {
+  private readVideoAccess(metadata: unknown): { video: GuestAccess } {
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
       return { video: 'AUTHENTICATED' };
     }
 
-    const accessRaw = (robot.metadata as Record<string, unknown>).access;
+    const accessRaw = (metadata as Record<string, unknown>).access;
     if (!accessRaw || typeof accessRaw !== 'object' || Array.isArray(accessRaw)) {
       return { video: 'AUTHENTICATED' };
     }

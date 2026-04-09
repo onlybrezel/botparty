@@ -112,7 +112,7 @@ export const WS_EVENTS = {
 
   // Moderation
   MOD_TIMEOUT: 'mod:timeout',           // Temporarily mute a user
-  MOD_KICK: 'mod:kick',                 // Remove from queue + timeout
+  MOD_KICK: 'mod:kick',                 // Immediate control/queue removal without a lasting restriction
   MOD_BAN: 'mod:ban',                   // Permanent robot-level ban
   MOD_UNBAN: 'mod:unban',               // Lift ban
   MOD_ACTION_BROADCAST: 'mod:action',   // Notify room of mod action

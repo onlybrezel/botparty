@@ -821,7 +821,14 @@ class ApiClient {
   // ─── Controls ──────────────────────────────────────────────────────────────
 
   async getControls(robotId: string) {
-    return this.request<ControlButtonRecord[]>(`/controls/robot/${robotId}`);
+    const roomAccessToken =
+      typeof window !== 'undefined' ? window.sessionStorage.getItem(`botparty.room-access.${robotId}`) : null;
+    const guestSessionId =
+      typeof window !== 'undefined' ? window.localStorage.getItem('botparty.guestSessionId.v1') : null;
+
+    return this.request<ControlButtonRecord[]>(
+      `/controls/robot/${robotId}${buildQueryString({ roomAccessToken, guestSessionId })}`,
+    );
   }
 
   async getAllControls(robotId: string) {

@@ -1,7 +1,7 @@
 'use client';
 
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
 
 interface AuthState {
   accessToken: string | null;
@@ -67,6 +67,7 @@ export const useAuth = create(
     }),
     {
       name: 'botparty-auth',
+      storage: createJSONStorage(() => sessionStorage),
       onRehydrateStorage: () => (state) => {
         state?.setHasHydrated(true);
       },

@@ -8,14 +8,34 @@ export class SessionsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(robotId: string, userId: string) {
-    const session = await this.prisma.session.create({
-      data: { robotId, userId },
-    });
+    const session = await this.prisma.$transaction(async (tx) => {
+      const now = new Date();
+      const activeSessions = await tx.session.findMany({
+        where: { robotId, status: 'ACTIVE' },
+        select: { id: true, startedAt: true },
+      });
 
-    // Increment robot session count
-    await this.prisma.robot.update({
-      where: { id: robotId },
-      data: { totalSessions: { increment: 1 } },
+      for (const activeSession of activeSessions) {
+        await tx.session.update({
+          where: { id: activeSession.id },
+          data: {
+            status: 'ENDED',
+            endedAt: now,
+            durationMs: now.getTime() - activeSession.startedAt.getTime(),
+          },
+        });
+      }
+
+      const createdSession = await tx.session.create({
+        data: { robotId, userId },
+      });
+
+      await tx.robot.update({
+        where: { id: robotId },
+        data: { totalSessions: { increment: 1 } },
+      });
+
+      return createdSession;
     });
 
     this.logger.log(`Session started: ${session.id} (robot: ${robotId}, user: ${userId})`);

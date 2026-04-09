@@ -1209,11 +1209,20 @@ export class RobotsService {
   }
 
   private buildGuestActorId(guestSessionId?: string): string {
+    const actorId = this.resolveGuestActorId(guestSessionId);
+    if (actorId) {
+      return actorId;
+    }
+
+    throw new ForbiddenException('Valid guest session required');
+  }
+
+  resolveGuestActorId(guestSessionId?: string): string | null {
     const raw = guestSessionId?.trim().toLowerCase() ?? '';
     if (/^[a-z0-9_-]{6,64}$/.test(raw)) {
       return `guest:${raw}`;
     }
-    throw new ForbiddenException('Valid guest session required');
+    return null;
   }
 
   private roomAccessKey(token: string): string {
