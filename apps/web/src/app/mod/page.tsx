@@ -133,6 +133,7 @@ export default function ModDashboardPage() {
   const [editingRobotId, setEditingRobotId] = useState<string | null>(null);
   const [robotDraft, setRobotDraft] = useState<RobotDraft | null>(null);
   const [runtimeActionLoading, setRuntimeActionLoading] = useState<string | null>(null);
+  const [recordingActionLoading, setRecordingActionLoading] = useState<string | null>(null);
 
   useEffect(() => {
     if (!hasHydrated) {
@@ -212,6 +213,42 @@ export default function ModDashboardPage() {
       pushToast(err instanceof Error ? err.message : 'Failed to queue client update.', 'error');
     } finally {
       setRuntimeActionLoading(null);
+    }
+  };
+
+  const activeRecordings = useMemo(() => {
+    return (runtimeOverview?.robots ?? []).filter((robot) => robot.livekit?.activeRecording);
+  }, [runtimeOverview]);
+
+  const stopRecordingForRobot = async (robotId: string) => {
+    if (!accessToken || !viewerIsAdmin || recordingActionLoading) return;
+
+    setRecordingActionLoading(robotId);
+    try {
+      api.setToken(accessToken);
+      await api.stopAdminRobotRecording(robotId);
+      await refresh({ silent: true });
+      pushToast('Recording stopped.', 'success', 1600);
+    } catch (err) {
+      pushToast(err instanceof Error ? err.message : 'Failed to stop recording.', 'error');
+    } finally {
+      setRecordingActionLoading(null);
+    }
+  };
+
+  const stopAllRecordings = async () => {
+    if (!accessToken || !viewerIsAdmin || recordingActionLoading || activeRecordings.length === 0) return;
+
+    setRecordingActionLoading('__all__');
+    try {
+      api.setToken(accessToken);
+      await Promise.all(activeRecordings.map((robot) => api.stopAdminRobotRecording(robot.id)));
+      await refresh({ silent: true });
+      pushToast('All active recordings stopped.', 'success', 2200);
+    } catch (err) {
+      pushToast(err instanceof Error ? err.message : 'Failed to stop all recordings.', 'error');
+    } finally {
+      setRecordingActionLoading(null);
     }
   };
 
@@ -778,6 +815,58 @@ export default function ModDashboardPage() {
             <p className="text-sm text-[var(--muted-foreground)]">No Docker container metrics available right now.</p>
           )}
         </div>
+
+        {viewerIsAdmin ? (
+          <div className="mb-4 rounded-lg border border-[var(--border)] bg-[var(--background)] p-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-base font-bold">Recording Control (Admin)</h3>
+                <p className="text-xs text-[var(--muted-foreground)]">Live view of active room recordings with direct stop controls.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void stopAllRecordings()}
+                disabled={activeRecordings.length === 0 || recordingActionLoading !== null}
+                className="rounded border border-red-500/40 px-2 py-1 text-xs text-red-300 disabled:opacity-60"
+              >
+                {recordingActionLoading === '__all__' ? 'Stopping all...' : 'Stop all'}
+              </button>
+            </div>
+
+            {activeRecordings.length === 0 ? (
+              <p className="text-sm text-[var(--muted-foreground)]">No active recordings right now.</p>
+            ) : (
+              <div className="grid gap-2 xl:grid-cols-2">
+                {activeRecordings.map((robot) => (
+                  <div key={robot.id} className="rounded border border-[var(--border)] bg-[var(--card)] px-3 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-semibold">{robot.name}</p>
+                        <p className="text-[10px] text-[var(--muted-foreground)]">/{robot.slug}</p>
+                      </div>
+                      <span className="rounded-full border border-red-500/40 bg-red-500/10 px-2 py-0.5 text-[10px] font-semibold text-red-300">
+                        Recording
+                      </span>
+                    </div>
+                    <div className="mt-2 flex items-center justify-between gap-2">
+                      <p className="text-xs text-[var(--muted-foreground)]">
+                        Clients: {robot.livekit?.participants ?? 0} · Publishers: {robot.livekit?.publishers ?? 0}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => void stopRecordingForRobot(robot.id)}
+                        disabled={recordingActionLoading !== null}
+                        className="rounded border border-red-500/40 px-2 py-1 text-xs text-red-300 disabled:opacity-60"
+                      >
+                        {recordingActionLoading === robot.id ? 'Stopping...' : 'Stop'}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : null}
 
         <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-4">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">

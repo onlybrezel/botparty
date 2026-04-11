@@ -857,9 +857,13 @@ export default function RobotView({ robot }: Props) {
     api.setToken(accessToken);
 
     try {
-      const next = shouldStart
-        ? await api.startAdminRobotRecording(robot.id)
-        : await api.stopAdminRobotRecording(robot.id);
+      const actionPromise = shouldStart
+        ? api.startAdminRobotRecording(robot.id)
+        : api.stopAdminRobotRecording(robot.id);
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        window.setTimeout(() => reject(new Error('Recording request timed out. Please try again.')), 15000);
+      });
+      const next = await Promise.race([actionPromise, timeoutPromise]);
       setRecordingState(next);
       pushToast(shouldStart ? 'Recording started.' : 'Recording stopped.', 'success', 1800);
     } catch (err) {

@@ -18,6 +18,7 @@ type RobotWhipIngress = {
 @Injectable()
 export class LivekitService {
   private readonly logger = new Logger(LivekitService.name);
+  private readonly egressTimeoutMs = 12000;
   private readonly apiKey: string;
   private readonly apiSecret: string;
   private readonly livekitUrl: string;
@@ -159,7 +160,10 @@ export class LivekitService {
     const roomName = `robot-${robotId}`;
     const [rooms, activeEgress] = await Promise.all([
       this.roomService.listRooms([roomName]),
-      this.egressService.listEgress({ roomName, active: true }),
+      this.withTimeout(
+        this.egressService.listEgress({ roomName, active: true }),
+        'list recording status',
+      ),
     ]);
 
     const room = rooms.find((entry) => entry.name === roomName) ?? null;
@@ -186,7 +190,10 @@ export class LivekitService {
       throw new Error('Robot room is not active');
     }
 
-    const activeEgress = await this.egressService.listEgress({ roomName, active: true });
+    const activeEgress = await this.withTimeout(
+      this.egressService.listEgress({ roomName, active: true }),
+      'list active recording before start',
+    );
     const existing = activeEgress[0] ?? null;
     if (existing) {
       return {
@@ -204,7 +211,10 @@ export class LivekitService {
       disableManifest: true,
     });
 
-    const created = await this.egressService.startRoomCompositeEgress(roomName, output);
+    const created = await this.withTimeout(
+      this.egressService.startRoomCompositeEgress(roomName, output),
+      'start room recording',
+    );
     return {
       roomName,
       active: true,
@@ -220,13 +230,16 @@ export class LivekitService {
     startedAt: string | null;
   }> {
     const roomName = `robot-${robotId}`;
-    const activeEgress = await this.egressService.listEgress({ roomName, active: true });
+    const activeEgress = await this.withTimeout(
+      this.egressService.listEgress({ roomName, active: true }),
+      'list active recording before stop',
+    );
 
     await Promise.all(
       activeEgress
         .map((entry) => entry.egressId)
         .filter((entry): entry is string => Boolean(entry))
-        .map((egressId) => this.egressService.stopEgress(egressId)),
+        .map((egressId) => this.withTimeout(this.egressService.stopEgress(egressId), 'stop room recording')),
     );
 
     return {
@@ -373,5 +386,23 @@ export class LivekitService {
     }
 
     return new Date(asNumber).toISOString();
+  }
+
+  private async withTimeout<T>(promise: Promise<T>, action: string): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<T>((_, reject) => {
+          timer = setTimeout(() => {
+            reject(new Error(`LiveKit egress timeout (${action}) after ${this.egressTimeoutMs}ms`));
+          }, this.egressTimeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timer) {
+        clearTimeout(timer);
+      }
+    }
   }
 }
