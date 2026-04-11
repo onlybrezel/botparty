@@ -257,6 +257,14 @@ export interface ActiveSessionRecord {
   };
 }
 
+export interface AdminRobotRecordingStatus {
+  roomName: string;
+  active: boolean;
+  egressId: string | null;
+  startedAt: string | null;
+  updatedAt: string;
+}
+
 type AuthSessionResponse = {
   accessToken: string;
   user: UserPublic;
@@ -753,6 +761,24 @@ class ApiClient {
         body: JSON.stringify(data),
       },
     );
+  }
+
+  async getAdminRobotRecordingStatus(robotId: string) {
+    return this.request<AdminRobotRecordingStatus>(`/moderation/admin/robot/${robotId}/recording`);
+  }
+
+  async startAdminRobotRecording(robotId: string) {
+    return this.request<AdminRobotRecordingStatus>(`/moderation/admin/robot/${robotId}/recording/start`, {
+      method: 'POST',
+      body: '{}',
+    });
+  }
+
+  async stopAdminRobotRecording(robotId: string) {
+    return this.request<AdminRobotRecordingStatus>(`/moderation/admin/robot/${robotId}/recording/stop`, {
+      method: 'POST',
+      body: '{}',
+    });
   }
 
   async getPendingRobotActions(robotId: string) {

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { AccessToken, IngressClient, IngressInput, RoomServiceClient } from 'livekit-server-sdk';
+import { AccessToken, EgressClient, IngressClient, IngressInput, RoomServiceClient } from 'livekit-server-sdk';
+import { EncodedFileOutput, EncodedFileType } from '@livekit/protocol';
 import type { IngressInfo } from '@livekit/protocol';
 
 type RobotWhipIngress = {
@@ -23,6 +24,7 @@ export class LivekitService {
   private readonly livekitServiceUrl: string;
   private readonly roomService: RoomServiceClient;
   private readonly ingressService: IngressClient;
+  private readonly egressService: EgressClient;
 
   constructor(private readonly config: ConfigService) {
     this.apiKey = config.getOrThrow<string>('LIVEKIT_API_KEY');
@@ -35,6 +37,11 @@ export class LivekitService {
       this.apiSecret,
     );
     this.ingressService = new IngressClient(
+      this.livekitServiceUrl,
+      this.apiKey,
+      this.apiSecret,
+    );
+    this.egressService = new EgressClient(
       this.livekitServiceUrl,
       this.apiKey,
       this.apiSecret,
@@ -143,6 +150,93 @@ export class LivekitService {
     return this.roomService.listParticipants(roomName);
   }
 
+  async getRoomRecordingStatus(robotId: string): Promise<{
+    roomName: string;
+    active: boolean;
+    egressId: string | null;
+    startedAt: string | null;
+  }> {
+    const roomName = `robot-${robotId}`;
+    const [rooms, activeEgress] = await Promise.all([
+      this.roomService.listRooms([roomName]),
+      this.egressService.listEgress({ roomName, active: true }),
+    ]);
+
+    const room = rooms.find((entry) => entry.name === roomName) ?? null;
+    const current = activeEgress[0] ?? null;
+
+    return {
+      roomName,
+      active: Boolean(room?.activeRecording) || activeEgress.length > 0,
+      egressId: current?.egressId ?? null,
+      startedAt: this.toIsoTimestamp(current?.startedAt),
+    };
+  }
+
+  async startRoomRecording(robotId: string): Promise<{
+    roomName: string;
+    active: boolean;
+    egressId: string | null;
+    startedAt: string | null;
+  }> {
+    const roomName = `robot-${robotId}`;
+    const rooms = await this.roomService.listRooms([roomName]);
+    const room = rooms.find((entry) => entry.name === roomName) ?? null;
+    if (!room) {
+      throw new Error('Robot room is not active');
+    }
+
+    const activeEgress = await this.egressService.listEgress({ roomName, active: true });
+    const existing = activeEgress[0] ?? null;
+    if (existing) {
+      return {
+        roomName,
+        active: true,
+        egressId: existing.egressId ?? null,
+        startedAt: this.toIsoTimestamp(existing.startedAt),
+      };
+    }
+
+    const filepath = this.resolveRecordingFilepath(roomName);
+    const output = new EncodedFileOutput({
+      fileType: EncodedFileType.MP4,
+      filepath,
+      disableManifest: true,
+    });
+
+    const created = await this.egressService.startRoomCompositeEgress(roomName, output);
+    return {
+      roomName,
+      active: true,
+      egressId: created.egressId ?? null,
+      startedAt: this.toIsoTimestamp(created.startedAt),
+    };
+  }
+
+  async stopRoomRecording(robotId: string): Promise<{
+    roomName: string;
+    active: boolean;
+    egressId: string | null;
+    startedAt: string | null;
+  }> {
+    const roomName = `robot-${robotId}`;
+    const activeEgress = await this.egressService.listEgress({ roomName, active: true });
+
+    await Promise.all(
+      activeEgress
+        .map((entry) => entry.egressId)
+        .filter((entry): entry is string => Boolean(entry))
+        .map((egressId) => this.egressService.stopEgress(egressId)),
+    );
+
+    return {
+      roomName,
+      active: false,
+      egressId: null,
+      startedAt: null,
+    };
+  }
+
   async ensureRobotWhipIngress(
     robotId: string,
     robotName: string,
@@ -238,5 +332,46 @@ export class LivekitService {
       return normalizedBase;
     }
     return `${normalizedBase}/${normalizedKey}`;
+  }
+
+  private resolveRecordingFilepath(roomName: string): string {
+    const template = this.config
+      .get<string>('LIVEKIT_RECORDING_FILEPATH_TEMPLATE')
+      ?.trim() || 'recordings/{room_name}-{time}.mp4';
+    const roomSegment = roomName.replace(/[^a-zA-Z0-9._-]/g, '_');
+    return template.replaceAll('{room_name}', roomSegment);
+  }
+
+  private toIsoTimestamp(raw?: bigint | number | null): string | null {
+    if (raw === null || raw === undefined) {
+      return null;
+    }
+
+    const asBigInt = typeof raw === 'bigint' ? raw : BigInt(Math.trunc(raw));
+    if (asBigInt <= 0n) {
+      return null;
+    }
+
+    let millis: bigint;
+    if (asBigInt > 9_999_999_999_999_999n) {
+      // Most LiveKit timestamps are unix nanos.
+      millis = asBigInt / 1_000_000n;
+    } else if (asBigInt > 9_999_999_999_999n) {
+      // Microseconds fallback.
+      millis = asBigInt / 1_000n;
+    } else if (asBigInt > 9_999_999_999n) {
+      // Milliseconds fallback.
+      millis = asBigInt;
+    } else {
+      // Seconds fallback.
+      millis = asBigInt * 1000n;
+    }
+
+    const asNumber = Number(millis);
+    if (!Number.isFinite(asNumber)) {
+      return null;
+    }
+
+    return new Date(asNumber).toISOString();
   }
 }

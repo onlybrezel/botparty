@@ -1091,6 +1091,43 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
     return this.robotsService.enqueueActionForRobot(robotId, payload);
   }
 
+  async getAdminRobotRecordingStatus(robotId: string, requesterId: string) {
+    await this._assertAdmin(requesterId);
+
+    return {
+      ...(await this.livekit.getRoomRecordingStatus(robotId)),
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  async startAdminRobotRecording(robotId: string, requesterId: string) {
+    await this._assertAdmin(requesterId);
+
+    try {
+      return {
+        ...(await this.livekit.startRoomRecording(robotId)),
+        updatedAt: new Date().toISOString(),
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to start recording';
+      throw new BadRequestException(message);
+    }
+  }
+
+  async stopAdminRobotRecording(robotId: string, requesterId: string) {
+    await this._assertAdmin(requesterId);
+
+    try {
+      return {
+        ...(await this.livekit.stopRoomRecording(robotId)),
+        updatedAt: new Date().toISOString(),
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to stop recording';
+      throw new BadRequestException(message);
+    }
+  }
+
   // ─── Helpers ────────────────────────────────────────────────────────────────
 
   private async _getLivekitRuntime() {
@@ -1596,6 +1633,16 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
     if (!user) throw new NotFoundException('User not found');
     const isStaff = this._isStaffRole(user.role);
     if (robot.ownerId !== userId && !isStaff) {
+      throw new ForbiddenException('Access denied');
+    }
+  }
+
+  private async _assertAdmin(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { role: true },
+    });
+    if (!user || user.role !== 'ADMIN') {
       throw new ForbiddenException('Access denied');
     }
   }

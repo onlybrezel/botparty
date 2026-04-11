@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import type { RobotPublic } from '@botparty/shared';
 import { AlertTriangle, Bot, Radio, Video, Gamepad2 } from 'lucide-react';
-import { api } from '@/lib/api';
+import { api, type AdminRobotRecordingStatus } from '@/lib/api';
 import { useAuth } from '@/lib/store';
 import { LiveKitPlayer } from '@/components/livekit-player';
 import { pushToast } from '@/lib/toast';
@@ -305,6 +305,10 @@ export default function RobotView({ robot }: Props) {
   const [reconnectCountdownMs, setReconnectCountdownMs] = useState<number | null>(null);
   const [widgetQueueResetEpoch, setWidgetQueueResetEpoch] = useState(0);
   const [widgetOfflineResetEpoch, setWidgetOfflineResetEpoch] = useState(0);
+  const [recordingState, setRecordingState] = useState<AdminRobotRecordingStatus | null>(null);
+  const [recordingLoading, setRecordingLoading] = useState(false);
+  const [recordingAction, setRecordingAction] = useState<'start' | 'stop' | null>(null);
+  const [recordingError, setRecordingError] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
@@ -345,6 +349,7 @@ export default function RobotView({ robot }: Props) {
   const estopAccess = robotAccess?.estop;
   const canUseEStop = canUseAccess(estopAccess);
   const canModerate = Boolean(userId && (userId === robot.owner.id || role === 'ADMIN' || role === 'MOD'));
+  const isAdmin = role === 'ADMIN';
   const resolveUserLabel = useCallback(
     (targetUserId: string, preferredName?: string | null) => {
       if (preferredName?.trim()) {
@@ -789,6 +794,83 @@ export default function RobotView({ robot }: Props) {
       window.clearInterval(interval);
     };
   }, [connected, robot.id]);
+
+  const refreshRecordingStatus = useCallback(async () => {
+    if (!isAdmin || !accessToken) {
+      return;
+    }
+
+    const currentlyOnline = robotStatus === 'ONLINE' || robotStatus === 'BUSY';
+    if (!currentlyOnline) {
+      setRecordingState((prev) => (prev?.active ? { ...prev, active: false, egressId: null, startedAt: null } : prev));
+      return;
+    }
+
+    api.setToken(accessToken);
+    try {
+      const next = await api.getAdminRobotRecordingStatus(robot.id);
+      setRecordingState((prev) => {
+        if (
+          prev &&
+          prev.active === next.active &&
+          prev.egressId === next.egressId &&
+          prev.startedAt === next.startedAt
+        ) {
+          return prev;
+        }
+        return next;
+      });
+      setRecordingError(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Recording status unavailable';
+      setRecordingError(message);
+    }
+  }, [accessToken, isAdmin, robot.id, robotStatus]);
+
+  useEffect(() => {
+    if (!isAdmin || !accessToken) {
+      setRecordingState(null);
+      setRecordingError(null);
+      return;
+    }
+
+    setRecordingLoading(true);
+    void refreshRecordingStatus().finally(() => setRecordingLoading(false));
+
+    const interval = window.setInterval(() => {
+      void refreshRecordingStatus();
+    }, 7000);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [accessToken, isAdmin, refreshRecordingStatus]);
+
+  const toggleRecording = useCallback(async () => {
+    if (!isAdmin || !accessToken || recordingAction) {
+      return;
+    }
+
+    const shouldStart = !recordingState?.active;
+    setRecordingAction(shouldStart ? 'start' : 'stop');
+    setRecordingError(null);
+    api.setToken(accessToken);
+
+    try {
+      const next = shouldStart
+        ? await api.startAdminRobotRecording(robot.id)
+        : await api.stopAdminRobotRecording(robot.id);
+      setRecordingState(next);
+      pushToast(shouldStart ? 'Recording started.' : 'Recording stopped.', 'success', 1800);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Recording action failed';
+      setRecordingError(message);
+      pushToast(message, 'error', 2600);
+    } finally {
+      setRecordingAction(null);
+      void refreshRecordingStatus();
+    }
+  }, [accessToken, isAdmin, recordingAction, recordingState?.active, refreshRecordingStatus, robot.id]);
 
   const handleWsEvent = useCallback((event: string, data: Record<string, unknown>) => {
     switch (event) {
@@ -1941,6 +2023,54 @@ export default function RobotView({ robot }: Props) {
                   </span>
                 )}
               </div>
+            </div>
+          )}
+
+          {isAdmin && (
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
+                  Recording (Admin)
+                </p>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                    recordingState?.active
+                      ? 'bg-red-500/15 text-red-300'
+                      : 'bg-[var(--muted)] text-[var(--muted-foreground)]'
+                  }`}
+                >
+                  {recordingState?.active ? 'Recording' : recordingLoading ? 'Checking' : 'Idle'}
+                </span>
+              </div>
+
+              <p className="mt-2 text-xs text-[var(--muted-foreground)]">
+                {recordingState?.startedAt
+                  ? `Started at ${new Date(recordingState.startedAt).toLocaleString()}`
+                  : 'Capture this robot room directly from LiveKit.'}
+              </p>
+
+              <button
+                type="button"
+                disabled={recordingLoading || Boolean(recordingAction)}
+                onClick={() => void toggleRecording()}
+                className={`mt-3 w-full rounded-lg px-3 py-2 text-sm font-semibold text-white transition disabled:opacity-60 ${
+                  recordingState?.active
+                    ? 'bg-red-600 hover:bg-red-500'
+                    : 'bg-[var(--primary)] hover:bg-[var(--primary-hover)]'
+                }`}
+              >
+                {recordingAction === 'start'
+                  ? 'Starting recording...'
+                  : recordingAction === 'stop'
+                    ? 'Stopping recording...'
+                    : recordingState?.active
+                      ? 'Stop recording'
+                      : 'Start recording'}
+              </button>
+
+              {recordingError && (
+                <p className="mt-2 text-xs text-red-300">{recordingError}</p>
+              )}
             </div>
           )}
 

@@ -85,6 +85,39 @@ export class ModerationController {
     });
   }
 
+  @Get('admin/robot/:robotId/recording')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Get LiveKit recording status for a robot room (admin only)' })
+  getAdminRobotRecordingStatus(
+    @Param('robotId', ParseUUIDPipe) robotId: string,
+    @CurrentUser('sub') requesterId: string,
+  ) {
+    return this.moderationService.getAdminRobotRecordingStatus(robotId, requesterId);
+  }
+
+  @Post('admin/robot/:robotId/recording/start')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Start LiveKit recording for a robot room (admin only)' })
+  startAdminRobotRecording(
+    @Param('robotId', ParseUUIDPipe) robotId: string,
+    @CurrentUser('sub') requesterId: string,
+  ) {
+    return this.moderationService.startAdminRobotRecording(robotId, requesterId);
+  }
+
+  @Post('admin/robot/:robotId/recording/stop')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Stop LiveKit recording for a robot room (admin only)' })
+  stopAdminRobotRecording(
+    @Param('robotId', ParseUUIDPipe) robotId: string,
+    @CurrentUser('sub') requesterId: string,
+  ) {
+    return this.moderationService.stopAdminRobotRecording(robotId, requesterId);
+  }
+
   @Get('admin/profanity-overview')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN, Role.MOD)
