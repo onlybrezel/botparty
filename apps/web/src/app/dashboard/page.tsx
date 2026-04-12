@@ -16,6 +16,7 @@ import {
   Check,
   Eye,
   EyeOff,
+  X,
 } from 'lucide-react';
 import {
   api,
@@ -437,6 +438,8 @@ export default function DashboardPage() {
   const [ingressOp, setIngressOp] = useState<string | null>(null);
   const [newIngressCameraId, setNewIngressCameraId] = useState('');
   const [newIngressLabel, setNewIngressLabel] = useState('');
+  const [newIngressCompatibilityMode, setNewIngressCompatibilityMode] = useState(false);
+  const [obsHelpOpen, setObsHelpOpen] = useState(false);
   const previousPendingActionTypesRef = useRef<RemoteActionType[]>([]);
   const previewRefreshInFlightRef = useRef(false);
 
@@ -895,6 +898,7 @@ export default function DashboardPage() {
       const created = await api.createRobotIngressCamera(selectedRobot.id, {
         cameraId,
         label: newIngressLabel.trim() || undefined,
+        compatibilityMode: newIngressCompatibilityMode,
       });
       setIngressCameras((prev) => {
         const withoutExisting = prev.filter((entry) => entry.ingressId !== created.ingressId);
@@ -902,6 +906,7 @@ export default function DashboardPage() {
       });
       setNewIngressCameraId('');
       setNewIngressLabel('');
+      setNewIngressCompatibilityMode(false);
       pushToast('External camera ingress saved.', 'success', 2600);
     } catch (err) {
       pushToast(err instanceof Error ? err.message : 'Failed to create camera ingress.', 'error', 3200);
@@ -1522,9 +1527,18 @@ export default function DashboardPage() {
                         <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
                           External Camera Ingress (OBS / WHIP)
                         </label>
-                        <span className="text-[10px] text-[var(--muted-foreground)]">
-                          {ingressLoading ? 'Loading...' : `${ingressCameras.length} configured`}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setObsHelpOpen(true)}
+                            className="rounded border border-[var(--border)] px-2 py-0.5 text-[10px] font-semibold text-[var(--muted-foreground)]"
+                          >
+                            OBS setup
+                          </button>
+                          <span className="text-[10px] text-[var(--muted-foreground)]">
+                            {ingressLoading ? 'Loading...' : `${ingressCameras.length} configured`}
+                          </span>
+                        </div>
                       </div>
 
                       <div className="grid gap-2 sm:grid-cols-[1fr,1fr,auto]">
@@ -1550,6 +1564,16 @@ export default function DashboardPage() {
                           Add
                         </button>
                       </div>
+
+                      <label className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
+                        <input
+                          type="checkbox"
+                          checked={newIngressCompatibilityMode}
+                          onChange={(event) => setNewIngressCompatibilityMode(event.target.checked)}
+                          className="h-3.5 w-3.5"
+                        />
+                        Compatibility mode (enable transcoding). Leave OFF for lowest latency.
+                      </label>
 
                       <p className="text-[11px] text-[var(--muted-foreground)]">
                         Use the generated WHIP endpoint in OBS. The camera appears in the viewer only while it is live.
@@ -1612,6 +1636,58 @@ export default function DashboardPage() {
                         )}
                       </div>
                     </div>
+
+                    {obsHelpOpen ? (
+                      <div
+                        className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4"
+                        onClick={() => setObsHelpOpen(false)}
+                      >
+                        <div
+                          className="w-full max-w-2xl rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4"
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          <div className="mb-3 flex items-center justify-between gap-2">
+                            <h3 className="text-lg font-bold">OBS Low-Latency Setup</h3>
+                            <button
+                              type="button"
+                              onClick={() => setObsHelpOpen(false)}
+                              className="rounded border border-[var(--border)] p-1.5"
+                              aria-label="Close OBS help"
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
+                          </div>
+
+                          <div className="space-y-3 text-sm">
+                            <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-amber-200">
+                              30s delay is usually OBS buffering/transcoding settings, not WHIP itself.
+                            </p>
+
+                            <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
+                              <p className="font-semibold">Recommended OBS output values</p>
+                              <ul className="mt-2 list-disc space-y-1 pl-5 text-[var(--muted-foreground)]">
+                                <li>Encoder: H.264 (NVENC/VAAPI/QSV or x264 veryfast)</li>
+                                <li>Keyframe interval: 1s (max 2s)</li>
+                                <li>B-frames: 0</li>
+                                <li>Rate control: CBR</li>
+                                <li>Bitrate: 1200-3500 kbps (depending on resolution)</li>
+                                <li>Disable any Stream Delay in OBS</li>
+                                <li>Advanced Network: Low Latency Mode ON</li>
+                              </ul>
+                            </div>
+
+                            <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
+                              <p className="font-semibold">In this dashboard</p>
+                              <ul className="mt-2 list-disc space-y-1 pl-5 text-[var(--muted-foreground)]">
+                                <li>Keep Compatibility mode OFF for minimum latency.</li>
+                                <li>Use Compatibility mode only if the stream fails to appear.</li>
+                                <li>Viewer only shows the camera when OBS is actively publishing.</li>
+                              </ul>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
 
                     <div className="space-y-1">
                       <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">

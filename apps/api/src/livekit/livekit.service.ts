@@ -326,6 +326,7 @@ export class LivekitService {
     robotName: string,
     cameraId: string,
     cameraLabel?: string,
+    enableTranscoding = false,
   ): Promise<RobotCameraIngress | null> {
     const normalizedCameraId = this.sanitizeCameraId(cameraId);
     if (!normalizedCameraId) {
@@ -357,7 +358,7 @@ export class LivekitService {
                 robotId,
                 cameraId: normalizedCameraId,
               }),
-              enableTranscoding: true,
+              enableTranscoding,
             }),
           )
         : this.mapRobotWhipIngress(
@@ -371,7 +372,7 @@ export class LivekitService {
                 robotId,
                 cameraId: normalizedCameraId,
               }),
-              enableTranscoding: true,
+              enableTranscoding,
             }),
           );
 
@@ -430,24 +431,24 @@ export class LivekitService {
       });
   }
 
-  async deleteRobotCameraIngress(robotId: string, ingressId: string): Promise<boolean> {
+  async deleteRobotCameraIngress(robotId: string, ingressId: string): Promise<string | null> {
     const roomName = `robot-${robotId}`;
     const existing = (await this.ingressService.listIngress({ roomName })).find(
       (entry) => entry.ingressId === ingressId,
     );
     if (!existing || existing.inputType !== IngressInput.WHIP_INPUT) {
-      return false;
+      return null;
     }
 
     const participantIdentity = existing.participantIdentity?.trim() || '';
     const cameraId = this.cameraIdFromParticipantIdentityForRobot(robotId, participantIdentity);
     if (!cameraId) {
       // Keep the default robot ingress untouched.
-      return false;
+      return null;
     }
 
     await this.ingressService.deleteIngress(ingressId);
-    return true;
+    return cameraId;
   }
 
   private toLivekitServiceUrl(url: string): string {

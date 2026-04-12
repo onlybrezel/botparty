@@ -657,7 +657,10 @@ class ApiClient {
     return this.request<RobotCameraIngress[]>(`/robots/${robotId}/ingress-cameras`);
   }
 
-  async createRobotIngressCamera(robotId: string, payload: { cameraId: string; label?: string }) {
+  async createRobotIngressCamera(
+    robotId: string,
+    payload: { cameraId: string; label?: string; compatibilityMode?: boolean },
+  ) {
     return this.request<RobotCameraIngress>(`/robots/${robotId}/ingress-cameras`, {
       method: 'POST',
       body: JSON.stringify(payload),

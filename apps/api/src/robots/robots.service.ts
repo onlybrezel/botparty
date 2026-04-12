@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  BadRequestException,
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
@@ -355,6 +356,97 @@ export class RobotsService {
     const robot = await this.findById(id);
     await this.prisma.robot.delete({ where: { id } });
     this.logger.log(`Robot deleted by staff: ${robot.name}`);
+  }
+
+  async upsertExternalStreamCamera(
+    robotId: string,
+    ownerId: string,
+    camera: {
+      id: string;
+      label?: string;
+      role?: string;
+      enabled?: boolean;
+      publishMode?: string;
+    },
+  ) {
+    const robot = await this.findById(robotId);
+    if (robot.ownerId !== ownerId) {
+      throw new ForbiddenException('Not your robot');
+    }
+
+    const cameraId = camera.id.trim();
+    if (!cameraId) {
+      throw new BadRequestException('camera id is required');
+    }
+
+    const stream = this.parseStreamFromMetadata(robot.metadata);
+    const currentCameras = stream.cameras ?? [];
+    const withoutCamera = currentCameras.filter((entry) => entry.id !== cameraId);
+
+    const nextCamera: RobotStreamCameraDescriptor = {
+      id: cameraId,
+      label: camera.label?.trim() || undefined,
+      role: camera.role?.trim() || undefined,
+      enabled: camera.enabled ?? true,
+      publishMode: camera.publishMode?.trim() || 'always_on',
+    };
+
+    const nextCameras = [...withoutCamera, nextCamera].sort((left, right) => left.id.localeCompare(right.id));
+    const nextStream: RobotStreamPolicy = {
+      targetBitrateKbps: stream.targetBitrateKbps,
+      activeCameraId: stream.activeCameraId || nextCameras[0]?.id,
+      cameras: nextCameras,
+    };
+
+    const metadata = this.mergeMetadata(robot.metadata, undefined, {
+      targetBitrateKbps: nextStream.targetBitrateKbps ?? undefined,
+      activeCameraId: nextStream.activeCameraId,
+      cameras: nextStream.cameras,
+    });
+    this.policyCache.delete(robotId);
+    return this.prisma.robot.update({
+      where: { id: robotId },
+      data: {
+        metadata: metadata as Prisma.InputJsonValue,
+      },
+    });
+  }
+
+  async removeExternalStreamCamera(robotId: string, ownerId: string, cameraId: string) {
+    const robot = await this.findById(robotId);
+    if (robot.ownerId !== ownerId) {
+      throw new ForbiddenException('Not your robot');
+    }
+
+    const normalizedCameraId = cameraId.trim();
+    if (!normalizedCameraId) {
+      return robot;
+    }
+
+    const stream = this.parseStreamFromMetadata(robot.metadata);
+    const currentCameras = stream.cameras ?? [];
+    const nextCameras = currentCameras.filter((entry) => entry.id !== normalizedCameraId);
+    const nextStream: RobotStreamPolicy = {
+      targetBitrateKbps: stream.targetBitrateKbps,
+      activeCameraId:
+        stream.activeCameraId && stream.activeCameraId !== normalizedCameraId
+          ? stream.activeCameraId
+          : nextCameras[0]?.id,
+      cameras: nextCameras.length ? nextCameras : undefined,
+    };
+
+    const metadata = this.mergeMetadata(robot.metadata, undefined, {
+      targetBitrateKbps: nextStream.targetBitrateKbps ?? undefined,
+      activeCameraId: nextStream.activeCameraId,
+      cameras: nextStream.cameras,
+    });
+    this.policyCache.delete(robotId);
+    return this.prisma.robot.update({
+      where: { id: robotId },
+      data: {
+        metadata: metadata as Prisma.InputJsonValue,
+      },
+    });
   }
 
   async regenerateClaimToken(id: string, ownerId: string) {

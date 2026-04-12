@@ -199,7 +199,7 @@ export class RobotsController {
   async createIngressCamera(
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,
-    @Body() body: { cameraId?: string; label?: string },
+    @Body() body: { cameraId?: string; label?: string; compatibilityMode?: boolean },
   ) {
     const robot = await this.requireRobotOwner(id, user.sub);
     const cameraId = body.cameraId?.trim();
@@ -212,11 +212,19 @@ export class RobotsController {
       robot.name,
       cameraId,
       body.label,
+      Boolean(body.compatibilityMode),
     );
 
     if (!ingress) {
       throw new BadRequestException('Failed to provision camera ingress');
     }
+
+    await this.robotsService.upsertExternalStreamCamera(robot.id, user.sub, {
+      id: ingress.cameraId ?? cameraId,
+      label: body.label,
+      enabled: true,
+      publishMode: 'always_on',
+    });
 
     return ingress;
   }
@@ -232,10 +240,11 @@ export class RobotsController {
     @CurrentUser() user: JwtPayload,
   ) {
     await this.requireRobotOwner(id, user.sub);
-    const deleted = await this.livekitService.deleteRobotCameraIngress(id, ingressId);
-    if (!deleted) {
+    const deletedCameraId = await this.livekitService.deleteRobotCameraIngress(id, ingressId);
+    if (!deletedCameraId) {
       throw new BadRequestException('Ingress not found or not removable');
     }
+    await this.robotsService.removeExternalStreamCamera(id, user.sub, deletedCameraId);
   }
 
   @Post(':id/access/verify')
