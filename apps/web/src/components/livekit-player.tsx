@@ -1,7 +1,7 @@
 'use client';
 
 import { LiveKitRoom, RoomAudioRenderer, VideoTrack, useRoomContext, useTracks } from '@livekit/components-react';
-import { Track, type RemoteVideoTrack } from 'livekit-client';
+import { Track, RoomEvent, type RemoteVideoTrack } from 'livekit-client';
 import type { TrackReference } from '@livekit/components-core';
 import type { RobotStreamCameraConfig } from '@botparty/shared';
 import { Check, Copy, Radio, Volume2, VolumeX, X } from 'lucide-react';
@@ -589,6 +589,18 @@ function VideoRenderer({
     );
   }, [isMuted, volume, volumeStorageKey]);
 
+  // Reset stall detection when the room successfully reconnects so a brief
+  // SID update / network resume doesn't immediately trigger a token refresh.
+  useEffect(() => {
+    const onReconnected = () => {
+      stallNotifiedRef.current = false;
+    };
+    room.on(RoomEvent.Reconnected, onReconnected);
+    return () => {
+      room.off(RoomEvent.Reconnected, onReconnected);
+    };
+  }, [room]);
+
   useEffect(() => {
     const connected = String(room.state).toLowerCase() === 'connected';
 
@@ -602,13 +614,16 @@ function VideoRenderer({
       return;
     }
 
+    // Give the room 8 s to recover before declaring a stall. 3 s was too
+    // aggressive: normal participant SID updates after brief reconnects
+    // caused premature token refreshes and a visible video drop.
     const timeout = window.setTimeout(() => {
       if (stallNotifiedRef.current) {
         return;
       }
       stallNotifiedRef.current = true;
       onStreamStalled();
-    }, 3000);
+    }, 8000);
 
     return () => window.clearTimeout(timeout);
   }, [robotTrack, room.state, onStreamStalled]);
