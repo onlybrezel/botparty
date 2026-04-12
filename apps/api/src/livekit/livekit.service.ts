@@ -15,6 +15,11 @@ type RobotWhipIngress = {
   enableTranscoding: boolean;
 };
 
+export type RobotCameraIngress = RobotWhipIngress & {
+  cameraId: string | null;
+  isLive: boolean;
+};
+
 type RecordingTrackTarget = {
   cameraId: string | null;
   videoTrackId: string;
@@ -316,6 +321,135 @@ export class LivekitService {
     }
   }
 
+  async ensureRobotCameraWhipIngress(
+    robotId: string,
+    robotName: string,
+    cameraId: string,
+    cameraLabel?: string,
+  ): Promise<RobotCameraIngress | null> {
+    const normalizedCameraId = this.sanitizeCameraId(cameraId);
+    if (!normalizedCameraId) {
+      return null;
+    }
+
+    const roomName = `robot-${robotId}`;
+    const participantIdentity = `robot-media:${robotId}:${normalizedCameraId}`;
+    const participantName = cameraLabel?.trim()
+      ? `${robotName} ${cameraLabel.trim()}`
+      : `${robotName} ${normalizedCameraId}`;
+
+    try {
+      const existing = (await this.ingressService.listIngress({ roomName })).find(
+        (entry) =>
+          entry.inputType === IngressInput.WHIP_INPUT &&
+          entry.participantIdentity === participantIdentity,
+      );
+
+      const mapped = existing
+        ? this.mapRobotWhipIngress(
+            await this.ingressService.updateIngress(existing.ingressId, {
+              name: participantName,
+              roomName,
+              participantIdentity,
+              participantName,
+              participantMetadata: JSON.stringify({
+                kind: 'robot-media',
+                robotId,
+                cameraId: normalizedCameraId,
+              }),
+              enableTranscoding: true,
+            }),
+          )
+        : this.mapRobotWhipIngress(
+            await this.ingressService.createIngress(IngressInput.WHIP_INPUT, {
+              name: participantName,
+              roomName,
+              participantIdentity,
+              participantName,
+              participantMetadata: JSON.stringify({
+                kind: 'robot-media',
+                robotId,
+                cameraId: normalizedCameraId,
+              }),
+              enableTranscoding: true,
+            }),
+          );
+
+      if (!mapped) {
+        return null;
+      }
+
+      return {
+        ...mapped,
+        cameraId: normalizedCameraId,
+        isLive: await this.isParticipantLive(roomName, participantIdentity),
+      };
+    } catch (error) {
+      this.logger.warn(
+        `Failed to provision camera WHIP ingress for robot ${robotId}/${normalizedCameraId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return null;
+    }
+  }
+
+  async listRobotCameraIngresses(robotId: string): Promise<RobotCameraIngress[]> {
+    const roomName = `robot-${robotId}`;
+    const [ingresses, participants] = await Promise.all([
+      this.ingressService.listIngress({ roomName }),
+      this.safeListParticipants(roomName),
+    ]);
+
+    const liveParticipants = new Set(
+      participants
+        .map((participant) => participant.identity?.trim())
+        .filter((identity): identity is string => Boolean(identity)),
+    );
+
+    return ingresses
+      .filter((entry) => entry.inputType === IngressInput.WHIP_INPUT)
+      .map((entry) => {
+        const mapped = this.mapRobotWhipIngress(entry);
+        if (!mapped) {
+          return null;
+        }
+
+        const cameraId = this.cameraIdFromParticipantIdentityForRobot(robotId, mapped.participantIdentity);
+        return {
+          ...mapped,
+          cameraId,
+          isLive: Boolean(mapped.participantIdentity && liveParticipants.has(mapped.participantIdentity)),
+        } satisfies RobotCameraIngress;
+      })
+      .filter((entry): entry is RobotCameraIngress => Boolean(entry))
+      .sort((left, right) => {
+        const leftId = left.cameraId ?? '';
+        const rightId = right.cameraId ?? '';
+        return leftId.localeCompare(rightId);
+      });
+  }
+
+  async deleteRobotCameraIngress(robotId: string, ingressId: string): Promise<boolean> {
+    const roomName = `robot-${robotId}`;
+    const existing = (await this.ingressService.listIngress({ roomName })).find(
+      (entry) => entry.ingressId === ingressId,
+    );
+    if (!existing || existing.inputType !== IngressInput.WHIP_INPUT) {
+      return false;
+    }
+
+    const participantIdentity = existing.participantIdentity?.trim() || '';
+    const cameraId = this.cameraIdFromParticipantIdentityForRobot(robotId, participantIdentity);
+    if (!cameraId) {
+      // Keep the default robot ingress untouched.
+      return false;
+    }
+
+    await this.ingressService.deleteIngress(ingressId);
+    return true;
+  }
+
   private toLivekitServiceUrl(url: string): string {
     try {
       const parsed = new URL(url);
@@ -348,6 +482,45 @@ export class LivekitService {
       participantName: info.participantName?.trim() || undefined,
       enableTranscoding: Boolean(info.enableTranscoding),
     };
+  }
+
+  private sanitizeCameraId(value: string): string {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) {
+      return '';
+    }
+    return normalized.replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64);
+  }
+
+  private cameraIdFromParticipantIdentityForRobot(robotId: string, identity?: string): string | null {
+    const normalized = identity?.trim();
+    if (!normalized) {
+      return null;
+    }
+
+    const prefixed = normalized.match(new RegExp(`^robot-media:${robotId}:(.+)$`, 'i'));
+    if (prefixed?.[1]) {
+      return prefixed[1];
+    }
+
+    if (normalized === `robot-media-${robotId}`) {
+      return null;
+    }
+
+    return null;
+  }
+
+  private async safeListParticipants(roomName: string) {
+    try {
+      return await this.roomService.listParticipants(roomName);
+    } catch {
+      return [];
+    }
+  }
+
+  private async isParticipantLive(roomName: string, participantIdentity: string): Promise<boolean> {
+    const participants = await this.safeListParticipants(roomName);
+    return participants.some((participant) => participant.identity === participantIdentity);
   }
 
   private buildIngressEndpointUrl(baseUrl: string, streamKey: string): string {

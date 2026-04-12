@@ -183,6 +183,61 @@ export class RobotsController {
     await this.robotsService.removeAllowedUser(id, user.sub, targetUserId);
   }
 
+  @Get(':id/ingress-cameras')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'List WHIP camera ingresses for a robot (owner only)' })
+  async listIngressCameras(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    await this.requireRobotOwner(id, user.sub);
+    return this.livekitService.listRobotCameraIngresses(id);
+  }
+
+  @Post(':id/ingress-cameras')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Create or update a WHIP camera ingress for OBS/manual streaming (owner only)' })
+  async createIngressCamera(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @Body() body: { cameraId?: string; label?: string },
+  ) {
+    const robot = await this.requireRobotOwner(id, user.sub);
+    const cameraId = body.cameraId?.trim();
+    if (!cameraId) {
+      throw new BadRequestException('cameraId is required');
+    }
+
+    const ingress = await this.livekitService.ensureRobotCameraWhipIngress(
+      robot.id,
+      robot.name,
+      cameraId,
+      body.label,
+    );
+
+    if (!ingress) {
+      throw new BadRequestException('Failed to provision camera ingress');
+    }
+
+    return ingress;
+  }
+
+  @Delete(':id/ingress-cameras/:ingressId')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete an external camera WHIP ingress (owner only)' })
+  async deleteIngressCamera(
+    @Param('id') id: string,
+    @Param('ingressId') ingressId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    await this.requireRobotOwner(id, user.sub);
+    const deleted = await this.livekitService.deleteRobotCameraIngress(id, ingressId);
+    if (!deleted) {
+      throw new BadRequestException('Ingress not found or not removable');
+    }
+  }
+
   @Post(':id/access/verify')
   @ApiOperation({ summary: 'Verify room access and issue a temporary room access grant' })
   async verifyRoomAccess(
@@ -411,5 +466,13 @@ export class RobotsController {
       this.configService.get<string>('ROBOT_JWT_SECRET') ??
       createHash('sha256').update(this.configService.getOrThrow<string>('JWT_SECRET')).digest('hex')
     );
+  }
+
+  private async requireRobotOwner(robotId: string, userId: string) {
+    const robot = await this.robotsService.findById(robotId);
+    if (robot.ownerId !== userId) {
+      throw new ForbiddenException('Not your robot');
+    }
+    return robot;
   }
 }

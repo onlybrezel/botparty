@@ -21,6 +21,7 @@ import {
   api,
   type AllowedUserRecord,
   type ControlButtonRecord,
+  type RobotCameraIngress,
   type RobotManaged,
   type RobotTelemetryPoint,
 } from '@/lib/api';
@@ -431,6 +432,11 @@ export default function DashboardPage() {
   const [allowlistLoading, setAllowlistLoading] = useState(false);
   const [allowlistUsername, setAllowlistUsername] = useState('');
   const [allowlistOp, setAllowlistOp] = useState<string | null>(null);
+  const [ingressCameras, setIngressCameras] = useState<RobotCameraIngress[]>([]);
+  const [ingressLoading, setIngressLoading] = useState(false);
+  const [ingressOp, setIngressOp] = useState<string | null>(null);
+  const [newIngressCameraId, setNewIngressCameraId] = useState('');
+  const [newIngressLabel, setNewIngressLabel] = useState('');
   const previousPendingActionTypesRef = useRef<RemoteActionType[]>([]);
   const previewRefreshInFlightRef = useRef(false);
 
@@ -546,6 +552,38 @@ export default function DashboardPage() {
       active = false;
     };
   }, [selectedRobot?.id, editForm.accessMode, accessToken]);
+
+  useEffect(() => {
+    if (!accessToken || !selectedRobot) {
+      setIngressCameras([]);
+      return;
+    }
+
+    let active = true;
+    setIngressLoading(true);
+
+    api.setToken(accessToken);
+    api.getRobotIngressCameras(selectedRobot.id)
+      .then((rows) => {
+        if (active) {
+          setIngressCameras(rows);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setIngressCameras([]);
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setIngressLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [selectedRobot?.id, accessToken]);
 
   const refreshPreview = useCallback(async (forceRemount = false) => {
     if (!selectedRobot || !accessToken || selectedRobot.status !== 'ONLINE') {
@@ -840,6 +878,63 @@ export default function DashboardPage() {
     } catch {
       setError('Clipboard permission denied. Copy invite link manually.');
       pushToast('Clipboard access denied - please copy manually.', 'error');
+    }
+  };
+
+  const createIngressCamera = async () => {
+    if (!accessToken || !selectedRobot) return;
+    const cameraId = newIngressCameraId.trim();
+    if (!cameraId) {
+      pushToast('Camera ID is required.', 'error', 2600);
+      return;
+    }
+
+    setIngressOp(`create:${cameraId}`);
+    try {
+      api.setToken(accessToken);
+      const created = await api.createRobotIngressCamera(selectedRobot.id, {
+        cameraId,
+        label: newIngressLabel.trim() || undefined,
+      });
+      setIngressCameras((prev) => {
+        const withoutExisting = prev.filter((entry) => entry.ingressId !== created.ingressId);
+        return [...withoutExisting, created].sort((a, b) => (a.cameraId ?? '').localeCompare(b.cameraId ?? ''));
+      });
+      setNewIngressCameraId('');
+      setNewIngressLabel('');
+      pushToast('External camera ingress saved.', 'success', 2600);
+    } catch (err) {
+      pushToast(err instanceof Error ? err.message : 'Failed to create camera ingress.', 'error', 3200);
+    } finally {
+      setIngressOp(null);
+    }
+  };
+
+  const deleteIngressCamera = async (ingressId: string) => {
+    if (!accessToken || !selectedRobot) return;
+    if (!window.confirm('Delete this external camera ingress? OBS publishing to it will stop.')) {
+      return;
+    }
+
+    setIngressOp(`delete:${ingressId}`);
+    try {
+      api.setToken(accessToken);
+      await api.deleteRobotIngressCamera(selectedRobot.id, ingressId);
+      setIngressCameras((prev) => prev.filter((entry) => entry.ingressId !== ingressId));
+      pushToast('External camera ingress deleted.', 'success', 2600);
+    } catch (err) {
+      pushToast(err instanceof Error ? err.message : 'Failed to delete camera ingress.', 'error', 3200);
+    } finally {
+      setIngressOp(null);
+    }
+  };
+
+  const copyIngressEndpoint = async (endpointUrl: string) => {
+    try {
+      await navigator.clipboard.writeText(endpointUrl);
+      pushToast('WHIP endpoint copied.', 'success', 2200);
+    } catch {
+      pushToast('Clipboard denied. Copy the endpoint manually.', 'error', 2800);
     }
   };
 
@@ -1420,6 +1515,102 @@ export default function DashboardPage() {
                         }
                         placeholder="e.g. 1800"
                       />
+                    </div>
+
+                    <div className="space-y-2 rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
+                          External Camera Ingress (OBS / WHIP)
+                        </label>
+                        <span className="text-[10px] text-[var(--muted-foreground)]">
+                          {ingressLoading ? 'Loading...' : `${ingressCameras.length} configured`}
+                        </span>
+                      </div>
+
+                      <div className="grid gap-2 sm:grid-cols-[1fr,1fr,auto]">
+                        <input
+                          className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                          placeholder="camera id (e.g. obs-front)"
+                          value={newIngressCameraId}
+                          onChange={(event) => setNewIngressCameraId(event.target.value)}
+                        />
+                        <input
+                          className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                          placeholder="label (optional)"
+                          value={newIngressLabel}
+                          onChange={(event) => setNewIngressLabel(event.target.value)}
+                        />
+                        <button
+                          type="button"
+                          onClick={createIngressCamera}
+                          disabled={Boolean(ingressOp)}
+                          className="inline-flex items-center justify-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-semibold disabled:opacity-60"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          Add
+                        </button>
+                      </div>
+
+                      <p className="text-[11px] text-[var(--muted-foreground)]">
+                        Use the generated WHIP endpoint in OBS. The camera appears in the viewer only while it is live.
+                      </p>
+
+                      <div className="space-y-2">
+                        {ingressCameras.length === 0 ? (
+                          <p className="text-xs text-[var(--muted-foreground)]">No external camera ingress configured yet.</p>
+                        ) : (
+                          ingressCameras.map((entry) => {
+                            const deleting = ingressOp === `delete:${entry.ingressId}`;
+                            return (
+                              <div
+                                key={entry.ingressId}
+                                className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-2"
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <div>
+                                    <p className="text-sm font-semibold">
+                                      {entry.cameraId ?? 'default'}
+                                    </p>
+                                    <p className="text-[11px] text-[var(--muted-foreground)]">
+                                      {entry.participantName ?? entry.participantIdentity ?? 'camera ingress'}
+                                    </p>
+                                  </div>
+                                  <span
+                                    className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                                      entry.isLive
+                                        ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+                                        : 'border-[var(--border)] bg-[var(--background)] text-[var(--muted-foreground)]'
+                                    }`}
+                                  >
+                                    {entry.isLive ? 'LIVE' : 'Offline'}
+                                  </span>
+                                </div>
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => void copyIngressEndpoint(entry.endpointUrl)}
+                                    className="inline-flex items-center gap-2 rounded border border-[var(--border)] px-2 py-1 text-xs"
+                                  >
+                                    <Copy className="h-3.5 w-3.5" />
+                                    Copy WHIP URL
+                                  </button>
+                                  {entry.cameraId ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => void deleteIngressCamera(entry.ingressId)}
+                                      disabled={Boolean(ingressOp)}
+                                      className="inline-flex items-center gap-2 rounded border border-red-500/40 px-2 py-1 text-xs text-red-300 disabled:opacity-60"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                      {deleting ? 'Deleting...' : 'Delete'}
+                                    </button>
+                                  ) : null}
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
                     </div>
 
                     <div className="space-y-1">

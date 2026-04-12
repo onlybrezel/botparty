@@ -67,6 +67,19 @@ export interface RobotMutationInput {
   accessPassword?: string;
 }
 
+export interface RobotCameraIngress {
+  type: 'WHIP';
+  ingressId: string;
+  url: string;
+  streamKey: string;
+  endpointUrl: string;
+  participantIdentity?: string;
+  participantName?: string;
+  enableTranscoding: boolean;
+  cameraId: string | null;
+  isLive: boolean;
+}
+
 export interface PlatformStats {
   totalUsers: number;
   totalRobots: number;
@@ -636,6 +649,23 @@ class ApiClient {
 
   async removeAllowedUser(robotId: string, userId: string) {
     return this.request<void>(`/robots/${robotId}/allowed-users/${userId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getRobotIngressCameras(robotId: string) {
+    return this.request<RobotCameraIngress[]>(`/robots/${robotId}/ingress-cameras`);
+  }
+
+  async createRobotIngressCamera(robotId: string, payload: { cameraId: string; label?: string }) {
+    return this.request<RobotCameraIngress>(`/robots/${robotId}/ingress-cameras`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteRobotIngressCamera(robotId: string, ingressId: string) {
+    return this.request<void>(`/robots/${robotId}/ingress-cameras/${encodeURIComponent(ingressId)}`, {
       method: 'DELETE',
     });
   }
