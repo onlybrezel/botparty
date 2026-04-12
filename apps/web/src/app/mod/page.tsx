@@ -136,6 +136,7 @@ const formatClientBuild = (
   telemetry:
     | {
         clientVersion: string | null;
+        botpartyStreamerVersion?: string | null;
         gitBranch: string | null;
         gitCommit: string | null;
         gitDirty: boolean;
@@ -1215,6 +1216,9 @@ export default function ModDashboardPage() {
                   </p>
                   <p className="mt-1 text-xs text-[var(--muted-foreground)]">
                     Client {formatClientBuild(selectedRuntimeRobot.telemetry)} · Python {selectedRuntimeRobot.telemetry?.pythonVersion ?? '-'}
+                  </p>
+                  <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+                    Streamer {selectedRuntimeRobot.telemetry?.botpartyStreamerVersion ?? '-'}
                   </p>
                 </div>
                 <div className="flex gap-2">

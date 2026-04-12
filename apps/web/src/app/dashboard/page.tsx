@@ -1809,6 +1809,11 @@ export default function DashboardPage() {
                             Python: <span className="font-semibold text-[var(--foreground)]">{telemetry.latest.pythonVersion}</span>
                           </p>
                         )}
+                        {telemetry.latest.botpartyStreamerVersion && (
+                          <p className="mt-1">
+                            Streamer: <span className="font-semibold text-[var(--foreground)]">{telemetry.latest.botpartyStreamerVersion}</span>
+                          </p>
+                        )}
                       </div>
                     )}
                     <div className="flex flex-wrap gap-2">
@@ -2598,7 +2603,7 @@ export default function DashboardPage() {
                             <p className="font-semibold">{formatUptime(telemetry.latest.uptimeSec)}</p>
                           </div>
                         </div>
-                        <div className="mt-2 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+                        <div className="mt-2 grid grid-cols-2 gap-2 text-xs sm:grid-cols-6">
                           <div className="rounded border border-[var(--border)] px-2 py-1.5 sm:col-span-2">
                             <p className="text-[var(--muted-foreground)]">Client build</p>
                             <p className="font-semibold">{formatClientBuild(telemetry.latest)}</p>
@@ -2606,6 +2611,10 @@ export default function DashboardPage() {
                           <div className="rounded border border-[var(--border)] px-2 py-1.5 sm:col-span-2">
                             <p className="text-[var(--muted-foreground)]">Python</p>
                             <p className="font-semibold">{telemetry.latest.pythonVersion ?? '-'}</p>
+                          </div>
+                          <div className="rounded border border-[var(--border)] px-2 py-1.5 sm:col-span-2">
+                            <p className="text-[var(--muted-foreground)]">Streamer</p>
+                            <p className="font-semibold">{telemetry.latest.botpartyStreamerVersion ?? '-'}</p>
                           </div>
                         </div>
                         <div className="mt-2 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">

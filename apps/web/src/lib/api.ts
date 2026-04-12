@@ -93,6 +93,7 @@ export interface PlatformStats {
 export interface RobotTelemetryPoint {
   ts: number;
   clientVersion: string | null;
+  botpartyStreamerVersion?: string | null;
   gitBranch: string | null;
   gitCommit: string | null;
   gitDirty: boolean;
