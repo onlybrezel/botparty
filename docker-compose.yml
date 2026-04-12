@@ -67,10 +67,16 @@ services:
     environment:
       LIVEKIT_KEYS: "${LIVEKIT_API_KEY:-devkey}: ${LIVEKIT_API_SECRET:-secret_that_is_at_least_32_characters_long}"
       REDIS_PASSWORD: ${REDIS_PASSWORD:-botparty_redis_secret}
-    # network_mode: host lets livekit bind directly to the host's network stack.
-    # This makes all ports (7880 TCP/WS and 50000-50100 UDP for WebRTC ICE)
-    # available on the host's IP without manual port mapping.
-    network_mode: host
+    ports:
+      - "7880:7880"
+      - "7881:7881/tcp"
+      - "50000-50100:50000-50100/udp"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - internal
+      - frontend
     volumes:
       - ./docker/livekit/livekit.yaml:/etc/livekit.yaml:ro
     healthcheck:
@@ -83,8 +89,6 @@ services:
     image: livekit/ingress:latest
     container_name: botparty-livekit-ingress
     restart: unless-stopped
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     ports:
       - "8080:8080"
       - "7882:7882/tcp"
@@ -93,7 +97,7 @@ services:
       INGRESS_CONFIG_BODY: |
         api_key: ${LIVEKIT_API_KEY:-devkey}
         api_secret: ${LIVEKIT_API_SECRET:-secret_that_is_at_least_32_characters_long}
-        ws_url: ws://host.docker.internal:7880
+        ws_url: ws://livekit:7880
         redis:
           address: redis:6379
           password: ${REDIS_PASSWORD:-botparty_redis_secret}
@@ -126,7 +130,7 @@ services:
       EGRESS_CONFIG_BODY: |
         api_key: ${LIVEKIT_API_KEY:-devkey}
         api_secret: ${LIVEKIT_API_SECRET:-secret_that_is_at_least_32_characters_long}
-        ws_url: ws://botparty.live:7880
+        ws_url: ws://livekit:7880
         redis:
           address: redis:6379
           password: ${REDIS_PASSWORD:-botparty_redis_secret}
@@ -202,7 +206,7 @@ services:
       SMTP_FROM: ${SMTP_FROM:-BotParty <no-reply@botparty.live>}
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-secret_that_is_at_least_32_characters_long}
-      LIVEKIT_URL: ${LIVEKIT_URL:-ws://localhost:7880}
+      LIVEKIT_URL: ${LIVEKIT_URL:-ws://livekit:7880}
       LIVEKIT_PUBLIC_URL: ${LIVEKIT_PUBLIC_URL:-wss://botparty.live/rtc}
       LIVEKIT_RECORDING_FILEPATH_TEMPLATE: ${LIVEKIT_RECORDING_FILEPATH_TEMPLATE:-/out/{room_name}-{time}.mp4}
       LIVEKIT_RECORDINGS_DIR: ${LIVEKIT_RECORDINGS_DIR:-/recordings}
@@ -269,8 +273,6 @@ services:
     image: nginx:1.27-alpine
     container_name: botparty-nginx
     restart: unless-stopped
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     ports:
       - "80:80"
       - "443:443"

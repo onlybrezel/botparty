@@ -22,7 +22,7 @@ room:
   max_participants: 1000
 
 redis:
-  address: 127.0.0.1:6379
+  address: redis:6379
   password: ${REDIS_PASSWORD}
 
 ingress:

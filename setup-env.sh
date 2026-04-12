@@ -100,7 +100,7 @@ echo ""
 if [[ "$IS_LOCAL" == "y" ]]; then
   API_URL="http://localhost:4000"
   WS_URL="ws://localhost:4000"
-  LIVEKIT_URL="ws://localhost:7880"
+  LIVEKIT_URL="ws://livekit:7880"
   LIVEKIT_EXT_URL="ws://localhost:7880"
   APP_URL="http://localhost:3000"
   SMTP_HOST=""
@@ -138,11 +138,10 @@ else
   APP_URL="${PROTO}://${DOMAIN}"
   CORS_ORIGIN="${PROTO}://${DOMAIN}"
 
-  # LiveKit is accessed directly by robot clients and the browser.
-  # If nginx doesn't proxy it, clients need the direct port.
-  ask LIVEKIT_HOST "LiveKit public host" "$DOMAIN"
-  LIVEKIT_URL="${WS_PROTO}://${LIVEKIT_HOST}:7880"
-  LIVEKIT_EXT_URL="${WS_PROTO}://${LIVEKIT_HOST}:7880"
+  # Internal services should use the Docker service name.
+  # Public clients connect through nginx on /rtc.
+  LIVEKIT_URL="ws://livekit:7880"
+  LIVEKIT_EXT_URL="${WS_PROTO}://${DOMAIN}/rtc"
 
   echo ""
   ask SMTP_HOST "SMTP host" "smtp.example.com"
