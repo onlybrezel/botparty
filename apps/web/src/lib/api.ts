@@ -260,9 +260,26 @@ export interface ActiveSessionRecord {
 export interface AdminRobotRecordingStatus {
   roomName: string;
   active: boolean;
+  activeCount: number;
   egressId: string | null;
   startedAt: string | null;
+  sessions: Array<{
+    egressId: string;
+    cameraId: string | null;
+    videoTrackId: string | null;
+    audioTrackId: string | null;
+    startedAt: string | null;
+  }>;
   updatedAt: string;
+}
+
+export interface AdminRecordingFile {
+  fileName: string;
+  sizeBytes: number;
+  modifiedAt: string;
+  robotId: string | null;
+  cameraId?: string | null;
+  recordedAt?: string | null;
 }
 
 type AuthSessionResponse = {
@@ -779,6 +796,15 @@ class ApiClient {
       method: 'POST',
       body: '{}',
     });
+  }
+
+  async listAdminRecordings() {
+    return this.request<AdminRecordingFile[]>('/moderation/admin/recordings');
+  }
+
+  getAdminRecordingStreamUrl(fileName: string) {
+    const encoded = encodeURIComponent(fileName);
+    return `${this.baseUrl}/moderation/admin/recordings/${encoded}`;
   }
 
   async getPendingRobotActions(robotId: string) {

@@ -5,10 +5,16 @@ rtc:
   port_range_end: 50100
   tcp_port: 7881
   use_external_ip: true
+  interfaces:
+    excludes:
+      - lo
+      - docker*
+      - br-*
+      - veth*
 
 logging:
-  level: info
-  pion_level: warn
+  level: warn
+  pion_level: error
 
 room:
   auto_create: true

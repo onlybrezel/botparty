@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Shield, Search, Ban, Clock3, Trash2, RefreshCw, Activity, Server, Users, Bot, UserRound, Siren, ChevronRight } from 'lucide-react';
@@ -80,6 +80,58 @@ const formatUptime = (value: number | null | undefined) => {
   return `${minutes}m`;
 };
 
+const formatDurationClock = (seconds: number) => {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '0:00';
+  const totalSeconds = Math.floor(seconds);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const secs = totalSeconds % 60;
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  }
+  return `${minutes}:${String(secs).padStart(2, '0')}`;
+};
+
+const parseCompactRecordingTime = (value: string): Date | null => {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2})(\d{2})(\d{2})$/);
+  if (!match) return null;
+  const [, y, m, d, hh, mm, ss] = match;
+  const parsed = new Date(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm), Number(ss));
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const parseRecordingMeta = (file: { fileName: string; robotId: string | null; modifiedAt: string; cameraId?: string | null; recordedAt?: string | null }) => {
+  if (file.cameraId || file.recordedAt) {
+    return {
+      robotId: file.robotId,
+      cameraId: file.cameraId ?? null,
+      recordedAt: file.recordedAt ? new Date(file.recordedAt) : null,
+    };
+  }
+
+  const nameWithoutExt = file.fileName.replace(/\.mp4$/i, '');
+  const strict = nameWithoutExt.match(/^robot-([0-9a-f-]{36})(?:-([a-zA-Z0-9._-]+))?-(\d{4}-\d{2}-\d{2}T\d{6})$/i);
+  if (strict) {
+    const [, robotIdFromName, cameraIdRaw, compactTime] = strict;
+    const parsedTime = compactTime ? parseCompactRecordingTime(compactTime) : null;
+    return {
+      robotId: file.robotId ?? robotIdFromName,
+      cameraId: cameraIdRaw ? cameraIdRaw.replace(/^camera[-_]?/i, '') : null,
+      recordedAt: parsedTime,
+    };
+  }
+
+  const fallbackTimeMatch = nameWithoutExt.match(/(\d{4}-\d{2}-\d{2}T\d{6})(?!.*\d{4}-\d{2}-\d{2}T\d{6})/);
+  const fallbackTimeToken = fallbackTimeMatch?.[1] ?? null;
+  const recordedAt = fallbackTimeToken ? parseCompactRecordingTime(fallbackTimeToken) : null;
+  const cameraMatch = nameWithoutExt.match(/(?:^|[-_])(camera|cam|stream)[-_]?([a-zA-Z0-9._-]+)/i);
+  return {
+    robotId: file.robotId,
+    cameraId: cameraMatch?.[2] ?? null,
+    recordedAt,
+  };
+};
+
 const formatClientBuild = (
   telemetry:
     | {
@@ -134,6 +186,13 @@ export default function ModDashboardPage() {
   const [robotDraft, setRobotDraft] = useState<RobotDraft | null>(null);
   const [runtimeActionLoading, setRuntimeActionLoading] = useState<string | null>(null);
   const [recordingActionLoading, setRecordingActionLoading] = useState<string | null>(null);
+  const [recordingFiles, setRecordingFiles] = useState<Awaited<ReturnType<typeof api.listAdminRecordings>>>([]);
+  const [selectedRecordingFile, setSelectedRecordingFile] = useState<string | null>(null);
+  const [recordingRobotFilter, setRecordingRobotFilter] = useState<string>('ALL');
+  const [recordingCameraFilter, setRecordingCameraFilter] = useState<string>('ALL');
+  const [playerCurrentSec, setPlayerCurrentSec] = useState(0);
+  const [playerDurationSec, setPlayerDurationSec] = useState(0);
+  const recordingVideoRef = useRef<HTMLVideoElement | null>(null);
 
   useEffect(() => {
     if (!hasHydrated) {
@@ -168,6 +227,10 @@ export default function ModDashboardPage() {
         setOverview(modOverview);
         setRuntimeOverview(runtime);
         setProfanity(globalProfanity);
+        if (me.role === 'ADMIN') {
+          const recordings = await api.listAdminRecordings();
+          setRecordingFiles(recordings);
+        }
       } catch (err) {
         pushToast(err instanceof Error ? err.message : 'Failed to load mod dashboard.', 'error');
       } finally {
@@ -395,6 +458,10 @@ export default function ModDashboardPage() {
       setOverview(modOverview);
       setRuntimeOverview(runtime);
       setProfanity(globalProfanity);
+      if (viewerIsAdmin) {
+        const recordings = await api.listAdminRecordings();
+        setRecordingFiles(recordings);
+      }
       if (!options?.silent) {
         pushToast('Mod data refreshed.', 'success');
       }
@@ -406,6 +473,94 @@ export default function ModDashboardPage() {
       setRefreshing(false);
     }
   };
+
+  const selectedRecording = useMemo(() => {
+    if (!selectedRecordingFile) return null;
+    return recordingFiles.find((file) => file.fileName === selectedRecordingFile) ?? null;
+  }, [recordingFiles, selectedRecordingFile]);
+
+  const recordingRobotNameMap = useMemo(() => {
+    const robots = runtimeOverview?.robots ?? [];
+    return new Map(robots.map((robot) => [robot.id, robot.name]));
+  }, [runtimeOverview]);
+
+  const recordingEntries = useMemo(() => {
+    return recordingFiles
+      .map((file) => {
+        const parsed = parseRecordingMeta(file);
+        return {
+          ...file,
+          parsedRobotId: parsed.robotId,
+          parsedCameraId: parsed.cameraId,
+          recordedAt: parsed.recordedAt,
+          robotName: parsed.robotId ? (recordingRobotNameMap.get(parsed.robotId) ?? parsed.robotId) : null,
+        };
+      })
+      .sort((a, b) => new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime());
+  }, [recordingFiles, recordingRobotNameMap]);
+
+  const recordingRobotOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const entry of recordingEntries) {
+      if (!entry.parsedRobotId) continue;
+      map.set(entry.parsedRobotId, entry.robotName ?? entry.parsedRobotId);
+    }
+    return Array.from(map.entries())
+      .map(([id, label]) => ({ id, label }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [recordingEntries]);
+
+  const recordingCameraOptions = useMemo(() => {
+    const values = new Set<string>();
+    for (const entry of recordingEntries) {
+      if (entry.parsedCameraId) values.add(entry.parsedCameraId);
+    }
+    return Array.from(values).sort((a, b) => a.localeCompare(b));
+  }, [recordingEntries]);
+
+  const filteredRecordingEntries = useMemo(() => {
+    return recordingEntries.filter((entry) => {
+      if (recordingRobotFilter !== 'ALL' && entry.parsedRobotId !== recordingRobotFilter) {
+        return false;
+      }
+      if (recordingCameraFilter !== 'ALL' && entry.parsedCameraId !== recordingCameraFilter) {
+        return false;
+      }
+      return true;
+    });
+  }, [recordingCameraFilter, recordingEntries, recordingRobotFilter]);
+
+  const selectedRecordingEntry = useMemo(() => {
+    if (!selectedRecordingFile) return null;
+    return recordingEntries.find((entry) => entry.fileName === selectedRecordingFile) ?? null;
+  }, [recordingEntries, selectedRecordingFile]);
+
+  const selectedRecordingClock = useMemo(() => {
+    if (!selectedRecordingEntry?.recordedAt) return null;
+    const ts = selectedRecordingEntry.recordedAt.getTime() + Math.max(0, playerCurrentSec) * 1000;
+    return new Date(ts);
+  }, [playerCurrentSec, selectedRecordingEntry]);
+
+  const selectedRecordingEndClock = useMemo(() => {
+    if (!selectedRecordingEntry?.recordedAt || !playerDurationSec || !Number.isFinite(playerDurationSec)) return null;
+    return new Date(selectedRecordingEntry.recordedAt.getTime() + playerDurationSec * 1000);
+  }, [playerDurationSec, selectedRecordingEntry]);
+
+  const playerProgressPercent = useMemo(() => {
+    if (!playerDurationSec || !Number.isFinite(playerDurationSec) || playerDurationSec <= 0) return 0;
+    return Math.min(100, Math.max(0, (playerCurrentSec / playerDurationSec) * 100));
+  }, [playerCurrentSec, playerDurationSec]);
+
+  useEffect(() => {
+    setPlayerCurrentSec(0);
+    setPlayerDurationSec(0);
+  }, [selectedRecordingFile]);
+
+  useEffect(() => {
+    if (!selectedRecordingFile) return;
+    if (filteredRecordingEntries.some((entry) => entry.fileName === selectedRecordingFile)) return;
+    setSelectedRecordingFile(filteredRecordingEntries[0]?.fileName ?? null);
+  }, [filteredRecordingEntries, selectedRecordingFile]);
 
   useEffect(() => {
     if (!accessToken || !allowed) {
@@ -863,6 +1018,160 @@ export default function ModDashboardPage() {
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+        ) : null}
+
+        {viewerIsAdmin ? (
+          <div className="mb-4 rounded-lg border border-[var(--border)] bg-[var(--background)] p-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-base font-bold">Recordings Library (Admin)</h3>
+                <p className="text-xs text-[var(--muted-foreground)]">Recent .mp4 files from livekit-egress output.</p>
+              </div>
+              <span className="text-xs text-[var(--muted-foreground)]">{recordingFiles.length} files</span>
+            </div>
+
+            {recordingFiles.length === 0 ? (
+              <p className="text-sm text-[var(--muted-foreground)]">No recordings found yet.</p>
+            ) : (
+              <div className="grid gap-3 xl:grid-cols-[0.95fr,1.05fr]">
+                <div className="rounded border border-[var(--border)] bg-[var(--card)]">
+                  <div className="sticky top-0 z-10 border-b border-[var(--border)] bg-[var(--background)]/95 p-2 backdrop-blur">
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <Select
+                        value={recordingRobotFilter}
+                        onChange={(event) => setRecordingRobotFilter(event.target.value)}
+                        className="h-8 bg-[var(--card)] text-xs"
+                      >
+                        <option value="ALL">All robots</option>
+                        {recordingRobotOptions.map((robot) => (
+                          <option key={robot.id} value={robot.id}>
+                            {robot.label}
+                          </option>
+                        ))}
+                      </Select>
+                      <Select
+                        value={recordingCameraFilter}
+                        onChange={(event) => setRecordingCameraFilter(event.target.value)}
+                        className="h-8 bg-[var(--card)] text-xs"
+                      >
+                        <option value="ALL">All cameras</option>
+                        {recordingCameraOptions.map((cameraId) => (
+                          <option key={cameraId} value={cameraId}>
+                            {cameraId}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                    <p className="mt-2 text-[11px] text-[var(--muted-foreground)]">
+                      Showing {filteredRecordingEntries.length} of {recordingEntries.length}
+                    </p>
+                  </div>
+                  <div className="max-h-[28rem] overflow-y-auto overscroll-contain">
+                  {filteredRecordingEntries.slice(0, 200).map((file) => (
+                    <button
+                      key={file.fileName}
+                      type="button"
+                      onClick={() => setSelectedRecordingFile(file.fileName)}
+                      className={`w-full border-b border-[var(--border)] px-3 py-2 text-left text-xs hover:bg-[var(--muted)] ${
+                        selectedRecordingFile === file.fileName ? 'bg-[var(--muted)]' : ''
+                      }`}
+                    >
+                      <p className="truncate font-semibold text-[var(--foreground)]">{file.fileName}</p>
+                      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[var(--muted-foreground)]">
+                        <span>{new Date(file.modifiedAt).toLocaleString()}</span>
+                        <span>· {(file.sizeBytes / (1024 * 1024)).toFixed(1)} MB</span>
+                        {file.parsedCameraId ? <span>· cam: {file.parsedCameraId}</span> : null}
+                      </div>
+                    </button>
+                  ))}
+                  </div>
+                </div>
+
+                <div className="rounded border border-[var(--border)] bg-[var(--card)] p-3">
+                  {selectedRecording && selectedRecordingEntry ? (
+                    <>
+                      <p className="mb-2 text-xs text-[var(--muted-foreground)]">Previewing {selectedRecording.fileName}</p>
+                      <video
+                        ref={recordingVideoRef}
+                        key={selectedRecording.fileName}
+                        controls
+                        preload="metadata"
+                        className="h-auto w-full rounded border border-[var(--border)] bg-black"
+                        src={api.getAdminRecordingStreamUrl(selectedRecording.fileName)}
+                        onTimeUpdate={(event) => {
+                          setPlayerCurrentSec(event.currentTarget.currentTime || 0);
+                        }}
+                        onLoadedMetadata={(event) => {
+                          setPlayerDurationSec(event.currentTarget.duration || 0);
+                        }}
+                      />
+                      <div className="mt-2 rounded border border-[var(--border)] bg-[var(--background)] px-3 py-2">
+                        <input
+                          type="range"
+                          min={0}
+                          max={playerDurationSec > 0 ? playerDurationSec : 0}
+                          step={0.25}
+                          value={Math.min(playerCurrentSec, playerDurationSec || playerCurrentSec)}
+                          onChange={(event) => {
+                            const nextTime = Number(event.target.value);
+                            if (!Number.isFinite(nextTime)) return;
+                            setPlayerCurrentSec(nextTime);
+                            if (recordingVideoRef.current) {
+                              recordingVideoRef.current.currentTime = nextTime;
+                            }
+                          }}
+                          className="w-full accent-sky-400"
+                          aria-label="Recording timeline"
+                        />
+                        <div className="mt-2 flex items-center justify-between gap-3 text-[11px]">
+                          <span className="text-[var(--muted-foreground)]">
+                            Start: {selectedRecordingEntry.recordedAt ? selectedRecordingEntry.recordedAt.toLocaleTimeString() : '-'}
+                          </span>
+                          <span className="font-medium text-[var(--foreground)]">
+                            {formatDurationClock(playerCurrentSec)} / {formatDurationClock(playerDurationSec)}
+                          </span>
+                          <span className="text-[var(--muted-foreground)]">
+                            End: {selectedRecordingEndClock ? selectedRecordingEndClock.toLocaleTimeString() : '-'}
+                          </span>
+                        </div>
+                        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--muted)]">
+                          <div className="h-full rounded-full bg-sky-400 transition-[width]" style={{ width: `${playerProgressPercent}%` }} />
+                        </div>
+                      </div>
+                      <div className="mt-2 rounded border border-[var(--border)] bg-[var(--background)] p-2 text-xs">
+                        <div className="grid gap-1 sm:grid-cols-2">
+                          <span className="text-[var(--muted-foreground)]">Robot: {selectedRecordingEntry.robotName ?? selectedRecordingEntry.parsedRobotId ?? 'unknown'}</span>
+                          <span className="text-[var(--muted-foreground)]">Camera: {selectedRecordingEntry.parsedCameraId ?? 'default'}</span>
+                          <span className="text-[var(--muted-foreground)]">Recorded: {selectedRecordingEntry.recordedAt ? selectedRecordingEntry.recordedAt.toLocaleString() : new Date(selectedRecordingEntry.modifiedAt).toLocaleString()}</span>
+                          <span className="text-[var(--muted-foreground)]">Duration: {playerDurationSec > 0 ? `${Math.floor(playerDurationSec / 60)}m ${Math.floor(playerDurationSec % 60)}s` : '-'}</span>
+                        </div>
+                        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border)] pt-2">
+                          <span className="font-medium text-[var(--foreground)]">
+                            Playback clock: {selectedRecordingClock ? selectedRecordingClock.toLocaleString() : '-'}
+                          </span>
+                          <span className="text-[var(--muted-foreground)]">
+                            End clock: {selectedRecordingEndClock ? selectedRecordingEndClock.toLocaleString() : '-'}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="mt-2 flex items-center justify-end gap-2 text-xs">
+                        <a
+                          href={api.getAdminRecordingStreamUrl(selectedRecording.fileName)}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="rounded border border-[var(--border)] px-2 py-1 text-[var(--foreground)]"
+                        >
+                          Open in new tab
+                        </a>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-sm text-[var(--muted-foreground)]">Select a recording to preview.</p>
+                  )}
+                </div>
               </div>
             )}
           </div>

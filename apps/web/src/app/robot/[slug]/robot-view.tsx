@@ -802,7 +802,11 @@ export default function RobotView({ robot }: Props) {
 
     const currentlyOnline = robotStatus === 'ONLINE' || robotStatus === 'BUSY';
     if (!currentlyOnline) {
-      setRecordingState((prev) => (prev?.active ? { ...prev, active: false, egressId: null, startedAt: null } : prev));
+      setRecordingState((prev) =>
+        prev?.active
+          ? { ...prev, active: false, activeCount: 0, egressId: null, startedAt: null, sessions: [] }
+          : prev,
+      );
       return;
     }
 
@@ -813,8 +817,10 @@ export default function RobotView({ robot }: Props) {
         if (
           prev &&
           prev.active === next.active &&
+          prev.activeCount === next.activeCount &&
           prev.egressId === next.egressId &&
-          prev.startedAt === next.startedAt
+          prev.startedAt === next.startedAt &&
+          JSON.stringify(prev.sessions) === JSON.stringify(next.sessions)
         ) {
           return prev;
         }
@@ -875,6 +881,17 @@ export default function RobotView({ robot }: Props) {
       void refreshRecordingStatus();
     }
   }, [accessToken, isAdmin, recordingAction, recordingState?.active, refreshRecordingStatus, robot.id]);
+
+  const recordingCameraSummary = useMemo(() => {
+    const cameraIds = (recordingState?.sessions ?? [])
+      .map((session) => session.cameraId)
+      .filter((cameraId): cameraId is string => Boolean(cameraId));
+    if (cameraIds.length === 0) {
+      return recordingState?.active ? 'default camera' : null;
+    }
+
+    return cameraIds.join(', ');
+  }, [recordingState]);
 
   const handleWsEvent = useCallback((event: string, data: Record<string, unknown>) => {
     switch (event) {
@@ -2049,9 +2066,15 @@ export default function RobotView({ robot }: Props) {
 
               <p className="mt-2 text-xs text-[var(--muted-foreground)]">
                 {recordingState?.startedAt
-                  ? `Started at ${new Date(recordingState.startedAt).toLocaleString()}`
+                  ? `Started at ${new Date(recordingState.startedAt).toLocaleString()}${recordingState.activeCount > 1 ? ` · ${recordingState.activeCount} cameras` : ''}`
                   : 'Capture this robot room directly from LiveKit.'}
               </p>
+
+              {recordingState?.active && recordingCameraSummary && (
+                <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+                  Active cameras: {recordingCameraSummary}
+                </p>
+              )}
 
               <button
                 type="button"

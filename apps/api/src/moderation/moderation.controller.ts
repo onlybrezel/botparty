@@ -8,6 +8,7 @@ import {
   UseGuards,
   Query,
   BadRequestException,
+  StreamableFile,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ModerationService } from './moderation.service';
@@ -116,6 +117,25 @@ export class ModerationController {
     @CurrentUser('sub') requesterId: string,
   ) {
     return this.moderationService.stopAdminRobotRecording(robotId, requesterId);
+  }
+
+  @Get('admin/recordings')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'List available recording files (admin only)' })
+  listAdminRecordings(@CurrentUser('sub') requesterId: string) {
+    return this.moderationService.listAdminRecordings(requesterId);
+  }
+
+  @Get('admin/recordings/:fileName')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Stream a recording file (admin only)' })
+  async streamAdminRecording(
+    @Param('fileName') fileName: string,
+    @CurrentUser('sub') requesterId: string,
+  ): Promise<StreamableFile> {
+    return this.moderationService.streamAdminRecording(fileName, requesterId);
   }
 
   @Get('admin/profanity-overview')

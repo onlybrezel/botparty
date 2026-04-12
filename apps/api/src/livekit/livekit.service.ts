@@ -1,8 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AccessToken, EgressClient, IngressClient, IngressInput, RoomServiceClient } from 'livekit-server-sdk';
-import { EncodedFileOutput, EncodedFileType } from '@livekit/protocol';
-import type { IngressInfo } from '@livekit/protocol';
+import { EncodedFileOutput, EncodedFileType, TrackType } from '@livekit/protocol';
+import type { EgressInfo, IngressInfo } from '@livekit/protocol';
 
 type RobotWhipIngress = {
   type: 'WHIP';
@@ -15,10 +15,34 @@ type RobotWhipIngress = {
   enableTranscoding: boolean;
 };
 
+type RecordingTrackTarget = {
+  cameraId: string | null;
+  videoTrackId: string;
+  audioTrackId: string | null;
+};
+
+type ActiveRecordingSession = {
+  egressId: string;
+  cameraId: string | null;
+  videoTrackId: string | null;
+  audioTrackId: string | null;
+  startedAt: string | null;
+};
+
+type RecordingStatus = {
+  roomName: string;
+  active: boolean;
+  activeCount: number;
+  egressId: string | null;
+  startedAt: string | null;
+  sessions: ActiveRecordingSession[];
+};
+
 @Injectable()
 export class LivekitService {
   private readonly logger = new Logger(LivekitService.name);
   private readonly egressTimeoutMs = 12000;
+  private readonly egressStopWaitMs = 12000;
   private readonly apiKey: string;
   private readonly apiSecret: string;
   private readonly livekitUrl: string;
@@ -151,12 +175,7 @@ export class LivekitService {
     return this.roomService.listParticipants(roomName);
   }
 
-  async getRoomRecordingStatus(robotId: string): Promise<{
-    roomName: string;
-    active: boolean;
-    egressId: string | null;
-    startedAt: string | null;
-  }> {
+  async getRoomRecordingStatus(robotId: string): Promise<RecordingStatus> {
     const roomName = `robot-${robotId}`;
     const [rooms, activeEgress] = await Promise.all([
       this.roomService.listRooms([roomName]),
@@ -167,22 +186,12 @@ export class LivekitService {
     ]);
 
     const room = rooms.find((entry) => entry.name === roomName) ?? null;
-    const current = activeEgress[0] ?? null;
-
-    return {
-      roomName,
-      active: Boolean(room?.activeRecording) || activeEgress.length > 0,
-      egressId: current?.egressId ?? null,
-      startedAt: this.toIsoTimestamp(current?.startedAt),
-    };
+    const participants = room ? await this.roomService.listParticipants(roomName) : [];
+    const trackCameraLookup = this.buildTrackCameraLookup(participants);
+    return this.toRecordingStatus(roomName, activeEgress, Boolean(room?.activeRecording), trackCameraLookup);
   }
 
-  async startRoomRecording(robotId: string): Promise<{
-    roomName: string;
-    active: boolean;
-    egressId: string | null;
-    startedAt: string | null;
-  }> {
+  async startRoomRecording(robotId: string): Promise<RecordingStatus> {
     const roomName = `robot-${robotId}`;
     const rooms = await this.roomService.listRooms([roomName]);
     const room = rooms.find((entry) => entry.name === roomName) ?? null;
@@ -194,41 +203,47 @@ export class LivekitService {
       this.egressService.listEgress({ roomName, active: true }),
       'list active recording before start',
     );
-    const existing = activeEgress[0] ?? null;
-    if (existing) {
-      return {
-        roomName,
-        active: true,
-        egressId: existing.egressId ?? null,
-        startedAt: this.toIsoTimestamp(existing.startedAt),
-      };
+
+    const participants = await this.roomService.listParticipants(roomName);
+    const trackCameraLookup = this.buildTrackCameraLookup(participants);
+    const targets = this.collectRecordingTargets(participants);
+    if (targets.length === 0) {
+      throw new Error('No published tracks available to record yet');
     }
 
-    const filepath = this.resolveRecordingFilepath(roomName);
-    const output = new EncodedFileOutput({
-      fileType: EncodedFileType.MP4,
-      filepath,
-      disableManifest: true,
-    });
-
-    const created = await this.withTimeout(
-      this.egressService.startRoomCompositeEgress(roomName, output),
-      'start room recording',
+    const activeVideoTrackIds = new Set(
+      activeEgress
+        .map((entry) => this.getTrackCompositeVideoTrackId(entry))
+        .filter((trackId): trackId is string => Boolean(trackId)),
     );
-    return {
-      roomName,
-      active: true,
-      egressId: created.egressId ?? null,
-      startedAt: this.toIsoTimestamp(created.startedAt),
-    };
+    const pendingTargets = targets.filter((target) => !activeVideoTrackIds.has(target.videoTrackId));
+
+    if (pendingTargets.length === 0) {
+      return this.toRecordingStatus(roomName, activeEgress, true, trackCameraLookup);
+    }
+
+    const created: Awaited<ReturnType<EgressClient['startTrackCompositeEgress']>>[] = [];
+    for (const target of pendingTargets) {
+      const output = new EncodedFileOutput({
+        fileType: EncodedFileType.MP4,
+        filepath: this.resolveRecordingFilepath(roomName, target.cameraId),
+        disableManifest: true,
+      });
+
+      const session = await this.withTimeout(
+        this.egressService.startTrackCompositeEgress(roomName, output, {
+          audioTrackId: target.audioTrackId ?? undefined,
+          videoTrackId: target.videoTrackId,
+        }),
+        `start room recording${target.cameraId ? ` (${target.cameraId})` : ''}`,
+      );
+      created.push(session);
+    }
+
+    return this.toRecordingStatus(roomName, [...activeEgress, ...created], true, trackCameraLookup);
   }
 
-  async stopRoomRecording(robotId: string): Promise<{
-    roomName: string;
-    active: boolean;
-    egressId: string | null;
-    startedAt: string | null;
-  }> {
+  async stopRoomRecording(robotId: string): Promise<RecordingStatus> {
     const roomName = `robot-${robotId}`;
     const activeEgress = await this.withTimeout(
       this.egressService.listEgress({ roomName, active: true }),
@@ -242,12 +257,9 @@ export class LivekitService {
         .map((egressId) => this.withTimeout(this.egressService.stopEgress(egressId), 'stop room recording')),
     );
 
-    return {
-      roomName,
-      active: false,
-      egressId: null,
-      startedAt: null,
-    };
+    await this.waitForActiveEgressCount(roomName, 0);
+
+    return this.toRecordingStatus(roomName, [], false, new Map());
   }
 
   async ensureRobotWhipIngress(
@@ -347,12 +359,151 @@ export class LivekitService {
     return `${normalizedBase}/${normalizedKey}`;
   }
 
-  private resolveRecordingFilepath(roomName: string): string {
-    const template = this.config
+  private resolveRecordingFilepath(roomName: string, cameraId: string | null): string {
+    let template = this.config
       .get<string>('LIVEKIT_RECORDING_FILEPATH_TEMPLATE')
       ?.trim() || 'recordings/{room_name}-{time}.mp4';
     const roomSegment = roomName.replace(/[^a-zA-Z0-9._-]/g, '_');
-    return template.replaceAll('{room_name}', roomSegment);
+    const cameraSegment = cameraId ? this.sanitizePathSegment(cameraId) : '';
+
+    if (cameraSegment && !template.includes('{camera_id}')) {
+      template = template.includes('{time}')
+        ? template.replace('{time}', `${cameraSegment}-{time}`)
+        : template.replace(/(\.mp4)$/i, `-${cameraSegment}$1`);
+    }
+
+    let resolved = template
+      .replaceAll('{room_name}', roomSegment)
+      .replaceAll('{camera_id}', cameraSegment || 'default')
+      .replace(/--+/g, '-')
+      .replace(/-_+/g, '-');
+
+    if (!cameraSegment) {
+      resolved = resolved.replace(/-default(?=-\d{4}-\d{2}-\d{2}T\d{6}\.mp4$)/i, '');
+    }
+
+    return resolved;
+  }
+
+  private buildTrackCameraLookup(
+    participants: Awaited<ReturnType<RoomServiceClient['listParticipants']>>,
+  ): Map<string, string | null> {
+    const lookup = new Map<string, string | null>();
+    for (const participant of participants) {
+      const cameraId = this.cameraIdFromParticipantIdentity(participant.identity);
+      for (const track of participant.tracks) {
+        const trackId = track.sid?.trim();
+        if (!trackId) {
+          continue;
+        }
+        lookup.set(trackId, cameraId);
+      }
+    }
+    return lookup;
+  }
+
+  private collectRecordingTargets(
+    participants: Awaited<ReturnType<RoomServiceClient['listParticipants']>>,
+  ): RecordingTrackTarget[] {
+    const audioTrackId =
+      participants
+        .flatMap((participant) => participant.tracks)
+        .find((track) => track.type === TrackType.AUDIO && track.muted !== true)?.sid ?? null;
+
+    const targets = participants
+      .flatMap((participant) => {
+        const cameraId = this.cameraIdFromParticipantIdentity(participant.identity);
+        return participant.tracks
+          .filter((track) => track.type === TrackType.VIDEO && track.muted !== true && Boolean(track.sid))
+          .map((track) => ({
+            cameraId,
+            videoTrackId: track.sid,
+            audioTrackId,
+          }));
+      })
+      .sort((left, right) => (left.cameraId ?? '').localeCompare(right.cameraId ?? ''));
+
+    return targets;
+  }
+
+  private toRecordingStatus(
+    roomName: string,
+    egressItems: EgressInfo[],
+    roomActiveRecording: boolean,
+    trackCameraLookup: Map<string, string | null>,
+  ): RecordingStatus {
+    const sessions = egressItems
+      .map((entry) => {
+        const egressId = entry.egressId?.trim();
+        if (!egressId) {
+          return null;
+        }
+
+        const videoTrackId = entry.request?.case === 'trackComposite' ? entry.request.value?.videoTrackId?.trim() || null : null;
+        const audioTrackId = entry.request?.case === 'trackComposite' ? entry.request.value?.audioTrackId?.trim() || null : null;
+        return {
+          egressId,
+          cameraId: videoTrackId ? (trackCameraLookup.get(videoTrackId) ?? null) : null,
+          videoTrackId,
+          audioTrackId,
+          startedAt: this.toIsoTimestamp(entry.startedAt),
+        } satisfies ActiveRecordingSession;
+      })
+      .filter((entry): entry is ActiveRecordingSession => Boolean(entry))
+      .sort((left, right) => (left.cameraId ?? '').localeCompare(right.cameraId ?? ''));
+
+    const current = sessions[0] ?? null;
+    return {
+      roomName,
+      active: roomActiveRecording || sessions.length > 0,
+      activeCount: sessions.length,
+      egressId: current?.egressId ?? null,
+      startedAt: current?.startedAt ?? null,
+      sessions,
+    };
+  }
+
+  private getTrackCompositeVideoTrackId(entry: EgressInfo): string | null {
+    if (entry.request?.case !== 'trackComposite') {
+      return null;
+    }
+
+    const trackId = entry.request.value?.videoTrackId?.trim();
+    return trackId || null;
+  }
+
+  private cameraIdFromParticipantIdentity(identity?: string | null): string | null {
+    const normalized = identity?.trim();
+    if (!normalized) {
+      return null;
+    }
+
+    const prefixed = normalized.match(/^robot-media:[0-9a-f-]{36}:(.+)$/i);
+    if (prefixed?.[1]) {
+      return prefixed[1];
+    }
+
+    return normalized === 'robot-media' || normalized.startsWith('robot-') ? null : normalized;
+  }
+
+  private sanitizePathSegment(value: string): string {
+    return value.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/^[-_.]+|[-_.]+$/g, '') || 'camera';
+  }
+
+  private async waitForActiveEgressCount(roomName: string, expectedCount: number): Promise<void> {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < this.egressStopWaitMs) {
+      const activeEgress = await this.withTimeout(
+        this.egressService.listEgress({ roomName, active: true }),
+        'wait for egress shutdown',
+      );
+      if (activeEgress.length === expectedCount) {
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+
+    throw new Error(`Timed out waiting for ${expectedCount} active recording egresses in ${roomName}`);
   }
 
   private toIsoTimestamp(raw?: bigint | number | null): string | null {
