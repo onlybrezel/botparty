@@ -11,6 +11,9 @@ import { RedisService } from '../redis/redis.service';
 import { createRobotSchema, updateRobotSchema, LIMITS } from '@botparty/shared';
 import { createHash, randomBytes } from 'crypto';
 import { hash, verify } from 'argon2';
+import { access, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
+import { join, resolve } from 'node:path';
 import type { z } from 'zod';
 import type { Prisma } from '@botparty/prisma';
 
@@ -535,7 +538,13 @@ export class RobotsService {
       publishMode: camera.publishMode?.trim() || 'always_on',
     };
 
-    const nextCameras = [...withoutCamera, nextCamera].sort((left, right) => left.id.localeCompare(right.id));
+    const existingIndex = currentCameras.findIndex((entry) => entry.id === cameraId);
+    const nextCameras = [...withoutCamera];
+    if (existingIndex >= 0) {
+      nextCameras.splice(Math.min(existingIndex, nextCameras.length), 0, nextCamera);
+    } else {
+      nextCameras.push(nextCamera);
+    }
     const nextStream: RobotStreamPolicy = {
       targetBitrateKbps: stream.targetBitrateKbps,
       activeCameraId: stream.activeCameraId || nextCameras[0]?.id,
@@ -626,6 +635,72 @@ export class RobotsService {
       data: { inviteCode },
       select: { id: true, inviteCode: true },
     });
+  }
+
+  async saveRobotThumbnail(id: string, ownerId: string, dataUrl: string) {
+    const robot = await this.findById(id);
+    if (robot.ownerId !== ownerId) {
+      throw new ForbiddenException('Not your robot');
+    }
+
+    const parsed = this.parseThumbnailDataUrl(dataUrl);
+    await this.ensureThumbnailStorageDir();
+    await this.removeExistingThumbnailFiles(id);
+
+    const filePath = this.thumbnailFilePath(id, parsed.extension);
+    await writeFile(filePath, parsed.buffer);
+
+    const thumbnailUrl = this.buildThumbnailUrl(id);
+    const updated = await this.prisma.robot.update({
+      where: { id },
+      data: { thumbnailUrl },
+      include: {
+        owner: {
+          select: { id: true, username: true, displayName: true, avatarUrl: true },
+        },
+      },
+    });
+
+    return this.sanitizeManagedRobot(updated);
+  }
+
+  async clearRobotThumbnail(id: string, ownerId: string) {
+    const robot = await this.findById(id);
+    if (robot.ownerId !== ownerId) {
+      throw new ForbiddenException('Not your robot');
+    }
+
+    await this.removeExistingThumbnailFiles(id);
+    const updated = await this.prisma.robot.update({
+      where: { id },
+      data: { thumbnailUrl: null },
+      include: {
+        owner: {
+          select: { id: true, username: true, displayName: true, avatarUrl: true },
+        },
+      },
+    });
+
+    return this.sanitizeManagedRobot(updated);
+  }
+
+  async readRobotThumbnail(id: string) {
+    await this.findById(id);
+
+    for (const extension of ['png', 'jpg', 'webp']) {
+      const filePath = this.thumbnailFilePath(id, extension);
+      try {
+        await access(filePath, fsConstants.R_OK);
+        return {
+          buffer: await readFile(filePath),
+          contentType: this.thumbnailContentType(extension),
+        };
+      } catch {
+        // try the next extension
+      }
+    }
+
+    throw new NotFoundException('Thumbnail not found');
   }
 
   async findPrivateBySlugForUser(slug: string, requesterId: string) {
@@ -1529,6 +1604,68 @@ export class RobotsService {
     }
 
     throw new ForbiddenException('Valid guest session required');
+  }
+
+  private thumbnailStorageDir() {
+    return resolve(process.cwd(), 'data', 'robot-thumbnails');
+  }
+
+  private thumbnailFilePath(robotId: string, extension: string) {
+    return join(this.thumbnailStorageDir(), `${robotId}.${extension}`);
+  }
+
+  private buildThumbnailUrl(robotId: string) {
+    return `/api/v1/robots/${robotId}/thumbnail-image?v=${Date.now()}`;
+  }
+
+  private async ensureThumbnailStorageDir() {
+    await mkdir(this.thumbnailStorageDir(), { recursive: true });
+  }
+
+  private async removeExistingThumbnailFiles(robotId: string) {
+    try {
+      const files = await readdir(this.thumbnailStorageDir());
+      await Promise.all(
+        files
+          .filter((file) => file.startsWith(`${robotId}.`))
+          .map((file) => rm(join(this.thumbnailStorageDir(), file), { force: true })),
+      );
+    } catch {
+      // Directory may not exist yet.
+    }
+  }
+
+  private parseThumbnailDataUrl(dataUrl: string): { buffer: Buffer; extension: 'png' | 'jpg' | 'webp' } {
+    const trimmed = dataUrl.trim();
+    const match = /^data:(image\/(?:png|jpeg|webp));base64,([a-z0-9+/=]+)$/i.exec(trimmed);
+    if (!match) {
+      throw new BadRequestException('Thumbnail must be a PNG, JPEG, or WebP image');
+    }
+
+    const mime = match[1]!.toLowerCase();
+    const payload = match[2] ?? '';
+    const buffer = Buffer.from(payload, 'base64');
+    if (!buffer.length) {
+      throw new BadRequestException('Thumbnail image is empty');
+    }
+    if (buffer.length > 3 * 1024 * 1024) {
+      throw new BadRequestException('Thumbnail image must be 3 MB or smaller');
+    }
+
+    return {
+      buffer,
+      extension: mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg',
+    };
+  }
+
+  private thumbnailContentType(extension: string) {
+    if (extension === 'png') {
+      return 'image/png';
+    }
+    if (extension === 'webp') {
+      return 'image/webp';
+    }
+    return 'image/jpeg';
   }
 
   resolveGuestActorId(guestSessionId?: string): string | null {

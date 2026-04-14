@@ -30,6 +30,7 @@ interface ChatMsg {
   content: string;
   timestamp: number;
   isSystem?: boolean;
+  clientMessageId?: string;
 }
 
 interface Viewer {
@@ -165,6 +166,10 @@ function normalizeQueueEntries(rows: QueueEntryWire[] | undefined): QueueEntry[]
   }));
 }
 
+function buildGuestMessageId() {
+  return `guest-msg-${Math.random().toString(36).slice(2, 10)}-${Date.now().toString(36)}`;
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
@@ -269,7 +274,7 @@ interface Props {
 
 export default function RobotView({ robot }: Props) {
   const searchParams = useSearchParams();
-  const { accessToken, userId, role, hasHydrated } = useAuth();
+  const { accessToken, userId, username, role, hasHydrated } = useAuth();
 
   const [focusMode, setFocusMode] = useState<FocusMode>('controls');
   const [controlButtons, setControlButtons] = useState<ControlButton[]>([]);
@@ -294,7 +299,10 @@ export default function RobotView({ robot }: Props) {
   const [tabSwitchOnlyWhenEmpty, setTabSwitchOnlyWhenEmpty] = useState(true);
   const [guestSessionId] = useState<string>(() => getOrCreateGuestSessionId());
   const currentViewerId = userId ? userId : `guest:${guestSessionId}`;
-  const inviteCodeFromUrl = searchParams.get('invite')?.trim() ?? '';
+  const inviteCodeFromUrl =
+    searchParams.get('invite')?.trim()
+    ?? searchParams.get('code')?.trim()
+    ?? '';
   const [roomAccessToken, setRoomAccessToken] = useState<string | null>(null);
   const [accessPasswordInput, setAccessPasswordInput] = useState('');
   const [accessLoading, setAccessLoading] = useState(false);
@@ -600,6 +608,19 @@ export default function RobotView({ robot }: Props) {
   useEffect(() => {
     void refreshViewerToken(false);
   }, [refreshViewerToken]);
+
+  useEffect(() => {
+    const currentlyOnline = robotStatus === 'ONLINE' || robotStatus === 'BUSY';
+    if (!currentlyOnline || livekitCreds || livekitRefreshInFlightRef.current) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      void refreshViewerToken(true);
+    }, 3000);
+
+    return () => window.clearTimeout(timer);
+  }, [livekitCreds, refreshViewerToken, robotStatus]);
 
   useEffect(() => {
     const previousStatus = previousRobotStatusRef.current;
@@ -911,15 +932,44 @@ export default function RobotView({ robot }: Props) {
         setCrowdInputs((prev) => new Map(prev).set(data.command as string, Date.now()));
         break;
       case 'chat:message':
-        setMessages((prev) => [
-          ...prev.slice(-200),
-          { userId: data.userId as string, username: data.username as string, content: data.content as string, timestamp: data.timestamp as number },
-        ]);
+        setMessages((prev) => {
+          const nextMessage: ChatMsg = {
+            userId: data.userId as string,
+            username: data.username as string,
+            content: data.content as string,
+            timestamp: data.timestamp as number,
+            clientMessageId:
+              typeof data.clientMessageId === 'string' ? data.clientMessageId : undefined,
+          };
+
+          if (nextMessage.clientMessageId) {
+            const existingIndex = prev.findIndex((entry) => entry.clientMessageId === nextMessage.clientMessageId);
+            if (existingIndex >= 0) {
+              const next = [...prev];
+              next[existingIndex] = {
+                ...next[existingIndex],
+                ...nextMessage,
+              };
+              return next.slice(-200);
+            }
+          }
+
+          return [...prev.slice(-200), nextMessage];
+        });
         break;
       case 'chat:system':
         setMessages((prev) => [
           ...prev.slice(-200),
-          { userId: 'system', username: 'system', content: data.message as string, timestamp: Date.now(), isSystem: true },
+          {
+            userId: 'system',
+            username: 'system',
+            content: data.message as string,
+            timestamp:
+              typeof data.timestamp === 'number' && Number.isFinite(data.timestamp)
+                ? data.timestamp
+                : Date.now(),
+            isSystem: true,
+          },
         ]);
         break;
       case 'queue:update':
@@ -965,19 +1015,17 @@ export default function RobotView({ robot }: Props) {
       case 'mod:timeout':
       case 'mod:ban': {
         const targetUserId = typeof data.userId === 'string' ? data.userId : null;
-        if (!targetUserId || targetUserId !== currentViewerId) {
-          break;
+        if (targetUserId && targetUserId === currentViewerId) {
+          const action = event === 'mod:ban' ? 'BAN' : 'TIMEOUT';
+          const expiresAt =
+            typeof data.expiresAt === 'string' && data.expiresAt.length > 0 ? data.expiresAt : null;
+          const until = expiresAt ? ` Until ${new Date(expiresAt).toLocaleTimeString()}.` : '';
+          setChatRestriction(
+            action === 'BAN'
+              ? 'You are banned from this room. Your turn ended immediately and you were removed from the control queue.'
+              : `You are temporarily restricted in this room. Your turn ended immediately and you were removed from the control queue.${until}`,
+          );
         }
-
-        const action = event === 'mod:ban' ? 'BAN' : 'TIMEOUT';
-        const expiresAt =
-          typeof data.expiresAt === 'string' && data.expiresAt.length > 0 ? data.expiresAt : null;
-        const until = expiresAt ? ` Until ${new Date(expiresAt).toLocaleTimeString()}.` : '';
-        setChatRestriction(
-          action === 'BAN'
-            ? 'You are banned from this room. Your turn ended immediately and you were removed from the control queue.'
-            : `You are temporarily restricted in this room. Your turn ended immediately and you were removed from the control queue.${until}`,
-        );
         break;
       }
       case 'mod:kick': {
@@ -1009,6 +1057,8 @@ export default function RobotView({ robot }: Props) {
           setQueue([]);
           setActiveSession(null);
           setInQueue(false);
+        } else if (status === 'ONLINE' || status === 'BUSY') {
+          void refreshViewerToken(true);
         }
         break;
       }
@@ -1066,7 +1116,7 @@ export default function RobotView({ robot }: Props) {
         break;
       }
     }
-  }, [currentViewerId]);
+  }, [currentViewerId, refreshViewerToken, robot.status]);
 
   // ─── Controls ─────────────────────────────────────────────────────────────
 
@@ -1351,9 +1401,23 @@ export default function RobotView({ robot }: Props) {
       }
       return;
     }
-    wsRef.current.send(JSON.stringify({ event: 'chat:message', data: { robotId: robot.id, content: text } }));
+    const clientMessageId = buildGuestMessageId();
+    setMessages((prev) => [
+      ...prev.slice(-200),
+      {
+        userId: currentViewerId,
+        username: userId ? (username ?? 'You') : `Guest-${guestSessionId.slice(0, 6)}`,
+        content: text,
+        timestamp: Date.now(),
+        clientMessageId,
+      },
+    ]);
+    wsRef.current.send(JSON.stringify({
+      event: 'chat:message',
+      data: { robotId: robot.id, content: text, clientMessageId },
+    }));
     setChatInput('');
-  }, [chatInput, robot.id]);
+  }, [chatInput, currentViewerId, guestSessionId, robot.id, userId, username]);
 
   const requestRoomAccess = useCallback(async () => {
     setAccessLoading(true);
@@ -1389,22 +1453,6 @@ export default function RobotView({ robot }: Props) {
           reason: 'Chat moderation',
           durationSec: action === 'TIMEOUT' ? 300 : undefined,
         });
-
-        setMessages((prev) => [
-          ...prev.slice(-200),
-          {
-            userId: 'system',
-            username: 'system',
-            content:
-              action === 'TIMEOUT'
-                ? `${targetLabel} timed out for 5 minutes.`
-                : action === 'BAN'
-                  ? `${targetLabel} has been banned from this room.`
-                  : `${targetLabel} has been unbanned.`,
-            timestamp: Date.now(),
-            isSystem: true,
-          },
-        ]);
         pushToast(
           action === 'TIMEOUT'
             ? 'Timeout applied.'
@@ -1415,16 +1463,6 @@ export default function RobotView({ robot }: Props) {
         );
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Moderation action failed.';
-        setMessages((prev) => [
-          ...prev.slice(-200),
-          {
-            userId: 'system',
-            username: 'system',
-            content: message,
-            timestamp: Date.now(),
-            isSystem: true,
-          },
-        ]);
         pushToast(message, 'error');
       } finally {
         setModeratingUserId(null);

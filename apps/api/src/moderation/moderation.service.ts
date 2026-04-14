@@ -255,6 +255,7 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
   private previousCadvisorSample: CadvisorSample | null = null;
   private cadvisorWarmupInterval: ReturnType<typeof setInterval> | null = null;
   private cadvisorWarmupInFlight = false;
+  private static readonly ACTION_COOLDOWN_SEC = 4;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -306,6 +307,21 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
 
     if (isGuestTarget) {
       return this._moderateGuest(robotId, dto, moderatorId);
+    }
+
+    await this._assertActionNotCoolingDown(robotId, dto.targetUserId, dto.action, moderatorId);
+
+    const activeRestriction = await this.getActiveRestriction(robotId, dto.targetUserId);
+    if (dto.action === ModerationActionType.BAN && activeRestriction?.action === ModerationActionType.BAN) {
+      throw new BadRequestException('User is already banned');
+    }
+    if (dto.action === ModerationActionType.TIMEOUT) {
+      if (activeRestriction?.action === ModerationActionType.BAN) {
+        throw new BadRequestException('User is already banned');
+      }
+      if (activeRestriction?.action === ModerationActionType.TIMEOUT) {
+        throw new BadRequestException('User is already timed out');
+      }
     }
 
     const createsActiveRestriction =
@@ -440,9 +456,22 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
   private async _moderateGuest(robotId: string, dto: ModerateUserDto, moderatorId: string) {
     const key = this._guestRestrictionKey(robotId, dto.targetUserId);
     const targetLabel = this._getTargetLabel(dto.targetUserId, null);
+    await this._assertActionNotCoolingDown(robotId, dto.targetUserId, dto.action, moderatorId);
+
+    const existing = await this._getGuestRestriction(robotId, dto.targetUserId);
+    if (dto.action === ModerationActionType.BAN && existing?.action === ModerationActionType.BAN) {
+      throw new BadRequestException('User is already banned');
+    }
+    if (dto.action === ModerationActionType.TIMEOUT) {
+      if (existing?.action === ModerationActionType.BAN) {
+        throw new BadRequestException('User is already banned');
+      }
+      if (existing?.action === ModerationActionType.TIMEOUT) {
+        throw new BadRequestException('User is already timed out');
+      }
+    }
 
     if (dto.action === ModerationActionType.UNBAN) {
-      const existing = await this._getGuestRestriction(robotId, dto.targetUserId);
       if (!existing || existing.action !== ModerationActionType.BAN) {
         throw new BadRequestException('User is not currently banned');
       }
@@ -550,6 +579,37 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
 
   private _guestRestrictionKey(robotId: string, userId: string): string {
     return `moderation:guest:restriction:${robotId}:${userId}`;
+  }
+
+  private moderationCooldownKey(robotId: string, targetUserId: string, action: ModerationActionType) {
+    return `moderation:cooldown:${robotId}:${targetUserId}:${action}`;
+  }
+
+  private async _assertActionNotCoolingDown(
+    robotId: string,
+    targetUserId: string,
+    action: ModerationActionType,
+    moderatorId: string,
+  ) {
+    if (action === ModerationActionType.WARN) {
+      return;
+    }
+
+    const key = this.moderationCooldownKey(robotId, targetUserId, action);
+    const payload = JSON.stringify({
+      moderatorId,
+      createdAt: Date.now(),
+    });
+    const acquired = await this.redis.set(
+      key,
+      payload,
+      'EX',
+      ModerationService.ACTION_COOLDOWN_SEC,
+      'NX',
+    );
+    if (acquired !== 'OK') {
+      throw new BadRequestException('That moderation action is cooling down');
+    }
   }
 
   private _getTargetLabel(

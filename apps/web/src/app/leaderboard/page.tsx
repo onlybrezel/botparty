@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
 import type { PublicRobotOverview, RobotPublic } from '@botparty/shared';
 import { Trophy, Eye, Radio, Clock3 } from 'lucide-react';
 
@@ -112,13 +111,9 @@ export default async function LeaderboardPage() {
                 </span>
 
                 <div className="col-span-5 sm:col-span-4">
-                    <Link
-                      href={`/robot/${robot.owner.username}/${robot.slug}`}
-                    className="truncate font-semibold transition hover:text-violet-300"
-                  >
+                  <p className="truncate font-semibold">
                     {robot.name}
-                  </Link>
-                  <p className="truncate text-xs text-[var(--muted-foreground)]">/{robot.slug}</p>
+                  </p>
                 </div>
 
                 <span

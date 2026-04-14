@@ -219,14 +219,7 @@ function buildCameraTracks(trackRefs: TrackReference[], streamConfig?: StreamCon
         trackName,
       };
     })
-    .sort((left, right) => {
-      const leftPrimary = streamConfig?.activeCameraId === left.id || left.role === 'primary';
-      const rightPrimary = streamConfig?.activeCameraId === right.id || right.role === 'primary';
-      if (leftPrimary !== rightPrimary) {
-        return leftPrimary ? -1 : 1;
-      }
-      return left.order - right.order;
-    });
+    .sort((left, right) => left.order - right.order);
 }
 
 function readVolumePreference(storageKey?: string | null): VolumePreference {

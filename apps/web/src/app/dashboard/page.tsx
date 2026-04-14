@@ -1,6 +1,6 @@
 'use client';
 
-import type { FormEvent } from 'react';
+import type { ChangeEvent, FormEvent } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
@@ -482,6 +482,9 @@ export default function DashboardPage() {
   const previousPendingActionTypesRef = useRef<RemoteActionType[]>([]);
   const previewRefreshInFlightRef = useRef(false);
   const editFormRef = useRef<HTMLFormElement>(null);
+  const thumbnailInputRef = useRef<HTMLInputElement>(null);
+  const previewContainerRef = useRef<HTMLDivElement>(null);
+  const [thumbnailOp, setThumbnailOp] = useState<'upload' | 'snapshot' | 'remove' | null>(null);
 
   useEffect(() => {
     if (!hasHydrated) {
@@ -942,6 +945,112 @@ export default function DashboardPage() {
     return `/robot/${robot.owner.username}/${robot.slug}${inviteSuffix}`;
   }, []);
 
+  const applyUpdatedRobot = useCallback((updated: RobotManaged) => {
+    setRobots((prev) => prev.map((robot) => (robot.id === updated.id ? updated : robot)));
+    setEditForm(formFromRobot(updated));
+  }, []);
+
+  const updateThumbnailFromDataUrl = useCallback(async (dataUrl: string, mode: 'upload' | 'snapshot') => {
+    if (!accessToken || !selectedRobot) {
+      return;
+    }
+
+    setThumbnailOp(mode);
+    setError(null);
+    setStatus(null);
+
+    try {
+      api.setToken(accessToken);
+      const updated = await api.uploadRobotThumbnail(selectedRobot.id, dataUrl);
+      applyUpdatedRobot(updated);
+      setStatus(mode === 'snapshot' ? 'Thumbnail captured from the live preview.' : 'Thumbnail uploaded.');
+      pushToast(mode === 'snapshot' ? 'Thumbnail captured.' : 'Thumbnail uploaded.', 'success', 2600);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to update thumbnail';
+      setError(message);
+      pushToast(message, 'error', 3200);
+    } finally {
+      setThumbnailOp(null);
+    }
+  }, [accessToken, applyUpdatedRobot, selectedRobot]);
+
+  const handleThumbnailFileChange = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) {
+      return;
+    }
+
+    if (!file.type.startsWith('image/')) {
+      pushToast('Please choose an image file.', 'error', 2600);
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : null;
+      if (!result) {
+        pushToast('Could not read that image file.', 'error', 2600);
+        return;
+      }
+      void updateThumbnailFromDataUrl(result, 'upload');
+    };
+    reader.onerror = () => {
+      pushToast('Could not read that image file.', 'error', 2600);
+    };
+    reader.readAsDataURL(file);
+  }, [updateThumbnailFromDataUrl]);
+
+  const capturePreviewThumbnail = useCallback(async () => {
+    if (!selectedRobot || (selectedRobot.status !== 'ONLINE' && selectedRobot.status !== 'BUSY')) {
+      pushToast('The robot must be live to capture a snapshot.', 'error', 2600);
+      return;
+    }
+
+    const video = previewContainerRef.current?.querySelector('video') ?? null;
+    if (!video || video.videoWidth <= 0 || video.videoHeight <= 0) {
+      pushToast('No live camera frame is available yet.', 'error', 2600);
+      return;
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      pushToast('Snapshot capture is not available in this browser.', 'error', 2600);
+      return;
+    }
+
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+    await updateThumbnailFromDataUrl(dataUrl, 'snapshot');
+  }, [selectedRobot, updateThumbnailFromDataUrl]);
+
+  const removeThumbnail = useCallback(async () => {
+    if (!accessToken || !selectedRobot) {
+      return;
+    }
+
+    setThumbnailOp('remove');
+    setError(null);
+    setStatus(null);
+
+    try {
+      api.setToken(accessToken);
+      const updated = await api.deleteRobotThumbnail(selectedRobot.id);
+      applyUpdatedRobot(updated);
+      setStatus('Thumbnail removed.');
+      pushToast('Thumbnail removed.', 'success', 2400);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to remove thumbnail';
+      setError(message);
+      pushToast(message, 'error', 3200);
+    } finally {
+      setThumbnailOp(null);
+    }
+  }, [accessToken, applyUpdatedRobot, selectedRobot]);
+
   const regenerateInviteCode = async () => {
     if (!accessToken || !selectedRobot || selectedRobot.accessMode !== 'LINK_ONLY') {
       return;
@@ -1377,13 +1486,6 @@ export default function DashboardPage() {
               onChange={(event) => setCreateForm((prev) => ({ ...prev, description: event.target.value }))}
             />
             <input
-              type="url"
-              className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-              placeholder="Thumbnail URL (optional)"
-              value={createForm.thumbnailUrl}
-              onChange={(event) => setCreateForm((prev) => ({ ...prev, thumbnailUrl: event.target.value }))}
-            />
-            <input
               className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
               placeholder="Tags (comma separated)"
               value={createForm.tags}
@@ -1493,7 +1595,7 @@ export default function DashboardPage() {
           ) : (
             <div className="flex items-start gap-5">
               <aside className="hidden w-[200px] shrink-0 lg:block">
-                <div className="sticky top-4 max-h-[calc(100vh-1rem)] overflow-auto pb-1 flex flex-col gap-3">
+                <div className="max-h-[calc(100vh-6rem)] overflow-auto pb-1 flex flex-col gap-3">
                   <div className="space-y-1.5">
                     {robots.map((robot) => {
                       const _seed = robot.slug.split('').reduce((s, ch) => s + ch.charCodeAt(0), 0);
@@ -1589,7 +1691,7 @@ export default function DashboardPage() {
                         Open
                       </a>
                     </div>
-                    <div className="relative aspect-video w-full bg-zinc-950">
+                    <div ref={previewContainerRef} className="relative aspect-video w-full bg-zinc-950">
                       {preview ? (
                         <LiveKitPlayer
                           key={`${selectedRobot.id}-${previewVersion}`}
@@ -1964,17 +2066,53 @@ export default function DashboardPage() {
                     </div>
                   </div>
 
-                  <div className="space-y-1">
+                    <div className="space-y-1">
                       <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
-                        Thumbnail URL
+                        Thumbnail
                       </label>
                       <input
-                        type="url"
-                        className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                        value={editForm.thumbnailUrl}
-                        onChange={(event) => setEditForm((prev) => ({ ...prev, thumbnailUrl: event.target.value }))}
-                        placeholder="https://..."
+                        ref={thumbnailInputRef}
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp"
+                        onChange={handleThumbnailFileChange}
+                        className="hidden"
                       />
+                      <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => thumbnailInputRef.current?.click()}
+                            disabled={thumbnailOp !== null}
+                            className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm disabled:opacity-60"
+                          >
+                            {thumbnailOp === 'upload' ? 'Uploading...' : 'Upload image'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void capturePreviewThumbnail()}
+                            disabled={
+                              thumbnailOp !== null ||
+                              (selectedRobot.status !== 'ONLINE' && selectedRobot.status !== 'BUSY')
+                            }
+                            className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm disabled:opacity-60"
+                          >
+                            {thumbnailOp === 'snapshot' ? 'Capturing...' : 'Use live snapshot'}
+                          </button>
+                          {selectedRobot.thumbnailUrl && (
+                            <button
+                              type="button"
+                              onClick={() => void removeThumbnail()}
+                              disabled={thumbnailOp !== null}
+                              className="rounded-lg border border-red-500/40 px-3 py-2 text-sm text-red-300 disabled:opacity-60"
+                            >
+                              {thumbnailOp === 'remove' ? 'Removing...' : 'Remove thumbnail'}
+                            </button>
+                          )}
+                        </div>
+                        <p className="mt-2 text-xs text-[var(--muted-foreground)]">
+                          Upload an image, or capture the current frame from the first live camera when the robot is online.
+                        </p>
+                      </div>
                     </div>
 
                     <div className="space-y-1">

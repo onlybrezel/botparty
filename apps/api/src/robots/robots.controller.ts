@@ -14,6 +14,7 @@ import {
   UnauthorizedException,
   ForbiddenException,
   Headers,
+  Res,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { RobotsService } from './robots.service';
@@ -28,6 +29,7 @@ import { JwtService, type JwtSignOptions } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { createHash } from 'crypto';
 import { extractBearerToken, getAccessCookieName, parseCookie } from '../auth/auth.cookies';
+import type { FastifyReply } from 'fastify';
 
 @ApiTags('robots')
 @Controller('robots')
@@ -164,6 +166,43 @@ export class RobotsController {
   @ApiOperation({ summary: 'Regenerate invite code for link-only access' })
   async regenerateInviteCode(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.robotsService.regenerateInviteCode(id, user.sub);
+  }
+
+  @Post(':id/thumbnail')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Upload or replace a robot thumbnail (owner only)' })
+  async uploadThumbnail(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @Body() body: { dataUrl?: string },
+  ) {
+    const dataUrl = body.dataUrl?.trim();
+    if (!dataUrl) {
+      throw new BadRequestException('dataUrl is required');
+    }
+
+    return this.robotsService.saveRobotThumbnail(id, user.sub, dataUrl);
+  }
+
+  @Delete(':id/thumbnail')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Remove a robot thumbnail (owner only)' })
+  async deleteThumbnail(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.robotsService.clearRobotThumbnail(id, user.sub);
+  }
+
+  @Get(':id/thumbnail-image')
+  @ApiOperation({ summary: 'Get a robot thumbnail image' })
+  async getThumbnail(
+    @Param('id') id: string,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    const file = await this.robotsService.readRobotThumbnail(id);
+    reply.header('Cache-Control', 'public, max-age=300');
+    reply.type(file.contentType);
+    return file.buffer;
   }
 
   @Get(':id/allowed-users')

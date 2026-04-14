@@ -686,6 +686,19 @@ class ApiClient {
     });
   }
 
+  async uploadRobotThumbnail(robotId: string, dataUrl: string) {
+    return this.request<RobotManaged>(`/robots/${robotId}/thumbnail`, {
+      method: 'POST',
+      body: JSON.stringify({ dataUrl }),
+    });
+  }
+
+  async deleteRobotThumbnail(robotId: string) {
+    return this.request<RobotManaged>(`/robots/${robotId}/thumbnail`, {
+      method: 'DELETE',
+    });
+  }
+
   async getPrivateRobot(username: string, slug: string) {
     return this.request<RobotPublic>(`/robots/private/${encodeURIComponent(username)}/${encodeURIComponent(slug)}`);
   }

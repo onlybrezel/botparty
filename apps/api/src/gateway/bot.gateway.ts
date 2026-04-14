@@ -711,7 +711,7 @@ export class BotGateway
   @SubscribeMessage(WS_EVENTS.CHAT_MESSAGE)
   async handleChatMessage(
     @ConnectedSocket() client: WsClient,
-    @MessageBody() data: { robotId: string; content: string },
+    @MessageBody() data: { robotId: string; content: string; clientMessageId?: string },
   ) {
     if (client.watchingRobotId !== data.robotId) {
       client.send(JSON.stringify({ event: 'error', data: { message: 'Join the room before chatting' } }));
@@ -814,6 +814,7 @@ export class BotGateway
       username: client.username,
       content: sanitized,
       timestamp: now,
+      clientMessageId: typeof data.clientMessageId === 'string' ? data.clientMessageId : undefined,
     });
 
     // Forward chat to the robot client so it can drive TTS
@@ -1165,6 +1166,13 @@ export class BotGateway
         }
         await this.enforceModerationEvent(robotId, payload);
         this._broadcastToRoomLocally(robotId, payload.event, payload.data ?? {});
+        const systemMessage = this.buildModerationSystemMessage(payload.event, payload.data);
+        if (systemMessage) {
+          this._broadcastToRoomLocally(robotId, WS_EVENTS.CHAT_SYSTEM, {
+            message: systemMessage,
+            timestamp: Date.now(),
+          });
+        }
       } catch (err) {
         this.logger.warn(`Failed to process moderation event for ${robotId}: ${(err as Error).message}`);
       }
@@ -1386,6 +1394,59 @@ export class BotGateway
         client.close();
       }
     }
+  }
+
+  private buildModerationSystemMessage(event: string, data: unknown): string | null {
+    const details =
+      data && typeof data === 'object' && !Array.isArray(data)
+        ? (data as Record<string, unknown>)
+        : null;
+    if (!details) {
+      return null;
+    }
+
+    const label = this.readModerationTargetLabel(details);
+    if (!label) {
+      return null;
+    }
+
+    if (event === WS_EVENTS.MOD_BAN) {
+      return `${label} has been banned from this room.`;
+    }
+    if (event === WS_EVENTS.MOD_UNBAN) {
+      return `${label} has been unbanned.`;
+    }
+    if (event === WS_EVENTS.MOD_KICK) {
+      return `${label} was removed from the control queue.`;
+    }
+    if (event === WS_EVENTS.MOD_TIMEOUT) {
+      const expiresAt =
+        typeof details.expiresAt === 'string' && details.expiresAt.trim().length > 0
+          ? Date.parse(details.expiresAt)
+          : Number.NaN;
+      if (Number.isFinite(expiresAt) && expiresAt > Date.now()) {
+        const totalMinutes = Math.max(1, Math.round((expiresAt - Date.now()) / 60000));
+        return `${label} was timed out for ${totalMinutes} minute${totalMinutes === 1 ? '' : 's'}.`;
+      }
+      return `${label} was timed out.`;
+    }
+
+    return null;
+  }
+
+  private readModerationTargetLabel(details: Record<string, unknown>) {
+    const displayName = typeof details.displayName === 'string' ? details.displayName.trim() : '';
+    if (displayName) {
+      return displayName;
+    }
+
+    const username = typeof details.username === 'string' ? details.username.trim() : '';
+    if (username) {
+      return username;
+    }
+
+    const userId = typeof details.userId === 'string' ? details.userId.trim() : '';
+    return userId ? userId.slice(0, 8) : null;
   }
 
   private async acquireRobotClaimLock(robotId: string, clientId: string): Promise<boolean> {
