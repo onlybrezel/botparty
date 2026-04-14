@@ -66,6 +66,7 @@ type ControlButtonDraft = {
 
 type RobotFormState = {
   name: string;
+  slug: string;
   description: string;
   roomMode: RoomMode;
   queueMode: 'FIRST_COME' | 'VOTING' | 'DISABLED';
@@ -83,6 +84,7 @@ type RobotFormState = {
 
 const DEFAULT_CREATE_FORM: RobotFormState = {
   name: '',
+  slug: '',
   description: '',
   roomMode: 'PUBLIC',
   queueMode: 'FIRST_COME',
@@ -266,6 +268,7 @@ function toUpdatePayload(form: RobotFormState) {
 
   return {
     name: form.name.trim(),
+    slug: form.slug.trim() || undefined,
     description: form.description.trim() || undefined,
     visibility,
     accessMode,
@@ -296,6 +299,7 @@ function formFromRobot(robot: RobotManaged): RobotFormState {
 
   return {
     name: robot.name,
+    slug: robot.slug,
     description: robot.description ?? '',
     roomMode: detectRoomMode(robot),
     queueMode: robot.queueMode,
@@ -1517,6 +1521,29 @@ export default function DashboardPage() {
                         onChange={(event) => setEditForm((prev) => ({ ...prev, name: event.target.value }))}
                         required
                       />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
+                        URL Slug
+                      </label>
+                      <div className="flex items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm">
+                        <span className="shrink-0 text-[var(--muted-foreground)]">/robot/</span>
+                        <input
+                          className="min-w-0 flex-1 bg-transparent outline-none"
+                          value={editForm.slug}
+                          onChange={(event) =>
+                            setEditForm((prev) => ({ ...prev, slug: event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') }))
+                          }
+                          placeholder={selectedRobot.slug}
+                          pattern="[a-z0-9][a-z0-9-]*[a-z0-9]"
+                          minLength={3}
+                          maxLength={50}
+                          title="3-50 lowercase letters, numbers, and hyphens. No leading or trailing hyphen."
+                        />
+                      </div>
+                      {editForm.slug && editForm.slug !== selectedRobot.slug && (
+                        <p className="text-[10px] text-amber-400">Old URL will redirect to the new one automatically.</p>
+                      )}
                     </div>
                     <div className="space-y-1">
                       <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">

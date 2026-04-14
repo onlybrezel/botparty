@@ -78,7 +78,17 @@ export const createRobotSchema = z.object({
     .optional(),
 });
 
-export const updateRobotSchema = createRobotSchema.partial();
+export const updateRobotSchema = createRobotSchema.partial().extend({
+  slug: z
+    .string()
+    .min(3)
+    .max(50)
+    .regex(
+      /^[a-z0-9][a-z0-9-]*[a-z0-9]$/,
+      'Slug must be 3-50 lowercase alphanumeric characters and hyphens, without a leading or trailing hyphen',
+    )
+    .optional(),
+});
 
 // ─── Control Schemas ─────────────────────────────────
 export const controlCommandSchema = z.object({

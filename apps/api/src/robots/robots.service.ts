@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  ConflictException,
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
@@ -229,8 +230,8 @@ export class RobotsService {
   }
 
   async findBySlug(slug: string) {
-    const robot = await this.prisma.robot.findUnique({
-      where: { slug },
+    const robot = await this.prisma.robot.findFirst({
+      where: { OR: [{ slug }, { slugAliases: { has: slug } }] },
       include: {
         owner: {
           select: { id: true, username: true, displayName: true, avatarUrl: true, role: true },
@@ -275,6 +276,20 @@ export class RobotsService {
     const accessPassword = data.accessPassword;
     const baseData = this.stripRobotWriteFields(data);
     this.policyCache.delete(id);
+
+    let slugUpdate: { slug: string; slugAliases: { push: string } } | undefined;
+    if (data.slug && data.slug !== robot.slug) {
+      const conflict = await this.prisma.robot.findFirst({
+        where: {
+          OR: [{ slug: data.slug }, { slugAliases: { has: data.slug } }],
+          NOT: { id },
+        },
+        select: { id: true },
+      });
+      if (conflict) throw new ConflictException('This slug is already taken');
+      slugUpdate = { slug: data.slug, slugAliases: { push: robot.slug } };
+    }
+
     const nextAccessMode = data.accessMode ?? robot.accessMode;
     const nextAccessPassword =
       nextAccessMode === 'PASSWORD'
@@ -295,6 +310,7 @@ export class RobotsService {
         accessPassword: nextAccessPassword,
         inviteCode: nextInviteCode,
         metadata: metadata as Prisma.InputJsonValue,
+        ...slugUpdate,
       },
     });
     return this.sanitizeManagedRobot(updated);
@@ -467,8 +483,8 @@ export class RobotsService {
   }
 
   async findPrivateBySlugForUser(slug: string, requesterId: string) {
-    const robot = await this.prisma.robot.findUnique({
-      where: { slug },
+    const robot = await this.prisma.robot.findFirst({
+      where: { OR: [{ slug }, { slugAliases: { has: slug } }] },
       include: {
         owner: {
           select: { id: true, username: true, displayName: true, avatarUrl: true, role: true },
@@ -1200,10 +1216,12 @@ export class RobotsService {
   }
 
   private generateSlug(name: string): string {
-    const base = name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '');
+    const base =
+      name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '')
+        .slice(0, 40) || 'robot'; // fallback for emoji-only or non-ASCII names
     const suffix = randomBytes(3).toString('hex');
     return `${base}-${suffix}`;
   }
@@ -1390,14 +1408,17 @@ export class RobotsService {
     }
   }
 
-  private stripRobotWriteFields<T extends { acl?: unknown; stream?: unknown; accessPassword?: unknown }>(
+  private stripRobotWriteFields<T extends { acl?: unknown; stream?: unknown; accessPassword?: unknown; slug?: unknown }>(
     data: T,
-  ): Omit<T, 'acl' | 'stream' | 'accessPassword'> {
-    const baseData = { ...data };
-    delete baseData.acl;
-    delete baseData.stream;
-    delete baseData.accessPassword;
-    return baseData;
+  ): Omit<T, 'acl' | 'stream' | 'accessPassword' | 'slug'> {
+    const { acl: _acl, stream: _stream, accessPassword: _pw, slug: _slug, ...rest } = data as T & {
+      acl?: unknown;
+      stream?: unknown;
+      accessPassword?: unknown;
+      slug?: unknown;
+    };
+    void _acl; void _stream; void _pw; void _slug;
+    return rest as Omit<T, 'acl' | 'stream' | 'accessPassword' | 'slug'>;
   }
 
   private sanitizeManagedRobot<T extends { accessPassword?: string | null }>(robot: T): T {

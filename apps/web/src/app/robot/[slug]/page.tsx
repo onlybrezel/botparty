@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import type { RobotPublic } from '@botparty/shared';
+import { permanentRedirect } from 'next/navigation';
 import RobotView from './robot-view';
 import PrivateRobotClient from './private-robot-client';
 
@@ -83,6 +84,11 @@ export default async function RobotPage({
 
   if (!robot) {
     return <PrivateRobotClient slug={slug} />;
+  }
+
+  // Alias lookup: robot was found via an old slug stored in slugAliases — redirect to canonical URL
+  if (robot.slug !== slug) {
+    permanentRedirect(`/robot/${robot.slug}`);
   }
 
   return <RobotView robot={robot} />;
