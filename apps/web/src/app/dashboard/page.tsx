@@ -6,7 +6,6 @@ import { useRouter } from 'next/navigation';
 import {
   Bot,
   Cable,
-  CircuitBoard,
   Copy,
   ExternalLink,
   RefreshCcw,
@@ -1298,41 +1297,22 @@ export default function DashboardPage() {
         </div>
       </section>
 
-      <section className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <article className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 sm:p-5">
-          <div className="flex items-center gap-2 text-sm font-semibold">
-            <Cable className="h-4 w-4 text-violet-300" />
-            Controller flow
-          </div>
-          <p className="mt-3 text-sm leading-6 text-[var(--muted-foreground)]">
-            Keep browser controls simple. Board-specific behavior belongs in the robot client.
-          </p>
-        </article>
-
-        <article className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 sm:p-5">
-          <div className="flex items-center gap-2 text-sm font-semibold">
-            <CircuitBoard className="h-4 w-4 text-amber-300" />
-            Hardware support
-          </div>
-          <p className="mt-3 text-sm leading-6 text-[var(--muted-foreground)]">
-            Direct motor drivers, serial bridges, MQTT targets, and robot-specific profiles all fit
-            into the same client structure.
-          </p>
-        </article>
-      </section>
-
       <section className="mt-6 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 sm:p-5">
         <h2 className="mb-4 text-lg font-bold">My Robots</h2>
 
-        <div className="mb-4 rounded-lg border border-[var(--border)] bg-[var(--background)] p-3 text-xs text-[var(--muted-foreground)]">
-          <p className="font-semibold text-[var(--foreground)]">Settings guide</p>
-          <p className="mt-1">Visibility: who can discover this robot in Explore.</p>
-          <p>Access Mode: entry model for the room itself (open/password/invite/allowlist).</p>
-          <p>Queue Mode: how control turns are assigned.</p>
-          <p>Guest ACL: what non-logged-in visitors are allowed to do.</p>
-          <p>Guest E-STOP: who can see and trigger emergency stop.</p>
-          <p>Target Bitrate: desired stream quality for the robot uplink (150-3000 kbps).</p>
-        </div>
+        <details className="mb-4 rounded-lg border border-[var(--border)] bg-[var(--background)] text-xs text-[var(--muted-foreground)]">
+          <summary className="cursor-pointer select-none px-3 py-2 font-semibold text-[var(--foreground)]">
+            Settings guide
+          </summary>
+          <div className="space-y-1 px-3 pb-3">
+            <p>Visibility: who can discover this robot in Explore.</p>
+            <p>Access Mode: entry model for the room itself (open/password/invite/allowlist).</p>
+            <p>Queue Mode: how control turns are assigned.</p>
+            <p>Guest ACL: what non-logged-in visitors are allowed to do.</p>
+            <p>Guest E-STOP: who can see and trigger emergency stop.</p>
+            <p>Target Bitrate: desired stream quality for the robot uplink (150-3000 kbps).</p>
+          </div>
+        </details>
 
         {loading ? (
           <p className="text-sm text-[var(--muted-foreground)]">Loading robots...</p>
@@ -1403,6 +1383,10 @@ export default function DashboardPage() {
                   </div>
 
                 <form onSubmit={handleSave} className="space-y-3">
+                  <div className="flex items-center gap-3">
+                    <span className="shrink-0 text-[11px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)]">Settings</span>
+                    <div className="h-px flex-1 bg-[var(--border)]" />
+                  </div>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div className="space-y-1">
                       <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
@@ -1430,6 +1414,10 @@ export default function DashboardPage() {
                         <option value="UNLISTED">Unlisted (link only)</option>
                         <option value="PRIVATE">Private</option>
                       </Select>
+                    </div>
+                    <div className="sm:col-span-2 flex items-center gap-2">
+                      <span className="text-[10px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)]">Access</span>
+                      <div className="h-px flex-1 bg-[var(--border)]" />
                     </div>
                     <div className="space-y-1">
                       <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
@@ -1504,6 +1492,11 @@ export default function DashboardPage() {
                       value={editForm.aclEStop}
                       onChange={(value) => setEditForm((prev) => ({ ...prev, aclEStop: value }))}
                     />
+
+                    <div className="sm:col-span-2 flex items-center gap-2">
+                      <span className="text-[10px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)]">Stream</span>
+                      <div className="h-px flex-1 bg-[var(--border)]" />
+                    </div>
 
                     <div className="space-y-1">
                       <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
@@ -1730,6 +1723,11 @@ export default function DashboardPage() {
                     />
                   </div>
 
+                  <div className="flex items-center gap-3 pt-2">
+                    <span className="shrink-0 text-[11px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)]">Token & Links</span>
+                    <div className="h-px flex-1 bg-[var(--border)]" />
+                  </div>
+
                   <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
                     <p className="mb-2 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Claim Token</p>
                     <div className="flex items-center gap-2">
@@ -1793,6 +1791,11 @@ export default function DashboardPage() {
                       </div>
                     </div>
                   )}
+
+                  <div className="flex items-center gap-3 pt-2">
+                    <span className="shrink-0 text-[11px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)]">Operations</span>
+                    <div className="h-px flex-1 bg-[var(--border)]" />
+                  </div>
 
                   <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
                     <p className="mb-2 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Remote Operations (Pi)</p>
@@ -1937,6 +1940,11 @@ export default function DashboardPage() {
                       )}
                     </div>
                   )}
+
+                  <div className="flex items-center gap-3 pt-2">
+                    <span className="shrink-0 text-[11px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)]">Controls</span>
+                    <div className="h-px flex-1 bg-[var(--border)]" />
+                  </div>
 
                   <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
                     <div className="mb-3 flex items-center justify-between gap-3">
@@ -2548,6 +2556,11 @@ export default function DashboardPage() {
                           ))}
                       </div>
                     )}
+                  </div>
+
+                  <div className="flex items-center gap-3 pt-2">
+                    <span className="shrink-0 text-[11px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)]">Monitoring</span>
+                    <div className="h-px flex-1 bg-[var(--border)]" />
                   </div>
 
                   <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
