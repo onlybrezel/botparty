@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
-import { permanentRedirect } from 'next/navigation';
+import { notFound, permanentRedirect } from 'next/navigation';
 import type { RobotPublic } from '@botparty/shared';
-import RobotView from '../../[slug]/robot-view';
+import RobotView from '../[slug]/robot-view';
 import PrivateRobotClient from './private-robot-client';
 
 function buildRobotDescription(robot: RobotPublic): string {
@@ -10,15 +10,28 @@ function buildRobotDescription(robot: RobotPublic): string {
   return description.length <= 160 ? description : `${description.slice(0, 157).trimEnd()}...`;
 }
 
-async function getRobot(username: string, slug: string): Promise<RobotPublic | null> {
+function parseParts(parts: string[]): { username: string | null; slug: string } | null {
+  if (parts.length === 1) {
+    return { username: null, slug: parts[0] ?? '' };
+  }
+  if (parts.length === 2) {
+    return { username: parts[0] ?? null, slug: parts[1] ?? '' };
+  }
+  return null;
+}
+
+function canonicalRobotPath(robot: RobotPublic): string {
+  return `/robot/${robot.owner.username}/${robot.slug}`;
+}
+
+async function getRobot(username: string | null, slug: string): Promise<RobotPublic | null> {
   const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
+  const endpoint = username
+    ? `${apiUrl}/api/v1/robots/${encodeURIComponent(username)}/${encodeURIComponent(slug)}`
+    : `${apiUrl}/api/v1/robots/${encodeURIComponent(slug)}`;
+
   try {
-    const res = await fetch(
-      `${apiUrl}/api/v1/robots/${encodeURIComponent(username)}/${encodeURIComponent(slug)}`,
-      {
-        next: { revalidate: 10 },
-      },
-    );
+    const res = await fetch(endpoint, { next: { revalidate: 10 } });
     if (res.status === 404) return null;
     if (!res.ok) return null;
     return res.json() as Promise<RobotPublic>;
@@ -30,13 +43,16 @@ async function getRobot(username: string, slug: string): Promise<RobotPublic | n
 export async function generateMetadata({
   params,
 }: {
-  params: Promise<{ username: string; slug: string }>;
+  params: Promise<{ parts: string[] }>;
 }): Promise<Metadata> {
-  const { username, slug } = await params;
-  const robot = await getRobot(username, slug);
+  const { parts } = await params;
+  const parsed = parseParts(parts);
+  if (!parsed) return { title: 'Robot not found' };
+
+  const robot = await getRobot(parsed.username, parsed.slug);
   if (!robot) return { title: 'Robot not found' };
 
-  const canonicalUrl = `/robot/${robot.owner.username}/${robot.slug}`;
+  const canonicalUrl = canonicalRobotPath(robot);
   const title = robot.name;
   const description = buildRobotDescription(robot);
   const previewImages = robot.thumbnailUrl
@@ -81,17 +97,22 @@ export async function generateMetadata({
 export default async function RobotPage({
   params,
 }: {
-  params: Promise<{ username: string; slug: string }>;
+  params: Promise<{ parts: string[] }>;
 }) {
-  const { username, slug } = await params;
-  const robot = await getRobot(username, slug);
-
-  if (!robot) {
-    return <PrivateRobotClient username={username} slug={slug} />;
+  const { parts } = await params;
+  const parsed = parseParts(parts);
+  if (!parsed) {
+    notFound();
   }
 
-  if (robot.owner.username !== username || robot.slug !== slug) {
-    permanentRedirect(`/robot/${robot.owner.username}/${robot.slug}`);
+  const robot = await getRobot(parsed.username, parsed.slug);
+  if (!robot) {
+    return <PrivateRobotClient username={parsed.username} slug={parsed.slug} />;
+  }
+
+  const canonical = canonicalRobotPath(robot);
+  if (parsed.username !== robot.owner.username || parsed.slug !== robot.slug) {
+    permanentRedirect(canonical);
   }
 
   return <RobotView robot={robot} />;
