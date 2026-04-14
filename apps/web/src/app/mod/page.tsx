@@ -1231,7 +1231,7 @@ export default function ModDashboardPage() {
                     {runtimeActionLoading === selectedRuntimeRobot.id ? 'Queueing...' : 'Force Update'}
                   </button>
                   <Link
-                    href={`/robot/${selectedRuntimeRobot.slug}`}
+                    href={`/robot/${selectedRuntimeRobot.owner.username}/${selectedRuntimeRobot.slug}`}
                     className="rounded border border-sky-500/40 px-2 py-1 text-xs text-sky-300"
                   >
                     Preview
@@ -1629,7 +1629,7 @@ export default function ModDashboardPage() {
               <span className="rounded bg-[var(--muted)] px-2 py-0.5 text-xs">{robot.visibility}</span>
               <span className="text-[var(--muted-foreground)]">Owner: {robot.owner.displayName ?? robot.owner.username}</span>
               <Link
-                href={`/robot/${robot.slug}`}
+                href={`/robot/${robot.owner.username}/${robot.slug}`}
                 className="rounded border border-sky-500/40 px-2 py-1 text-xs text-sky-300"
               >
                 Preview

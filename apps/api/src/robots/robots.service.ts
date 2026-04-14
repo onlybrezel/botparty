@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
-import { createRobotSchema, updateRobotSchema } from '@botparty/shared';
+import { createRobotSchema, updateRobotSchema, LIMITS } from '@botparty/shared';
 import { createHash, randomBytes } from 'crypto';
 import { hash, verify } from 'argon2';
 import type { z } from 'zod';
@@ -126,6 +126,36 @@ const DEFAULT_STREAM_POLICY: RobotStreamPolicy = {
   targetBitrateKbps: null,
 };
 
+const SLUG_PROFANITY_TERMS = [
+  'fuck',
+  'motherfucker',
+  'shit',
+  'bitch',
+  'asshole',
+  'cunt',
+  'nigger',
+  'nigga',
+  'faggot',
+  'hurensohn',
+  'arschloch',
+  'fotze',
+  'hijodeputa',
+  'gilipollas',
+  'putain',
+  'filsdepute',
+  'caralho',
+  'filhodaputa',
+  'vaffanculo',
+  'klootzak',
+  'orospu',
+  'siktir',
+  'heilhitler',
+  'siegheil',
+  'whitepower',
+  'whitesupremacy',
+  'hakenkreuz',
+];
+
 type PolicyCacheEntry = {
   access: RobotAccessPolicy;
   stream: RobotStreamPolicy;
@@ -179,6 +209,55 @@ export class RobotsService {
       },
     });
 
+    await this.prisma.controlButton.createMany({
+      data: [
+        {
+          robotId: robot.id,
+          label: 'Forward',
+          command: 'forward',
+          hotKey: 'w',
+          icon: '▲',
+          cooldownMs: LIMITS.DEFAULT_CONTROL_COOLDOWN_MS,
+          access: 'QUEUE_TURN',
+          position: 0,
+          isEnabled: true,
+        },
+        {
+          robotId: robot.id,
+          label: 'Left',
+          command: 'left',
+          hotKey: 'a',
+          icon: '◀',
+          cooldownMs: LIMITS.DEFAULT_CONTROL_COOLDOWN_MS,
+          access: 'QUEUE_TURN',
+          position: 1,
+          isEnabled: true,
+        },
+        {
+          robotId: robot.id,
+          label: 'Back',
+          command: 'backward',
+          hotKey: 's',
+          icon: '▼',
+          cooldownMs: LIMITS.DEFAULT_CONTROL_COOLDOWN_MS,
+          access: 'QUEUE_TURN',
+          position: 2,
+          isEnabled: true,
+        },
+        {
+          robotId: robot.id,
+          label: 'Right',
+          command: 'right',
+          hotKey: 'd',
+          icon: '▶',
+          cooldownMs: LIMITS.DEFAULT_CONTROL_COOLDOWN_MS,
+          access: 'QUEUE_TURN',
+          position: 3,
+          isEnabled: true,
+        },
+      ],
+    });
+
     this.logger.log(`Robot created: ${robot.name} (${robot.slug}) by ${ownerId}`);
     return this.sanitizeManagedRobot(robot);
   }
@@ -230,16 +309,18 @@ export class RobotsService {
   }
 
   async findBySlug(slug: string) {
-    const robot = await this.prisma.robot.findFirst({
-      where: { OR: [{ slug }, { slugAliases: { has: slug } }] },
-      include: {
-        owner: {
-          select: { id: true, username: true, displayName: true, avatarUrl: true, role: true },
-        },
-      },
-    });
+    const robot = await this.findRobotBySlugAny(slug);
     if (!robot) throw new NotFoundException('Robot not found');
     if (robot.visibility === 'PRIVATE') throw new NotFoundException('Robot not found');
+    return this.toPublicRobot(robot);
+  }
+
+  async findByUsernameAndSlug(username: string, slug: string) {
+    const robot = await this.findRobotBySlugAny(slug);
+    if (!robot) throw new NotFoundException('Robot not found');
+    if (robot.visibility === 'PRIVATE') throw new NotFoundException('Robot not found');
+    // Keep lenient lookup for backward compatibility; web canonicalizes URL to owner username.
+    void username;
     return this.toPublicRobot(robot);
   }
 
@@ -277,17 +358,19 @@ export class RobotsService {
     const baseData = this.stripRobotWriteFields(data);
     this.policyCache.delete(id);
 
-    let slugUpdate: { slug: string; slugAliases: { push: string } } | undefined;
+    let slugUpdate: { slug: string; slugAliases: { set: string[] } } | undefined;
     if (data.slug && data.slug !== robot.slug) {
-      const conflict = await this.prisma.robot.findFirst({
-        where: {
-          OR: [{ slug: data.slug }, { slugAliases: { has: data.slug } }],
-          NOT: { id },
-        },
-        select: { id: true },
-      });
+      const nextSlug = this.validateAndNormalizeSlugInput(data.slug);
+      const conflict = await this.prisma.robot.findFirst({ where: { slug: nextSlug, NOT: { id } }, select: { id: true } });
       if (conflict) throw new ConflictException('This slug is already taken');
-      slugUpdate = { slug: data.slug, slugAliases: { push: robot.slug } };
+      await this.reclaimSlugAlias(nextSlug, id);
+      const currentAliases = Array.isArray((robot as { slugAliases?: string[] }).slugAliases)
+        ? ((robot as { slugAliases?: string[] }).slugAliases ?? [])
+        : [];
+      slugUpdate = {
+        slug: nextSlug,
+        slugAliases: { set: Array.from(new Set([...currentAliases, robot.slug])) },
+      };
     }
 
     const nextAccessMode = data.accessMode ?? robot.accessMode;
@@ -317,7 +400,7 @@ export class RobotsService {
   }
 
   async updateByStaff(id: string, input: z.infer<typeof updateRobotSchema>) {
-    await this.findById(id);
+    const existing = await this.findById(id);
     const data = updateRobotSchema.parse(input);
 
     const current = await this.prisma.robot.findUnique({
@@ -346,6 +429,21 @@ export class RobotsService {
       nextAccessMode,
     });
 
+    let slugUpdate: { slug: string; slugAliases: { set: string[] } } | undefined;
+    if (data.slug && data.slug !== existing.slug) {
+      const nextSlug = this.validateAndNormalizeSlugInput(data.slug);
+      const conflict = await this.prisma.robot.findFirst({ where: { slug: nextSlug, NOT: { id } }, select: { id: true } });
+      if (conflict) throw new ConflictException('This slug is already taken');
+      await this.reclaimSlugAlias(nextSlug, id);
+      const currentAliases = Array.isArray((existing as { slugAliases?: string[] }).slugAliases)
+        ? ((existing as { slugAliases?: string[] }).slugAliases ?? [])
+        : [];
+      slugUpdate = {
+        slug: nextSlug,
+        slugAliases: { set: Array.from(new Set([...currentAliases, existing.slug])) },
+      };
+    }
+
     const updated = await this.prisma.robot.update({
       where: { id },
       data: {
@@ -353,6 +451,7 @@ export class RobotsService {
         accessPassword: nextAccessPassword,
         inviteCode: nextInviteCode,
         metadata: metadata as Prisma.InputJsonValue,
+        ...slugUpdate,
       },
     });
     return this.sanitizeManagedRobot(updated);
@@ -483,14 +582,7 @@ export class RobotsService {
   }
 
   async findPrivateBySlugForUser(slug: string, requesterId: string) {
-    const robot = await this.prisma.robot.findFirst({
-      where: { OR: [{ slug }, { slugAliases: { has: slug } }] },
-      include: {
-        owner: {
-          select: { id: true, username: true, displayName: true, avatarUrl: true, role: true },
-        },
-      },
-    });
+    const robot = await this.findRobotBySlugAny(slug);
 
     if (!robot) {
       throw new NotFoundException('Robot not found');
@@ -511,6 +603,11 @@ export class RobotsService {
     }
 
     return this.toPublicRobot(robot);
+  }
+
+  async findPrivateByUsernameAndSlugForUser(username: string, slug: string, requesterId: string) {
+    void username;
+    return this.findPrivateBySlugForUser(slug, requesterId);
   }
 
   async getAllowedUsers(robotId: string, ownerId: string): Promise<AllowedUserSummary[]> {
@@ -797,6 +894,8 @@ export class RobotsService {
       gitBranch?: string;
       gitCommit?: string;
       gitDirty?: boolean;
+      botpartyStreamerVersion?: string;
+      streamerVersion?: string;
       pythonVersion?: string;
       cpuPercent?: number;
       memoryPercent?: number;
@@ -825,6 +924,12 @@ export class RobotsService {
           ? payload.gitCommit.trim().slice(0, 64)
           : null,
       gitDirty: Boolean(payload.gitDirty),
+      botpartyStreamerVersion:
+        typeof payload.botpartyStreamerVersion === 'string' && payload.botpartyStreamerVersion.trim()
+          ? payload.botpartyStreamerVersion.trim().slice(0, 64)
+          : typeof payload.streamerVersion === 'string' && payload.streamerVersion.trim()
+            ? payload.streamerVersion.trim().slice(0, 64)
+            : null,
       pythonVersion:
         typeof payload.pythonVersion === 'string' && payload.pythonVersion.trim()
           ? payload.pythonVersion.trim().slice(0, 64)
@@ -1222,8 +1327,10 @@ export class RobotsService {
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-|-$/g, '')
         .slice(0, 40) || 'robot'; // fallback for emoji-only or non-ASCII names
+    const compact = base.replace(/-/g, '');
+    const safeBase = SLUG_PROFANITY_TERMS.some((term) => compact.includes(term)) ? 'robot' : base;
     const suffix = randomBytes(3).toString('hex');
-    return `${base}-${suffix}`;
+    return `${safeBase}-${suffix}`;
   }
 
   private async getRoomAccessContext(robotId: string, requesterUserId: string | null) {
@@ -1419,6 +1526,62 @@ export class RobotsService {
     };
     void _acl; void _stream; void _pw; void _slug;
     return rest as Omit<T, 'acl' | 'stream' | 'accessPassword' | 'slug'>;
+  }
+
+  private validateAndNormalizeSlugInput(rawSlug: string): string {
+    const slug = rawSlug.trim().toLowerCase();
+    if (!/^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$/.test(slug)) {
+      throw new BadRequestException('Slug must be 3-50 lowercase alphanumeric characters and hyphens');
+    }
+
+    const compact = slug.replace(/-/g, '');
+    if (SLUG_PROFANITY_TERMS.some((term) => compact.includes(term))) {
+      throw new BadRequestException('Slug blocked by moderation policy');
+    }
+
+    return slug;
+  }
+
+  private async reclaimSlugAlias(slug: string, excludeRobotId: string) {
+    const holders = await this.prisma.robot.findMany({
+      where: { slugAliases: { has: slug }, NOT: { id: excludeRobotId } },
+      select: { id: true, slugAliases: true },
+    });
+
+    if (holders.length === 0) return;
+
+    await this.prisma.$transaction(
+      holders.map((row) =>
+        this.prisma.robot.update({
+          where: { id: row.id },
+          data: {
+            slugAliases: { set: (row.slugAliases ?? []).filter((entry) => entry !== slug) },
+          },
+        }),
+      ),
+    );
+  }
+
+  private async findRobotBySlugAny(slug: string) {
+    const canonical = await this.prisma.robot.findUnique({
+      where: { slug },
+      include: {
+        owner: {
+          select: { id: true, username: true, displayName: true, avatarUrl: true, role: true },
+        },
+      },
+    });
+    if (canonical) return canonical;
+
+    return this.prisma.robot.findFirst({
+      where: { slugAliases: { has: slug } },
+      include: {
+        owner: {
+          select: { id: true, username: true, displayName: true, avatarUrl: true, role: true },
+        },
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
   }
 
   private sanitizeManagedRobot<T extends { accessPassword?: string | null }>(robot: T): T {

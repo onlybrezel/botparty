@@ -51,7 +51,7 @@ export default function RobotCard({ robot }: Props) {
 
   return (
     <Link
-      href={`/robot/${robot.slug}`}
+      href={`/robot/${robot.owner.username}/${robot.slug}`}
       className="group block overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] transition duration-200 hover:border-violet-500/40 hover:-translate-y-0.5"
     >
       {/* Thumbnail */}

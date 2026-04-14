@@ -26,7 +26,7 @@ export default function PrivateRobotClient({ slug }: { slug: string }) {
 
     let active = true;
     api.setToken(accessToken);
-    api.getPrivateRobot(slug)
+    api.getPrivateRobotBySlug(slug)
       .then((result) => {
         if (!active) return;
         setRobot(result);

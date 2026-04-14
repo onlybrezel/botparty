@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import {
   Bot,
   Cable,
+  CircleHelp,
   Copy,
   ExternalLink,
   RefreshCcw,
@@ -896,7 +897,7 @@ export default function DashboardPage() {
       robot.accessMode === 'LINK_ONLY' && robot.inviteCode
         ? `?invite=${encodeURIComponent(robot.inviteCode)}`
         : '';
-    return `/robot/${robot.slug}${inviteSuffix}`;
+    return `/robot/${robot.owner.username}/${robot.slug}${inviteSuffix}`;
   }, []);
 
   const copyInviteLink = async () => {
@@ -1391,7 +1392,7 @@ export default function DashboardPage() {
           ) : (
             <div className="flex items-start gap-5">
               <aside className="hidden w-[200px] shrink-0 lg:block">
-                <div className="sticky top-4 flex flex-col gap-3">
+                <div className="sticky top-4 max-h-[calc(100vh-1rem)] overflow-auto pb-1 flex flex-col gap-3">
                   <div className="space-y-1.5">
                     {robots.map((robot) => {
                       const _seed = robot.slug.split('').reduce((s, ch) => s + ch.charCodeAt(0), 0);
@@ -1425,8 +1426,8 @@ export default function DashboardPage() {
                     {[
                       { id: 'section-settings', label: 'Settings' },
                       { id: 'section-token', label: 'Token & Links' },
-                      { id: 'section-operations', label: 'Operations' },
                       { id: 'section-controls', label: 'Controls' },
+                      { id: 'section-operations', label: 'Operations' },
                       { id: 'section-monitoring', label: 'Monitoring' },
                     ].map((s) => (
                       <button
@@ -1505,7 +1506,7 @@ export default function DashboardPage() {
                     </div>
                   </div>
 
-                <form ref={editFormRef} onSubmit={handleSave} className="space-y-3">
+                <form ref={editFormRef} onSubmit={handleSave} className="flex flex-col gap-3">
                   <div id="section-settings" className="scroll-mt-4 flex items-center gap-3">
                     <span className="shrink-0 text-[11px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)]">Settings</span>
                     <div className="h-px flex-1 bg-[var(--border)]" />
@@ -1527,7 +1528,7 @@ export default function DashboardPage() {
                         URL Slug
                       </label>
                       <div className="flex items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm">
-                        <span className="shrink-0 text-[var(--muted-foreground)]">/robot/</span>
+                        <span className="shrink-0 text-[var(--muted-foreground)]">/robot/{selectedRobot.owner.username}/</span>
                         <input
                           className="min-w-0 flex-1 bg-transparent outline-none"
                           value={editForm.slug}
@@ -1580,8 +1581,11 @@ export default function DashboardPage() {
                       </div>
                     ) : null}
                     <div className="space-y-1">
-                      <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
+                      <label className="inline-flex items-center gap-1 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
                         Queue Mode
+                        <span title="First come: next user in line gets control. Voting: viewers vote for the next controller. Disabled: no controller queue.">
+                          <CircleHelp className="h-3.5 w-3.5" />
+                        </span>
                       </label>
                       <Select
                         className="bg-[var(--background)]"
@@ -1642,35 +1646,39 @@ export default function DashboardPage() {
                       />
                     </div>
 
-                    <div className="space-y-2 rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
+                    <div className="space-y-2 rounded-lg border border-[var(--border)] bg-[var(--background)] p-3 sm:col-span-2">
                       <div className="flex items-center justify-between gap-2 mb-2">
                         <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
-                          External Camera Ingress (OBS / WHIP)
+                          External Camera Feed (OBS via WHIP)
                         </label>
                         <div className="flex items-center gap-1.5">
                           <button
                             type="button"
                             onClick={() => setObsHelpOpen(true)}
-                            className="rounded border border-[var(--border)] px-1.5 py-0.5 text-[9px] font-semibold text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                            className="rounded border border-[var(--border)] px-2 py-0.5 text-[10px] font-semibold text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
                           >
-                            Setup
+                            How to connect
                           </button>
-                          <span className="text-[9px] text-[var(--muted-foreground)]">
-                            {ingressLoading ? '...' : `${ingressCameras.length}`}
+                          <span className="text-[10px] text-[var(--muted-foreground)]">
+                            {ingressLoading ? 'Loading...' : `${ingressCameras.length} configured`}
                           </span>
                         </div>
                       </div>
 
+                      <p className="text-xs text-[var(--muted-foreground)]">
+                        Add one or more camera feeds. Use camera IDs like front, rear, arm. In OBS, paste the endpoint URL as WHIP server.
+                      </p>
+
                       <div className="flex gap-1.5 mb-2">
                         <input
                           className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-xs"
-                          placeholder="camera id"
+                          placeholder="Camera ID (e.g. front)"
                           value={newIngressCameraId}
                           onChange={(event) => setNewIngressCameraId(event.target.value)}
                         />
                         <input
                           className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-xs"
-                          placeholder="label (opt)"
+                          placeholder="Display label (optional)"
                           value={newIngressLabel}
                           onChange={(event) => setNewIngressLabel(event.target.value)}
                         />
@@ -1685,18 +1693,18 @@ export default function DashboardPage() {
                         </button>
                       </div>
 
-                      <label className="flex items-center gap-1.5 text-[9px] text-[var(--muted-foreground)]">
+                      <label className="flex items-center gap-1.5 text-[10px] text-[var(--muted-foreground)]">
                         <input
                           type="checkbox"
                           checked={newIngressCompatibilityMode}
                           onChange={(event) => setNewIngressCompatibilityMode(event.target.checked)}
                           className="h-3 w-3"
                         />
-                        Compat mode (transcod)
+                        Compatibility mode (enable when OBS has WHIP handshake issues)
                       </label>
 
                       {ingressCameras.length === 0 ? (
-                        <p className="text-[9px] text-[var(--muted-foreground)] italic">No cameras configured</p>
+                        <p className="text-[10px] text-[var(--muted-foreground)] italic">No external camera feeds configured yet.</p>
                       ) : (
                         <div className="space-y-1.5 mt-2">
                           {ingressCameras.map((entry) => {
@@ -1839,12 +1847,12 @@ export default function DashboardPage() {
                     />
                   </div>
 
-                  <div id="section-token" className="scroll-mt-4 flex items-center gap-3 pt-2">
+                  <div id="section-token" className="order-2 scroll-mt-4 flex items-center gap-3 pt-2">
                     <span className="shrink-0 text-[11px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)]">Token & Links</span>
                     <div className="h-px flex-1 bg-[var(--border)]" />
                   </div>
 
-                  <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
+                  <div className="order-2 rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
                     <p className="mb-2 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Claim Token</p>
                     <div className="flex items-center gap-2">
                       <code className="block min-h-5 flex-1 break-all text-xs text-[var(--foreground)]">
@@ -1881,7 +1889,7 @@ export default function DashboardPage() {
                   </div>
 
                   {editForm.roomMode === 'LINK_ONLY' && selectedRobot.inviteCode && (
-                    <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
+                    <div className="order-2 rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
                       <p className="mb-2 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Invite Link</p>
                       <code className="block break-all text-xs text-[var(--foreground)]">
                         {buildRobotRoomHref(selectedRobot)}
@@ -1908,12 +1916,12 @@ export default function DashboardPage() {
                     </div>
                   )}
 
-                  <div id="section-operations" className="scroll-mt-4 flex items-center gap-3 pt-2">
+                  <div id="section-operations" className="order-4 scroll-mt-4 flex items-center gap-3 pt-2">
                     <span className="shrink-0 text-[11px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)]">Operations</span>
                     <div className="h-px flex-1 bg-[var(--border)]" />
                   </div>
 
-                  <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
+                  <div className="order-4 rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
                     <p className="mb-2 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Remote Operations</p>
                     <p className="mb-3 text-xs text-[var(--muted-foreground)]">
                       Run maintenance actions on the robot client without SSH. Commands are queued and picked up on the next poll cycle.
@@ -1928,11 +1936,9 @@ export default function DashboardPage() {
                             Python: <span className="font-semibold text-[var(--foreground)]">{telemetry.latest.pythonVersion}</span>
                           </p>
                         )}
-                        {telemetry.latest.botpartyStreamerVersion && (
-                          <p className="mt-1">
-                            Streamer: <span className="font-semibold text-[var(--foreground)]">{telemetry.latest.botpartyStreamerVersion}</span>
-                          </p>
-                        )}
+                        <p className="mt-1">
+                          Streamer: <span className="font-semibold text-[var(--foreground)]">{telemetry.latest.botpartyStreamerVersion ?? '-'}</span>
+                        </p>
                       </div>
                     )}
                     <div className="flex flex-wrap gap-2">
@@ -2023,7 +2029,7 @@ export default function DashboardPage() {
                   </div>
 
                   {editForm.roomMode === 'ALLOWED_USERS' && (
-                    <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
+                    <div className="order-4 rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
                       <div className="mb-3">
                         <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Allow List</p>
                         <p className="text-xs text-[var(--muted-foreground)]">
@@ -2080,12 +2086,12 @@ export default function DashboardPage() {
                     </div>
                   )}
 
-                  <div id="section-controls" className="scroll-mt-4 flex items-center gap-3 pt-2">
+                  <div id="section-controls" className="order-3 scroll-mt-4 flex items-center gap-3 pt-2">
                     <span className="shrink-0 text-[11px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)]">Controls</span>
                     <div className="h-px flex-1 bg-[var(--border)]" />
                   </div>
 
-                  <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
+                  <div className="order-3 rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
                     <div className="mb-3 flex items-center justify-between gap-3">
                       <div>
                         <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Control Buttons</p>
@@ -2697,12 +2703,12 @@ export default function DashboardPage() {
                     )}
                   </div>
 
-                  <div id="section-monitoring" className="scroll-mt-4 flex items-center gap-3 pt-2">
+                  <div id="section-monitoring" className="order-5 scroll-mt-4 flex items-center gap-3 pt-2">
                     <span className="shrink-0 text-[11px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)]">Monitoring</span>
                     <div className="h-px flex-1 bg-[var(--border)]" />
                   </div>
 
-                  <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
+                  <div className="order-5 rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
                     <div className="mb-2 flex items-center justify-between">
                       <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Runtime Telemetry</p>
                       <p className="text-[10px] text-[var(--muted-foreground)]">dashboard refreshes 5s, client updates ~30s</p>
@@ -2739,7 +2745,7 @@ export default function DashboardPage() {
                             <p className="font-semibold">{telemetry.latest.pythonVersion ?? '-'}</p>
                           </div>
                           <div className="rounded border border-[var(--border)] px-2 py-1.5 sm:col-span-2">
-                            <p className="text-[var(--muted-foreground)]">Streamer</p>
+                            <p className="text-[var(--muted-foreground)]">Streamer Version</p>
                             <p className="font-semibold">{telemetry.latest.botpartyStreamerVersion ?? '-'}</p>
                           </div>
                         </div>
@@ -2785,7 +2791,7 @@ export default function DashboardPage() {
                     )}
                   </div>
 
-                  <div className="flex flex-wrap gap-2 lg:hidden">
+                  <div className="order-5 flex flex-wrap gap-2 lg:hidden">
                     <button
                       type="submit"
                       disabled={saving}
@@ -2891,12 +2897,16 @@ function ControlBuilderPreview({ draft }: { draft: ControlButtonDraft }) {
             style={draft.color.trim() ? { borderColor: draft.color.trim(), backgroundColor: draft.color.trim(), color: 'white' } : undefined}
           >
             {draft.icon.trim() ? <span>{draft.icon.trim()}</span> : null}
-            {draft.label.trim() || 'Button'}
+            <span>{draft.label.trim() || 'Button'}</span>
+            {draft.hotKey ? (
+              <span className="rounded border border-current/40 px-1.5 py-0.5 text-[10px] font-mono uppercase opacity-90">
+                {draft.hotKey}
+              </span>
+            ) : null}
           </button>
-          <div className="text-[10px] text-[var(--muted-foreground)] space-y-0.5">
-            {draft.hotKey && <p>Hotkey: <span className="font-mono">{draft.hotKey}</span></p>}
-            <p>Cooldown: {draft.cooldownMs}ms</p>
-            {draft.color && <p>Color: <span className="font-mono">{draft.color}</span></p>}
+          <div className="flex flex-wrap gap-1.5 text-[10px] text-[var(--muted-foreground)]">
+            <span className="rounded border border-[var(--border)] px-1.5 py-0.5">Cooldown {draft.cooldownMs}ms</span>
+            {draft.color && <span className="rounded border border-[var(--border)] px-1.5 py-0.5 font-mono">{draft.color}</span>}
           </div>
         </div>
       ) : draft.controlKind === 'slider' ? (
@@ -2916,14 +2926,20 @@ function ControlBuilderPreview({ draft }: { draft: ControlButtonDraft }) {
               }`}
             />
             <div className="text-xs text-[var(--muted-foreground)]">
-              <p className="font-semibold text-[var(--foreground)]">{draft.label.trim() || 'Slider'}</p>
+              <p className="flex items-center gap-1.5 font-semibold text-[var(--foreground)]">
+                <span>{draft.label.trim() || 'Slider'}</span>
+                {draft.hotKey ? (
+                  <span className="rounded border border-[var(--border)] px-1 py-0.5 text-[10px] font-mono uppercase text-[var(--muted-foreground)]">
+                    {draft.hotKey}
+                  </span>
+                ) : null}
+              </p>
               <p>{sliderValue.toFixed(0)}</p>
             </div>
           </div>
-          <div className="text-[10px] text-[var(--muted-foreground)] space-y-0.5">
-            {draft.hotKey && <p>Hotkey: <span className="font-mono">{draft.hotKey}</span></p>}
-            <p>Range: {draft.sliderMin} → {draft.sliderMax}</p>
-            <p>Cooldown: {draft.cooldownMs}ms</p>
+          <div className="flex flex-wrap gap-1.5 text-[10px] text-[var(--muted-foreground)]">
+            <span className="rounded border border-[var(--border)] px-1.5 py-0.5">Range {draft.sliderMin} to {draft.sliderMax}</span>
+            <span className="rounded border border-[var(--border)] px-1.5 py-0.5">Cooldown {draft.cooldownMs}ms</span>
           </div>
         </div>
       ) : (
@@ -2949,14 +2965,20 @@ function ControlBuilderPreview({ draft }: { draft: ControlButtonDraft }) {
               />
             </div>
             <div className="text-xs text-[var(--muted-foreground)]">
-              <p className="font-semibold text-[var(--foreground)]">{draft.label.trim() || 'XY Pad'}</p>
+              <p className="flex items-center gap-1.5 font-semibold text-[var(--foreground)]">
+                <span>{draft.label.trim() || 'XY Pad'}</span>
+                {draft.hotKey ? (
+                  <span className="rounded border border-[var(--border)] px-1 py-0.5 text-[10px] font-mono uppercase text-[var(--muted-foreground)]">
+                    {draft.hotKey}
+                  </span>
+                ) : null}
+              </p>
               <p>x: {xyValue.x.toFixed(0)}</p>
               <p>y: {xyValue.y.toFixed(0)}</p>
             </div>
           </div>
-          <div className="text-[10px] text-[var(--muted-foreground)] space-y-0.5">
-            {draft.hotKey && <p>Hotkey: <span className="font-mono">{draft.hotKey}</span></p>}
-            <p>Cooldown: {draft.cooldownMs}ms</p>
+          <div className="flex flex-wrap gap-1.5 text-[10px] text-[var(--muted-foreground)]">
+            <span className="rounded border border-[var(--border)] px-1.5 py-0.5">Cooldown {draft.cooldownMs}ms</span>
           </div>
         </div>
       )}

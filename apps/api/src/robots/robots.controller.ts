@@ -70,18 +70,30 @@ export class RobotsController {
     return this.robotsService.findByOwner(user.sub);
   }
 
-  @Get(':slug')
-  @ApiOperation({ summary: 'Get robot by slug' })
-  async findBySlug(@Param('slug') slug: string) {
-    return this.robotsService.findBySlug(slug);
-  }
-
   @Get('private/:slug')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get private robot by slug for owner/staff' })
   async findPrivateBySlug(@Param('slug') slug: string, @CurrentUser() user: JwtPayload) {
     return this.robotsService.findPrivateBySlugForUser(slug, user.sub);
+  }
+
+  @Get('private/:username/:slug')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get private robot by owner username + slug for owner/staff' })
+  async findPrivateByUsernameAndSlug(
+    @Param('username') username: string,
+    @Param('slug') slug: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.robotsService.findPrivateByUsernameAndSlugForUser(username, slug, user.sub);
+  }
+
+  @Get(':slug')
+  @ApiOperation({ summary: 'Get robot by slug (legacy route)' })
+  async findBySlug(@Param('slug') slug: string) {
+    return this.robotsService.findBySlug(slug);
   }
 
   @Post()
@@ -392,6 +404,8 @@ export class RobotsController {
       gitBranch?: string;
       gitCommit?: string;
       gitDirty?: boolean;
+      botpartyStreamerVersion?: string;
+      streamerVersion?: string;
       pythonVersion?: string;
       cpuPercent?: number;
       memoryPercent?: number;
@@ -428,6 +442,12 @@ export class RobotsController {
   @ApiOperation({ summary: 'Get recent temporary robot telemetry (owner only)' })
   async getTelemetry(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     return this.robotsService.getRobotTelemetry(id, user.sub);
+  }
+
+  @Get(':username/:slug')
+  @ApiOperation({ summary: 'Get robot by owner username + slug' })
+  async findByUsernameAndSlug(@Param('username') username: string, @Param('slug') slug: string) {
+    return this.robotsService.findByUsernameAndSlug(username, slug);
   }
 
   private resolveRequesterId(authorization?: string, cookieHeader?: string): string | null {

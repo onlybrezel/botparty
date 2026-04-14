@@ -135,7 +135,59 @@ export class ControlsService {
   async create(robotId: string, dto: CreateControlButtonDto, requesterId: string) {
     await this._assertOwner(robotId, requesterId);
 
-    const count = await this.prisma.controlButton.count({ where: { robotId } });
+    let count = await this.prisma.controlButton.count({ where: { robotId } });
+    if (count === 0) {
+      await this.prisma.controlButton.createMany({
+        data: [
+          {
+            robotId,
+            label: 'Forward',
+            command: 'forward',
+            hotKey: 'w',
+            icon: '▲',
+            cooldownMs: LIMITS.DEFAULT_CONTROL_COOLDOWN_MS,
+            access: 'QUEUE_TURN',
+            position: 0,
+            isEnabled: true,
+          },
+          {
+            robotId,
+            label: 'Left',
+            command: 'left',
+            hotKey: 'a',
+            icon: '◀',
+            cooldownMs: LIMITS.DEFAULT_CONTROL_COOLDOWN_MS,
+            access: 'QUEUE_TURN',
+            position: 1,
+            isEnabled: true,
+          },
+          {
+            robotId,
+            label: 'Back',
+            command: 'backward',
+            hotKey: 's',
+            icon: '▼',
+            cooldownMs: LIMITS.DEFAULT_CONTROL_COOLDOWN_MS,
+            access: 'QUEUE_TURN',
+            position: 2,
+            isEnabled: true,
+          },
+          {
+            robotId,
+            label: 'Right',
+            command: 'right',
+            hotKey: 'd',
+            icon: '▶',
+            cooldownMs: LIMITS.DEFAULT_CONTROL_COOLDOWN_MS,
+            access: 'QUEUE_TURN',
+            position: 3,
+            isEnabled: true,
+          },
+        ],
+      });
+      count = 4;
+    }
+
     if (count >= LIMITS.MAX_CONTROL_BUTTONS) {
       throw new BadRequestException(
         `Maximum of ${LIMITS.MAX_CONTROL_BUTTONS} control buttons allowed per robot`,

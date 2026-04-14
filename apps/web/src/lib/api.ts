@@ -582,8 +582,12 @@ class ApiClient {
     return this.request<RobotPublic[]>(`/robots${buildQueryString(params)}`);
   }
 
-  async getRobot(slug: string) {
-    return this.request<RobotPublic>(`/robots/${slug}`);
+  async getRobot(username: string, slug: string) {
+    return this.request<RobotPublic>(`/robots/${encodeURIComponent(username)}/${encodeURIComponent(slug)}`);
+  }
+
+  async getRobotBySlug(slug: string) {
+    return this.request<RobotPublic>(`/robots/${encodeURIComponent(slug)}`);
   }
 
   async getFeaturedRobots() {
@@ -674,7 +678,11 @@ class ApiClient {
     });
   }
 
-  async getPrivateRobot(slug: string) {
+  async getPrivateRobot(username: string, slug: string) {
+    return this.request<RobotPublic>(`/robots/private/${encodeURIComponent(username)}/${encodeURIComponent(slug)}`);
+  }
+
+  async getPrivateRobotBySlug(slug: string) {
     return this.request<RobotPublic>(`/robots/private/${encodeURIComponent(slug)}`);
   }
 

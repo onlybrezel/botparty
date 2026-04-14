@@ -112,8 +112,8 @@ export default async function LeaderboardPage() {
                 </span>
 
                 <div className="col-span-5 sm:col-span-4">
-                  <Link
-                    href={`/robot/${robot.slug}`}
+                    <Link
+                      href={`/robot/${robot.owner.username}/${robot.slug}`}
                     className="truncate font-semibold transition hover:text-violet-300"
                   >
                     {robot.name}
