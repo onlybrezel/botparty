@@ -48,6 +48,7 @@ export default function RobotCard({ robot }: Props) {
     ? robot.description.trim().slice(0, 108)
     : 'Live room with queue-based robot control.';
   const isTrimmed = Boolean(robot.description?.trim() && robot.description.trim().length > 108);
+  const isApiThumbnail = robot.thumbnailUrl?.startsWith('/api/') ?? false;
 
   return (
     <Link
@@ -61,6 +62,7 @@ export default function RobotCard({ robot }: Props) {
             src={robot.thumbnailUrl}
             alt={robot.name}
             fill
+            unoptimized={isApiThumbnail}
             className="object-cover transition duration-300 group-hover:scale-105"
             sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
           />
