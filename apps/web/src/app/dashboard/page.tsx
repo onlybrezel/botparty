@@ -36,6 +36,8 @@ type RemoteActionType = 'restart_video' | 'restart_control' | 'restart_chat' | '
 
 type ControlPresetKey = 'ptz-pan' | 'ptz-tilt' | 'drive-speed' | 'gripper' | 'arm-xy';
 
+type RoomMode = 'PUBLIC' | 'LINK_ONLY' | 'PASSWORD' | 'ALLOWED_USERS' | 'PRIVATE';
+
 type ControlButtonDraft = {
   label: string;
   command: string;
@@ -65,8 +67,7 @@ type ControlButtonDraft = {
 type RobotFormState = {
   name: string;
   description: string;
-  visibility: 'PUBLIC' | 'UNLISTED' | 'PRIVATE';
-  accessMode: 'OPEN' | 'PASSWORD' | 'LINK_ONLY' | 'ALLOWED_USERS';
+  roomMode: RoomMode;
   queueMode: 'FIRST_COME' | 'VOTING' | 'DISABLED';
   aclVideo: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
   aclControl: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
@@ -83,8 +84,7 @@ type RobotFormState = {
 const DEFAULT_CREATE_FORM: RobotFormState = {
   name: '',
   description: '',
-  visibility: 'PUBLIC',
-  accessMode: 'OPEN',
+  roomMode: 'PUBLIC',
   queueMode: 'FIRST_COME',
   aclVideo: 'AUTHENTICATED',
   aclControl: 'AUTHENTICATED',
@@ -152,6 +152,14 @@ const CONTROL_PRESETS: Array<{ key: ControlPresetKey; label: string }> = [
   { key: 'drive-speed', label: 'Drive Speed (0..100 slider)' },
   { key: 'gripper', label: 'Gripper (Center slider)' },
   { key: 'arm-xy', label: 'Arm XY Pad' },
+];
+
+const ROOM_MODE_OPTIONS: Array<{ value: RoomMode; label: string; description: string }> = [
+  { value: 'PUBLIC', label: 'Public', description: 'Visible in Explore, anyone can enter' },
+  { value: 'LINK_ONLY', label: 'Link only', description: 'Not in Explore, anyone with the invite link' },
+  { value: 'PASSWORD', label: 'Password', description: 'Password-protected room' },
+  { value: 'ALLOWED_USERS', label: 'Allow list', description: 'Only specific users you approve' },
+  { value: 'PRIVATE', label: 'Private', description: 'Only you (owner)' },
 ];
 
 function applyControlPreset(draft: ControlButtonDraft, preset: ControlPresetKey): ControlButtonDraft {
@@ -230,15 +238,37 @@ function applyControlPreset(draft: ControlButtonDraft, preset: ControlPresetKey)
   }
 }
 
+function detectRoomMode(robot: { visibility: string; accessMode: string }): RoomMode {
+  if (robot.visibility === 'PRIVATE') return 'PRIVATE';
+  if (robot.accessMode === 'ALLOWED_USERS') return 'ALLOWED_USERS';
+  if (robot.accessMode === 'LINK_ONLY') return 'LINK_ONLY';
+  if (robot.accessMode === 'PASSWORD') return 'PASSWORD';
+  return 'PUBLIC';
+}
+
+function roomModeToFields(mode: RoomMode): {
+  visibility: 'PUBLIC' | 'UNLISTED' | 'PRIVATE';
+  accessMode: 'OPEN' | 'PASSWORD' | 'LINK_ONLY' | 'ALLOWED_USERS';
+} {
+  switch (mode) {
+    case 'PUBLIC': return { visibility: 'PUBLIC', accessMode: 'OPEN' };
+    case 'LINK_ONLY': return { visibility: 'UNLISTED', accessMode: 'LINK_ONLY' };
+    case 'PASSWORD': return { visibility: 'PUBLIC', accessMode: 'PASSWORD' };
+    case 'ALLOWED_USERS': return { visibility: 'UNLISTED', accessMode: 'ALLOWED_USERS' };
+    case 'PRIVATE': return { visibility: 'PRIVATE', accessMode: 'OPEN' };
+  }
+}
+
 function toUpdatePayload(form: RobotFormState) {
   const bitrate = Number(form.targetBitrateKbps);
   const hasBitrate = Number.isFinite(bitrate) && bitrate >= 150 && bitrate <= 3000;
+  const { visibility, accessMode } = roomModeToFields(form.roomMode);
 
   return {
     name: form.name.trim(),
     description: form.description.trim() || undefined,
-    visibility: form.visibility,
-    accessMode: form.accessMode,
+    visibility,
+    accessMode,
     queueMode: form.queueMode,
     acl: {
       video: form.aclVideo,
@@ -267,8 +297,7 @@ function formFromRobot(robot: RobotManaged): RobotFormState {
   return {
     name: robot.name,
     description: robot.description ?? '',
-    visibility: robot.visibility,
-    accessMode: robot.accessMode,
+    roomMode: detectRoomMode(robot),
     queueMode: robot.queueMode,
     aclVideo: access?.video ?? 'AUTHENTICATED',
     aclControl: access?.control ?? 'AUTHENTICATED',
@@ -524,7 +553,7 @@ export default function DashboardPage() {
   }, [selectedRobot?.id, accessToken]);
 
   useEffect(() => {
-    if (!accessToken || !selectedRobot || editForm.accessMode !== 'ALLOWED_USERS') {
+    if (!accessToken || !selectedRobot || editForm.roomMode !== 'ALLOWED_USERS') {
       setAllowedUsers([]);
       return;
     }
@@ -553,7 +582,7 @@ export default function DashboardPage() {
     return () => {
       active = false;
     };
-  }, [selectedRobot?.id, editForm.accessMode, accessToken]);
+  }, [selectedRobot?.id, editForm.roomMode, accessToken]);
 
   useEffect(() => {
     if (!accessToken || !selectedRobot) {
@@ -1300,20 +1329,6 @@ export default function DashboardPage() {
       <section className="mt-6 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 sm:p-5">
         <h2 className="mb-4 text-lg font-bold">My Robots</h2>
 
-        <details className="mb-4 rounded-lg border border-[var(--border)] bg-[var(--background)] text-xs text-[var(--muted-foreground)]">
-          <summary className="cursor-pointer select-none px-3 py-2 font-semibold text-[var(--foreground)]">
-            Settings guide
-          </summary>
-          <div className="space-y-1 px-3 pb-3">
-            <p>Visibility: who can discover this robot in Explore.</p>
-            <p>Access Mode: entry model for the room itself (open/password/invite/allowlist).</p>
-            <p>Queue Mode: how control turns are assigned.</p>
-            <p>Guest ACL: what non-logged-in visitors are allowed to do.</p>
-            <p>Guest E-STOP: who can see and trigger emergency stop.</p>
-            <p>Target Bitrate: desired stream quality for the robot uplink (150-3000 kbps).</p>
-          </div>
-        </details>
-
         {loading ? (
           <p className="text-sm text-[var(--muted-foreground)]">Loading robots...</p>
         ) : robots.length === 0 ? (
@@ -1401,42 +1416,23 @@ export default function DashboardPage() {
                     </div>
                     <div className="space-y-1">
                       <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
-                        Visibility
-                      </label>
-                      <Select
-                        className="bg-[var(--background)]"
-                        value={editForm.visibility}
-                        onChange={(event) =>
-                          setEditForm((prev) => ({ ...prev, visibility: event.target.value as RobotFormState['visibility'] }))
-                        }
-                      >
-                        <option value="PUBLIC">Public</option>
-                        <option value="UNLISTED">Unlisted (link only)</option>
-                        <option value="PRIVATE">Private</option>
-                      </Select>
-                    </div>
-                    <div className="sm:col-span-2 flex items-center gap-2">
-                      <span className="text-[10px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)]">Access</span>
-                      <div className="h-px flex-1 bg-[var(--border)]" />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
                         Room Access
                       </label>
                       <Select
                         className="bg-[var(--background)]"
-                        value={editForm.accessMode}
+                        value={editForm.roomMode}
                         onChange={(event) =>
-                          setEditForm((prev) => ({ ...prev, accessMode: event.target.value as RobotFormState['accessMode'] }))
+                          setEditForm((prev) => ({ ...prev, roomMode: event.target.value as RoomMode }))
                         }
                       >
-                        <option value="OPEN">Open</option>
-                        <option value="PASSWORD">Password</option>
-                        <option value="LINK_ONLY">Link only</option>
-                        <option value="ALLOWED_USERS">Allow list only</option>
+                        <option value="PUBLIC">Public (anyone can view and control)</option>
+                        <option value="LINK_ONLY">Link only (share via invite link)</option>
+                        <option value="PASSWORD">Password protected</option>
+                        <option value="ALLOWED_USERS">Allowed users only</option>
+                        <option value="PRIVATE">Private (owner only)</option>
                       </Select>
                     </div>
-                    {editForm.accessMode === 'PASSWORD' ? (
+                    {editForm.roomMode === 'PASSWORD' ? (
                       <div className="space-y-1">
                         <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
                           Room Password
@@ -1516,34 +1512,34 @@ export default function DashboardPage() {
                     </div>
 
                     <div className="space-y-2 rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
-                      <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center justify-between gap-2 mb-2">
                         <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
                           External Camera Ingress (OBS / WHIP)
                         </label>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5">
                           <button
                             type="button"
                             onClick={() => setObsHelpOpen(true)}
-                            className="rounded border border-[var(--border)] px-2 py-0.5 text-[10px] font-semibold text-[var(--muted-foreground)]"
+                            className="rounded border border-[var(--border)] px-1.5 py-0.5 text-[9px] font-semibold text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
                           >
-                            OBS setup
+                            Setup
                           </button>
-                          <span className="text-[10px] text-[var(--muted-foreground)]">
-                            {ingressLoading ? 'Loading...' : `${ingressCameras.length} configured`}
+                          <span className="text-[9px] text-[var(--muted-foreground)]">
+                            {ingressLoading ? '...' : `${ingressCameras.length}`}
                           </span>
                         </div>
                       </div>
 
-                      <div className="grid gap-2 sm:grid-cols-[1fr,1fr,auto]">
+                      <div className="flex gap-1.5 mb-2">
                         <input
-                          className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-                          placeholder="camera id (e.g. obs-front)"
+                          className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-xs"
+                          placeholder="camera id"
                           value={newIngressCameraId}
                           onChange={(event) => setNewIngressCameraId(event.target.value)}
                         />
                         <input
-                          className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-                          placeholder="label (optional)"
+                          className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-xs"
+                          placeholder="label (opt)"
                           value={newIngressLabel}
                           onChange={(event) => setNewIngressLabel(event.target.value)}
                         />
@@ -1551,83 +1547,72 @@ export default function DashboardPage() {
                           type="button"
                           onClick={createIngressCamera}
                           disabled={Boolean(ingressOp)}
-                          className="inline-flex items-center justify-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-semibold disabled:opacity-60"
+                          className="inline-flex items-center justify-center gap-1 rounded-lg border border-[var(--border)] px-2 py-1.5 text-xs font-semibold disabled:opacity-60"
                         >
-                          <Plus className="h-3.5 w-3.5" />
+                          <Plus className="h-3 w-3" />
                           Add
                         </button>
                       </div>
 
-                      <label className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
+                      <label className="flex items-center gap-1.5 text-[9px] text-[var(--muted-foreground)]">
                         <input
                           type="checkbox"
                           checked={newIngressCompatibilityMode}
                           onChange={(event) => setNewIngressCompatibilityMode(event.target.checked)}
-                          className="h-3.5 w-3.5"
+                          className="h-3 w-3"
                         />
-                        Compatibility mode (enable transcoding). Leave OFF for lowest latency.
+                        Compat mode (transcod)
                       </label>
 
-                      <p className="text-[11px] text-[var(--muted-foreground)]">
-                        Use the generated WHIP endpoint in OBS. The camera appears in the viewer only while it is live.
-                      </p>
-
-                      <div className="space-y-2">
-                        {ingressCameras.length === 0 ? (
-                          <p className="text-xs text-[var(--muted-foreground)]">No external camera ingress configured yet.</p>
-                        ) : (
-                          ingressCameras.map((entry) => {
+                      {ingressCameras.length === 0 ? (
+                        <p className="text-[9px] text-[var(--muted-foreground)] italic">No cameras configured</p>
+                      ) : (
+                        <div className="space-y-1.5 mt-2">
+                          {ingressCameras.map((entry) => {
                             const deleting = ingressOp === `delete:${entry.ingressId}`;
                             return (
                               <div
                                 key={entry.ingressId}
-                                className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-2"
+                                className="rounded border border-[var(--border)] bg-[var(--card)] p-1.5 text-xs"
                               >
-                                <div className="flex items-center justify-between gap-2">
-                                  <div>
-                                    <p className="text-sm font-semibold">
-                                      {entry.cameraId ?? 'default'}
-                                    </p>
-                                    <p className="text-[11px] text-[var(--muted-foreground)]">
-                                      {entry.participantName ?? entry.participantIdentity ?? 'camera ingress'}
-                                    </p>
+                                <div className="flex items-center justify-between gap-2 mb-1">
+                                  <div className="truncate">
+                                    <p className="font-semibold truncate">{entry.cameraId ?? 'default'}</p>
                                   </div>
                                   <span
-                                    className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                                    className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[8px] font-semibold whitespace-nowrap ${
                                       entry.isLive
                                         ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
-                                        : 'border-[var(--border)] bg-[var(--background)] text-[var(--muted-foreground)]'
+                                        : 'border-[var(--border)] text-[var(--muted-foreground)]'
                                     }`}
                                   >
-                                    {entry.isLive ? 'LIVE' : 'Offline'}
+                                    {entry.isLive ? 'LIVE' : 'Off'}
                                   </span>
                                 </div>
-                                <div className="mt-2 flex flex-wrap gap-2">
+                                <div className="flex gap-1">
                                   <button
                                     type="button"
                                     onClick={() => void copyIngressEndpoint(entry.endpointUrl)}
-                                    className="inline-flex items-center gap-2 rounded border border-[var(--border)] px-2 py-1 text-xs"
+                                    className="flex-1 rounded border border-[var(--border)] px-1.5 py-0.5 text-[8px] hover:border-[var(--muted-foreground)]"
                                   >
-                                    <Copy className="h-3.5 w-3.5" />
-                                    Copy WHIP URL
+                                    Copy URL
                                   </button>
                                   {entry.cameraId ? (
                                     <button
                                       type="button"
                                       onClick={() => void deleteIngressCamera(entry.ingressId)}
                                       disabled={Boolean(ingressOp)}
-                                      className="inline-flex items-center gap-2 rounded border border-red-500/40 px-2 py-1 text-xs text-red-300 disabled:opacity-60"
+                                      className="rounded border border-red-500/40 px-1.5 py-0.5 text-[8px] text-red-300 disabled:opacity-60"
                                     >
-                                      <Trash2 className="h-3.5 w-3.5" />
-                                      {deleting ? 'Deleting...' : 'Delete'}
+                                      {deleting ? '...' : 'Del'}
                                     </button>
                                   ) : null}
                                 </div>
                               </div>
                             );
-                          })
-                        )}
-                      </div>
+                          })}
+                        </div>
+                      )}
                     </div>
 
                     {obsHelpOpen ? (
@@ -1764,7 +1749,7 @@ export default function DashboardPage() {
                     </div>
                   </div>
 
-                  {selectedRobot.accessMode === 'LINK_ONLY' && selectedRobot.inviteCode && (
+                  {editForm.roomMode === 'LINK_ONLY' && selectedRobot.inviteCode && (
                     <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
                       <p className="mb-2 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Invite Link</p>
                       <code className="block break-all text-xs text-[var(--foreground)]">
@@ -1798,7 +1783,7 @@ export default function DashboardPage() {
                   </div>
 
                   <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
-                    <p className="mb-2 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Remote Operations (Pi)</p>
+                    <p className="mb-2 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Remote Operations</p>
                     <p className="mb-3 text-xs text-[var(--muted-foreground)]">
                       Run maintenance actions on the robot client without SSH. Commands are queued and picked up on the next poll cycle.
                     </p>
@@ -1881,9 +1866,32 @@ export default function DashboardPage() {
                             : 'Enable 2min Diagnostics'}
                       </button>
                     </div>
+
+                    <div className="mt-3 pt-3 border-t border-[var(--border)]">
+                      <div className="mb-2 flex items-center justify-between">
+                        <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Diagnostics Log</p>
+                        <button
+                          type="button"
+                          onClick={refreshLogs}
+                          disabled={logsLoading}
+                          className="rounded border border-[var(--border)] px-2 py-1 text-[10px] text-[var(--muted-foreground)] disabled:opacity-60"
+                        >
+                          {logsLoading ? 'Loading...' : 'Refresh'}
+                        </button>
+                      </div>
+                      <div className="max-h-48 overflow-auto rounded border border-[var(--border)] bg-black/70 p-2 font-mono text-[11px] leading-5 text-emerald-300">
+                        {diagLogs.length === 0 ? (
+                          <p className="text-[var(--muted-foreground)]">No logs. Enable diagnostics above.</p>
+                        ) : (
+                          diagLogs.map((row, idx) => (
+                            <p key={`${row.ts}-${idx}`}>[{new Date(row.ts).toLocaleTimeString()}] {row.line}</p>
+                          ))
+                        )}
+                      </div>
+                    </div>
                   </div>
 
-                  {editForm.accessMode === 'ALLOWED_USERS' && (
+                  {editForm.roomMode === 'ALLOWED_USERS' && (
                     <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
                       <div className="mb-3">
                         <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Allow List</p>
@@ -2565,32 +2573,6 @@ export default function DashboardPage() {
 
                   <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
                     <div className="mb-2 flex items-center justify-between">
-                      <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Temporary Diagnostics</p>
-                      <button
-                        type="button"
-                        onClick={refreshLogs}
-                        disabled={logsLoading}
-                        className="rounded border border-[var(--border)] px-2 py-1 text-[10px] text-[var(--muted-foreground)] disabled:opacity-60"
-                      >
-                        {logsLoading ? 'Loading...' : 'Refresh'}
-                      </button>
-                    </div>
-                    <p className="mb-2 text-xs text-[var(--muted-foreground)]">
-                      Ephemeral logs from Pi (auto-expire, no long-term storage). Last {diagLogs.length} lines shown.
-                    </p>
-                    <div className="max-h-56 overflow-auto rounded border border-[var(--border)] bg-black/70 p-2 font-mono text-[11px] leading-5 text-emerald-300">
-                      {diagLogs.length === 0 ? (
-                        <p className="text-[var(--muted-foreground)]">No diagnostics logs yet. Trigger "Enable 2min Diagnostics".</p>
-                      ) : (
-                        diagLogs.map((row, idx) => (
-                          <p key={`${row.ts}-${idx}`}>[{new Date(row.ts).toLocaleTimeString()}] {row.line}</p>
-                        ))
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
-                    <div className="mb-2 flex items-center justify-between">
                       <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Runtime Telemetry</p>
                       <p className="text-[10px] text-[var(--muted-foreground)]">dashboard refreshes 5s, client updates ~30s</p>
                     </div>
@@ -2776,59 +2758,79 @@ function ControlBuilderPreview({ draft }: { draft: ControlButtonDraft }) {
       <p className="mb-2 text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">Live Preview</p>
 
       {draft.controlKind === 'button' ? (
-        <button
-          type="button"
-          className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--muted)] px-3 py-2 text-sm font-semibold"
-          style={draft.color.trim() ? { borderColor: draft.color.trim(), color: draft.color.trim() } : undefined}
-        >
-          {draft.icon.trim() ? <span>{draft.icon.trim()}</span> : null}
-          {draft.label.trim() || 'Button'}
-        </button>
+        <div className="space-y-2">
+          <button
+            type="button"
+            className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--muted)] px-3 py-2 text-sm font-semibold"
+            style={draft.color.trim() ? { borderColor: draft.color.trim(), backgroundColor: draft.color.trim(), color: 'white' } : undefined}
+          >
+            {draft.icon.trim() ? <span>{draft.icon.trim()}</span> : null}
+            {draft.label.trim() || 'Button'}
+          </button>
+          <div className="text-[10px] text-[var(--muted-foreground)] space-y-0.5">
+            {draft.hotKey && <p>Hotkey: <span className="font-mono">{draft.hotKey}</span></p>}
+            <p>Cooldown: {draft.cooldownMs}ms</p>
+            {draft.color && <p>Color: <span className="font-mono">{draft.color}</span></p>}
+          </div>
+        </div>
       ) : draft.controlKind === 'slider' ? (
-        <div className="flex items-center gap-3">
-          <input
-            type="range"
-            min={Number.isFinite(sliderMin) ? sliderMin : -100}
-            max={Number.isFinite(sliderMax) ? sliderMax : 100}
-            step={sliderStep}
-            value={sliderValue}
-            onChange={(event) => setSliderValue(Number(event.target.value))}
-            className={`accent-[var(--primary)] ${
-              draft.sliderDirection === 'vertical'
-                ? 'h-24 w-6 [writing-mode:vertical-lr] [-webkit-appearance:slider-vertical]'
-                : 'w-full'
-            }`}
-          />
-          <div className="text-xs text-[var(--muted-foreground)]">
-            <p className="font-semibold text-[var(--foreground)]">{draft.label.trim() || 'Slider'}</p>
-            <p>{sliderValue.toFixed(0)}</p>
+        <div className="space-y-2">
+          <div className="flex items-center gap-3">
+            <input
+              type="range"
+              min={Number.isFinite(sliderMin) ? sliderMin : -100}
+              max={Number.isFinite(sliderMax) ? sliderMax : 100}
+              step={sliderStep}
+              value={sliderValue}
+              onChange={(event) => setSliderValue(Number(event.target.value))}
+              className={`accent-[var(--primary)] ${
+                draft.sliderDirection === 'vertical'
+                  ? 'h-24 w-6 [writing-mode:vertical-lr] [-webkit-appearance:slider-vertical]'
+                  : 'w-full'
+              }`}
+            />
+            <div className="text-xs text-[var(--muted-foreground)]">
+              <p className="font-semibold text-[var(--foreground)]">{draft.label.trim() || 'Slider'}</p>
+              <p>{sliderValue.toFixed(0)}</p>
+            </div>
+          </div>
+          <div className="text-[10px] text-[var(--muted-foreground)] space-y-0.5">
+            {draft.hotKey && <p>Hotkey: <span className="font-mono">{draft.hotKey}</span></p>}
+            <p>Range: {draft.sliderMin} → {draft.sliderMax}</p>
+            <p>Cooldown: {draft.cooldownMs}ms</p>
           </div>
         </div>
       ) : (
-        <div className="flex items-center gap-3">
-          <div
-            className="relative h-24 w-24 rounded border border-[var(--border)] bg-[var(--background)]"
-            onPointerDown={(event) => {
-              const target = event.currentTarget;
-              const rect = target.getBoundingClientRect();
-              const nx = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
-              const ny = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
-              const nextX = xMin + nx * (xMax - xMin);
-              const nextY = yMax - ny * (yMax - yMin);
-              setXyValue({ x: nextX, y: nextY });
-            }}
-          >
-            <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-[var(--border)]" />
-            <div className="absolute left-0 top-1/2 h-px w-full -translate-y-1/2 bg-[var(--border)]" />
+        <div className="space-y-2">
+          <div className="flex items-center gap-3">
             <div
-              className="absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--primary)]"
-              style={{ left: `${xPercent}%`, top: `${100 - yPercent}%` }}
-            />
+              className="relative h-24 w-24 rounded border border-[var(--border)] bg-[var(--background)]"
+              onPointerDown={(event) => {
+                const target = event.currentTarget;
+                const rect = target.getBoundingClientRect();
+                const nx = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+                const ny = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
+                const nextX = xMin + nx * (xMax - xMin);
+                const nextY = yMax - ny * (yMax - yMin);
+                setXyValue({ x: nextX, y: nextY });
+              }}
+            >
+              <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-[var(--border)]" />
+              <div className="absolute left-0 top-1/2 h-px w-full -translate-y-1/2 bg-[var(--border)]" />
+              <div
+                className="absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--primary)]"
+                style={{ left: `${xPercent}%`, top: `${100 - yPercent}%` }}
+              />
+            </div>
+            <div className="text-xs text-[var(--muted-foreground)]">
+              <p className="font-semibold text-[var(--foreground)]">{draft.label.trim() || 'XY Pad'}</p>
+              <p>x: {xyValue.x.toFixed(0)}</p>
+              <p>y: {xyValue.y.toFixed(0)}</p>
+            </div>
           </div>
-          <div className="text-xs text-[var(--muted-foreground)]">
-            <p className="font-semibold text-[var(--foreground)]">{draft.label.trim() || 'XY Pad'}</p>
-            <p>x: {xyValue.x.toFixed(0)}</p>
-            <p>y: {xyValue.y.toFixed(0)}</p>
+          <div className="text-[10px] text-[var(--muted-foreground)] space-y-0.5">
+            {draft.hotKey && <p>Hotkey: <span className="font-mono">{draft.hotKey}</span></p>}
+            <p>Cooldown: {draft.cooldownMs}ms</p>
           </div>
         </div>
       )}
