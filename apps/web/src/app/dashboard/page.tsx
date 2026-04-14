@@ -264,6 +264,16 @@ function roomModeToFields(mode: RoomMode): {
   }
 }
 
+function queueModeDescription(mode: RobotFormState['queueMode']) {
+  if (mode === 'VOTING') {
+    return 'Viewers can vote who should control next. The highest-voted person takes the next turn.';
+  }
+  if (mode === 'DISABLED') {
+    return 'There is no queue. Controls are handled without turn rotation.';
+  }
+  return 'First come, first served. The next person in line gets control when the current turn ends.';
+}
+
 function toUpdatePayload(form: RobotFormState) {
   const bitrate = Number(form.targetBitrateKbps);
   const hasBitrate = Number.isFinite(bitrate) && bitrate >= 150 && bitrate <= 3000;
@@ -938,12 +948,25 @@ export default function DashboardPage() {
   };
 
   const buildRobotRoomHref = useCallback((robot: RobotManaged) => {
+    const effectiveMode = robot.accessMode === 'LINK_ONLY' ? 'LINK_ONLY' : detectRoomMode(robot);
     const inviteSuffix =
-      robot.inviteCode
+      effectiveMode === 'LINK_ONLY' && robot.inviteCode
         ? `?invite=${encodeURIComponent(robot.inviteCode)}`
         : '';
     return `/robot/${robot.owner.username}/${robot.slug}${inviteSuffix}`;
   }, []);
+
+  const buildSelectedRobotRoomHref = useCallback((roomMode: RoomMode = editForm.roomMode) => {
+    if (!selectedRobot) {
+      return '#';
+    }
+
+    const inviteSuffix =
+      roomMode === 'LINK_ONLY' && selectedRobot.inviteCode
+        ? `?invite=${encodeURIComponent(selectedRobot.inviteCode)}`
+        : '';
+    return `/robot/${selectedRobot.owner.username}/${selectedRobot.slug}${inviteSuffix}`;
+  }, [editForm.roomMode, selectedRobot]);
 
   const applyUpdatedRobot = useCallback((updated: RobotManaged) => {
     setRobots((prev) => prev.map((robot) => (robot.id === updated.id ? updated : robot)));
@@ -993,7 +1016,28 @@ export default function DashboardPage() {
         pushToast('Could not read that image file.', 'error', 2600);
         return;
       }
-      void updateThumbnailFromDataUrl(result, 'upload');
+
+      const image = new window.Image();
+      image.onload = () => {
+        const maxDimension = 1280;
+        const scale = Math.min(1, maxDimension / Math.max(image.width, image.height));
+        const width = Math.max(1, Math.round(image.width * scale));
+        const height = Math.max(1, Math.round(image.height * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          pushToast('Could not prepare that image.', 'error', 2600);
+          return;
+        }
+        ctx.drawImage(image, 0, 0, width, height);
+        void updateThumbnailFromDataUrl(canvas.toDataURL('image/jpeg', 0.82), 'upload');
+      };
+      image.onerror = () => {
+        pushToast('Could not decode that image file.', 'error', 2600);
+      };
+      image.src = result;
     };
     reader.onerror = () => {
       pushToast('Could not read that image file.', 'error', 2600);
@@ -1014,8 +1058,10 @@ export default function DashboardPage() {
     }
 
     const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    const maxDimension = 1280;
+    const scale = Math.min(1, maxDimension / Math.max(video.videoWidth, video.videoHeight));
+    canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+    canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
     const ctx = canvas.getContext('2d');
     if (!ctx) {
       pushToast('Snapshot capture is not available in this browser.', 'error', 2600);
@@ -1023,9 +1069,36 @@ export default function DashboardPage() {
     }
 
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
     await updateThumbnailFromDataUrl(dataUrl, 'snapshot');
   }, [selectedRobot, updateThumbnailFromDataUrl]);
+
+  useEffect(() => {
+    if (!accessToken || !selectedRobot || editForm.roomMode !== 'LINK_ONLY' || selectedRobot.inviteCode) {
+      return;
+    }
+
+    let active = true;
+    api.setToken(accessToken);
+    api.ensureRobotInviteCode(selectedRobot.id)
+      .then((next) => {
+        if (!active) {
+          return;
+        }
+        setRobots((prev) =>
+          prev.map((robot) =>
+            robot.id === selectedRobot.id ? { ...robot, inviteCode: next.inviteCode } : robot,
+          ),
+        );
+      })
+      .catch(() => {
+        // Keep UI usable; save will still fail loudly if invite generation is broken.
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [accessToken, editForm.roomMode, selectedRobot]);
 
   const removeThumbnail = useCallback(async () => {
     if (!accessToken || !selectedRobot) {
@@ -1052,7 +1125,7 @@ export default function DashboardPage() {
   }, [accessToken, applyUpdatedRobot, selectedRobot]);
 
   const regenerateInviteCode = async () => {
-    if (!accessToken || !selectedRobot || selectedRobot.accessMode !== 'LINK_ONLY') {
+    if (!accessToken || !selectedRobot || editForm.roomMode !== 'LINK_ONLY') {
       return;
     }
 
@@ -1084,11 +1157,11 @@ export default function DashboardPage() {
   };
 
   const copyInviteLink = async () => {
-    if (!selectedRobot || selectedRobot.accessMode !== 'LINK_ONLY' || !selectedRobot.inviteCode) {
+    if (!selectedRobot || editForm.roomMode !== 'LINK_ONLY' || !selectedRobot.inviteCode) {
       return;
     }
 
-    const href = buildRobotRoomHref(selectedRobot);
+    const href = buildSelectedRobotRoomHref('LINK_ONLY');
     const fullUrl =
       typeof window !== 'undefined' ? new URL(href, window.location.origin).toString() : href;
     try {
@@ -1595,7 +1668,7 @@ export default function DashboardPage() {
           ) : (
             <div className="flex items-start gap-5">
               <aside className="hidden w-[200px] shrink-0 lg:block">
-                <div className="max-h-[calc(100vh-6rem)] overflow-auto pb-1 flex flex-col gap-3">
+                <div className="pb-1 flex flex-col gap-3">
                   <div className="space-y-1.5">
                     {robots.map((robot) => {
                       const _seed = robot.slug.split('').reduce((s, ch) => s + ch.charCodeAt(0), 0);
@@ -1790,7 +1863,7 @@ export default function DashboardPage() {
                     {editForm.roomMode === 'LINK_ONLY' && selectedRobot.inviteCode ? (
                       <div className="space-y-2 sm:col-span-2 rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
                         <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Invite Link</p>
-                        <code className="block break-all text-xs text-[var(--foreground)]">{buildRobotRoomHref(selectedRobot)}</code>
+                        <code className="block break-all text-xs text-[var(--foreground)]">{buildSelectedRobotRoomHref('LINK_ONLY')}</code>
                         <p className="text-[11px] text-[var(--muted-foreground)]">
                           Invite code: <span className="font-semibold text-[var(--foreground)]">{selectedRobot.inviteCode}</span>
                         </p>
@@ -1804,7 +1877,7 @@ export default function DashboardPage() {
                             Copy invite link
                           </button>
                           <a
-                            href={buildRobotRoomHref(selectedRobot)}
+                            href={buildSelectedRobotRoomHref('LINK_ONLY')}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs"
@@ -1842,6 +1915,9 @@ export default function DashboardPage() {
                         <option value="VOTING">Voting</option>
                         <option value="DISABLED">Disabled</option>
                       </Select>
+                      <p className="text-[11px] leading-relaxed text-[var(--muted-foreground)]">
+                        {queueModeDescription(editForm.queueMode)}
+                      </p>
                     </div>
 
                     <AclPicker
@@ -3149,107 +3225,103 @@ function ControlBuilderPreview({ draft }: { draft: ControlButtonDraft }) {
   const yRange = yMax - yMin;
   const xPercent = xRange > 0 ? ((xyValue.x - xMin) / xRange) * 100 : 50;
   const yPercent = yRange > 0 ? ((xyValue.y - yMin) / yRange) * 100 : 50;
+  const colorStyle = draft.color.trim() ? { borderColor: draft.color.trim() } : undefined;
 
   return (
     <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
-      <p className="mb-2 text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">Live Preview</p>
+      <p className="mb-3 text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">Live Preview</p>
 
       {draft.controlKind === 'button' ? (
-        <div>
+        <div className="flex flex-wrap items-start gap-3">
           <button
             type="button"
-            className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--muted)] px-3 py-2 text-sm font-semibold"
-            style={draft.color.trim() ? { borderColor: draft.color.trim(), backgroundColor: draft.color.trim(), color: 'white' } : undefined}
+            style={colorStyle}
+            className="flex min-h-12 min-w-[3.25rem] items-center justify-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--muted)] px-3 py-2 text-sm font-bold transition select-none"
           >
             {draft.icon.trim() ? <span>{draft.icon.trim()}</span> : null}
-            <span>{draft.label.trim() || 'Button'}</span>
-            {draft.hotKey ? (
-              <span className="rounded border border-current/40 px-1.5 py-0.5 text-[10px] font-mono uppercase opacity-90">
-                {draft.hotKey}
-              </span>
-            ) : null}
-            <span className="rounded border border-current/40 px-1.5 py-0.5 text-[10px] opacity-90">
-              {draft.cooldownMs}ms
-            </span>
-            {draft.color ? (
-              <span className="rounded border border-current/40 px-1.5 py-0.5 text-[10px] font-mono opacity-90">
-                {draft.color}
-              </span>
-            ) : null}
+            {draft.label.trim() || 'Button'}
+            {draft.hotKey ? <span className="ml-1 text-xs opacity-40">[{draft.hotKey}]</span> : null}
           </button>
+          <div className="text-xs text-[var(--muted-foreground)]">
+            <p>{draft.command.trim() || 'command'}</p>
+            <p>{draft.access} · {draft.cooldownMs}ms</p>
+          </div>
         </div>
       ) : draft.controlKind === 'slider' ? (
-        <div className="space-y-2">
-          <div className="flex items-center gap-3">
-            <input
-              type="range"
-              min={Number.isFinite(sliderMin) ? sliderMin : -100}
-              max={Number.isFinite(sliderMax) ? sliderMax : 100}
-              step={sliderStep}
-              value={sliderValue}
-              onChange={(event) => setSliderValue(Number(event.target.value))}
-              className={`accent-[var(--primary)] ${
-                draft.sliderDirection === 'vertical'
-                  ? 'h-24 w-6 [writing-mode:vertical-lr] [-webkit-appearance:slider-vertical]'
-                  : 'w-full'
-              }`}
-            />
-            <div className="text-xs text-[var(--muted-foreground)]">
-              <p className="flex flex-wrap items-center gap-1.5 font-semibold text-[var(--foreground)]">
-                <span>{draft.label.trim() || 'Slider'}</span>
-                {draft.hotKey ? (
-                  <span className="rounded border border-[var(--border)] px-1 py-0.5 text-[10px] font-mono uppercase text-[var(--muted-foreground)]">
-                    {draft.hotKey}
-                  </span>
-                ) : null}
-                <span className="rounded border border-[var(--border)] px-1 py-0.5 text-[10px] text-[var(--muted-foreground)]">
-                  {draft.cooldownMs}ms
-                </span>
-                <span className="rounded border border-[var(--border)] px-1 py-0.5 text-[10px] text-[var(--muted-foreground)]">
-                  {draft.sliderMin} to {draft.sliderMax}
-                </span>
-              </p>
-              <p>{sliderValue.toFixed(0)}</p>
-            </div>
+        <div
+          className="min-w-[14rem] rounded-lg border border-[var(--border)] bg-[var(--muted)] px-3 py-2"
+          style={colorStyle}
+        >
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <p className="text-xs font-semibold text-[var(--foreground)]">{draft.label.trim() || 'Slider'}</p>
+            <span className="text-[10px] text-[var(--muted-foreground)]">{sliderValue.toFixed(0)}</span>
+          </div>
+          <input
+            type="range"
+            min={Number.isFinite(sliderMin) ? sliderMin : -100}
+            max={Number.isFinite(sliderMax) ? sliderMax : 100}
+            step={sliderStep}
+            value={sliderValue}
+            onChange={(event) => setSliderValue(Number(event.target.value))}
+            onPointerUp={() => {
+              if (draft.widgetReturn === 'center') {
+                setSliderValue(Number(draft.sliderStart) || 0);
+              }
+            }}
+            className={`accent-[var(--primary)] ${
+              draft.sliderDirection === 'vertical'
+                ? 'h-28 w-6 [writing-mode:vertical-lr] [-webkit-appearance:slider-vertical]'
+                : 'w-full'
+            }`}
+          />
+          <div className="mt-1 flex items-center justify-between text-[10px] text-[var(--muted-foreground)]">
+            <span>{draft.sliderMin}</span>
+            <span className="opacity-80">
+              {draft.command.trim() || 'command'} · {draft.access} · {draft.cooldownMs}ms
+            </span>
+            <span>{draft.sliderMax}</span>
           </div>
         </div>
       ) : (
-        <div className="space-y-2">
-          <div className="flex items-center gap-3">
+        <div
+          className="rounded-lg border border-[var(--border)] bg-[var(--muted)] px-3 py-2"
+          style={colorStyle}
+        >
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <p className="text-xs font-semibold text-[var(--foreground)]">{draft.label.trim() || 'XY Pad'}</p>
+            <span className="text-[10px] text-[var(--muted-foreground)]">
+              x {xyValue.x.toFixed(0)} · y {xyValue.y.toFixed(0)}
+            </span>
+          </div>
+          <div
+            className="relative h-32 w-32 touch-none rounded border border-[var(--border)] bg-[var(--background)]"
+            onPointerDown={(event) => {
+              const target = event.currentTarget;
+              const rect = target.getBoundingClientRect();
+              const nx = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+              const ny = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
+              const nextX = xMin + nx * (xMax - xMin);
+              const nextY = yMax - ny * (yMax - yMin);
+              setXyValue({ x: nextX, y: nextY });
+            }}
+            onPointerUp={() => {
+              if (draft.widgetReturn === 'center') {
+                setXyValue({
+                  x: Number(draft.xyXStart) || 0,
+                  y: Number(draft.xyYStart) || 0,
+                });
+              }
+            }}
+          >
+            <div className="absolute left-1/2 top-1/2 h-px w-full -translate-x-1/2 bg-[var(--border)]" />
+            <div className="absolute left-1/2 top-1/2 h-full w-px -translate-y-1/2 bg-[var(--border)]" />
             <div
-              className="relative h-24 w-24 rounded border border-[var(--border)] bg-[var(--background)]"
-              onPointerDown={(event) => {
-                const target = event.currentTarget;
-                const rect = target.getBoundingClientRect();
-                const nx = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
-                const ny = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
-                const nextX = xMin + nx * (xMax - xMin);
-                const nextY = yMax - ny * (yMax - yMin);
-                setXyValue({ x: nextX, y: nextY });
-              }}
-            >
-              <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-[var(--border)]" />
-              <div className="absolute left-0 top-1/2 h-px w-full -translate-y-1/2 bg-[var(--border)]" />
-              <div
-                className="absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--primary)]"
-                style={{ left: `${xPercent}%`, top: `${100 - yPercent}%` }}
-              />
-            </div>
-            <div className="text-xs text-[var(--muted-foreground)]">
-              <p className="flex flex-wrap items-center gap-1.5 font-semibold text-[var(--foreground)]">
-                <span>{draft.label.trim() || 'XY Pad'}</span>
-                {draft.hotKey ? (
-                  <span className="rounded border border-[var(--border)] px-1 py-0.5 text-[10px] font-mono uppercase text-[var(--muted-foreground)]">
-                    {draft.hotKey}
-                  </span>
-                ) : null}
-                <span className="rounded border border-[var(--border)] px-1 py-0.5 text-[10px] text-[var(--muted-foreground)]">
-                  {draft.cooldownMs}ms
-                </span>
-              </p>
-              <p>x: {xyValue.x.toFixed(0)}</p>
-              <p>y: {xyValue.y.toFixed(0)}</p>
-            </div>
+              className="absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--primary)]"
+              style={{ left: `${xPercent}%`, top: `${100 - yPercent}%` }}
+            />
+          </div>
+          <div className="mt-1 text-[10px] text-[var(--muted-foreground)]">
+            {draft.command.trim() || 'command'} · {draft.access} · {draft.cooldownMs}ms
           </div>
         </div>
       )}

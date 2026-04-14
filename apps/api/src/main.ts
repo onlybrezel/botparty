@@ -14,6 +14,7 @@ async function bootstrap() {
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     new FastifyAdapter({
+      bodyLimit: Number(process.env.FASTIFY_BODY_LIMIT ?? 5 * 1024 * 1024),
       logger: {
         level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
         transport:

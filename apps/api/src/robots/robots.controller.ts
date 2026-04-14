@@ -168,6 +168,14 @@ export class RobotsController {
     return this.robotsService.regenerateInviteCode(id, user.sub);
   }
 
+  @Post(':id/ensure-invite')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Ensure a stable invite code exists for a robot (owner only)' })
+  async ensureInviteCode(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.robotsService.ensureInviteCode(id, user.sub);
+  }
+
   @Post(':id/thumbnail')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()

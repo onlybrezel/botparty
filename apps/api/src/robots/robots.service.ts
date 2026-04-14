@@ -191,7 +191,7 @@ export class RobotsService {
       if (conflict) {
         throw new ConflictException('This slug is already taken');
       }
-      await this.reclaimSlugAlias(nextSlug, '__none__');
+      await this.reclaimSlugAlias(nextSlug);
       slug = nextSlug;
     }
     const streamKey = randomBytes(32).toString('hex');
@@ -635,6 +635,25 @@ export class RobotsService {
       data: { inviteCode },
       select: { id: true, inviteCode: true },
     });
+  }
+
+  async ensureInviteCode(id: string, ownerId: string) {
+    const robot = await this.findById(id);
+    if (robot.ownerId !== ownerId) {
+      throw new ForbiddenException('Not your robot');
+    }
+
+    if (robot.inviteCode) {
+      return { id: robot.id, inviteCode: robot.inviteCode };
+    }
+
+    const inviteCode = await this.generateUniqueInviteCode();
+    const updated = await this.prisma.robot.update({
+      where: { id },
+      data: { inviteCode },
+      select: { id: true, inviteCode: true },
+    });
+    return updated;
   }
 
   async saveRobotThumbnail(id: string, ownerId: string, dataUrl: string) {
@@ -1607,7 +1626,10 @@ export class RobotsService {
   }
 
   private thumbnailStorageDir() {
-    return resolve(process.cwd(), 'data', 'robot-thumbnails');
+    const configured = process.env.THUMBNAIL_STORAGE_DIR?.trim();
+    return configured
+      ? resolve(configured)
+      : resolve(process.cwd(), 'data', 'robot-thumbnails');
   }
 
   private thumbnailFilePath(robotId: string, extension: string) {
@@ -1773,9 +1795,12 @@ export class RobotsService {
       .trim();
   }
 
-  private async reclaimSlugAlias(slug: string, excludeRobotId: string) {
+  private async reclaimSlugAlias(slug: string, excludeRobotId?: string) {
     const holders = await this.prisma.robot.findMany({
-      where: { slugAliases: { has: slug }, NOT: { id: excludeRobotId } },
+      where: {
+        slugAliases: { has: slug },
+        ...(excludeRobotId ? { NOT: { id: excludeRobotId } } : {}),
+      },
       select: { id: true, slugAliases: true },
     });
 

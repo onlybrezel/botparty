@@ -649,6 +649,12 @@ class ApiClient {
     });
   }
 
+  async ensureRobotInviteCode(id: string) {
+    return this.request<{ id: string; inviteCode: string }>(`/robots/${id}/ensure-invite`, {
+      method: 'POST',
+    });
+  }
+
   async getAllowedUsers(robotId: string) {
     return this.request<AllowedUserRecord[]>(`/robots/${robotId}/allowed-users`);
   }

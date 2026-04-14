@@ -214,6 +214,8 @@ services:
       CORS_ORIGIN: ${CORS_ORIGIN:-https://botparty.live}
       THROTTLE_TTL: ${THROTTLE_TTL:-60000}
       THROTTLE_LIMIT: ${THROTTLE_LIMIT:-100}
+      FASTIFY_BODY_LIMIT: ${FASTIFY_BODY_LIMIT:-5242880}
+      THUMBNAIL_STORAGE_DIR: ${THUMBNAIL_STORAGE_DIR:-/app/data/robot-thumbnails}
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
       SEED_DEMO_USER_PASSWORD: ${SEED_DEMO_USER_PASSWORD:-}
     depends_on:
@@ -232,6 +234,7 @@ services:
       - frontend
     volumes:
       - ./data/livekit-recordings:/recordings:ro
+      - ./data/robot-thumbnails:/app/data/robot-thumbnails
     healthcheck:
       test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:4000/api/v1/health/live 2>/dev/null && echo ok || exit 1"]
       interval: 3s
