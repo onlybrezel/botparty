@@ -470,6 +470,7 @@ export default function DashboardPage() {
   const [obsHelpOpen, setObsHelpOpen] = useState(false);
   const previousPendingActionTypesRef = useRef<RemoteActionType[]>([]);
   const previewRefreshInFlightRef = useRef(false);
+  const editFormRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
     if (!hasHydrated) {
@@ -1333,27 +1334,130 @@ export default function DashboardPage() {
           <p className="text-sm text-[var(--muted-foreground)]">Loading robots...</p>
         ) : robots.length === 0 ? (
           <p className="text-sm text-[var(--muted-foreground)]">No robots yet. Create your first robot above.</p>
-        ) : (
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-            <aside className="space-y-2 lg:col-span-4">
-              {robots.map((robot) => (
-                <button
-                  key={robot.id}
-                  onClick={() => setSelectedId(robot.id)}
-                  className={`w-full rounded-lg border px-3 py-2 text-left text-sm transition ${
-                    selectedId === robot.id
-                      ? 'border-[var(--primary)] bg-[var(--primary)]/10'
-                      : 'border-[var(--border)] bg-[var(--background)] hover:border-[var(--muted-foreground)]'
-                  }`}
-                >
-                  <p className="font-semibold">{robot.name}</p>
-                  <p className="text-xs text-[var(--muted-foreground)]">/{robot.slug}</p>
-                </button>
-              ))}
-            </aside>
-
-            <div className="lg:col-span-8">
-              {selectedRobot ? (
+        ) : !selectedRobot ? (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {robots.map((robot) => {
+                const _seed = robot.slug.split('').reduce((s, ch) => s + ch.charCodeAt(0), 0);
+                const _hue = _seed % 360;
+                return (
+                  <button
+                    key={robot.id}
+                    type="button"
+                    onClick={() => setSelectedId(robot.id)}
+                    className="group overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)] text-left transition hover:border-violet-500/40 hover:-translate-y-0.5"
+                  >
+                    <div
+                      className="relative flex h-28 items-center justify-center overflow-hidden"
+                      style={!robot.thumbnailUrl ? { background: `linear-gradient(135deg, hsla(${_hue}, 75%, 55%, 0.25), hsla(${(_hue + 50) % 360}, 80%, 50%, 0.08))` } : undefined}
+                    >
+                      {robot.thumbnailUrl ? (
+                        <img src={robot.thumbnailUrl} alt={robot.name} className="h-full w-full object-cover" />
+                      ) : (
+                        <>
+                          <div className="absolute inset-0 opacity-30" style={{ backgroundImage: 'radial-gradient(circle at 20% 20%, rgba(255,255,255,0.25), transparent 45%)' }} />
+                          <span className="relative text-3xl font-black text-white/60">{robot.name.trim().charAt(0).toUpperCase()}</span>
+                        </>
+                      )}
+                      <div className="absolute left-2 top-2">
+                        {robot.status === 'ONLINE' ? (
+                          <span className="flex items-center gap-1 rounded-full bg-[var(--live)]/90 px-2 py-0.5 text-[10px] font-semibold text-white">
+                            <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse-dot" />
+                            LIVE
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-zinc-700/90 px-2 py-0.5 text-[10px] font-medium text-zinc-300">Offline</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="p-3">
+                      <p className="truncate text-sm font-semibold transition-colors group-hover:text-violet-400">{robot.name}</p>
+                      <p className="text-xs text-[var(--muted-foreground)]">/{robot.slug}</p>
+                      {robot.tags.length > 0 && (
+                        <div className="mt-1.5 flex flex-wrap gap-1">
+                          {robot.tags.slice(0, 3).map((tag) => (
+                            <span key={tag} className="rounded-full border border-[var(--border)] px-1.5 py-0.5 text-[10px] text-[var(--muted-foreground)]">{tag}</span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="flex items-start gap-5">
+              <aside className="hidden w-[200px] shrink-0 lg:block">
+                <div className="sticky top-4 flex flex-col gap-3">
+                  <div className="space-y-1.5">
+                    {robots.map((robot) => {
+                      const _seed = robot.slug.split('').reduce((s, ch) => s + ch.charCodeAt(0), 0);
+                      const _hue = _seed % 360;
+                      return (
+                        <button
+                          key={robot.id}
+                          type="button"
+                          onClick={() => setSelectedId(robot.id)}
+                          className={`flex w-full items-center gap-2 rounded-lg border px-2 py-1.5 text-left text-xs transition ${
+                            selectedId === robot.id
+                              ? 'border-violet-500/50 bg-violet-500/10 text-[var(--foreground)]'
+                              : 'border-[var(--border)] text-[var(--muted-foreground)] hover:border-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+                          }`}
+                        >
+                          <div
+                            className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-xs font-bold text-white"
+                            style={{ background: `linear-gradient(135deg, hsla(${_hue}, 75%, 55%, 0.5), hsla(${(_hue + 50) % 360}, 80%, 50%, 0.3))` }}
+                          >
+                            {robot.name.trim().charAt(0).toUpperCase()}
+                          </div>
+                          <span className="min-w-0 flex-1 truncate font-medium">{robot.name}</span>
+                          {robot.status === 'ONLINE' && (
+                            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="space-y-0.5 border-t border-[var(--border)] pt-3">
+                    {[
+                      { id: 'section-settings', label: 'Settings' },
+                      { id: 'section-token', label: 'Token & Links' },
+                      { id: 'section-operations', label: 'Operations' },
+                      { id: 'section-controls', label: 'Controls' },
+                      { id: 'section-monitoring', label: 'Monitoring' },
+                    ].map((s) => (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onClick={() => document.getElementById(s.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                        className="w-full rounded px-2 py-1.5 text-left text-xs text-[var(--muted-foreground)] transition hover:bg-[var(--muted)] hover:text-[var(--foreground)]"
+                      >
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="space-y-2 border-t border-[var(--border)] pt-3">
+                    <button
+                      type="button"
+                      disabled={saving}
+                      onClick={() => editFormRef.current?.requestSubmit()}
+                      className="flex w-full items-center justify-center gap-2 rounded-lg bg-[var(--primary)] px-3 py-2 text-xs font-semibold text-white hover:bg-[var(--primary-hover)] disabled:opacity-60"
+                    >
+                      <Save className="h-3.5 w-3.5" />
+                      {saving ? 'Saving...' : 'Save'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={deleting}
+                      onClick={() => void handleDelete()}
+                      className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-red-500/40 px-3 py-2 text-xs font-semibold text-red-300 disabled:opacity-60"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      {deleting ? 'Deleting...' : 'Delete'}
+                    </button>
+                  </div>
+                </div>
+              </aside>
+              <div className="min-w-0 flex-1">
                 <>
                   {/* Live preview */}
                   <div className="mb-4 overflow-hidden rounded-xl border border-[var(--border)] bg-black">
@@ -1397,8 +1501,8 @@ export default function DashboardPage() {
                     </div>
                   </div>
 
-                <form onSubmit={handleSave} className="space-y-3">
-                  <div className="flex items-center gap-3">
+                <form ref={editFormRef} onSubmit={handleSave} className="space-y-3">
+                  <div id="section-settings" className="scroll-mt-4 flex items-center gap-3">
                     <span className="shrink-0 text-[11px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)]">Settings</span>
                     <div className="h-px flex-1 bg-[var(--border)]" />
                   </div>
@@ -1708,7 +1812,7 @@ export default function DashboardPage() {
                     />
                   </div>
 
-                  <div className="flex items-center gap-3 pt-2">
+                  <div id="section-token" className="scroll-mt-4 flex items-center gap-3 pt-2">
                     <span className="shrink-0 text-[11px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)]">Token & Links</span>
                     <div className="h-px flex-1 bg-[var(--border)]" />
                   </div>
@@ -1777,7 +1881,7 @@ export default function DashboardPage() {
                     </div>
                   )}
 
-                  <div className="flex items-center gap-3 pt-2">
+                  <div id="section-operations" className="scroll-mt-4 flex items-center gap-3 pt-2">
                     <span className="shrink-0 text-[11px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)]">Operations</span>
                     <div className="h-px flex-1 bg-[var(--border)]" />
                   </div>
@@ -1949,7 +2053,7 @@ export default function DashboardPage() {
                     </div>
                   )}
 
-                  <div className="flex items-center gap-3 pt-2">
+                  <div id="section-controls" className="scroll-mt-4 flex items-center gap-3 pt-2">
                     <span className="shrink-0 text-[11px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)]">Controls</span>
                     <div className="h-px flex-1 bg-[var(--border)]" />
                   </div>
@@ -2566,7 +2670,7 @@ export default function DashboardPage() {
                     )}
                   </div>
 
-                  <div className="flex items-center gap-3 pt-2">
+                  <div id="section-monitoring" className="scroll-mt-4 flex items-center gap-3 pt-2">
                     <span className="shrink-0 text-[11px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)]">Monitoring</span>
                     <div className="h-px flex-1 bg-[var(--border)]" />
                   </div>
@@ -2654,7 +2758,7 @@ export default function DashboardPage() {
                     )}
                   </div>
 
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-2 lg:hidden">
                     <button
                       type="submit"
                       disabled={saving}
@@ -2675,13 +2779,8 @@ export default function DashboardPage() {
                   </div>
                 </form>
                 </>
-              ) : (
-                <div className="rounded-xl border border-dashed border-[var(--border)] bg-[var(--background)] p-6 text-sm text-[var(--muted-foreground)]">
-                  Select a robot on the left to edit its settings.
-                </div>
-              )}
+              </div>
             </div>
-          </div>
         )}
       </section>
     </div>
