@@ -341,6 +341,11 @@ export class RobotsService {
     const robots = await this.prisma.robot.findMany({
       where: { ownerId },
       orderBy: { createdAt: 'desc' },
+      include: {
+        owner: {
+          select: { id: true, username: true, displayName: true, avatarUrl: true },
+        },
+      },
     });
     const normalizedRobots = await Promise.all(robots.map((robot) => this.ensureInviteCodeForManagedRobot(robot)));
     return normalizedRobots.map((robot) => this.sanitizeManagedRobot(robot));
@@ -394,6 +399,11 @@ export class RobotsService {
         inviteCode: nextInviteCode,
         metadata: metadata as Prisma.InputJsonValue,
         ...slugUpdate,
+      },
+      include: {
+        owner: {
+          select: { id: true, username: true, displayName: true, avatarUrl: true },
+        },
       },
     });
     return this.sanitizeManagedRobot(updated);
@@ -452,6 +462,11 @@ export class RobotsService {
         inviteCode: nextInviteCode,
         metadata: metadata as Prisma.InputJsonValue,
         ...slugUpdate,
+      },
+      include: {
+        owner: {
+          select: { id: true, username: true, displayName: true, avatarUrl: true },
+        },
       },
     });
     return this.sanitizeManagedRobot(updated);
