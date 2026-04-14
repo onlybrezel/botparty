@@ -57,7 +57,9 @@ FROM node:24-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 
-RUN addgroup -g 1001 botparty && adduser -u 1001 -G botparty -D -s /bin/sh botparty
+RUN apk add --no-cache su-exec \
+ && addgroup -g 1001 botparty \
+ && adduser -u 1001 -G botparty -D -s /bin/sh botparty
 
 # Production node_modules (no devDeps)
 COPY --from=prod-deps --chown=botparty:botparty /app/node_modules          ./node_modules
@@ -79,6 +81,5 @@ COPY --from=build-api    --chown=botparty:botparty /app/apps/api/dist           
 COPY --chown=botparty:botparty docker/api/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-USER botparty
 EXPOSE 4000
 ENTRYPOINT ["/entrypoint.sh"]

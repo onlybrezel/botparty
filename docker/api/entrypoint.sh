@@ -8,6 +8,14 @@ echo "  BotParty API  –  startup"
 echo "════════════════════════════════════════"
 
 SCHEMA="packages/prisma/prisma/schema.prisma"
+APP_USER="botparty"
+APP_GROUP="botparty"
+THUMBNAIL_DIR="${THUMBNAIL_STORAGE_DIR:-/app/data/robot-thumbnails}"
+
+echo "📁 Preparing writable runtime directories..."
+mkdir -p "$THUMBNAIL_DIR"
+chown -R "${APP_USER}:${APP_GROUP}" "$THUMBNAIL_DIR" || true
+chmod 775 "$THUMBNAIL_DIR" || true
 
 # 1. Apply DB schema changes
 echo "🔄 Synchronizing database schema..."
@@ -64,5 +72,4 @@ echo "════════════════════════�
 echo "  Starting NestJS API..."
 echo "════════════════════════════════════════"
 
-exec node apps/api/dist/main.js
-
+exec su-exec "${APP_USER}:${APP_GROUP}" node apps/api/dist/main.js
