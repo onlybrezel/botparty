@@ -178,7 +178,16 @@ export class RobotsService {
     const accessPassword = data.accessPassword;
     const baseData = this.stripRobotWriteFields(data);
 
-    const slug = this.generateSlug(data.name);
+    let slug = this.generateSlug(data.name);
+    if (data.slug) {
+      const nextSlug = this.validateAndNormalizeSlugInput(data.slug);
+      const conflict = await this.prisma.robot.findUnique({ where: { slug: nextSlug }, select: { id: true } });
+      if (conflict) {
+        throw new ConflictException('This slug is already taken');
+      }
+      await this.reclaimSlugAlias(nextSlug, '__none__');
+      slug = nextSlug;
+    }
     const streamKey = randomBytes(32).toString('hex');
     const claimToken = randomBytes(32).toString('hex');
     const passwordHash =

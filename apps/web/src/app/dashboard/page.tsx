@@ -1272,6 +1272,24 @@ export default function DashboardPage() {
               onChange={(event) => setCreateForm((prev) => ({ ...prev, name: event.target.value }))}
               required
             />
+            <div className="flex items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm">
+              <span className="shrink-0 text-[var(--muted-foreground)]">/robot/your-username/</span>
+              <input
+                className="min-w-0 flex-1 bg-transparent outline-none"
+                placeholder="custom-slug (optional)"
+                value={createForm.slug}
+                onChange={(event) =>
+                  setCreateForm((prev) => ({
+                    ...prev,
+                    slug: event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''),
+                  }))
+                }
+                pattern="[a-z0-9][a-z0-9-]*[a-z0-9]"
+                minLength={3}
+                maxLength={50}
+                title="3-50 lowercase letters, numbers, and hyphens. No leading or trailing hyphen."
+              />
+            </div>
             <textarea
               className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
               placeholder="Description"
@@ -2890,7 +2908,7 @@ function ControlBuilderPreview({ draft }: { draft: ControlButtonDraft }) {
       <p className="mb-2 text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">Live Preview</p>
 
       {draft.controlKind === 'button' ? (
-        <div className="space-y-2">
+        <div>
           <button
             type="button"
             className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--muted)] px-3 py-2 text-sm font-semibold"
@@ -2903,11 +2921,15 @@ function ControlBuilderPreview({ draft }: { draft: ControlButtonDraft }) {
                 {draft.hotKey}
               </span>
             ) : null}
+            <span className="rounded border border-current/40 px-1.5 py-0.5 text-[10px] opacity-90">
+              {draft.cooldownMs}ms
+            </span>
+            {draft.color ? (
+              <span className="rounded border border-current/40 px-1.5 py-0.5 text-[10px] font-mono opacity-90">
+                {draft.color}
+              </span>
+            ) : null}
           </button>
-          <div className="flex flex-wrap gap-1.5 text-[10px] text-[var(--muted-foreground)]">
-            <span className="rounded border border-[var(--border)] px-1.5 py-0.5">Cooldown {draft.cooldownMs}ms</span>
-            {draft.color && <span className="rounded border border-[var(--border)] px-1.5 py-0.5 font-mono">{draft.color}</span>}
-          </div>
         </div>
       ) : draft.controlKind === 'slider' ? (
         <div className="space-y-2">
@@ -2926,20 +2948,22 @@ function ControlBuilderPreview({ draft }: { draft: ControlButtonDraft }) {
               }`}
             />
             <div className="text-xs text-[var(--muted-foreground)]">
-              <p className="flex items-center gap-1.5 font-semibold text-[var(--foreground)]">
+              <p className="flex flex-wrap items-center gap-1.5 font-semibold text-[var(--foreground)]">
                 <span>{draft.label.trim() || 'Slider'}</span>
                 {draft.hotKey ? (
                   <span className="rounded border border-[var(--border)] px-1 py-0.5 text-[10px] font-mono uppercase text-[var(--muted-foreground)]">
                     {draft.hotKey}
                   </span>
                 ) : null}
+                <span className="rounded border border-[var(--border)] px-1 py-0.5 text-[10px] text-[var(--muted-foreground)]">
+                  {draft.cooldownMs}ms
+                </span>
+                <span className="rounded border border-[var(--border)] px-1 py-0.5 text-[10px] text-[var(--muted-foreground)]">
+                  {draft.sliderMin} to {draft.sliderMax}
+                </span>
               </p>
               <p>{sliderValue.toFixed(0)}</p>
             </div>
-          </div>
-          <div className="flex flex-wrap gap-1.5 text-[10px] text-[var(--muted-foreground)]">
-            <span className="rounded border border-[var(--border)] px-1.5 py-0.5">Range {draft.sliderMin} to {draft.sliderMax}</span>
-            <span className="rounded border border-[var(--border)] px-1.5 py-0.5">Cooldown {draft.cooldownMs}ms</span>
           </div>
         </div>
       ) : (
@@ -2965,20 +2989,20 @@ function ControlBuilderPreview({ draft }: { draft: ControlButtonDraft }) {
               />
             </div>
             <div className="text-xs text-[var(--muted-foreground)]">
-              <p className="flex items-center gap-1.5 font-semibold text-[var(--foreground)]">
+              <p className="flex flex-wrap items-center gap-1.5 font-semibold text-[var(--foreground)]">
                 <span>{draft.label.trim() || 'XY Pad'}</span>
                 {draft.hotKey ? (
                   <span className="rounded border border-[var(--border)] px-1 py-0.5 text-[10px] font-mono uppercase text-[var(--muted-foreground)]">
                     {draft.hotKey}
                   </span>
                 ) : null}
+                <span className="rounded border border-[var(--border)] px-1 py-0.5 text-[10px] text-[var(--muted-foreground)]">
+                  {draft.cooldownMs}ms
+                </span>
               </p>
               <p>x: {xyValue.x.toFixed(0)}</p>
               <p>y: {xyValue.y.toFixed(0)}</p>
             </div>
-          </div>
-          <div className="flex flex-wrap gap-1.5 text-[10px] text-[var(--muted-foreground)]">
-            <span className="rounded border border-[var(--border)] px-1.5 py-0.5">Cooldown {draft.cooldownMs}ms</span>
           </div>
         </div>
       )}

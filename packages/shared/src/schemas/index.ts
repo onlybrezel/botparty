@@ -9,6 +9,15 @@ const robotStreamCameraSchema = z.object({
   publishMode: z.enum(['always_on', 'preview_only', 'on_demand']).optional(),
 });
 
+const robotSlugSchema = z
+  .string()
+  .min(3)
+  .max(50)
+  .regex(
+    /^[a-z0-9][a-z0-9-]*[a-z0-9]$/,
+    'Slug must be 3-50 lowercase alphanumeric characters and hyphens, without a leading or trailing hyphen',
+  );
+
 // ─── Auth Schemas ────────────────────────────────────
 export const usernameSchema = z
   .string()
@@ -44,6 +53,7 @@ export const resetPasswordSchema = z.object({
 // ─── Robot Schemas ───────────────────────────────────
 export const createRobotSchema = z.object({
   name: z.string().min(1).max(LIMITS.MAX_ROBOT_NAME_LENGTH),
+  slug: robotSlugSchema.optional(),
   description: z.string().max(LIMITS.MAX_ROBOT_DESCRIPTION_LENGTH).optional(),
   visibility: z.enum(['PUBLIC', 'UNLISTED', 'PRIVATE']).default('PUBLIC'),
   accessMode: z.enum(['OPEN', 'PASSWORD', 'LINK_ONLY', 'ALLOWED_USERS']).default('OPEN'),
@@ -79,15 +89,7 @@ export const createRobotSchema = z.object({
 });
 
 export const updateRobotSchema = createRobotSchema.partial().extend({
-  slug: z
-    .string()
-    .min(3)
-    .max(50)
-    .regex(
-      /^[a-z0-9][a-z0-9-]*[a-z0-9]$/,
-      'Slug must be 3-50 lowercase alphanumeric characters and hyphens, without a leading or trailing hyphen',
-    )
-    .optional(),
+  slug: robotSlugSchema.optional(),
 });
 
 // ─── Control Schemas ─────────────────────────────────

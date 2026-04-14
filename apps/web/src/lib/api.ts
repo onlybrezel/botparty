@@ -45,6 +45,7 @@ export interface RobotManaged extends RobotPublic {
 
 export interface RobotMutationInput {
   name?: string;
+  slug?: string;
   description?: string;
   visibility?: 'PUBLIC' | 'UNLISTED' | 'PRIVATE';
   accessMode?: 'OPEN' | 'PASSWORD' | 'LINK_ONLY' | 'ALLOWED_USERS';
