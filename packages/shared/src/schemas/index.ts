@@ -55,6 +55,7 @@ export const createRobotSchema = z.object({
   name: z.string().min(1).max(LIMITS.MAX_ROBOT_NAME_LENGTH),
   slug: robotSlugSchema.optional(),
   description: z.string().max(LIMITS.MAX_ROBOT_DESCRIPTION_LENGTH).optional(),
+  thumbnailUrl: z.string().url().max(512).optional(),
   visibility: z.enum(['PUBLIC', 'UNLISTED', 'PRIVATE']).default('PUBLIC'),
   accessMode: z.enum(['OPEN', 'PASSWORD', 'LINK_ONLY', 'ALLOWED_USERS']).default('OPEN'),
   accessPassword: z.string().min(4).max(64).optional(),

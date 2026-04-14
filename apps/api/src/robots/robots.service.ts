@@ -156,6 +156,8 @@ const SLUG_PROFANITY_TERMS = [
   'hakenkreuz',
 ];
 
+const ROBOT_TEXT_PROFANITY_TERMS = Array.from(new Set(SLUG_PROFANITY_TERMS));
+
 type PolicyCacheEntry = {
   access: RobotAccessPolicy;
   stream: RobotStreamPolicy;
@@ -174,6 +176,7 @@ export class RobotsService {
 
   async create(ownerId: string, input: z.infer<typeof createRobotSchema>) {
     const data = createRobotSchema.parse(input);
+    this.assertRobotTextAllowed(data);
     const metadata = this.mergeMetadata(null, data.acl, data.stream);
     const accessPassword = data.accessPassword;
     const baseData = this.stripRobotWriteFields(data);
@@ -367,6 +370,7 @@ export class RobotsService {
     }
 
     const data = updateRobotSchema.parse(input);
+    this.assertRobotTextAllowed(data);
     const metadata = this.mergeMetadata(robot.metadata, data.acl, data.stream);
     const accessPassword = data.accessPassword;
     const baseData = this.stripRobotWriteFields(data);
@@ -421,6 +425,7 @@ export class RobotsService {
   async updateByStaff(id: string, input: z.infer<typeof updateRobotSchema>) {
     const existing = await this.findById(id);
     const data = updateRobotSchema.parse(input);
+    this.assertRobotTextAllowed(data);
 
     const current = await this.prisma.robot.findUnique({
       where: { id },
@@ -602,6 +607,24 @@ export class RobotsService {
         metadata: this.clearBoundDeviceMetadata(robot.metadata) as Prisma.InputJsonValue,
       },
       select: { id: true, claimToken: true },
+    });
+  }
+
+  async regenerateInviteCode(id: string, ownerId: string) {
+    const robot = await this.findById(id);
+    if (robot.ownerId !== ownerId) {
+      throw new ForbiddenException('Not your robot');
+    }
+
+    if (robot.accessMode !== 'LINK_ONLY') {
+      throw new BadRequestException('Invite links are only used in link-only mode');
+    }
+
+    const inviteCode = await this.generateUniqueInviteCode();
+    return this.prisma.robot.update({
+      where: { id },
+      data: { inviteCode },
+      select: { id: true, inviteCode: true },
     });
   }
 
@@ -1564,6 +1587,53 @@ export class RobotsService {
     }
 
     return slug;
+  }
+
+  private assertRobotTextAllowed(input: {
+    name?: string;
+    description?: string;
+    tags?: string[];
+  }) {
+    this.assertFieldModeration('name', input.name);
+    this.assertFieldModeration('description', input.description);
+    for (const tag of input.tags ?? []) {
+      this.assertFieldModeration('tag', tag);
+    }
+  }
+
+  private assertFieldModeration(field: 'name' | 'description' | 'tag', value?: string) {
+    if (!value) {
+      return;
+    }
+
+    const normalized = this.normalizeModerationText(value);
+    if (!normalized) {
+      return;
+    }
+
+    const compact = normalized.replace(/[\s_-]+/g, '');
+    const blocked = ROBOT_TEXT_PROFANITY_TERMS.some((term) => {
+      return normalized.includes(term) || compact.includes(term);
+    });
+
+    if (!blocked) {
+      return;
+    }
+
+    if (field === 'tag') {
+      throw new BadRequestException('One or more tags are blocked by moderation policy');
+    }
+    throw new BadRequestException(`${field} blocked by moderation policy`);
+  }
+
+  private normalizeModerationText(value: string): string {
+    return value
+      .toLowerCase()
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9\s_-]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
   private async reclaimSlugAlias(slug: string, excludeRobotId: string) {

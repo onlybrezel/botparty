@@ -158,6 +158,14 @@ export class RobotsController {
     return this.robotsService.regenerateClaimToken(id, user.sub);
   }
 
+  @Post(':id/regenerate-invite')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Regenerate invite code for link-only access' })
+  async regenerateInviteCode(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.robotsService.regenerateInviteCode(id, user.sub);
+  }
+
   @Get(':id/allowed-users')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()

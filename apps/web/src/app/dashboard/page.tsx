@@ -69,6 +69,7 @@ type RobotFormState = {
   name: string;
   slug: string;
   description: string;
+  thumbnailUrl: string;
   roomMode: RoomMode;
   queueMode: 'FIRST_COME' | 'VOTING' | 'DISABLED';
   aclVideo: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
@@ -87,6 +88,7 @@ const DEFAULT_CREATE_FORM: RobotFormState = {
   name: '',
   slug: '',
   description: '',
+  thumbnailUrl: '',
   roomMode: 'PUBLIC',
   queueMode: 'FIRST_COME',
   aclVideo: 'AUTHENTICATED',
@@ -133,21 +135,29 @@ const accessModeOptions: Array<{
   title: string;
   description: string;
 }> = [
-  { value: 'ALL', title: 'Everyone', description: 'Also allowed without login' },
+  { value: 'ALL', title: 'Everyone', description: 'Guests and signed-in users can access this' },
   {
     value: 'AUTHENTICATED',
-    title: 'Authenticated only',
-    description: 'Requires login',
+    title: 'Signed-in users only',
+    description: 'Requires an account login',
   },
   { value: 'DISABLED', title: 'Disabled', description: 'Function is disabled' },
 ];
 
 const controlAccessOptions: Array<{ value: ControlButtonAccess; label: string }> = [
-  { value: ControlButtonAccessEnum.EVERYONE, label: 'Everyone' },
+  { value: ControlButtonAccessEnum.EVERYONE, label: 'Everyone (guests + signed-in)' },
   { value: ControlButtonAccessEnum.QUEUE_TURN, label: 'Current turn' },
   { value: ControlButtonAccessEnum.MODERATOR, label: 'Moderator' },
   { value: ControlButtonAccessEnum.OWNER, label: 'Owner' },
 ];
+
+const DASHBOARD_SECTIONS = [
+  { id: 'section-settings', label: 'Settings' },
+  { id: 'section-token', label: 'Token & Links' },
+  { id: 'section-controls', label: 'Controls' },
+  { id: 'section-operations', label: 'Operations' },
+  { id: 'section-monitoring', label: 'Monitoring' },
+] as const;
 
 const CONTROL_PRESETS: Array<{ key: ControlPresetKey; label: string }> = [
   { key: 'ptz-pan', label: 'PTZ Pan (Horizontal slider)' },
@@ -155,14 +165,6 @@ const CONTROL_PRESETS: Array<{ key: ControlPresetKey; label: string }> = [
   { key: 'drive-speed', label: 'Drive Speed (0..100 slider)' },
   { key: 'gripper', label: 'Gripper (Center slider)' },
   { key: 'arm-xy', label: 'Arm XY Pad' },
-];
-
-const ROOM_MODE_OPTIONS: Array<{ value: RoomMode; label: string; description: string }> = [
-  { value: 'PUBLIC', label: 'Public', description: 'Visible in Explore, anyone can enter' },
-  { value: 'LINK_ONLY', label: 'Link only', description: 'Not in Explore, anyone with the invite link' },
-  { value: 'PASSWORD', label: 'Password', description: 'Password-protected room' },
-  { value: 'ALLOWED_USERS', label: 'Allow list', description: 'Only specific users you approve' },
-  { value: 'PRIVATE', label: 'Private', description: 'Only you (owner)' },
 ];
 
 function applyControlPreset(draft: ControlButtonDraft, preset: ControlPresetKey): ControlButtonDraft {
@@ -271,6 +273,7 @@ function toUpdatePayload(form: RobotFormState) {
     name: form.name.trim(),
     slug: form.slug.trim() || undefined,
     description: form.description.trim() || undefined,
+    thumbnailUrl: form.thumbnailUrl.trim() || undefined,
     visibility,
     accessMode,
     queueMode: form.queueMode,
@@ -302,6 +305,7 @@ function formFromRobot(robot: RobotManaged): RobotFormState {
     name: robot.name,
     slug: robot.slug,
     description: robot.description ?? '',
+    thumbnailUrl: robot.thumbnailUrl ?? '',
     roomMode: detectRoomMode(robot),
     queueMode: robot.queueMode,
     aclVideo: access?.video ?? 'AUTHENTICATED',
@@ -422,7 +426,7 @@ function draftFromControl(button: ControlButtonRecord): ControlButtonDraft {
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { accessToken, hasHydrated } = useAuth();
+  const { accessToken, hasHydrated, username } = useAuth();
 
   const [robots, setRobots] = useState<RobotManaged[]>([]);
   const [loading, setLoading] = useState(true);
@@ -442,6 +446,7 @@ export default function DashboardPage() {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+  const [regeneratingInvite, setRegeneratingInvite] = useState(false);
   const [opLoading, setOpLoading] = useState<string | null>(null);
   const [pendingActionTypes, setPendingActionTypes] = useState<RemoteActionType[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
@@ -473,6 +478,7 @@ export default function DashboardPage() {
   const [newIngressLabel, setNewIngressLabel] = useState('');
   const [newIngressCompatibilityMode, setNewIngressCompatibilityMode] = useState(false);
   const [obsHelpOpen, setObsHelpOpen] = useState(false);
+  const [activeSectionId, setActiveSectionId] = useState<string>(DASHBOARD_SECTIONS[0].id);
   const previousPendingActionTypesRef = useRef<RemoteActionType[]>([]);
   const previewRefreshInFlightRef = useRef(false);
   const editFormRef = useRef<HTMLFormElement>(null);
@@ -621,6 +627,42 @@ export default function DashboardPage() {
       active = false;
     };
   }, [selectedRobot?.id, accessToken]);
+
+  useEffect(() => {
+    if (!selectedRobot) {
+      return;
+    }
+
+    const sectionElements = DASHBOARD_SECTIONS
+      .map((entry) => document.getElementById(entry.id))
+      .filter((element): element is HTMLElement => Boolean(element));
+
+    if (sectionElements.length === 0) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio);
+        if (visible[0]?.target.id) {
+          setActiveSectionId(visible[0].target.id);
+        }
+      },
+      {
+        rootMargin: '-20% 0px -60% 0px',
+        threshold: [0.15, 0.35, 0.6],
+      },
+    );
+
+    for (const section of sectionElements) {
+      observer.observe(section);
+    }
+
+    setActiveSectionId('section-settings');
+    return () => observer.disconnect();
+  }, [selectedRobot?.id]);
 
   const refreshPreview = useCallback(async (forceRemount = false) => {
     if (!selectedRobot || !accessToken || selectedRobot.status !== 'ONLINE') {
@@ -784,7 +826,7 @@ export default function DashboardPage() {
       setSelectedId(created.id);
       setEditForm(formFromRobot(created));
       setCreateForm(DEFAULT_CREATE_FORM);
-      setStatus('Robot created. You can now copy the claim token to your Raspberry Pi config.');
+      setStatus('Robot created. You can now copy the claim token into your client config.');
       pushToast('Robot created.', 'success', 3000);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create robot';
@@ -869,7 +911,7 @@ export default function DashboardPage() {
           robot.id === selectedRobot.id ? { ...robot, claimToken: nextToken.claimToken } : robot,
         ),
       );
-      setStatus('Claim token regenerated. Update config.yaml on your Pi before restarting the client.');
+      setStatus('Claim token regenerated. Update config.yaml before restarting the client.');
       pushToast('New claim token generated.', 'success', 3200);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to regenerate token';
@@ -894,11 +936,43 @@ export default function DashboardPage() {
 
   const buildRobotRoomHref = useCallback((robot: RobotManaged) => {
     const inviteSuffix =
-      robot.accessMode === 'LINK_ONLY' && robot.inviteCode
+      robot.inviteCode
         ? `?invite=${encodeURIComponent(robot.inviteCode)}`
         : '';
     return `/robot/${robot.owner.username}/${robot.slug}${inviteSuffix}`;
   }, []);
+
+  const regenerateInviteCode = async () => {
+    if (!accessToken || !selectedRobot || selectedRobot.accessMode !== 'LINK_ONLY') {
+      return;
+    }
+
+    if (!window.confirm('Generate a new invite code? Previously shared invite links will stop working immediately.')) {
+      return;
+    }
+
+    setRegeneratingInvite(true);
+    setError(null);
+    setStatus(null);
+
+    try {
+      api.setToken(accessToken);
+      const next = await api.regenerateRobotInviteCode(selectedRobot.id);
+      setRobots((prev) =>
+        prev.map((robot) =>
+          robot.id === selectedRobot.id ? { ...robot, inviteCode: next.inviteCode } : robot,
+        ),
+      );
+      setStatus('Invite code regenerated. Update any shared invite links.');
+      pushToast('Invite code regenerated.', 'success', 2800);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to regenerate invite code';
+      setError(message);
+      pushToast(message, 'error', 3200);
+    } finally {
+      setRegeneratingInvite(false);
+    }
+  };
 
   const copyInviteLink = async () => {
     if (!selectedRobot || selectedRobot.accessMode !== 'LINK_ONLY' || !selectedRobot.inviteCode) {
@@ -1241,6 +1315,8 @@ export default function DashboardPage() {
 
   if (!hasHydrated || !accessToken) return null;
 
+  const createSlugOwner = username?.trim() ? username : 'your-username';
+
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
       <section className="mb-6 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6 sm:p-8">
@@ -1251,7 +1327,7 @@ export default function DashboardPage() {
           <div>
             <h1 className="text-3xl font-black tracking-tight">Robots Dashboard</h1>
             <p className="text-sm text-[var(--muted-foreground)]">
-              Create robots, configure settings, and copy claim tokens for your Raspberry Pi client.
+              Create robots, configure settings, and copy claim tokens for your Linux robot client.
             </p>
           </div>
         </div>
@@ -1261,7 +1337,7 @@ export default function DashboardPage() {
       {status && <p className="mb-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300">{status}</p>}
 
       <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <form onSubmit={handleCreate} className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 sm:p-5">
+        <form onSubmit={handleCreate} autoComplete="off" className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 sm:p-5">
           <h2 className="mb-4 text-lg font-bold">Create Robot</h2>
 
           <div className="space-y-3">
@@ -1273,10 +1349,13 @@ export default function DashboardPage() {
               required
             />
             <div className="flex items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm">
-              <span className="shrink-0 text-[var(--muted-foreground)]">/robot/your-username/</span>
+              <span className="shrink-0 text-[var(--muted-foreground)]">/robot/{createSlugOwner}/</span>
               <input
                 className="min-w-0 flex-1 bg-transparent outline-none"
                 placeholder="custom-slug (optional)"
+                autoComplete="off"
+                inputMode="text"
+                spellCheck={false}
                 value={createForm.slug}
                 onChange={(event) =>
                   setCreateForm((prev) => ({
@@ -1298,17 +1377,17 @@ export default function DashboardPage() {
               onChange={(event) => setCreateForm((prev) => ({ ...prev, description: event.target.value }))}
             />
             <input
+              type="url"
+              className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+              placeholder="Thumbnail URL (optional)"
+              value={createForm.thumbnailUrl}
+              onChange={(event) => setCreateForm((prev) => ({ ...prev, thumbnailUrl: event.target.value }))}
+            />
+            <input
               className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
               placeholder="Tags (comma separated)"
               value={createForm.tags}
               onChange={(event) => setCreateForm((prev) => ({ ...prev, tags: event.target.value }))}
-            />
-            <input
-              type="password"
-              className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-              placeholder="Optional room password"
-              value={createForm.accessPassword}
-              onChange={(event) => setCreateForm((prev) => ({ ...prev, accessPassword: event.target.value }))}
             />
           </div>
 
@@ -1323,13 +1402,13 @@ export default function DashboardPage() {
         </form>
 
         <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 sm:p-5">
-          <h2 className="mb-4 text-lg font-bold">Raspberry Pi Quickstart</h2>
+          <h2 className="mb-4 text-lg font-bold">Linux Robot Client Quickstart</h2>
           <ol className="space-y-2 text-sm text-[var(--muted-foreground)]">
             <li>1. Create a robot and copy the claim token.</li>
-            <li>2. On your Pi: clone the botparty-client repository.</li>
+            <li>2. On your robot host: clone the botparty-client repository.</li>
             <li>3. Create a venv, install requirements, and copy config.example.yaml to config.yaml.</li>
-            <li>4. Paste your claim token and set api_url/livekit_url to your server URLs.</li>
-            <li>5. Start with: python -m botparty_robot</li>
+            <li>4. Paste your claim token in config.yaml.</li>
+            <li>5. Start with python -m botparty_robot.</li>
           </ol>
           <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--background)] p-3">
             <div className="flex items-center gap-2 text-sm font-semibold">
@@ -1339,12 +1418,16 @@ export default function DashboardPage() {
             <p className="mt-2 text-sm text-[var(--muted-foreground)]">
               Browser UI → BotParty API + LiveKit → Python robot client → hardware adapter
             </p>
-            <div className="mt-3 flex flex-wrap gap-2 text-xs text-[var(--muted-foreground)]">
-              {['L298N', 'Serial bridge', 'MQTT', 'GoPiGo', 'ThunderBorg', 'OWI arm', 'MAX7219'].map((item) => (
-                <span key={item} className="rounded-full border border-[var(--border)] px-2.5 py-1">
-                  {item}
-                </span>
-              ))}
+            <div className="mt-3">
+              <a
+                href="https://github.com/onlybrezel/botparty-client/blob/main/docs/index.md"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--foreground)] transition hover:border-[var(--muted-foreground)]"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                Robot Setup
+              </a>
             </div>
           </div>
         </div>
@@ -1441,18 +1524,19 @@ export default function DashboardPage() {
                     })}
                   </div>
                   <div className="space-y-0.5 border-t border-[var(--border)] pt-3">
-                    {[
-                      { id: 'section-settings', label: 'Settings' },
-                      { id: 'section-token', label: 'Token & Links' },
-                      { id: 'section-controls', label: 'Controls' },
-                      { id: 'section-operations', label: 'Operations' },
-                      { id: 'section-monitoring', label: 'Monitoring' },
-                    ].map((s) => (
+                    {DASHBOARD_SECTIONS.map((s) => (
                       <button
                         key={s.id}
                         type="button"
-                        onClick={() => document.getElementById(s.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                        className="w-full rounded px-2 py-1.5 text-left text-xs text-[var(--muted-foreground)] transition hover:bg-[var(--muted)] hover:text-[var(--foreground)]"
+                        onClick={() => {
+                          setActiveSectionId(s.id);
+                          document.getElementById(s.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        }}
+                        className={`w-full rounded px-2 py-1.5 text-left text-xs transition ${
+                          activeSectionId === s.id
+                            ? 'bg-violet-500/10 text-[var(--foreground)]'
+                            : 'text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)]'
+                        }`}
                       >
                         {s.label}
                       </button>
@@ -1524,7 +1608,7 @@ export default function DashboardPage() {
                     </div>
                   </div>
 
-                <form ref={editFormRef} onSubmit={handleSave} className="flex flex-col gap-3">
+                <form ref={editFormRef} onSubmit={handleSave} autoComplete="off" className="flex flex-col gap-3">
                   <div id="section-settings" className="scroll-mt-4 flex items-center gap-3">
                     <span className="shrink-0 text-[11px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)]">Settings</span>
                     <div className="h-px flex-1 bg-[var(--border)]" />
@@ -1549,6 +1633,9 @@ export default function DashboardPage() {
                         <span className="shrink-0 text-[var(--muted-foreground)]">/robot/{selectedRobot.owner.username}/</span>
                         <input
                           className="min-w-0 flex-1 bg-transparent outline-none"
+                          autoComplete="off"
+                          inputMode="text"
+                          spellCheck={false}
                           value={editForm.slug}
                           onChange={(event) =>
                             setEditForm((prev) => ({ ...prev, slug: event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') }))
@@ -1598,10 +1685,47 @@ export default function DashboardPage() {
                         />
                       </div>
                     ) : null}
+                    {editForm.roomMode === 'LINK_ONLY' && selectedRobot.inviteCode ? (
+                      <div className="space-y-2 sm:col-span-2 rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
+                        <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Invite Link</p>
+                        <code className="block break-all text-xs text-[var(--foreground)]">{buildRobotRoomHref(selectedRobot)}</code>
+                        <p className="text-[11px] text-[var(--muted-foreground)]">
+                          Invite code: <span className="font-semibold text-[var(--foreground)]">{selectedRobot.inviteCode}</span>
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={copyInviteLink}
+                            className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs"
+                          >
+                            <Copy className="h-3.5 w-3.5" />
+                            Copy invite link
+                          </button>
+                          <a
+                            href={buildRobotRoomHref(selectedRobot)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs"
+                          >
+                            <ExternalLink className="h-3.5 w-3.5" />
+                            Open invite link
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => void regenerateInviteCode()}
+                            disabled={regeneratingInvite}
+                            className="inline-flex items-center gap-2 rounded-lg border border-amber-500/40 px-3 py-1.5 text-xs text-amber-300 disabled:opacity-60"
+                          >
+                            <RefreshCcw className="h-3.5 w-3.5" />
+                            {regeneratingInvite ? 'Regenerating...' : 'Renew invite link'}
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
                     <div className="space-y-1">
                       <label className="inline-flex items-center gap-1 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
                         Queue Mode
-                        <span title="First come: next user in line gets control. Voting: viewers vote for the next controller. Disabled: no controller queue.">
+                        <span title="First come, first served gives control to the next user in line. Voting lets viewers vote for the next controller. Disabled turns queueing off entirely.">
                           <CircleHelp className="h-3.5 w-3.5" />
                         </span>
                       </label>
@@ -1841,6 +1965,19 @@ export default function DashboardPage() {
                   </div>
 
                   <div className="space-y-1">
+                      <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
+                        Thumbnail URL
+                      </label>
+                      <input
+                        type="url"
+                        className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+                        value={editForm.thumbnailUrl}
+                        onChange={(event) => setEditForm((prev) => ({ ...prev, thumbnailUrl: event.target.value }))}
+                        placeholder="https://..."
+                      />
+                    </div>
+
+                    <div className="space-y-1">
                     <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
                       Description
                     </label>
@@ -1905,34 +2042,6 @@ export default function DashboardPage() {
                       </button>
                     </div>
                   </div>
-
-                  {editForm.roomMode === 'LINK_ONLY' && selectedRobot.inviteCode && (
-                    <div className="order-2 rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
-                      <p className="mb-2 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Invite Link</p>
-                      <code className="block break-all text-xs text-[var(--foreground)]">
-                        {buildRobotRoomHref(selectedRobot)}
-                      </code>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={copyInviteLink}
-                          className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs"
-                        >
-                          <Copy className="h-3.5 w-3.5" />
-                          Copy invite link
-                        </button>
-                        <a
-                          href={buildRobotRoomHref(selectedRobot)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs"
-                        >
-                          <ExternalLink className="h-3.5 w-3.5" />
-                          Open invite link
-                        </a>
-                      </div>
-                    </div>
-                  )}
 
                   <div id="section-operations" className="order-4 scroll-mt-4 flex items-center gap-3 pt-2">
                     <span className="shrink-0 text-[11px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)]">Operations</span>

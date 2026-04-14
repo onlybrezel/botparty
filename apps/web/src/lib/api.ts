@@ -47,6 +47,7 @@ export interface RobotMutationInput {
   name?: string;
   slug?: string;
   description?: string;
+  thumbnailUrl?: string;
   visibility?: 'PUBLIC' | 'UNLISTED' | 'PRIVATE';
   accessMode?: 'OPEN' | 'PASSWORD' | 'LINK_ONLY' | 'ALLOWED_USERS';
   queueMode?: 'FIRST_COME' | 'VOTING' | 'DISABLED';
@@ -638,6 +639,12 @@ class ApiClient {
 
   async regenerateRobotToken(id: string) {
     return this.request<{ id: string; claimToken: string }>(`/robots/${id}/regenerate-token`, {
+      method: 'POST',
+    });
+  }
+
+  async regenerateRobotInviteCode(id: string) {
+    return this.request<{ id: string; inviteCode: string }>(`/robots/${id}/regenerate-invite`, {
       method: 'POST',
     });
   }

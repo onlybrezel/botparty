@@ -610,20 +610,20 @@ function VideoRenderer({
       return;
     }
 
-    if (!connected || !hadTrackRef.current || stallNotifiedRef.current || !onStreamStalled) {
+    if (!connected || stallNotifiedRef.current || !onStreamStalled) {
       return;
     }
 
-    // Give the room 8 s to recover before declaring a stall. 3 s was too
-    // aggressive: normal participant SID updates after brief reconnects
-    // caused premature token refreshes and a visible video drop.
+    // If we already had video before, recover quickly. For initial joins with
+    // no track yet, wait a bit longer before forcing a token refresh.
+    const stallDelayMs = hadTrackRef.current ? 8000 : 15000;
     const timeout = window.setTimeout(() => {
       if (stallNotifiedRef.current) {
         return;
       }
       stallNotifiedRef.current = true;
       onStreamStalled();
-    }, 8000);
+    }, stallDelayMs);
 
     return () => window.clearTimeout(timeout);
   }, [robotTrack, room.state, onStreamStalled]);
