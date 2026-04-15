@@ -789,7 +789,26 @@ class ApiClient {
         slug: string;
         status: 'ONLINE' | 'OFFLINE' | 'BUSY' | 'MAINTENANCE';
         description: string | null;
+        thumbnailUrl: string | null;
         visibility: 'PUBLIC' | 'UNLISTED' | 'PRIVATE';
+        accessMode: 'OPEN' | 'PASSWORD' | 'LINK_ONLY' | 'ALLOWED_USERS';
+        queueMode: 'FIRST_COME' | 'VOTING' | 'DISABLED';
+        maxTurnTime: number;
+        maxViewers: number;
+        maxControllers: number;
+        metadata: {
+          access?: {
+            video?: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
+            control?: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
+            chat?: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
+            estop?: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
+          };
+          stream?: {
+            targetBitrateKbps?: number;
+            activeCameraId?: string;
+            cameras?: RobotStreamCameraConfig[];
+          };
+        } | null;
         tags: string[];
         owner: { id: string; username: string; displayName: string | null };
       }>;

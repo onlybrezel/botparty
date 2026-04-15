@@ -1,7 +1,11 @@
+'use client';
+
 import Link from 'next/link';
 import Image from 'next/image';
+import { motion } from 'framer-motion';
 import { Bot } from 'lucide-react';
 import type { RobotPublic } from '@botparty/shared';
+import { useDesktopMotionPreference } from '@/lib/use-desktop-motion';
 
 function StatusBadge({ status }: { status: RobotPublic['status'] }) {
   if (status === 'ONLINE') {
@@ -39,6 +43,7 @@ interface Props {
 }
 
 export default function RobotCard({ robot }: Props) {
+  const motionEnabled = useDesktopMotionPreference();
   const seed = robot.slug
     .split('')
     .reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
@@ -51,12 +56,19 @@ export default function RobotCard({ robot }: Props) {
   const isApiThumbnail = robot.thumbnailUrl?.startsWith('/api/') ?? false;
 
   return (
-    <Link
-      href={`/robot/${robot.owner.username}/${robot.slug}`}
-      className="group block overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] transition duration-200 hover:border-violet-500/40 hover:-translate-y-0.5"
+    <motion.div
+      initial={motionEnabled ? { opacity: 0, y: 18 } : false}
+      animate={motionEnabled ? { opacity: 1, y: 0 } : undefined}
+      whileHover={motionEnabled ? { y: -6, scale: 1.01 } : undefined}
+      whileTap={motionEnabled ? { scale: 0.995 } : undefined}
+      transition={{ duration: 0.24, ease: 'easeOut' }}
     >
-      {/* Thumbnail */}
-      <div className="relative aspect-video overflow-hidden bg-[var(--muted)]">
+      <Link
+        href={`/robot/${robot.owner.username}/${robot.slug}`}
+        className="group block overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] transition duration-200 hover:border-violet-500/40 hover:-translate-y-0.5"
+      >
+        {/* Thumbnail */}
+        <div className="relative aspect-video overflow-hidden bg-[var(--muted)]">
         {robot.thumbnailUrl ? (
           <Image
             src={robot.thumbnailUrl}
@@ -95,10 +107,10 @@ export default function RobotCard({ robot }: Props) {
             {robot.viewerCount}
           </div>
         )}
-      </div>
+        </div>
 
-      {/* Info */}
-      <div className="p-4">
+        {/* Info */}
+        <div className="p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <h3 className="truncate text-base font-semibold text-[var(--foreground)] transition-colors group-hover:text-violet-400">
@@ -154,7 +166,8 @@ export default function RobotCard({ robot }: Props) {
                   : 'Link-only room'}
           </span>
         </div>
-      </div>
-    </Link>
+        </div>
+      </Link>
+    </motion.div>
   );
 }

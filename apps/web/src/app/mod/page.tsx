@@ -1,13 +1,15 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { motion } from 'framer-motion';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Shield, Search, Ban, Clock3, Trash2, RefreshCw, Activity, Server, Users, Bot, UserRound, Siren, ChevronRight } from 'lucide-react';
+import { Shield, Search, Ban, Clock3, Trash2, RefreshCw, Activity, Server, Users, Bot, UserRound, Siren, ChevronRight, Save, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/store';
 import { pushToast } from '@/lib/toast';
 import { Select } from '@/components/ui/select';
+import { useDesktopMotionPreference } from '@/lib/use-desktop-motion';
 
 type StaffUser = {
   id: string;
@@ -34,9 +36,20 @@ type UserDraft = {
 
 type RobotDraft = {
   name: string;
+  slug: string;
   description: string;
+  roomMode: 'PUBLIC' | 'LINK_ONLY' | 'PASSWORD' | 'ALLOWED_USERS' | 'PRIVATE';
+  queueMode: 'FIRST_COME' | 'VOTING' | 'DISABLED';
+  aclVideo: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
+  aclControl: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
+  aclChat: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
+  aclEStop: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
+  targetBitrateKbps: string;
+  maxTurnTime: string;
+  maxViewers: string;
+  maxControllers: string;
   tags: string;
-  visibility: 'PUBLIC' | 'UNLISTED' | 'PRIVATE';
+  accessPassword: string;
 };
 
 type ModView = 'moderation' | 'runtime' | 'robots' | 'users';
@@ -166,9 +179,92 @@ const statusClassName = (status: 'ONLINE' | 'OFFLINE' | 'BUSY' | 'MAINTENANCE') 
   }
 };
 
+const baseButtonClass =
+  'inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition duration-200 hover:-translate-y-0.5 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0 disabled:active:scale-100';
+
+const secondaryButtonClass = `${baseButtonClass} border-[var(--border)] bg-[var(--background)] text-[var(--foreground)]`;
+const primaryButtonClass = `${baseButtonClass} border-sky-400/40 bg-sky-500/10 text-sky-200`;
+const successButtonClass = `${baseButtonClass} border-emerald-500/40 bg-emerald-500/10 text-emerald-200`;
+const dangerButtonClass = `${baseButtonClass} border-red-500/40 bg-red-500/10 text-red-200`;
+
+function detectRoomMode(robot: { visibility: string; accessMode: string }) {
+  if (robot.visibility === 'PRIVATE') return 'PRIVATE' as const;
+  if (robot.accessMode === 'ALLOWED_USERS') return 'ALLOWED_USERS' as const;
+  if (robot.accessMode === 'LINK_ONLY') return 'LINK_ONLY' as const;
+  if (robot.accessMode === 'PASSWORD') return 'PASSWORD' as const;
+  return 'PUBLIC' as const;
+}
+
+function roomModeToFields(mode: RobotDraft['roomMode']) {
+  switch (mode) {
+    case 'PUBLIC':
+      return { visibility: 'PUBLIC' as const, accessMode: 'OPEN' as const };
+    case 'LINK_ONLY':
+      return { visibility: 'UNLISTED' as const, accessMode: 'LINK_ONLY' as const };
+    case 'PASSWORD':
+      return { visibility: 'PUBLIC' as const, accessMode: 'PASSWORD' as const };
+    case 'ALLOWED_USERS':
+      return { visibility: 'UNLISTED' as const, accessMode: 'ALLOWED_USERS' as const };
+    case 'PRIVATE':
+      return { visibility: 'PRIVATE' as const, accessMode: 'OPEN' as const };
+  }
+}
+
+function queueModeDescription(mode: RobotDraft['queueMode']) {
+  if (mode === 'VOTING') {
+    return 'Viewers vote who gets the next turn.';
+  }
+  if (mode === 'DISABLED') {
+    return 'No queue rotation. Controls stay directly available.';
+  }
+  return 'First come, first served turn rotation.';
+}
+
+function roomModeDescription(mode: RobotDraft['roomMode']) {
+  switch (mode) {
+    case 'PUBLIC':
+      return 'Everyone can open the room directly.';
+    case 'LINK_ONLY':
+      return 'The room stays unlisted and requires the invite link.';
+    case 'PASSWORD':
+      return 'The room stays public, but viewers need the shared room password.';
+    case 'ALLOWED_USERS':
+      return 'Only explicitly allowed accounts can enter.';
+    case 'PRIVATE':
+      return 'The room is hidden and only visible to the owner and staff.';
+  }
+}
+
+function createRobotDraft(
+  robot: NonNullable<Awaited<ReturnType<typeof api.getModerationOverview>>['robots']>[number],
+): RobotDraft {
+  const access = robot.metadata?.access;
+  const stream = robot.metadata?.stream;
+
+  return {
+    name: robot.name,
+    slug: robot.slug,
+    description: robot.description ?? '',
+    roomMode: detectRoomMode(robot),
+    queueMode: robot.queueMode,
+    aclVideo: access?.video ?? 'AUTHENTICATED',
+    aclControl: access?.control ?? 'AUTHENTICATED',
+    aclChat: access?.chat ?? 'AUTHENTICATED',
+    aclEStop: access?.estop ?? 'AUTHENTICATED',
+    targetBitrateKbps:
+      typeof stream?.targetBitrateKbps === 'number' ? String(stream.targetBitrateKbps) : '',
+    maxTurnTime: String(robot.maxTurnTime),
+    maxViewers: String(robot.maxViewers),
+    maxControllers: String(robot.maxControllers),
+    tags: robot.tags.join(', '),
+    accessPassword: '',
+  };
+}
+
 export default function ModDashboardPage() {
   const router = useRouter();
   const { accessToken, hasHydrated, role: authRole, userId: authUserId, setSession, logout } = useAuth();
+  const motionEnabled = useDesktopMotionPreference();
 
   const [allowed, setAllowed] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -677,28 +773,48 @@ export default function ModDashboardPage() {
 
   const startRobotEdit = (robot: NonNullable<Awaited<ReturnType<typeof api.getModerationOverview>>['robots']>[number]) => {
     setEditingRobotId(robot.id);
-    setRobotDraft({
-      name: robot.name,
-      description: robot.description ?? '',
-      tags: robot.tags.join(', '),
-      visibility: robot.visibility,
-    });
+    setRobotDraft(createRobotDraft(robot));
   };
 
   const saveRobotEdit = async () => {
     if (!editingRobotId || !robotDraft || !accessToken) return;
     try {
       api.setToken(accessToken);
+      const { visibility, accessMode } = roomModeToFields(robotDraft.roomMode);
+      const bitrate = Number(robotDraft.targetBitrateKbps);
+      const maxTurnTime = Math.max(1000, Math.round(Number(robotDraft.maxTurnTime) || 60000));
+      const maxViewers = Math.max(1, Math.round(Number(robotDraft.maxViewers) || 1000));
+      const maxControllers = Math.max(1, Math.round(Number(robotDraft.maxControllers) || 1));
       await api.updateRobotAsStaff(editingRobotId, {
         name: robotDraft.name.trim(),
+        slug: robotDraft.slug.trim() || undefined,
         description: robotDraft.description.trim() || undefined,
-        visibility: robotDraft.visibility,
+        visibility,
+        accessMode,
+        queueMode: robotDraft.queueMode,
+        maxTurnTime,
+        maxViewers,
+        maxControllers,
+        acl: {
+          video: robotDraft.aclVideo,
+          control: robotDraft.aclControl,
+          chat: robotDraft.aclChat,
+          estop: robotDraft.aclEStop,
+        },
+        stream: {
+          targetBitrateKbps:
+            Number.isFinite(bitrate) && bitrate >= 150 && bitrate <= 3000 ? Math.round(bitrate) : undefined,
+        },
         tags: robotDraft.tags
           .split(',')
           .map((tag) => tag.trim())
           .filter(Boolean)
           .slice(0, 12),
+        accessPassword:
+          robotDraft.roomMode === 'PASSWORD' ? robotDraft.accessPassword.trim() || undefined : undefined,
       });
+      setEditingRobotId(null);
+      setRobotDraft(null);
       await refresh();
       pushToast('Robot updated.', 'success');
     } catch (err) {
@@ -736,7 +852,7 @@ export default function ModDashboardPage() {
                 type="button"
                 onClick={() => void refresh()}
                 disabled={refreshing}
-                className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm disabled:opacity-60"
+                className={secondaryButtonClass}
               >
                 <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
                 {refreshing ? 'Updating...' : 'Update'}
@@ -747,14 +863,21 @@ export default function ModDashboardPage() {
               {overviewCards.map((card) => {
                 const Icon = card.icon;
                 return (
-                  <article key={card.key} className="rounded-2xl border border-[var(--border)] bg-[var(--background)]/90 p-4 backdrop-blur">
+                  <motion.article
+                    key={card.key}
+                    initial={motionEnabled ? { opacity: 0, y: 16 } : false}
+                    animate={motionEnabled ? { opacity: 1, y: 0 } : undefined}
+                    whileHover={motionEnabled ? { y: -4, scale: 1.01 } : undefined}
+                    transition={{ duration: 0.22, ease: 'easeOut' }}
+                    className="rounded-2xl border border-[var(--border)] bg-[var(--background)]/90 p-4 backdrop-blur"
+                  >
                     <div className="flex items-center justify-between gap-3">
                       <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">{card.label}</p>
                       <Icon className={`h-4 w-4 ${card.accent}`} />
                     </div>
                     <p className="mt-3 text-2xl font-black">{card.value}</p>
                     <p className="mt-1 text-xs text-[var(--muted-foreground)]">{card.detail}</p>
-                  </article>
+                  </motion.article>
                 );
               })}
             </div>
@@ -773,10 +896,12 @@ export default function ModDashboardPage() {
 
             <div className="mt-4 space-y-3">
               {actionItems.map((item, index) => (
-                <button
+                <motion.button
                   key={`${item.title}-${index}`}
                   type="button"
                   onClick={() => setActiveView(item.view)}
+                  whileHover={motionEnabled ? { x: 4 } : undefined}
+                  whileTap={motionEnabled ? { scale: 0.99 } : undefined}
                   className="flex w-full items-start justify-between gap-3 rounded-2xl border border-[var(--border)] bg-[var(--background)] px-4 py-3 text-left transition hover:border-sky-400/40 hover:bg-sky-500/5"
                 >
                   <div>
@@ -784,7 +909,7 @@ export default function ModDashboardPage() {
                     <p className="mt-1 text-xs text-[var(--muted-foreground)]">{item.detail}</p>
                   </div>
                   <ChevronRight className="mt-0.5 h-4 w-4 text-[var(--muted-foreground)]" />
-                </button>
+                </motion.button>
               ))}
             </div>
 
@@ -814,13 +939,15 @@ export default function ModDashboardPage() {
             const Icon = view.icon;
             const active = activeView === view.id;
             return (
-              <button
+              <motion.button
                 key={view.id}
                 type="button"
                 onClick={() => setActiveView(view.id)}
+                whileHover={motionEnabled ? { y: -4, scale: 1.01 } : undefined}
+                whileTap={motionEnabled ? { scale: 0.99 } : undefined}
                 className={`rounded-2xl border px-4 py-4 text-left transition ${
                   active
-                    ? 'border-sky-400/40 bg-sky-500/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]'
+                    ? 'border-sky-400/50 bg-sky-500/12 shadow-[0_14px_30px_rgba(14,165,233,0.12),inset_0_1px_0_rgba(255,255,255,0.04)]'
                     : 'border-[var(--border)] bg-[var(--card)] hover:border-sky-400/30 hover:bg-sky-500/5'
                 }`}
               >
@@ -833,7 +960,7 @@ export default function ModDashboardPage() {
                     <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">{view.description}</p>
                   </div>
                 </div>
-              </button>
+              </motion.button>
             );
           })}
         </div>
@@ -983,7 +1110,7 @@ export default function ModDashboardPage() {
                 type="button"
                 onClick={() => void stopAllRecordings()}
                 disabled={activeRecordings.length === 0 || recordingActionLoading !== null}
-                className="rounded border border-red-500/40 px-2 py-1 text-xs text-red-300 disabled:opacity-60"
+                className={dangerButtonClass}
               >
                 {recordingActionLoading === '__all__' ? 'Stopping all...' : 'Stop all'}
               </button>
@@ -1012,7 +1139,7 @@ export default function ModDashboardPage() {
                         type="button"
                         onClick={() => void stopRecordingForRobot(robot.id)}
                         disabled={recordingActionLoading !== null}
-                        className="rounded border border-red-500/40 px-2 py-1 text-xs text-red-300 disabled:opacity-60"
+                        className={dangerButtonClass}
                       >
                         {recordingActionLoading === robot.id ? 'Stopping...' : 'Stop'}
                       </button>
@@ -1226,13 +1353,13 @@ export default function ModDashboardPage() {
                     type="button"
                     onClick={() => void handleRuntimeRobotUpdate()}
                     disabled={runtimeActionLoading === selectedRuntimeRobot.id}
-                    className="rounded border border-emerald-500/40 px-2 py-1 text-xs text-emerald-300 disabled:opacity-60"
+                    className={successButtonClass}
                   >
                     {runtimeActionLoading === selectedRuntimeRobot.id ? 'Queueing...' : 'Force Update'}
                   </button>
                   <Link
                     href={`/robot/${selectedRuntimeRobot.owner.username}/${selectedRuntimeRobot.slug}`}
-                    className="rounded border border-sky-500/40 px-2 py-1 text-xs text-sky-300"
+                    className={primaryButtonClass}
                   >
                     Preview
                   </Link>
@@ -1360,7 +1487,7 @@ export default function ModDashboardPage() {
                         <button
                           type="button"
                           onClick={() => void unrestrict(entry.robot.id, entry.user.id)}
-                          className="ml-auto rounded border border-emerald-500/40 px-2 py-0.5 text-xs text-emerald-300"
+                          className={`ml-auto ${successButtonClass}`}
                         >
                           Unban
                         </button>
@@ -1476,237 +1603,361 @@ export default function ModDashboardPage() {
           </div>
         </div>
 
-        <div className="max-h-72 overflow-auto rounded-lg border border-[var(--border)]">
-          {filteredUsers.map((user) => (
-            <button
-              key={user.id}
-              type="button"
-              onClick={() => startUserEdit(user)}
-              className="grid w-full grid-cols-12 gap-2 border-b border-[var(--border)] px-3 py-2 text-left text-sm last:border-none hover:bg-[var(--muted)]"
-            >
-              <span className="col-span-3 truncate">{user.displayName ?? user.username}</span>
-              <span className="col-span-4 truncate text-[var(--muted-foreground)]">{user.email}</span>
-              <span className="col-span-2 text-xs text-[var(--muted-foreground)]">{user.role}</span>
-              <span className="col-span-2 text-right text-xs text-[var(--muted-foreground)]">{user.credits} cr</span>
-              <span className="col-span-1 text-right text-xs text-sky-300">Edit</span>
-            </button>
-          ))}
-        </div>
-
-        {editingUserId && userDraft && (
-          <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
-            <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Edit user</p>
-                <p className="mt-1 text-sm font-semibold">{selectedUser?.username ?? 'User'}</p>
-                <p className="text-xs text-[var(--muted-foreground)]">
-                  {viewerIsAdmin
-                    ? 'Admins can edit credentials, password and delete accounts.'
-                    : 'Mods can edit regular user profiles. Sensitive account changes stay admin-only.'}
-                </p>
-              </div>
-              {selectedUser ? (
-                <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
-                  <p>Role: {selectedUser.role}</p>
-                  <p>Status: {selectedUser.isActive ? 'Active' : 'Inactive'}</p>
-                </div>
-              ) : null}
-            </div>
-
-            <div className="grid gap-2 sm:grid-cols-2">
-              <input
-                value={userDraft.username}
-                onChange={(event) => setUserDraft((prev) => (prev ? { ...prev, username: event.target.value } : prev))}
-                placeholder="Username"
-                disabled={!viewerIsAdmin}
-                className="rounded border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-60"
-              />
-              <input
-                value={userDraft.email}
-                onChange={(event) => setUserDraft((prev) => (prev ? { ...prev, email: event.target.value } : prev))}
-                placeholder="Email"
-                type="email"
-                disabled={!viewerIsAdmin}
-                className="rounded border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-60"
-              />
-            </div>
-
-            <div className="mt-2 grid gap-2 sm:grid-cols-5">
-              <input
-                value={userDraft.displayName}
-                onChange={(event) => setUserDraft((prev) => (prev ? { ...prev, displayName: event.target.value } : prev))}
-                placeholder="Display name"
-                className="rounded border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-sm"
-              />
-              <Select
-                value={userDraft.role}
-                onChange={(event) => setUserDraft((prev) => (prev ? { ...prev, role: event.target.value as UserDraft['role'] } : prev))}
-                disabled={!viewerIsAdmin}
-                className="h-[38px] rounded border bg-[var(--card)] px-2 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <option value="USER">USER</option>
-                <option value="MOD">MOD</option>
-                <option value="ADMIN">ADMIN</option>
-              </Select>
-              <input
-                value={userDraft.credits}
-                onChange={(event) => setUserDraft((prev) => (prev ? { ...prev, credits: event.target.value } : prev))}
-                placeholder="Credits"
-                className="rounded border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-sm"
-              />
-              <input
-                value={userDraft.balance}
-                onChange={(event) => setUserDraft((prev) => (prev ? { ...prev, balance: event.target.value } : prev))}
-                placeholder="Balance"
-                className="rounded border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-sm"
-              />
-              <label className="inline-flex items-center gap-2 rounded border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-sm">
-                <input
-                  type="checkbox"
-                  checked={userDraft.isActive}
-                  onChange={(event) => setUserDraft((prev) => (prev ? { ...prev, isActive: event.target.checked } : prev))}
-                />
-                Active
-              </label>
-            </div>
-            <div className="mt-2 grid gap-2 sm:grid-cols-2">
-              <input
-                value={userDraft.password}
-                onChange={(event) => setUserDraft((prev) => (prev ? { ...prev, password: event.target.value } : prev))}
-                placeholder={viewerIsAdmin ? 'New password (optional)' : 'Password changes are admin-only'}
-                type="password"
-                autoComplete="new-password"
-                disabled={!viewerIsAdmin}
-                className="rounded border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-60"
-              />
-              <div className="rounded border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
-                Leave password empty to keep the current password.
-              </div>
-            </div>
-            <div className="mt-3 flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => void saveUserEdit()}
-                className="rounded border border-emerald-500/40 px-3 py-1.5 text-xs text-emerald-300"
-              >
-                Save user
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setEditingUserId(null);
-                  setUserDraft(null);
-                }}
-                className="rounded border border-[var(--border)] px-3 py-1.5 text-xs text-[var(--muted-foreground)]"
-              >
-                Cancel
-              </button>
-              {viewerIsAdmin ? (
+        <div className="max-h-[36rem] space-y-3 overflow-auto rounded-lg">
+          {filteredUsers.map((user) => {
+            const isEditing = editingUserId === user.id && userDraft;
+            return (
+              <div key={user.id} className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--background)]">
                 <button
                   type="button"
-                  onClick={() => void deleteUserAsStaff()}
-                  className="ml-auto inline-flex items-center gap-2 rounded border border-red-500/40 px-3 py-1.5 text-xs text-red-300"
+                  onClick={() => startUserEdit(user)}
+                  className="grid w-full grid-cols-12 gap-2 px-3 py-3 text-left text-sm transition hover:bg-[var(--muted)]/70"
                 >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  Delete user
+                  <span className="col-span-4 truncate font-medium">{user.displayName ?? user.username}</span>
+                  <span className="col-span-4 truncate text-[var(--muted-foreground)]">{user.email}</span>
+                  <span className="col-span-2 text-xs text-[var(--muted-foreground)]">{user.role}</span>
+                  <span className="col-span-1 text-right text-xs text-[var(--muted-foreground)]">{user.credits} cr</span>
+                  <span className="col-span-1 text-right text-xs text-sky-300">{isEditing ? 'Open' : 'Edit'}</span>
                 </button>
-              ) : null}
-            </div>
-          </div>
-        )}
+
+                {isEditing ? (
+                  <div className="border-t border-[var(--border)] bg-[var(--card)]/80 p-4">
+                    <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Edit user</p>
+                        <p className="mt-1 text-sm font-semibold">{user.username}</p>
+                        <p className="text-xs text-[var(--muted-foreground)]">
+                          {viewerIsAdmin
+                            ? 'All staff-editable account fields are available here.'
+                            : 'Mods can update the visible profile and economy fields. Credentials stay admin-only.'}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
+                        <p>Role: {user.role}</p>
+                        <p>Status: {user.isActive ? 'Active' : 'Inactive'}</p>
+                        <p>Last login: {user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString() : 'Never'}</p>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-4 lg:grid-cols-3">
+                      <div className="space-y-2 rounded-2xl border border-[var(--border)] bg-[var(--background)] p-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">Identity</p>
+                        <input
+                          value={userDraft.username}
+                          onChange={(event) => setUserDraft((prev) => (prev ? { ...prev, username: event.target.value } : prev))}
+                          placeholder="Username"
+                          disabled={!viewerIsAdmin}
+                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                        />
+                        <input
+                          value={userDraft.email}
+                          onChange={(event) => setUserDraft((prev) => (prev ? { ...prev, email: event.target.value } : prev))}
+                          placeholder="Email"
+                          type="email"
+                          disabled={!viewerIsAdmin}
+                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                        />
+                        <input
+                          value={userDraft.displayName}
+                          onChange={(event) => setUserDraft((prev) => (prev ? { ...prev, displayName: event.target.value } : prev))}
+                          placeholder="Display name"
+                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                        />
+                      </div>
+
+                      <div className="space-y-2 rounded-2xl border border-[var(--border)] bg-[var(--background)] p-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">Access & status</p>
+                        <Select
+                          value={userDraft.role}
+                          onChange={(event) => setUserDraft((prev) => (prev ? { ...prev, role: event.target.value as UserDraft['role'] } : prev))}
+                          disabled={!viewerIsAdmin}
+                          className="h-[42px] rounded-xl border bg-[var(--card)] px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <option value="USER">USER</option>
+                          <option value="MOD">MOD</option>
+                          <option value="ADMIN">ADMIN</option>
+                        </Select>
+                        <label className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={userDraft.isActive}
+                            onChange={(event) => setUserDraft((prev) => (prev ? { ...prev, isActive: event.target.checked } : prev))}
+                          />
+                          Account active
+                        </label>
+                        <input
+                          value={userDraft.password}
+                          onChange={(event) => setUserDraft((prev) => (prev ? { ...prev, password: event.target.value } : prev))}
+                          placeholder={viewerIsAdmin ? 'New password (optional)' : 'Password changes are admin-only'}
+                          type="password"
+                          autoComplete="new-password"
+                          disabled={!viewerIsAdmin}
+                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                        />
+                        <p className="text-xs text-[var(--muted-foreground)]">
+                          Leave the password empty to keep the current one.
+                        </p>
+                      </div>
+
+                      <div className="space-y-2 rounded-2xl border border-[var(--border)] bg-[var(--background)] p-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">Economy</p>
+                        <input
+                          value={userDraft.credits}
+                          onChange={(event) => setUserDraft((prev) => (prev ? { ...prev, credits: event.target.value } : prev))}
+                          placeholder="Credits"
+                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                        />
+                        <input
+                          value={userDraft.balance}
+                          onChange={(event) => setUserDraft((prev) => (prev ? { ...prev, balance: event.target.value } : prev))}
+                          placeholder="Balance"
+                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                        />
+                        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
+                          Credits affect platform usage, while balance is the wallet-style numeric field used elsewhere in staff tooling.
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 flex flex-wrap items-center gap-2">
+                      <button type="button" onClick={() => void saveUserEdit()} className={successButtonClass}>
+                        <Save className="h-4 w-4" />
+                        Save user
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingUserId(null);
+                          setUserDraft(null);
+                        }}
+                        className={secondaryButtonClass}
+                      >
+                        <X className="h-4 w-4" />
+                        Cancel
+                      </button>
+                      {viewerIsAdmin ? (
+                        <button type="button" onClick={() => void deleteUserAsStaff()} className={`ml-auto ${dangerButtonClass}`}>
+                          <Trash2 className="h-4 w-4" />
+                          Delete user
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
       </section>
       ) : null}
 
       {activeView === 'robots' ? (
         <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
         <h3 className="mb-4 text-lg font-bold">Manage Robots</h3>
-        <div className="space-y-2">
-          {(overview?.robots ?? []).map((robot) => (
-            <div key={robot.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm">
-              <span className="font-medium">{robot.name}</span>
-              <span className="text-[var(--muted-foreground)]">/{robot.slug}</span>
-              <span className="rounded bg-[var(--muted)] px-2 py-0.5 text-xs">{robot.status}</span>
-              <span className="rounded bg-[var(--muted)] px-2 py-0.5 text-xs">{robot.visibility}</span>
-              <span className="text-[var(--muted-foreground)]">Owner: {robot.owner.displayName ?? robot.owner.username}</span>
-              <Link
-                href={`/robot/${robot.owner.username}/${robot.slug}`}
-                className="rounded border border-sky-500/40 px-2 py-1 text-xs text-sky-300"
-              >
-                Preview
-              </Link>
-              <button
-                type="button"
-                onClick={() => startRobotEdit(robot)}
-                className="rounded border border-emerald-500/40 px-2 py-1 text-xs text-emerald-300"
-              >
-                Edit
-              </button>
-              <button
-                type="button"
-                onClick={() => void deleteRobotAsStaff(robot.id, robot.name)}
-                className="ml-auto inline-flex items-center gap-1 rounded border border-red-500/40 px-2 py-1 text-xs text-red-300"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                Delete
-              </button>
-            </div>
-          ))}
-        </div>
+        <div className="space-y-3">
+          {(overview?.robots ?? []).map((robot) => {
+            const isEditing = editingRobotId === robot.id && robotDraft;
+            return (
+              <div key={robot.id} className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--background)]">
+                <div className="flex flex-wrap items-center gap-2 px-3 py-3 text-sm">
+                  <span className="font-medium">{robot.name}</span>
+                  <span className="text-[var(--muted-foreground)]">/{robot.slug}</span>
+                  <span className="rounded-full bg-[var(--muted)] px-2 py-0.5 text-xs">{robot.status}</span>
+                  <span className="rounded-full bg-[var(--muted)] px-2 py-0.5 text-xs">{robot.visibility}</span>
+                  <span className="rounded-full bg-[var(--muted)] px-2 py-0.5 text-xs">{robot.accessMode}</span>
+                  <span className="text-[var(--muted-foreground)]">Owner: {robot.owner.displayName ?? robot.owner.username}</span>
+                  <div className="ml-auto flex flex-wrap items-center gap-2">
+                    <Link href={`/robot/${robot.owner.username}/${robot.slug}`} className={primaryButtonClass}>
+                      Preview
+                    </Link>
+                    <button type="button" onClick={() => startRobotEdit(robot)} className={successButtonClass}>
+                      {isEditing ? 'Editing' : 'Edit'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void deleteRobotAsStaff(robot.id, robot.name)}
+                      className={dangerButtonClass}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Delete
+                    </button>
+                  </div>
+                </div>
 
-        {editingRobotId && robotDraft && (
-          <div className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
-            <p className="mb-2 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Edit robot</p>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <input
-                value={robotDraft.name}
-                onChange={(event) => setRobotDraft((prev) => (prev ? { ...prev, name: event.target.value } : prev))}
-                placeholder="Name"
-                className="rounded border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-sm"
-              />
-              <Select
-                value={robotDraft.visibility}
-                onChange={(event) => setRobotDraft((prev) => (prev ? { ...prev, visibility: event.target.value as RobotDraft['visibility'] } : prev))}
-                className="h-[38px] rounded border bg-[var(--card)] px-2 py-1.5 text-sm"
-              >
-                <option value="PUBLIC">PUBLIC</option>
-                <option value="UNLISTED">UNLISTED</option>
-                <option value="PRIVATE">PRIVATE</option>
-              </Select>
-              <input
-                value={robotDraft.tags}
-                onChange={(event) => setRobotDraft((prev) => (prev ? { ...prev, tags: event.target.value } : prev))}
-                placeholder="Tags (comma separated)"
-                className="rounded border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-sm sm:col-span-2"
-              />
-              <textarea
-                value={robotDraft.description}
-                onChange={(event) => setRobotDraft((prev) => (prev ? { ...prev, description: event.target.value } : prev))}
-                placeholder="Description"
-                rows={4}
-                className="rounded border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-sm sm:col-span-2"
-              />
-            </div>
-            <div className="mt-3 flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => void saveRobotEdit()}
-                className="rounded border border-emerald-500/40 px-3 py-1.5 text-xs text-emerald-300"
-              >
-                Save robot
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setEditingRobotId(null);
-                  setRobotDraft(null);
-                }}
-                className="rounded border border-[var(--border)] px-3 py-1.5 text-xs text-[var(--muted-foreground)]"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
+                {isEditing ? (
+                  <div className="border-t border-[var(--border)] bg-[var(--card)]/80 p-4">
+                    <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Edit robot</p>
+                        <p className="mt-1 text-sm font-semibold">{robot.name}</p>
+                        <p className="text-xs text-[var(--muted-foreground)]">
+                          This mirrors the current dashboard settings more closely, including slug, room access, queue mode, ACL and stream tuning.
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
+                        <p>Status: {robot.status}</p>
+                        <p>Owner: {robot.owner.displayName ?? robot.owner.username}</p>
+                        <p>{queueModeDescription(robotDraft.queueMode)}</p>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-4 xl:grid-cols-3">
+                      <div className="space-y-2 rounded-2xl border border-[var(--border)] bg-[var(--background)] p-3 xl:col-span-1">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">Identity</p>
+                        <input
+                          value={robotDraft.name}
+                          onChange={(event) => setRobotDraft((prev) => (prev ? { ...prev, name: event.target.value } : prev))}
+                          placeholder="Name"
+                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                        />
+                        <input
+                          value={robotDraft.slug}
+                          onChange={(event) => setRobotDraft((prev) => (prev ? { ...prev, slug: event.target.value } : prev))}
+                          placeholder="Slug"
+                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                        />
+                        <input
+                          value={robotDraft.tags}
+                          onChange={(event) => setRobotDraft((prev) => (prev ? { ...prev, tags: event.target.value } : prev))}
+                          placeholder="Tags (comma separated)"
+                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                        />
+                        <textarea
+                          value={robotDraft.description}
+                          onChange={(event) => setRobotDraft((prev) => (prev ? { ...prev, description: event.target.value } : prev))}
+                          placeholder="Description"
+                          rows={5}
+                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                        />
+                      </div>
+
+                      <div className="space-y-2 rounded-2xl border border-[var(--border)] bg-[var(--background)] p-3 xl:col-span-1">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">Room access</p>
+                        <Select
+                          value={robotDraft.roomMode}
+                          onChange={(event) => setRobotDraft((prev) => (prev ? { ...prev, roomMode: event.target.value as RobotDraft['roomMode'] } : prev))}
+                          className="h-[42px] rounded-xl border bg-[var(--card)] px-3 py-2 text-sm"
+                        >
+                          <option value="PUBLIC">PUBLIC</option>
+                          <option value="LINK_ONLY">LINK_ONLY</option>
+                          <option value="PASSWORD">PASSWORD</option>
+                          <option value="ALLOWED_USERS">ALLOWED_USERS</option>
+                          <option value="PRIVATE">PRIVATE</option>
+                        </Select>
+                        <p className="text-xs text-[var(--muted-foreground)]">{roomModeDescription(robotDraft.roomMode)}</p>
+                        {robotDraft.roomMode === 'PASSWORD' ? (
+                          <input
+                            value={robotDraft.accessPassword}
+                            onChange={(event) => setRobotDraft((prev) => (prev ? { ...prev, accessPassword: event.target.value } : prev))}
+                            placeholder="Set new room password"
+                            className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                          />
+                        ) : null}
+                        <Select
+                          value={robotDraft.queueMode}
+                          onChange={(event) => setRobotDraft((prev) => (prev ? { ...prev, queueMode: event.target.value as RobotDraft['queueMode'] } : prev))}
+                          className="h-[42px] rounded-xl border bg-[var(--card)] px-3 py-2 text-sm"
+                        >
+                          <option value="FIRST_COME">FIRST_COME</option>
+                          <option value="VOTING">VOTING</option>
+                          <option value="DISABLED">DISABLED</option>
+                        </Select>
+                        <p className="text-xs text-[var(--muted-foreground)]">{queueModeDescription(robotDraft.queueMode)}</p>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <Select
+                            value={robotDraft.aclVideo}
+                            onChange={(event) => setRobotDraft((prev) => (prev ? { ...prev, aclVideo: event.target.value as RobotDraft['aclVideo'] } : prev))}
+                            className="h-[42px] rounded-xl border bg-[var(--card)] px-3 py-2 text-sm"
+                          >
+                            <option value="ALL">Video: ALL</option>
+                            <option value="AUTHENTICATED">Video: AUTHENTICATED</option>
+                            <option value="DISABLED">Video: DISABLED</option>
+                          </Select>
+                          <Select
+                            value={robotDraft.aclControl}
+                            onChange={(event) => setRobotDraft((prev) => (prev ? { ...prev, aclControl: event.target.value as RobotDraft['aclControl'] } : prev))}
+                            className="h-[42px] rounded-xl border bg-[var(--card)] px-3 py-2 text-sm"
+                          >
+                            <option value="ALL">Control: ALL</option>
+                            <option value="AUTHENTICATED">Control: AUTHENTICATED</option>
+                            <option value="DISABLED">Control: DISABLED</option>
+                          </Select>
+                          <Select
+                            value={robotDraft.aclChat}
+                            onChange={(event) => setRobotDraft((prev) => (prev ? { ...prev, aclChat: event.target.value as RobotDraft['aclChat'] } : prev))}
+                            className="h-[42px] rounded-xl border bg-[var(--card)] px-3 py-2 text-sm"
+                          >
+                            <option value="ALL">Chat: ALL</option>
+                            <option value="AUTHENTICATED">Chat: AUTHENTICATED</option>
+                            <option value="DISABLED">Chat: DISABLED</option>
+                          </Select>
+                          <Select
+                            value={robotDraft.aclEStop}
+                            onChange={(event) => setRobotDraft((prev) => (prev ? { ...prev, aclEStop: event.target.value as RobotDraft['aclEStop'] } : prev))}
+                            className="h-[42px] rounded-xl border bg-[var(--card)] px-3 py-2 text-sm"
+                          >
+                            <option value="ALL">E-Stop: ALL</option>
+                            <option value="AUTHENTICATED">E-Stop: AUTHENTICATED</option>
+                            <option value="DISABLED">E-Stop: DISABLED</option>
+                          </Select>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2 rounded-2xl border border-[var(--border)] bg-[var(--background)] p-3 xl:col-span-1">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">Limits & stream</p>
+                        <input
+                          value={robotDraft.maxTurnTime}
+                          onChange={(event) => setRobotDraft((prev) => (prev ? { ...prev, maxTurnTime: event.target.value } : prev))}
+                          placeholder="Max turn time (ms)"
+                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                        />
+                        <input
+                          value={robotDraft.maxViewers}
+                          onChange={(event) => setRobotDraft((prev) => (prev ? { ...prev, maxViewers: event.target.value } : prev))}
+                          placeholder="Max viewers"
+                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                        />
+                        <input
+                          value={robotDraft.maxControllers}
+                          onChange={(event) => setRobotDraft((prev) => (prev ? { ...prev, maxControllers: event.target.value } : prev))}
+                          placeholder="Max controllers"
+                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                        />
+                        <input
+                          value={robotDraft.targetBitrateKbps}
+                          onChange={(event) => setRobotDraft((prev) => (prev ? { ...prev, targetBitrateKbps: event.target.value } : prev))}
+                          placeholder="Target bitrate kbps"
+                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                        />
+                        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
+                          Leave bitrate empty to keep the current stream tuning. Valid values stay in the 150-3000 kbps range.
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 flex flex-wrap items-center gap-2">
+                      <button type="button" onClick={() => void saveRobotEdit()} className={successButtonClass}>
+                        <Save className="h-4 w-4" />
+                        Save robot
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingRobotId(null);
+                          setRobotDraft(null);
+                        }}
+                        className={secondaryButtonClass}
+                      >
+                        <X className="h-4 w-4" />
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
       </section>
       ) : null}
     </div>

@@ -918,7 +918,14 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
           slug: true,
           status: true,
           description: true,
+          thumbnailUrl: true,
           visibility: true,
+          accessMode: true,
+          queueMode: true,
+          maxTurnTime: true,
+          maxViewers: true,
+          maxControllers: true,
+          metadata: true,
           tags: true,
           owner: { select: { id: true, username: true, displayName: true } },
         },
@@ -1072,6 +1079,7 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
           ? {
               ts: telemetryTs,
               clientVersion: this._asString(telemetry.clientVersion),
+              botpartyStreamerVersion: this._asString(telemetry.botpartyStreamerVersion),
               gitBranch: this._asString(telemetry.gitBranch),
               gitCommit: this._asString(telemetry.gitCommit),
               gitDirty: Boolean(telemetry.gitDirty),
@@ -1586,20 +1594,62 @@ export class ModerationService implements OnModuleInit, OnModuleDestroy {
   }
 
   private _resolveCadvisorService(labels: Record<string, string>, containerName: string | null) {
+    const composeProject = labels.container_label_com_docker_compose_project?.trim().toLowerCase() ?? '';
     const composeService = labels.container_label_com_docker_compose_service?.trim();
-    if (composeService) {
-      return composeService;
+    const normalizedContainerName = containerName?.trim().toLowerCase() ?? '';
+    const belongsToBotparty = composeProject.includes('botparty') || normalizedContainerName.includes('botparty');
+
+    if (composeService && belongsToBotparty) {
+      return this._matchKnownCadvisorService(composeService) ?? composeService;
     }
 
-    if (!containerName) {
+    if (!containerName || !belongsToBotparty) {
       return '';
     }
 
-    if (containerName.startsWith('botparty-')) {
-      return containerName.slice('botparty-'.length);
+    return this._matchKnownCadvisorService(containerName) ?? containerName;
+  }
+
+  private _matchKnownCadvisorService(value: string | null) {
+    if (!value) {
+      return null;
     }
 
-    return containerName;
+    const normalized = value
+      .trim()
+      .toLowerCase()
+      .replace(/^\/+/, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+
+    if (!normalized) {
+      return null;
+    }
+
+    const knownServices = [
+      'livekit-ingress',
+      'livekit-egress',
+      'livekit',
+      'postgres',
+      'redis',
+      'cadvisor',
+      'nginx',
+      'api',
+      'web',
+    ] as const;
+
+    for (const service of knownServices) {
+      if (
+        normalized === service ||
+        normalized.endsWith(`-${service}`) ||
+        normalized.startsWith(`${service}-`) ||
+        normalized.includes(`-${service}-`)
+      ) {
+        return service;
+      }
+    }
+
+    return null;
   }
 
   private _computeCpuPercent(
