@@ -22,59 +22,11 @@ import { ControlsService } from '../controls/controls.service';
 import { getAccessCookieName, parseCookie } from '../auth/auth.cookies';
 import Redis from 'ioredis';
 import { createHash } from 'crypto';
-
-interface WsClient extends WebSocket {
-  id: string;
-  userId?: string;
-  username?: string;
-  isGuest?: boolean;
-  /** Which robot room this client is subscribed to */
-  watchingRobotId?: string;
-  /** True if this socket is the robot hardware client */
-  isRobot?: boolean;
-  robotId?: string;
-  /** Timestamp of last chat message (for rate limiting) */
-  lastChatAt?: number;
-  /** User role (for rate-limit tier) */
-  role?: string;
-  cookieHeader?: string;
-  presenceJoinedAt?: number;
-}
-
-/** Lightweight presence record broadcast to the room */
-interface PresenceRecord {
-  userId: string;
-  username: string;
-  joinedAt: number;
-}
-
-interface ActiveTurnState {
-  sessionId: string;
-  userId: string;
-  startedAt: number;
-  expiresAt: number;
-}
-
-interface CommandMetadata {
-  user: {
-    id: string | null;
-    username: string | null;
-    role: string | null;
-    isGuest: boolean;
-    isRobotOwner: boolean;
-    isSiteAdmin: boolean;
-    isSiteModerator: boolean;
-  };
-  robotId: string;
-  source: 'gateway' | 'system';
-}
-
-type SharedPresenceSnapshot = {
-  viewerCount: number;
-  focusUserConnections: number;
-  presenceList: PresenceRecord[];
-  cleanedStaleEntries: boolean;
-};
+import type { ActiveTurnState, CommandMetadata, SharedPresenceSnapshot, WsClient } from './gateway-types';
+import { PresenceHandler } from './presence.handler';
+import { RobotClaimLockHandler } from './robot-claim-lock.handler';
+import { TurnHandler } from './turn.handler';
+import { ModerationEnforcerHandler } from './moderation-enforcer.handler';
 
 @WebSocketGateway({
   path: '/ws',
@@ -85,9 +37,6 @@ type SharedPresenceSnapshot = {
 export class BotGateway
   implements OnGatewayConnection, OnGatewayDisconnect, OnModuleInit, OnModuleDestroy, BeforeApplicationShutdown
 {
-  private static readonly ROBOT_CLAIM_TTL_MS = 45_000;
-  private static readonly VIEWER_PRESENCE_TTL_SEC = 45;
-
   @WebSocketServer()
   server!: Server;
 
@@ -105,11 +54,16 @@ export class BotGateway
   /** robotId → Set of viewer/controller clientIds */
   private readonly rooms = new Map<string, Set<string>>();
 
-  /** robotId → Map<userId, PresenceRecord> */
-  private readonly presence = new Map<string, Map<string, PresenceRecord>>();
   private readonly activeTurns = new Map<string, ActiveTurnState>();
   private readonly turnTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly controlCooldowns = new Map<string, number>();
+  private _pingInterval: ReturnType<typeof setInterval> | null = null;
+
+  // Sub-handlers (initialized in constructor)
+  private readonly presence: PresenceHandler;
+  private readonly claimLock: RobotClaimLockHandler;
+  private readonly turnHandler: TurnHandler;
+  private readonly moderationEnforcer: ModerationEnforcerHandler;
 
   constructor(
     private readonly robotsService: RobotsService,
@@ -120,9 +74,40 @@ export class BotGateway
     private readonly jwtService: JwtService,
     private readonly controlsService: ControlsService,
     private readonly configService: ConfigService,
-  ) {}
+  ) {
+    const instanceId = this.instanceId;
+    this.presence = new PresenceHandler(redis, instanceId);
+    this.claimLock = new RobotClaimLockHandler(redis);
+    this.turnHandler = new TurnHandler(
+      {
+        activeTurns: this.activeTurns,
+        turnTimeouts: this.turnTimeouts,
+        robotClients: this.robotClients,
+        broadcastToRoom: (robotId, event, data, excludeClientId) =>
+          this._broadcastToRoom(robotId, event, data, excludeClientId),
+        sendRobotStop: (robotId, reason) => this._sendRobotStop(robotId, reason),
+      },
+      robotsService,
+      sessionsService,
+      queueService,
+    );
+    this.moderationEnforcer = new ModerationEnforcerHandler(
+      {
+        activeTurns: this.activeTurns,
+        clients: this.clients,
+        clearTurnState: (robotId, reason) => this.clearTurnState(robotId, reason),
+        leaveRoom: (client) => this._leaveRoom(client),
+      },
+      queueService,
+    );
+  }
 
   async onModuleInit() {
+    // Reconcile any sessions left ACTIVE from a previous crash
+    await this.sessionsService.endAllActiveSessions().catch((err: unknown) => {
+      this.logger.warn('Failed to reconcile orphaned sessions on startup', err);
+    });
+
     this.subscriber = this.redis.duplicate();
 
     this.subscriber.on('pmessage', (_pattern, channel, message) => {
@@ -130,9 +115,22 @@ export class BotGateway
     });
 
     await this.subscriber.psubscribe('queue:*', 'ws:moderation:*', 'ws:room:*', 'ws:system:*');
+
+    // Server-side heartbeat: ping all open clients every 30 s to detect dead connections
+    this._pingInterval = setInterval(() => {
+      for (const client of this.clients.values()) {
+        if (client.readyState === WebSocket.OPEN) {
+          try { client.ping(); } catch { /* ignore */ }
+        }
+      }
+    }, 30_000);
   }
 
   async onModuleDestroy() {
+    if (this._pingInterval) {
+      clearInterval(this._pingInterval);
+      this._pingInterval = null;
+    }
     if (this.subscriber) {
       await this.subscriber.quit();
       this.subscriber = null;
@@ -192,6 +190,19 @@ export class BotGateway
     }
   }
 
+  private _checkEventRateLimit(client: WsClient): boolean {
+    const now = Date.now();
+    if (!client.wsEventWindowStart || now - client.wsEventWindowStart > LIMITS.WS_EVENT_RATE_WINDOW_MS) {
+      client.wsEventWindowStart = now;
+      client.wsEventCount = 1;
+      return true;
+    }
+    client.wsEventCount = (client.wsEventCount ?? 0) + 1;
+    const isPrivileged = client.isRobot || client.role === 'ADMIN' || client.role === 'MOD';
+    const limit = isPrivileged ? LIMITS.WS_EVENT_RATE_LIMIT_ADMIN : LIMITS.WS_EVENT_RATE_LIMIT;
+    return client.wsEventCount <= limit;
+  }
+
   handleConnection(client: WsClient, request?: { headers?: { cookie?: string } }) {
     client.id = crypto.randomUUID();
     client.cookieHeader = request?.headers?.cookie;
@@ -242,6 +253,11 @@ export class BotGateway
       roomAccessToken?: string;
     },
   ) {
+    if (!this._checkEventRateLimit(client)) {
+      client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Too many requests' } }));
+      return;
+    }
+
     if (client.watchingRobotId) {
       await this._leaveRoom(client);
     }
@@ -278,7 +294,7 @@ export class BotGateway
       client.username = undefined;
       client.isGuest = undefined;
       client.role = undefined;
-      client.send(JSON.stringify({ event: 'error', data: { message: 'Room access verification required' } }));
+      client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Room access verification required' } }));
       return;
     }
 
@@ -335,7 +351,7 @@ export class BotGateway
       client.send(JSON.stringify({ event: pendingRestriction.event, data: pendingRestriction.data }));
     }
 
-    return { event: 'room:join', data: { ok: true, viewerCount: presenceSnapshot.viewerCount } };
+    return { event: WS_EVENTS.ROOM_JOIN, data: { ok: true, viewerCount: presenceSnapshot.viewerCount } };
   }
 
   @SubscribeMessage('room:ping')
@@ -357,7 +373,7 @@ export class BotGateway
     try {
       const robotId = this.resolveRobotSocketIdentity(data.robotAuthToken);
       if (!robotId) {
-        client.send(JSON.stringify({ event: 'error', data: { message: 'Invalid robot authorization' } }));
+        client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Invalid robot authorization' } }));
         try {
           client.close(1008, 'Invalid robot authorization');
         } catch {
@@ -372,7 +388,7 @@ export class BotGateway
         this.logger.warn(`Rejected duplicate robot claim for ${robot.id}`);
         client.send(
           JSON.stringify({
-            event: 'error',
+            event: WS_EVENTS.ERROR,
             data: { message: 'Robot control channel is already connected' },
           }),
         );
@@ -389,7 +405,7 @@ export class BotGateway
         this.logger.warn(`Rejected cross-instance duplicate robot claim for ${robot.id}`);
         client.send(
           JSON.stringify({
-            event: 'error',
+            event: WS_EVENTS.ERROR,
             data: { message: 'Robot control channel is already connected' },
           }),
         );
@@ -419,7 +435,7 @@ export class BotGateway
         await this.releaseRobotClaimLock(client.robotId, client.id);
       }
       this.logger.error('Robot claim error', err);
-      return { event: 'error', data: { message: 'Claim failed' } };
+      return { event: WS_EVENTS.ERROR, data: { message: 'Claim failed' } };
     }
   }
 
@@ -439,7 +455,7 @@ export class BotGateway
     @MessageBody() data: Record<string, unknown>,
   ) {
     if (!client.isRobot || !client.robotId) {
-      client.send(JSON.stringify({ event: 'error', data: { message: 'Only robot clients can send telemetry' } }));
+      client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Only robot clients can send telemetry' } }));
       return;
     }
     try {
@@ -453,14 +469,14 @@ export class BotGateway
   async handleRobotActionsPull(@ConnectedSocket() client: WsClient) {
     if (!client.isRobot || !client.robotId) {
       client.send(
-        JSON.stringify({ event: 'error', data: { message: 'Only robot clients can pull actions' } }),
+        JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Only robot clients can pull actions' } }),
       );
       return;
     }
 
     try {
       const payload = await this.robotsService.consumeActionsByRobotId(client.robotId);
-      client.send(JSON.stringify({ event: 'robot:actions', data: payload }));
+      client.send(JSON.stringify({ event: WS_EVENTS.ROBOT_ACTIONS, data: payload }));
     } catch (err) {
       this.logger.error('Failed to pull robot actions', err);
     }
@@ -474,14 +490,19 @@ export class BotGateway
     @MessageBody()
     data: { robotId: string; command: string; value?: unknown; timestamp: number },
   ) {
+    if (!this._checkEventRateLimit(client)) {
+      client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Too many requests' } }));
+      return;
+    }
+
     const command = typeof data.command === 'string' ? data.command.trim() : '';
     if (!command) {
-      client.send(JSON.stringify({ event: 'error', data: { message: 'Invalid control command' } }));
+      client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Invalid control command' } }));
       return;
     }
 
     if (client.watchingRobotId !== data.robotId) {
-      client.send(JSON.stringify({ event: 'error', data: { message: 'Join the room before sending controls' } }));
+      client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Join the room before sending controls' } }));
       return;
     }
 
@@ -490,13 +511,13 @@ export class BotGateway
     const access = await this.robotsService.getAccessPolicy(data.robotId);
     if (access.control === 'DISABLED') {
       client.send(
-        JSON.stringify({ event: 'error', data: { message: 'Control is disabled for this robot' } }),
+        JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Control is disabled for this robot' } }),
       );
       return;
     }
     if (access.control === 'AUTHENTICATED' && client.isGuest) {
       client.send(
-        JSON.stringify({ event: 'error', data: { message: 'Please sign in to control this robot' } }),
+        JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Please sign in to control this robot' } }),
       );
       return;
     }
@@ -512,7 +533,7 @@ export class BotGateway
       currentControllerUserId,
     });
     if (!commandAccess.allowed) {
-      client.send(JSON.stringify({ event: 'error', data: { message: commandAccess.message } }));
+      client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: commandAccess.message } }));
       return;
     }
 
@@ -525,7 +546,7 @@ export class BotGateway
       const restriction = await this.moderationService.getActiveRestriction(data.robotId, client.userId);
       if (restriction) {
         client.send(
-          JSON.stringify({ event: 'error', data: { message: 'You are restricted in this room', restriction } }),
+          JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'You are restricted in this room', restriction } }),
         );
         return;
       }
@@ -542,7 +563,7 @@ export class BotGateway
     const robotClient = this._getOpenRobotClient(data.robotId);
     if (!robotClient) {
       client.send(
-        JSON.stringify({ event: 'error', data: { message: 'Robot realtime control channel is offline' } }),
+        JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Robot realtime control channel is offline' } }),
       );
       return;
     }
@@ -682,7 +703,7 @@ export class BotGateway
   ) {
     if (client.watchingRobotId !== data.robotId || !client.userId) {
       client.send(
-        JSON.stringify({ event: 'error', data: { message: 'Join the room before using E-STOP' } }),
+        JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Join the room before using E-STOP' } }),
       );
       return;
     }
@@ -690,19 +711,19 @@ export class BotGateway
     try {
       const access = await this.robotsService.getAccessPolicy(data.robotId);
       if (access.estop === 'DISABLED') {
-        client.send(JSON.stringify({ event: 'error', data: { message: 'E-STOP is disabled for this room' } }));
+        client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'E-STOP is disabled for this room' } }));
         return;
       }
       if (access.estop === 'AUTHENTICATED' && client.isGuest) {
         client.send(
-          JSON.stringify({ event: 'error', data: { message: 'Please sign in to use E-STOP' } }),
+          JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Please sign in to use E-STOP' } }),
         );
         return;
       }
 
       this._triggerEmergencyStop(data.robotId, `Manual E-STOP by ${client.userId}`);
     } catch {
-      client.send(JSON.stringify({ event: 'error', data: { message: 'Failed to validate E-STOP access' } }));
+      client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Failed to validate E-STOP access' } }));
     }
   }
 
@@ -713,8 +734,13 @@ export class BotGateway
     @ConnectedSocket() client: WsClient,
     @MessageBody() data: { robotId: string; content: string; clientMessageId?: string },
   ) {
+    if (!this._checkEventRateLimit(client)) {
+      client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Too many requests' } }));
+      return;
+    }
+
     if (client.watchingRobotId !== data.robotId) {
-      client.send(JSON.stringify({ event: 'error', data: { message: 'Join the room before chatting' } }));
+      client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Join the room before chatting' } }));
       return;
     }
 
@@ -722,20 +748,20 @@ export class BotGateway
     const access = await this.robotsService.getAccessPolicy(data.robotId);
     if (access.chat === 'DISABLED') {
       client.send(
-        JSON.stringify({ event: 'error', data: { message: 'Chat is disabled for this robot' } }),
+        JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Chat is disabled for this robot' } }),
       );
       return;
     }
     if (access.chat === 'AUTHENTICATED' && client.isGuest) {
       client.send(
-        JSON.stringify({ event: 'error', data: { message: 'Please sign in to chat in this room' } }),
+        JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Please sign in to chat in this room' } }),
       );
       return;
     }
 
     if (!data.content?.trim() || data.content.length > LIMITS.MAX_CHAT_MESSAGE_LENGTH) {
       client.send(
-        JSON.stringify({ event: 'error', data: { message: `Chat messages must be 1-${LIMITS.MAX_CHAT_MESSAGE_LENGTH} chars` } }),
+        JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: `Chat messages must be 1-${LIMITS.MAX_CHAT_MESSAGE_LENGTH} chars` } }),
       );
       return;
     }
@@ -746,7 +772,7 @@ export class BotGateway
     }
     if (hasIllegalChars) {
       client.send(
-        JSON.stringify({ event: 'error', data: { message: 'Message contains invalid characters' } }),
+        JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Message contains invalid characters' } }),
       );
       return;
     }
@@ -763,7 +789,7 @@ export class BotGateway
           .catch(() => {});
       }
       client.send(
-        JSON.stringify({ event: 'error', data: { message: 'Message blocked by moderation filter' } }),
+        JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Message blocked by moderation filter' } }),
       );
       return;
     }
@@ -780,7 +806,7 @@ export class BotGateway
           .catch(() => {});
       }
       client.send(
-        JSON.stringify({ event: 'error', data: { message: 'Message blocked by profanity filter' } }),
+        JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Message blocked by profanity filter' } }),
       );
       return;
     }
@@ -799,7 +825,7 @@ export class BotGateway
       const restriction = await this.moderationService.getActiveRestriction(data.robotId, client.userId);
       if (restriction) {
         client.send(
-          JSON.stringify({ event: 'error', data: { message: 'You are restricted in this room', restriction } }),
+          JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'You are restricted in this room', restriction } }),
         );
         return;
       }
@@ -950,171 +976,32 @@ export class BotGateway
       .catch(() => {});
   }
 
-  private async refreshSharedPresenceState(
-    client: WsClient,
-    robotId: string,
-  ): Promise<SharedPresenceSnapshot> {
-    if (!client.userId) {
-      return {
-        viewerCount: 0,
-        focusUserConnections: 0,
-        presenceList: [],
-        cleanedStaleEntries: false,
-      };
-    }
-
-    const socketKey = this.viewerSocketKey(client.id);
-    const joinedAt = client.presenceJoinedAt ?? Date.now();
-    client.presenceJoinedAt = joinedAt;
-
-    await this.redis.multi()
-      .set(
-        socketKey,
-        JSON.stringify({
-          robotId,
-          userId: client.userId,
-          username: client.username,
-          joinedAt,
-        }),
-        'EX',
-        BotGateway.VIEWER_PRESENCE_TTL_SEC,
-      )
-      .sadd(this.viewerRoomIndexKey(robotId), socketKey)
-      .expire(this.viewerRoomIndexKey(robotId), BotGateway.VIEWER_PRESENCE_TTL_SEC * 2)
-      .exec();
-
-    return this.getSharedPresenceSnapshot(robotId, client.userId);
+  private async refreshSharedPresenceState(client: WsClient, robotId: string): Promise<SharedPresenceSnapshot> {
+    return this.presence.refresh(client, robotId);
   }
 
   private async touchSharedPresenceState(client: WsClient, robotId: string): Promise<void> {
-    if (!client.userId) {
-      return;
-    }
-
-    const joinedAt = client.presenceJoinedAt ?? Date.now();
-    client.presenceJoinedAt = joinedAt;
-    await this.redis.set(
-      this.viewerSocketKey(client.id),
-      JSON.stringify({
-        robotId,
-        userId: client.userId,
-        username: client.username,
-        joinedAt,
-      }),
-      'EX',
-      BotGateway.VIEWER_PRESENCE_TTL_SEC,
-    );
+    return this.presence.touch(client, robotId);
   }
 
-  private async removeSharedPresenceState(
-    client: WsClient,
-    robotId: string,
-  ): Promise<SharedPresenceSnapshot> {
-    await this.redis.multi()
-      .del(this.viewerSocketKey(client.id))
-      .srem(this.viewerRoomIndexKey(robotId), this.viewerSocketKey(client.id))
-      .exec();
-
-    return this.getSharedPresenceSnapshot(robotId, client.userId);
+  private async removeSharedPresenceState(client: WsClient, robotId: string): Promise<SharedPresenceSnapshot> {
+    return this.presence.remove(client, robotId);
   }
 
-  private async getSharedPresenceSnapshot(
-    robotId: string,
-    focusUserId?: string,
-  ): Promise<SharedPresenceSnapshot> {
-    const roomIndexKey = this.viewerRoomIndexKey(robotId);
-    const socketKeys = await this.redis.smembers(roomIndexKey);
-    if (socketKeys.length === 0) {
-      return {
-        viewerCount: 0,
-        focusUserConnections: 0,
-        presenceList: [],
-        cleanedStaleEntries: false,
-      };
-    }
-
-    const pipeline = this.redis.pipeline();
-    for (const socketKey of socketKeys) {
-      pipeline.get(socketKey);
-    }
-    const results = await pipeline.exec();
-    const staleSocketKeys: string[] = [];
-    const presenceByUser = new Map<string, PresenceRecord>();
-    let viewerCount = 0;
-    let focusUserConnections = 0;
-
-    for (const [index, result] of (results ?? []).entries()) {
-      const socketKey = socketKeys[index];
-      if (!socketKey) {
-        continue;
-      }
-
-      const [error, raw] = result ?? [];
-      if (error || typeof raw !== 'string') {
-        staleSocketKeys.push(socketKey);
-        continue;
-      }
-
-      try {
-        const parsed = JSON.parse(raw) as {
-          robotId?: string;
-          userId?: string;
-          username?: string;
-          joinedAt?: number;
-        };
-        if (
-          parsed.robotId !== robotId ||
-          typeof parsed.userId !== 'string' ||
-          typeof parsed.username !== 'string' ||
-          typeof parsed.joinedAt !== 'number'
-        ) {
-          staleSocketKeys.push(socketKey);
-          continue;
-        }
-
-        viewerCount += 1;
-        if (parsed.userId === focusUserId) {
-          focusUserConnections += 1;
-        }
-
-        const existing = presenceByUser.get(parsed.userId);
-        if (!existing || parsed.joinedAt < existing.joinedAt) {
-          presenceByUser.set(parsed.userId, {
-            userId: parsed.userId,
-            username: parsed.username,
-            joinedAt: parsed.joinedAt,
-          });
-        }
-      } catch {
-        staleSocketKeys.push(socketKey);
-      }
-    }
-
-    if (staleSocketKeys.length > 0) {
-      await this.redis.srem(roomIndexKey, ...staleSocketKeys);
-      if (viewerCount === 0) {
-        await this.redis.del(roomIndexKey);
-      }
-    }
-
-    return {
-      viewerCount,
-      focusUserConnections,
-      presenceList: Array.from(presenceByUser.values()),
-      cleanedStaleEntries: staleSocketKeys.length > 0,
-    };
+  private async getSharedPresenceSnapshot(robotId: string, focusUserId?: string): Promise<SharedPresenceSnapshot> {
+    return this.presence.getSnapshot(robotId, focusUserId);
   }
 
   private viewerSocketKey(clientId: string) {
-    return `ws:viewer-socket:${this.instanceId}:${clientId}`;
+    return this.presence.viewerSocketKey(clientId);
   }
 
   private viewerRoomIndexKey(robotId: string) {
-    return `ws:viewer-room:${robotId}`;
+    return this.presence.viewerRoomIndexKey(robotId);
   }
 
   private robotClaimKey(robotId: string) {
-    return `ws:robot-claim:${robotId}`;
+    return this.claimLock.claimKey(robotId);
   }
 
   private _getOpenRobotClient(robotId: string): WsClient | undefined {
@@ -1248,254 +1135,39 @@ export class BotGateway
     robotId: string,
     queue: Array<{ userId: string; user?: { username?: string; displayName?: string | null } }>,
   ) {
-    const current = this.activeTurns.get(robotId) ?? null;
-    const nextEntry = queue[0] ?? null;
-    const robot = await this.robotsService.findById(robotId);
-    const robotRealtimeOnline = this.robotClients.has(robotId);
-
-    if (robot.queueMode === 'DISABLED') {
-      if (current) {
-        await this.clearTurnState(robotId, 'clear');
-      }
-      return;
-    }
-
-    if (!robotRealtimeOnline || robot.status === 'MAINTENANCE') {
-      if (current) {
-        await this.clearTurnState(robotId, 'clear');
-      }
-      return;
-    }
-
-    if (!nextEntry) {
-      if (current) {
-        await this.clearTurnState(robotId, 'clear');
-      }
-      await this.robotsService.updateStatus(robotId, 'ONLINE').catch(() => {});
-      this._broadcastToRoom(robotId, WS_EVENTS.ROBOT_STATUS, { status: 'ONLINE' });
-      return;
-    }
-
-    if (current && current.userId === nextEntry.userId) {
-      return;
-    }
-
-    if (current) {
-      await this.clearTurnState(robotId);
-    }
-
-    const session = await this.sessionsService.create(robotId, nextEntry.userId);
-    const expiresAt = Date.now() + robot.maxTurnTime;
-    this.activeTurns.set(robotId, {
-      sessionId: session.id,
-      userId: nextEntry.userId,
-      startedAt: Date.now(),
-      expiresAt,
-    });
-
-    await this.robotsService.updateStatus(robotId, 'BUSY').catch(() => {});
-    this._broadcastToRoom(robotId, WS_EVENTS.ROBOT_STATUS, { status: 'BUSY' });
-    this._broadcastToRoom(robotId, WS_EVENTS.SESSION_START, {
-      sessionId: session.id,
-      userId: nextEntry.userId,
-      expiresAt,
-    });
-    this._broadcastToRoom(robotId, WS_EVENTS.QUEUE_TURN_START, {
-      userId: nextEntry.userId,
-      username: nextEntry.user?.displayName ?? nextEntry.user?.username ?? nextEntry.userId,
-      expiresAt,
-      durationMs: robot.maxTurnTime,
-    });
-
-    const existingTimer = this.turnTimeouts.get(robotId);
-    if (existingTimer) {
-      clearTimeout(existingTimer);
-    }
-
-    const timer = setTimeout(() => {
-      void this.handleTurnTimeout(robotId, nextEntry.userId);
-    }, robot.maxTurnTime);
-    this.turnTimeouts.set(robotId, timer);
+    return this.turnHandler.syncTurnLifecycle(robotId, queue);
   }
 
   private async handleTurnTimeout(robotId: string, userId: string) {
-    await this.clearTurnState(robotId, 'timeout');
-    await this.queueService.leave(robotId, userId).catch(() => {});
+    return this.turnHandler.handleTurnTimeout(robotId, userId);
   }
 
   private async clearTurnState(robotId: string, reason: 'handoff' | 'timeout' | 'clear' = 'handoff') {
-    const current = this.activeTurns.get(robotId);
-    if (current) {
-      this._sendRobotStop(robotId, `Turn ended: ${reason}`);
-      await this.sessionsService.end(current.sessionId).catch(() => {});
-      this._broadcastToRoom(robotId, WS_EVENTS.SESSION_END, {
-        sessionId: current.sessionId,
-        userId: current.userId,
-      });
-      this._broadcastToRoom(robotId, WS_EVENTS.QUEUE_TURN_END, {
-        userId: current.userId,
-        reason,
-      });
-      this.activeTurns.delete(robotId);
-    }
-
-    const timer = this.turnTimeouts.get(robotId);
-    if (timer) {
-      clearTimeout(timer);
-      this.turnTimeouts.delete(robotId);
-    }
+    return this.turnHandler.clearTurnState(robotId, reason);
   }
 
-  private async enforceModerationEvent(
-    robotId: string,
-    payload: { event?: string; data?: unknown },
-  ) {
-    const event = payload.event;
-    if (
-      event !== WS_EVENTS.MOD_TIMEOUT &&
-      event !== WS_EVENTS.MOD_KICK &&
-      event !== WS_EVENTS.MOD_BAN
-    ) {
-      return;
-    }
-
-    const data =
-      payload.data && typeof payload.data === 'object'
-        ? (payload.data as Record<string, unknown>)
-        : null;
-    const targetUserId = typeof data?.userId === 'string' ? data.userId : null;
-    if (!targetUserId) {
-      return;
-    }
-
-    const activeTurn = this.activeTurns.get(robotId);
-    if (activeTurn?.userId === targetUserId) {
-      await this.clearTurnState(robotId, 'clear');
-    }
-
-    await this.queueService.leave(robotId, targetUserId).catch(() => {});
-
-    if (event === WS_EVENTS.MOD_BAN) {
-      this.disconnectUserFromRoom(robotId, targetUserId);
-    }
+  private async enforceModerationEvent(robotId: string, payload: { event?: string; data?: unknown }) {
+    return this.moderationEnforcer.enforce(robotId, payload);
   }
 
   private disconnectUserFromRoom(robotId: string, targetUserId: string) {
-    for (const client of this.clients.values()) {
-      if (client.isRobot) {
-        continue;
-      }
-      if (client.watchingRobotId !== robotId || client.userId !== targetUserId) {
-        continue;
-      }
-
-      void this._leaveRoom(client);
-      if (client.readyState === WebSocket.OPEN) {
-        client.close();
-      }
-    }
+    return this.moderationEnforcer.disconnectUserFromRoom(robotId, targetUserId);
   }
 
   private buildModerationSystemMessage(event: string, data: unknown): string | null {
-    const details =
-      data && typeof data === 'object' && !Array.isArray(data)
-        ? (data as Record<string, unknown>)
-        : null;
-    if (!details) {
-      return null;
-    }
-
-    const label = this.readModerationTargetLabel(details);
-    if (!label) {
-      return null;
-    }
-
-    if (event === WS_EVENTS.MOD_BAN) {
-      return `${label} has been banned from this room.`;
-    }
-    if (event === WS_EVENTS.MOD_UNBAN) {
-      return `${label} has been unbanned.`;
-    }
-    if (event === WS_EVENTS.MOD_KICK) {
-      return `${label} was removed from the control queue.`;
-    }
-    if (event === WS_EVENTS.MOD_TIMEOUT) {
-      const expiresAt =
-        typeof details.expiresAt === 'string' && details.expiresAt.trim().length > 0
-          ? Date.parse(details.expiresAt)
-          : Number.NaN;
-      if (Number.isFinite(expiresAt) && expiresAt > Date.now()) {
-        const totalMinutes = Math.max(1, Math.round((expiresAt - Date.now()) / 60000));
-        return `${label} was timed out for ${totalMinutes} minute${totalMinutes === 1 ? '' : 's'}.`;
-      }
-      return `${label} was timed out.`;
-    }
-
-    return null;
-  }
-
-  private readModerationTargetLabel(details: Record<string, unknown>) {
-    const displayName = typeof details.displayName === 'string' ? details.displayName.trim() : '';
-    if (displayName) {
-      return displayName;
-    }
-
-    const username = typeof details.username === 'string' ? details.username.trim() : '';
-    if (username) {
-      return username;
-    }
-
-    const userId = typeof details.userId === 'string' ? details.userId.trim() : '';
-    return userId ? userId.slice(0, 8) : null;
+    return this.moderationEnforcer.buildSystemMessage(event, data);
   }
 
   private async acquireRobotClaimLock(robotId: string, clientId: string): Promise<boolean> {
-    const lockKey = this.robotClaimKey(robotId);
-    const existingOwner = await this.redis.get(lockKey);
-    if (existingOwner === clientId) {
-      await this.refreshRobotClaimLock(robotId, clientId);
-      return true;
-    }
-
-    const acquired = await this.redis.set(
-      lockKey,
-      clientId,
-      'PX',
-      BotGateway.ROBOT_CLAIM_TTL_MS,
-      'NX',
-    );
-    return acquired === 'OK';
+    return this.claimLock.acquire(robotId, clientId);
   }
 
   private async refreshRobotClaimLock(robotId: string, clientId: string): Promise<void> {
-    const lockKey = this.robotClaimKey(robotId);
-    await this.redis.eval(
-      `
-        if redis.call("get", KEYS[1]) == ARGV[1] then
-          return redis.call("pexpire", KEYS[1], ARGV[2])
-        end
-        return 0
-      `,
-      1,
-      lockKey,
-      clientId,
-      String(BotGateway.ROBOT_CLAIM_TTL_MS),
-    );
+    return this.claimLock.refresh(robotId, clientId);
   }
 
   private async releaseRobotClaimLock(robotId: string, clientId: string): Promise<void> {
-    const lockKey = this.robotClaimKey(robotId);
-    await this.redis.eval(
-      `
-        if redis.call("get", KEYS[1]) == ARGV[1] then
-          return redis.call("del", KEYS[1])
-        end
-        return 0
-      `,
-      1,
-      lockKey,
-      clientId,
-    );
+    return this.claimLock.release(robotId, clientId);
   }
 
   private resolveSocketUser(accessToken?: string, cookieHeader?: string): JwtPayload | null {

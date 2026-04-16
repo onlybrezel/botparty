@@ -1,0 +1,41 @@
+# ─────────────────────────────────────────────────────
+# BotParty – Docker Compose Dev Overrides
+# ─────────────────────────────────────────────────────
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#
+# Differences from production:
+#   - API and Web run with hot-reload / dev mode
+#   - Source code is bind-mounted for instant changes
+#   - No nginx (access API on :4000, web on :3000 directly)
+#   - Debug logging enabled
+#   - cAdvisor and livekit egress/ingress are not included
+# ─────────────────────────────────────────────────────
+
+services:
+  api:
+    build:
+      target: dev
+    image: botparty-api:dev
+    environment:
+      NODE_ENV: development
+    volumes:
+      - ./apps/api/src:/app/apps/api/src:delegated
+      - ./packages:/app/packages:delegated
+    ports:
+      - "4000:4000"
+    # Override the prod command with dev server (ts-node / nest start --watch)
+    command: ["pnpm", "--filter", "api", "start:dev"]
+
+  web:
+    build:
+      target: dev
+    image: botparty-web:dev
+    environment:
+      NODE_ENV: development
+    volumes:
+      - ./apps/web/src:/app/apps/web/src:delegated
+      - ./packages:/app/packages:delegated
+    ports:
+      - "3000:3000"
+    command: ["pnpm", "--filter", "web", "dev"]

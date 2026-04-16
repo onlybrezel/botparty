@@ -5,6 +5,7 @@ import {
   BadRequestException,
   ConflictException,
   Logger,
+  OnModuleDestroy,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
@@ -16,6 +17,11 @@ import { constants as fsConstants } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { z } from 'zod';
 import type { Prisma } from '@botparty/prisma';
+import { isStaffRole } from '../common/robot-access';
+import { RobotTelemetryService } from './robot-telemetry.service';
+import { RobotThumbnailService } from './robot-thumbnail.service';
+import { RobotAccessService } from './robot-access.service';
+import { SLUG_PROFANITY_TERMS } from './profanity-terms';
 
 export type GuestAccess = 'ALL' | 'AUTHENTICATED' | 'DISABLED';
 
@@ -129,53 +135,23 @@ const DEFAULT_STREAM_POLICY: RobotStreamPolicy = {
   targetBitrateKbps: null,
 };
 
-const SLUG_PROFANITY_TERMS = [
-  'fuck',
-  'motherfucker',
-  'shit',
-  'bitch',
-  'asshole',
-  'cunt',
-  'nigger',
-  'nigga',
-  'faggot',
-  'hurensohn',
-  'arschloch',
-  'fotze',
-  'hijodeputa',
-  'gilipollas',
-  'putain',
-  'filsdepute',
-  'caralho',
-  'filhodaputa',
-  'vaffanculo',
-  'klootzak',
-  'orospu',
-  'siktir',
-  'heilhitler',
-  'siegheil',
-  'whitepower',
-  'whitesupremacy',
-  'hakenkreuz',
-];
-
 const ROBOT_TEXT_PROFANITY_TERMS = Array.from(new Set(SLUG_PROFANITY_TERMS));
 
-type PolicyCacheEntry = {
-  access: RobotAccessPolicy;
-  stream: RobotStreamPolicy;
-  expiresAt: number;
-};
-
 @Injectable()
-export class RobotsService {
+export class RobotsService implements OnModuleDestroy {
   private readonly logger = new Logger(RobotsService.name);
-  private readonly policyCache = new Map<string, PolicyCacheEntry>();
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
+    private readonly telemetry: RobotTelemetryService,
+    private readonly thumbnail: RobotThumbnailService,
+    private readonly access: RobotAccessService,
   ) {}
+
+  onModuleDestroy() {
+    // Lifecycle cleanup handled by sub-services.
+  }
 
   async create(ownerId: string, input: z.infer<typeof createRobotSchema>) {
     const data = createRobotSchema.parse(input);
@@ -277,9 +253,11 @@ export class RobotsService {
     return this.sanitizeManagedRobot(robot);
   }
 
-  async findAll(filters?: { visibility?: string; status?: string; tag?: string; q?: string; sort?: string }) {
+  async findAll(filters?: { visibility?: string; status?: string; tag?: string; q?: string; sort?: string; limit?: string; offset?: string }) {
     const query = filters?.q?.trim();
     const sort = filters?.sort?.trim().toLowerCase();
+    const take = Math.min(Math.max(Number(filters?.limit) || 50, 1), 200);
+    const skip = Math.max(Number(filters?.offset) || 0, 0);
 
     const orderBy: Prisma.RobotOrderByWithRelationInput[] =
       sort === 'new'
@@ -311,6 +289,8 @@ export class RobotsService {
         }),
       },
       orderBy,
+      take,
+      skip,
       include: {
         owner: {
           select: { id: true, username: true, displayName: true, avatarUrl: true },
@@ -330,12 +310,11 @@ export class RobotsService {
     return this.toPublicRobot(robot);
   }
 
-  async findByUsernameAndSlug(username: string, slug: string) {
+  async findByUsernameAndSlug(_username: string, slug: string) {
     const robot = await this.findRobotBySlugAny(slug);
     if (!robot) throw new NotFoundException('Robot not found');
     if (robot.visibility === 'PRIVATE') throw new NotFoundException('Robot not found');
     // Keep lenient lookup for backward compatibility; web canonicalizes URL to owner username.
-    void username;
     return this.toPublicRobot(robot);
   }
 
@@ -377,7 +356,7 @@ export class RobotsService {
     const metadata = this.mergeMetadata(robot.metadata, data.acl, data.stream);
     const accessPassword = data.accessPassword;
     const baseData = this.stripRobotWriteFields(data);
-    this.policyCache.delete(id);
+    this.access.invalidateCache(id);
 
     let slugUpdate: { slug: string; slugAliases: { set: string[] } } | undefined;
     if (data.slug && data.slug !== robot.slug) {
@@ -438,7 +417,7 @@ export class RobotsService {
     const metadata = this.mergeMetadata(current?.metadata, data.acl, data.stream);
     const accessPassword = data.accessPassword;
     const baseData = this.stripRobotWriteFields(data);
-    this.policyCache.delete(id);
+    this.access.invalidateCache(id);
     const currentRobot = await this.prisma.robot.findUnique({
       where: { id },
       select: { accessMode: true, accessPassword: true, inviteCode: true },
@@ -526,7 +505,7 @@ export class RobotsService {
       throw new BadRequestException('camera id is required');
     }
 
-    const stream = this.parseStreamFromMetadata(robot.metadata);
+    const stream = this.access.parseStreamFromMetadata(robot.metadata);
     const currentCameras = stream.cameras ?? [];
     const withoutCamera = currentCameras.filter((entry) => entry.id !== cameraId);
 
@@ -556,7 +535,7 @@ export class RobotsService {
       activeCameraId: nextStream.activeCameraId,
       cameras: nextStream.cameras,
     });
-    this.policyCache.delete(robotId);
+    this.access.invalidateCache(robotId);
     return this.prisma.robot.update({
       where: { id: robotId },
       data: {
@@ -576,7 +555,7 @@ export class RobotsService {
       return robot;
     }
 
-    const stream = this.parseStreamFromMetadata(robot.metadata);
+    const stream = this.access.parseStreamFromMetadata(robot.metadata);
     const currentCameras = stream.cameras ?? [];
     const nextCameras = currentCameras.filter((entry) => entry.id !== normalizedCameraId);
     const nextStream: RobotStreamPolicy = {
@@ -593,7 +572,7 @@ export class RobotsService {
       activeCameraId: nextStream.activeCameraId,
       cameras: nextStream.cameras,
     });
-    this.policyCache.delete(robotId);
+    this.access.invalidateCache(robotId);
     return this.prisma.robot.update({
       where: { id: robotId },
       data: {
@@ -657,71 +636,16 @@ export class RobotsService {
   }
 
   async saveRobotThumbnail(id: string, ownerId: string, dataUrl: string) {
-    const robot = await this.findById(id);
-    if (robot.ownerId !== ownerId) {
-      throw new ForbiddenException('Not your robot');
-    }
-
-    const parsed = this.parseThumbnailDataUrl(dataUrl);
-    await this.ensureThumbnailStorageDir();
-    await this.removeExistingThumbnailFiles(id);
-
-    const filePath = this.thumbnailFilePath(id, parsed.extension);
-    await writeFile(filePath, parsed.buffer);
-
-    const thumbnailUrl = this.buildThumbnailUrl(id);
-    const updated = await this.prisma.robot.update({
-      where: { id },
-      data: { thumbnailUrl },
-      include: {
-        owner: {
-          select: { id: true, username: true, displayName: true, avatarUrl: true },
-        },
-      },
-    });
-
-    return this.sanitizeManagedRobot(updated);
+    return this.thumbnail.save(id, ownerId, dataUrl);
   }
 
   async clearRobotThumbnail(id: string, ownerId: string) {
-    const robot = await this.findById(id);
-    if (robot.ownerId !== ownerId) {
-      throw new ForbiddenException('Not your robot');
-    }
-
-    await this.removeExistingThumbnailFiles(id);
-    const updated = await this.prisma.robot.update({
-      where: { id },
-      data: { thumbnailUrl: null },
-      include: {
-        owner: {
-          select: { id: true, username: true, displayName: true, avatarUrl: true },
-        },
-      },
-    });
-
-    return this.sanitizeManagedRobot(updated);
+    return this.thumbnail.clear(id, ownerId);
   }
 
   async readRobotThumbnail(id: string) {
-    await this.findById(id);
-
-    for (const extension of ['png', 'jpg', 'webp']) {
-      const filePath = this.thumbnailFilePath(id, extension);
-      try {
-        await access(filePath, fsConstants.R_OK);
-        return {
-          buffer: await readFile(filePath),
-          contentType: this.thumbnailContentType(extension),
-        };
-      } catch {
-        // try the next extension
-      }
-    }
-
-    throw new NotFoundException('Thumbnail not found');
+    return this.thumbnail.read(id);
   }
-
   async findPrivateBySlugForUser(slug: string, requesterId: string) {
     const robot = await this.findRobotBySlugAny(slug);
 
@@ -734,7 +658,7 @@ export class RobotsService {
       select: { role: true },
     });
 
-    const isStaff = requester?.role === 'ADMIN' || requester?.role === 'MOD';
+    const isStaff = isStaffRole(requester?.role);
     if (robot.visibility !== 'PRIVATE' && !isStaff && robot.ownerId !== requesterId) {
       throw new ForbiddenException('Robot is public');
     }
@@ -746,101 +670,21 @@ export class RobotsService {
     return this.toPublicRobot(robot);
   }
 
-  async findPrivateByUsernameAndSlugForUser(username: string, slug: string, requesterId: string) {
-    void username;
+  async findPrivateByUsernameAndSlugForUser(_username: string, slug: string, requesterId: string) {
     return this.findPrivateBySlugForUser(slug, requesterId);
   }
 
   async getAllowedUsers(robotId: string, ownerId: string): Promise<AllowedUserSummary[]> {
-    const robot = await this.findById(robotId);
-    if (robot.ownerId !== ownerId) {
-      throw new ForbiddenException('Not your robot');
-    }
-
-    const entries = await this.prisma.robotAllowedUser.findMany({
-      where: { robotId },
-      orderBy: { createdAt: 'asc' },
-      include: {
-        user: {
-          select: {
-            id: true,
-            username: true,
-            displayName: true,
-            avatarUrl: true,
-          },
-        },
-      },
-    });
-
-    return entries.map((entry) => ({
-      id: entry.user.id,
-      username: entry.user.username,
-      displayName: entry.user.displayName,
-      avatarUrl: entry.user.avatarUrl,
-      addedAt: entry.createdAt.toISOString(),
-    }));
+    return this.access.getAllowedUsers(robotId, ownerId);
   }
 
   async addAllowedUser(robotId: string, ownerId: string, username: string): Promise<AllowedUserSummary> {
-    const robot = await this.findById(robotId);
-    if (robot.ownerId !== ownerId) {
-      throw new ForbiddenException('Not your robot');
-    }
-
-    const normalizedUsername = username.trim();
-    if (!normalizedUsername) {
-      throw new NotFoundException('Username is required');
-    }
-
-    const user = await this.prisma.user.findUnique({
-      where: { username: normalizedUsername },
-      select: { id: true, username: true, displayName: true, avatarUrl: true },
-    });
-    if (!user) {
-      throw new NotFoundException('User not found');
-    }
-
-    const entry = await this.prisma.robotAllowedUser.upsert({
-      where: { robotId_userId: { robotId, userId: user.id } },
-      update: {},
-      create: {
-        robotId,
-        userId: user.id,
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            username: true,
-            displayName: true,
-            avatarUrl: true,
-          },
-        },
-      },
-    });
-
-    return {
-      id: entry.user.id,
-      username: entry.user.username,
-      displayName: entry.user.displayName,
-      avatarUrl: entry.user.avatarUrl,
-      addedAt: entry.createdAt.toISOString(),
-    };
+    return this.access.addAllowedUser(robotId, ownerId, username);
   }
 
   async removeAllowedUser(robotId: string, ownerId: string, userId: string) {
-    const robot = await this.findById(robotId);
-    if (robot.ownerId !== ownerId) {
-      throw new ForbiddenException('Not your robot');
-    }
-
-    await this.prisma.robotAllowedUser.deleteMany({
-      where: { robotId, userId },
-    });
-
-    return { ok: true };
+    return this.access.removeAllowedUser(robotId, ownerId, userId);
   }
-
   async updateStatus(id: string, status: 'ONLINE' | 'OFFLINE' | 'BUSY' | 'MAINTENANCE') {
     return this.prisma.robot.update({
       where: { id },
@@ -1003,29 +847,7 @@ export class RobotsService {
 
   async ingestRobotLogsByRobotId(robotId: string, lines: string[]) {
     await this.findById(robotId);
-
-    if (lines.length === 0) {
-      return { ok: true };
-    }
-
-    const key = `robot:logs:${robotId}`;
-    const now = Date.now();
-    const pipeline = this.redis.pipeline();
-
-    for (const line of lines.slice(-100)) {
-      pipeline.rpush(
-        key,
-        JSON.stringify({
-          ts: now,
-          line: line.slice(0, 1000),
-        }),
-      );
-    }
-
-    pipeline.ltrim(key, -400, -1);
-    pipeline.expire(key, 1800);
-    await pipeline.exec();
-    return { ok: true };
+    return this.telemetry.ingestLogsByRobotId(robotId, lines);
   }
 
   async ingestRobotTelemetryByRobotId(
@@ -1049,174 +871,24 @@ export class RobotsService {
     },
   ) {
     await this.findById(robotId);
-
-    const telemetry = {
-      ts: Date.now(),
-      clientVersion:
-        typeof payload.clientVersion === 'string' && payload.clientVersion.trim()
-          ? payload.clientVersion.trim().slice(0, 64)
-          : null,
-      gitBranch:
-        typeof payload.gitBranch === 'string' && payload.gitBranch.trim()
-          ? payload.gitBranch.trim().slice(0, 128)
-          : null,
-      gitCommit:
-        typeof payload.gitCommit === 'string' && payload.gitCommit.trim()
-          ? payload.gitCommit.trim().slice(0, 64)
-          : null,
-      gitDirty: Boolean(payload.gitDirty),
-      botpartyStreamerVersion:
-        typeof payload.botpartyStreamerVersion === 'string' && payload.botpartyStreamerVersion.trim()
-          ? payload.botpartyStreamerVersion.trim().slice(0, 64)
-          : typeof payload.streamerVersion === 'string' && payload.streamerVersion.trim()
-            ? payload.streamerVersion.trim().slice(0, 64)
-            : null,
-      pythonVersion:
-        typeof payload.pythonVersion === 'string' && payload.pythonVersion.trim()
-          ? payload.pythonVersion.trim().slice(0, 64)
-          : null,
-      cpuPercent:
-        typeof payload.cpuPercent === 'number' && Number.isFinite(payload.cpuPercent)
-          ? Math.max(0, Math.min(100, payload.cpuPercent))
-          : null,
-      memoryPercent:
-        typeof payload.memoryPercent === 'number' && Number.isFinite(payload.memoryPercent)
-          ? Math.max(0, Math.min(100, payload.memoryPercent))
-          : null,
-      temperatureC:
-        typeof payload.temperatureC === 'number' && Number.isFinite(payload.temperatureC)
-          ? payload.temperatureC
-          : null,
-      uptimeSec:
-        typeof payload.uptimeSec === 'number' && Number.isFinite(payload.uptimeSec)
-          ? Math.max(0, Math.floor(payload.uptimeSec))
-          : null,
-      controlConnected: Boolean(payload.controlConnected),
-      livekitConnected: Boolean(payload.livekitConnected),
-      commandsReceived:
-        typeof payload.commandsReceived === 'number' && Number.isFinite(payload.commandsReceived)
-          ? Math.max(0, Math.floor(payload.commandsReceived))
-          : 0,
-      cameraFrames:
-        typeof payload.cameraFrames === 'number' && Number.isFinite(payload.cameraFrames)
-          ? Math.max(0, Math.floor(payload.cameraFrames))
-          : 0,
-    };
-
-    const latestKey = `robot:telemetry:${robotId}:latest`;
-    const historyKey = `robot:telemetry:${robotId}:history`;
-    const pipeline = this.redis.pipeline();
-    pipeline.set(latestKey, JSON.stringify(telemetry), 'EX', 300);
-    pipeline.rpush(historyKey, JSON.stringify(telemetry));
-    pipeline.ltrim(historyKey, -300, -1);
-    pipeline.expire(historyKey, 60 * 60 * 24);
-    await pipeline.exec();
-
-    return { ok: true };
+    return this.telemetry.ingestTelemetryByRobotId(robotId, payload);
   }
 
   async getRobotTelemetry(robotId: string, ownerId: string) {
-    const robot = await this.findById(robotId);
-    if (robot.ownerId !== ownerId) {
-      throw new ForbiddenException('Not your robot');
-    }
-
-    const latestKey = `robot:telemetry:${robotId}:latest`;
-    const historyKey = `robot:telemetry:${robotId}:history`;
-    const [latestRaw, historyRaw] = await Promise.all([
-      this.redis.get(latestKey),
-      this.redis.lrange(historyKey, -120, -1),
-    ]);
-
-    const latest = latestRaw
-      ? (JSON.parse(latestRaw) as Record<string, unknown>)
-      : null;
-
-    const history = historyRaw
-      .map((entry) => {
-        try {
-          return JSON.parse(entry) as Record<string, unknown>;
-        } catch {
-          return null;
-        }
-      })
-      .filter((entry): entry is Record<string, unknown> => entry !== null);
-
-    return { latest, history };
+    return this.telemetry.getTelemetry(robotId, ownerId);
   }
 
   async getRobotLogs(robotId: string, ownerId: string) {
-    const robot = await this.findById(robotId);
-    if (robot.ownerId !== ownerId) {
-      throw new ForbiddenException('Not your robot');
-    }
-
-    const key = `robot:logs:${robotId}`;
-    const raw = await this.redis.lrange(key, 0, -1);
-    return raw
-      .map((entry) => {
-        try {
-          const parsed = JSON.parse(entry) as { ts?: number; line?: string };
-          if (!parsed.line) return null;
-          return {
-            ts: typeof parsed.ts === 'number' ? parsed.ts : Date.now(),
-            line: parsed.line,
-          };
-        } catch {
-          return null;
-        }
-      })
-      .filter((entry): entry is { ts: number; line: string } => entry !== null);
+    return this.telemetry.getLogs(robotId, ownerId);
   }
 
   async getAccessPolicy(robotId: string): Promise<RobotAccessPolicy> {
-    const cached = this.policyCache.get(robotId);
-    const now = Date.now();
-    if (cached && cached.expiresAt > now) {
-      return cached.access;
-    }
-
-    const robot = await this.prisma.robot.findUnique({
-      where: { id: robotId },
-      select: { metadata: true },
-    });
-
-    const access = this.parseAccessFromMetadata(robot?.metadata);
-    const stream = this.parseStreamFromMetadata(robot?.metadata);
-
-    this.policyCache.set(robotId, {
-      access,
-      stream,
-      expiresAt: now + 5000,
-    });
-
-    return access;
+    return this.access.getAccessPolicy(robotId);
   }
 
   async getStreamPolicy(robotId: string): Promise<RobotStreamPolicy> {
-    const cached = this.policyCache.get(robotId);
-    const now = Date.now();
-    if (cached && cached.expiresAt > now) {
-      return cached.stream;
-    }
-
-    const robot = await this.prisma.robot.findUnique({
-      where: { id: robotId },
-      select: { metadata: true },
-    });
-
-    const access = this.parseAccessFromMetadata(robot?.metadata);
-    const stream = this.parseStreamFromMetadata(robot?.metadata);
-
-    this.policyCache.set(robotId, {
-      access,
-      stream,
-      expiresAt: now + 5000,
-    });
-
-    return stream;
+    return this.access.getStreamPolicy(robotId);
   }
-
   async getFeatured() {
     const robots = await this.prisma.robot.findMany({
       where: { isFeatured: true, visibility: 'PUBLIC' },
@@ -1325,70 +997,7 @@ export class RobotsService {
     password?: string;
     inviteCode?: string;
   }): Promise<RoomAccessGrant> {
-    const robot = await this.getRoomAccessContext(input.robotId, input.requesterUserId);
-
-    if (!robot) {
-      throw new NotFoundException('Robot not found');
-    }
-
-    const actorId = input.requesterUserId ?? this.buildGuestActorId(input.guestSessionId);
-    const isOwner = input.requesterUserId === robot.ownerId;
-    const isStaff = robot.requesterRole === 'ADMIN' || robot.requesterRole === 'MOD';
-    const isAllowedUser =
-      Boolean(input.requesterUserId) &&
-      (isOwner || isStaff || robot.allowedUsers.some((entry) => entry.userId === input.requesterUserId));
-
-    if (robot.visibility === 'PRIVATE' && !isOwner && !isStaff) {
-      throw new ForbiddenException('This robot is private');
-    }
-
-    if (robot.accessMode === 'ALLOWED_USERS' && !isAllowedUser) {
-      throw new ForbiddenException('You are not on the allow list for this robot');
-    }
-
-    if (robot.accessMode === 'PASSWORD' && !isOwner && !isStaff) {
-      const password = input.password?.trim() ?? '';
-      if (!password) {
-        throw new ForbiddenException('Password required');
-      }
-
-      const matches = robot.accessPassword
-        ? await this.verifyStoredPassword(robot.id, password, robot.accessPassword)
-        : false;
-
-      if (!matches) {
-        throw new ForbiddenException('Invalid room password');
-      }
-    }
-
-    if (robot.accessMode === 'LINK_ONLY' && !isOwner && !isStaff) {
-      const inviteCode = input.inviteCode?.trim() ?? '';
-      if (!inviteCode) {
-        throw new ForbiddenException('Invite link required');
-      }
-
-      if (!robot.inviteCode || inviteCode !== robot.inviteCode) {
-        throw new ForbiddenException('Invalid invite link');
-      }
-    }
-
-    const token = randomBytes(24).toString('hex');
-    const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
-
-    await this.redis.set(
-      this.roomAccessKey(token),
-      JSON.stringify({
-        robotId: robot.id,
-        actorId,
-      }),
-      'EX',
-      60 * 60,
-    );
-
-    return {
-      token,
-      expiresAt: expiresAt.toISOString(),
-    };
+    return this.access.issueRoomAccessGrant(input);
   }
 
   async validateRoomAccess(input: {
@@ -1396,59 +1005,11 @@ export class RobotsService {
     actorId: string;
     roomAccessToken?: string;
   }): Promise<boolean> {
-    const requesterUserId = input.actorId.startsWith('guest:') ? null : input.actorId;
-    const robot = await this.getRoomAccessContext(input.robotId, requesterUserId);
+    return this.access.validateRoomAccess(input);
+  }
 
-    if (!robot) {
-      return false;
-    }
-
-    const isOwner = requesterUserId === robot.ownerId;
-    const isStaff = robot.requesterRole === 'ADMIN' || robot.requesterRole === 'MOD';
-    const isAllowedUser =
-      Boolean(requesterUserId) &&
-      (isOwner || isStaff || robot.allowedUsers.some((entry) => entry.userId === requesterUserId));
-
-    if (robot.visibility === 'PRIVATE') {
-      return isOwner || isStaff;
-    }
-
-    if (robot.accessMode === 'ALLOWED_USERS' && isAllowedUser) {
-      return true;
-    }
-
-    if (robot.accessMode === 'LINK_ONLY' && (isOwner || isStaff)) {
-      return true;
-    }
-
-    if (robot.accessMode === 'PASSWORD' && (isOwner || isStaff)) {
-      return true;
-    }
-
-    const requiresGrant =
-      robot.accessMode === 'PASSWORD' ||
-      robot.accessMode === 'ALLOWED_USERS' ||
-      robot.accessMode === 'LINK_ONLY';
-
-    if (!requiresGrant) {
-      return true;
-    }
-
-    if (!input.roomAccessToken) {
-      return false;
-    }
-
-    const raw = await this.redis.get(this.roomAccessKey(input.roomAccessToken));
-    if (!raw) {
-      return false;
-    }
-
-    try {
-      const parsed = JSON.parse(raw) as { robotId?: string; actorId?: string };
-      return parsed.robotId === input.robotId && parsed.actorId === input.actorId;
-    } catch {
-      return false;
-    }
+  resolveGuestActorId(guestSessionId?: string): string | null {
+    return this.access.resolveGuestActorId(guestSessionId);
   }
 
   async setViewerCount(robotId: string, viewerCount: number) {
@@ -1472,45 +1033,6 @@ export class RobotsService {
     const safeBase = SLUG_PROFANITY_TERMS.some((term) => compact.includes(term)) ? 'robot' : base;
     const suffix = randomBytes(3).toString('hex');
     return `${safeBase}-${suffix}`;
-  }
-
-  private async getRoomAccessContext(robotId: string, requesterUserId: string | null) {
-    const robot = await this.prisma.robot.findUnique({
-      where: { id: robotId },
-      select: {
-        id: true,
-        ownerId: true,
-        visibility: true,
-        accessMode: true,
-        accessPassword: true,
-        inviteCode: true,
-        allowedUsers: {
-          where: requesterUserId ? { userId: requesterUserId } : { userId: '__none__' },
-          select: { userId: true },
-        },
-      },
-    });
-
-    if (!robot) {
-      return null;
-    }
-
-    if (!requesterUserId) {
-      return {
-        ...robot,
-        requesterRole: null as 'ADMIN' | 'MOD' | 'USER' | null,
-      };
-    }
-
-    const requester = await this.prisma.user.findUnique({
-      where: { id: requesterUserId },
-      select: { role: true },
-    });
-
-    return {
-      ...robot,
-      requesterRole: requester?.role ?? null,
-    };
   }
 
   private mergeMetadata(
@@ -1546,180 +1068,6 @@ export class RobotsService {
     return existing;
   }
 
-  private parseAccessFromMetadata(metadata: unknown): RobotAccessPolicy {
-    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
-      return DEFAULT_ACCESS_POLICY;
-    }
-    const accessRaw = (metadata as Record<string, unknown>).access;
-    if (!accessRaw || typeof accessRaw !== 'object' || Array.isArray(accessRaw)) {
-      return DEFAULT_ACCESS_POLICY;
-    }
-
-    const access = accessRaw as Record<string, unknown>;
-    return {
-      video: this.readAccessValue(access.video),
-      control: this.readAccessValue(access.control),
-      chat: this.readAccessValue(access.chat),
-      estop: this.readAccessValue(access.estop),
-    };
-  }
-
-  private parseStreamFromMetadata(metadata: unknown): RobotStreamPolicy {
-    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
-      return DEFAULT_STREAM_POLICY;
-    }
-    const streamRaw = (metadata as Record<string, unknown>).stream;
-    if (!streamRaw || typeof streamRaw !== 'object' || Array.isArray(streamRaw)) {
-      return DEFAULT_STREAM_POLICY;
-    }
-
-    const stream = streamRaw as Record<string, unknown>;
-    const bitrate = stream.targetBitrateKbps;
-    const activeCameraId = typeof stream.activeCameraId === 'string' ? stream.activeCameraId.trim() : '';
-    const cameras: RobotStreamCameraDescriptor[] | undefined = Array.isArray(stream.cameras)
-      ? stream.cameras.reduce<RobotStreamCameraDescriptor[]>((acc, entry) => {
-          if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
-            return acc;
-          }
-
-          const camera = entry as Record<string, unknown>;
-          const id = typeof camera.id === 'string' ? camera.id.trim() : '';
-          if (!id) {
-            return acc;
-          }
-
-          acc.push({
-            id,
-            label: typeof camera.label === 'string' ? camera.label.trim() || undefined : undefined,
-            role: typeof camera.role === 'string' ? camera.role.trim() || undefined : undefined,
-            enabled: typeof camera.enabled === 'boolean' ? camera.enabled : undefined,
-            publishMode: typeof camera.publishMode === 'string' ? camera.publishMode.trim() || undefined : undefined,
-          });
-          return acc;
-        }, [])
-      : undefined;
-
-    return {
-      targetBitrateKbps:
-        typeof bitrate === 'number' && Number.isFinite(bitrate) && bitrate >= 150 && bitrate <= 3000
-          ? Math.round(bitrate)
-          : DEFAULT_STREAM_POLICY.targetBitrateKbps,
-      activeCameraId: activeCameraId || undefined,
-      cameras: cameras?.length ? cameras : undefined,
-    };
-  }
-
-  private readAccessValue(value: unknown): GuestAccess {
-    if (value === 'ALL' || value === 'AUTHENTICATED' || value === 'DISABLED') {
-      return value;
-    }
-    return 'AUTHENTICATED';
-  }
-
-  private buildGuestActorId(guestSessionId?: string): string {
-    const actorId = this.resolveGuestActorId(guestSessionId);
-    if (actorId) {
-      return actorId;
-    }
-
-    throw new ForbiddenException('Valid guest session required');
-  }
-
-  private thumbnailStorageDir() {
-    const configured = process.env.THUMBNAIL_STORAGE_DIR?.trim();
-    return configured
-      ? resolve(configured)
-      : resolve(process.cwd(), 'data', 'robot-thumbnails');
-  }
-
-  private thumbnailFilePath(robotId: string, extension: string) {
-    return join(this.thumbnailStorageDir(), `${robotId}.${extension}`);
-  }
-
-  private buildThumbnailUrl(robotId: string) {
-    return `/api/v1/robots/${robotId}/thumbnail-image?v=${Date.now()}`;
-  }
-
-  private async ensureThumbnailStorageDir() {
-    await mkdir(this.thumbnailStorageDir(), { recursive: true });
-  }
-
-  private async removeExistingThumbnailFiles(robotId: string) {
-    try {
-      const files = await readdir(this.thumbnailStorageDir());
-      await Promise.all(
-        files
-          .filter((file) => file.startsWith(`${robotId}.`))
-          .map((file) => rm(join(this.thumbnailStorageDir(), file), { force: true })),
-      );
-    } catch {
-      // Directory may not exist yet.
-    }
-  }
-
-  private parseThumbnailDataUrl(dataUrl: string): { buffer: Buffer; extension: 'png' | 'jpg' | 'webp' } {
-    const trimmed = dataUrl.trim();
-    const match = /^data:(image\/(?:png|jpeg|webp));base64,([a-z0-9+/=]+)$/i.exec(trimmed);
-    if (!match) {
-      throw new BadRequestException('Thumbnail must be a PNG, JPEG, or WebP image');
-    }
-
-    const mime = match[1]!.toLowerCase();
-    const payload = match[2] ?? '';
-    const buffer = Buffer.from(payload, 'base64');
-    if (!buffer.length) {
-      throw new BadRequestException('Thumbnail image is empty');
-    }
-    if (buffer.length > 3 * 1024 * 1024) {
-      throw new BadRequestException('Thumbnail image must be 3 MB or smaller');
-    }
-
-    return {
-      buffer,
-      extension: mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg',
-    };
-  }
-
-  private thumbnailContentType(extension: string) {
-    if (extension === 'png') {
-      return 'image/png';
-    }
-    if (extension === 'webp') {
-      return 'image/webp';
-    }
-    return 'image/jpeg';
-  }
-
-  resolveGuestActorId(guestSessionId?: string): string | null {
-    const raw = guestSessionId?.trim().toLowerCase() ?? '';
-    if (/^[a-z0-9_-]{6,64}$/.test(raw)) {
-      return `guest:${raw}`;
-    }
-    return null;
-  }
-
-  private roomAccessKey(token: string): string {
-    return `robot:room-access:${token}`;
-  }
-
-  private async verifyStoredPassword(robotId: string, password: string, stored: string): Promise<boolean> {
-    try {
-      return await verify(stored, password);
-    } catch {
-      if (stored !== password) {
-        return false;
-      }
-
-      await this.prisma.robot.update({
-        where: { id: robotId },
-        data: {
-          accessPassword: await hash(password, { type: 2 }),
-        },
-      });
-      this.logger.warn(`Migrated legacy plaintext room password for robot ${robotId}`);
-      return true;
-    }
-  }
 
   private stripRobotWriteFields<T extends { acl?: unknown; stream?: unknown; accessPassword?: unknown; slug?: unknown }>(
     data: T,

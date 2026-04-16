@@ -5,18 +5,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Bot,
-  Cable,
-  CircleHelp,
-  Copy,
-  ExternalLink,
-  RefreshCcw,
   Save,
   Trash2,
-  Plus,
-  Check,
-  Eye,
-  EyeOff,
-  X,
 } from 'lucide-react';
 import {
   api,
@@ -26,433 +16,84 @@ import {
   type RobotManaged,
   type RobotTelemetryPoint,
 } from '@/lib/api';
-import type { ControlButtonAccess } from '@botparty/shared';
-import { ControlButtonAccess as ControlButtonAccessEnum } from '@botparty/shared';
 import { useAuth } from '@/lib/store';
-import { LiveKitPlayer } from '@/components/livekit-player';
+import { useDashboardStore } from '@/lib/dashboard-store';
 import { pushToast } from '@/lib/toast';
-import { Select } from '@/components/ui/select';
-
-type RemoteActionType = 'restart_video' | 'restart_control' | 'restart_chat' | 'update_client' | 'set_log_stream';
-
-type ControlPresetKey = 'ptz-pan' | 'ptz-tilt' | 'drive-speed' | 'gripper' | 'arm-xy';
-
-type RoomMode = 'PUBLIC' | 'LINK_ONLY' | 'PASSWORD' | 'ALLOWED_USERS' | 'PRIVATE';
-
-type ControlButtonDraft = {
-  label: string;
-  command: string;
-  hotKey: string;
-  icon: string;
-  controlKind: 'button' | 'slider' | 'xy';
-  sliderMin: string;
-  sliderMax: string;
-  sliderStart: string;
-  sliderStep: string;
-  sliderDirection: 'horizontal' | 'vertical';
-  widgetReturn: 'none' | 'center';
-  resetOnQueueLoss: boolean;
-  resetOnOffline: boolean;
-  resetAfterMs: string;
-  xyXMin: string;
-  xyXMax: string;
-  xyXStart: string;
-  xyYMin: string;
-  xyYMax: string;
-  xyYStart: string;
-  cooldownMs: string;
-  access: ControlButtonAccess;
-  color: string;
-};
-
-type RobotFormState = {
-  name: string;
-  slug: string;
-  description: string;
-  thumbnailUrl: string;
-  roomMode: RoomMode;
-  queueMode: 'FIRST_COME' | 'VOTING' | 'DISABLED';
-  aclVideo: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
-  aclControl: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
-  aclChat: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
-  aclEStop: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
-  targetBitrateKbps: string;
-  maxTurnTime: number;
-  maxViewers: number;
-  maxControllers: number;
-  tags: string;
-  accessPassword: string;
-};
-
-const DEFAULT_CREATE_FORM: RobotFormState = {
-  name: '',
-  slug: '',
-  description: '',
-  thumbnailUrl: '',
-  roomMode: 'PUBLIC',
-  queueMode: 'FIRST_COME',
-  aclVideo: 'AUTHENTICATED',
-  aclControl: 'AUTHENTICATED',
-  aclChat: 'AUTHENTICATED',
-  aclEStop: 'AUTHENTICATED',
-  targetBitrateKbps: '1800',
-  maxTurnTime: 60000,
-  maxViewers: 1000,
-  maxControllers: 10,
-  tags: '',
-  accessPassword: '',
-};
-
-const LOCAL_SETTINGS_KEY = 'botparty.settings.v1';
-const DEFAULT_CONTROL_DRAFT: ControlButtonDraft = {
-  label: '',
-  command: '',
-  hotKey: '',
-  icon: '',
-  controlKind: 'button',
-  sliderMin: '-100',
-  sliderMax: '100',
-  sliderStart: '0',
-  sliderStep: '1',
-  sliderDirection: 'horizontal',
-  widgetReturn: 'none',
-  resetOnQueueLoss: false,
-  resetOnOffline: true,
-  resetAfterMs: '',
-  xyXMin: '-100',
-  xyXMax: '100',
-  xyXStart: '0',
-  xyYMin: '-100',
-  xyYMax: '100',
-  xyYStart: '0',
-  cooldownMs: '200',
-  access: ControlButtonAccessEnum.QUEUE_TURN,
-  color: '',
-};
-
-const accessModeOptions: Array<{
-  value: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
-  title: string;
-  description: string;
-}> = [
-  { value: 'ALL', title: 'Everyone', description: 'Guests and signed-in users can access this' },
-  {
-    value: 'AUTHENTICATED',
-    title: 'Signed-in users only',
-    description: 'Requires an account login',
-  },
-  { value: 'DISABLED', title: 'Disabled', description: 'Function is disabled' },
-];
-
-const controlAccessOptions: Array<{ value: ControlButtonAccess; label: string }> = [
-  { value: ControlButtonAccessEnum.EVERYONE, label: 'Everyone (guests + signed-in)' },
-  { value: ControlButtonAccessEnum.QUEUE_TURN, label: 'Current turn' },
-  { value: ControlButtonAccessEnum.MODERATOR, label: 'Moderator' },
-  { value: ControlButtonAccessEnum.OWNER, label: 'Owner' },
-];
-
-const DASHBOARD_SECTIONS = [
-  { id: 'section-settings', label: 'Settings' },
-  { id: 'section-token', label: 'Token & Links' },
-  { id: 'section-controls', label: 'Controls' },
-  { id: 'section-operations', label: 'Operations' },
-  { id: 'section-monitoring', label: 'Monitoring' },
-] as const;
-
-const CONTROL_PRESETS: Array<{ key: ControlPresetKey; label: string }> = [
-  { key: 'ptz-pan', label: 'PTZ Pan (Horizontal slider)' },
-  { key: 'ptz-tilt', label: 'PTZ Tilt (Vertical slider)' },
-  { key: 'drive-speed', label: 'Drive Speed (0..100 slider)' },
-  { key: 'gripper', label: 'Gripper (Center slider)' },
-  { key: 'arm-xy', label: 'Arm XY Pad' },
-];
-
-function applyControlPreset(draft: ControlButtonDraft, preset: ControlPresetKey): ControlButtonDraft {
-  const base = {
-    ...draft,
-    icon: '',
-    resetAfterMs: '',
-    resetOnQueueLoss: false,
-    resetOnOffline: true,
-    widgetReturn: 'none' as const,
-  };
-
-  switch (preset) {
-    case 'ptz-pan':
-      return {
-        ...base,
-        label: base.label || 'Pan',
-        command: base.command || 'ptz_pan',
-        controlKind: 'slider',
-        sliderMin: '-100',
-        sliderMax: '100',
-        sliderStart: '0',
-        sliderStep: '1',
-        sliderDirection: 'horizontal',
-      };
-    case 'ptz-tilt':
-      return {
-        ...base,
-        label: base.label || 'Tilt',
-        command: base.command || 'ptz_tilt',
-        controlKind: 'slider',
-        sliderMin: '-100',
-        sliderMax: '100',
-        sliderStart: '0',
-        sliderStep: '1',
-        sliderDirection: 'vertical',
-      };
-    case 'drive-speed':
-      return {
-        ...base,
-        label: base.label || 'Speed',
-        command: base.command || 'set_speed',
-        controlKind: 'slider',
-        sliderMin: '0',
-        sliderMax: '100',
-        sliderStart: '50',
-        sliderStep: '1',
-        sliderDirection: 'horizontal',
-      };
-    case 'gripper':
-      return {
-        ...base,
-        label: base.label || 'Gripper',
-        command: base.command || 'gripper',
-        controlKind: 'slider',
-        sliderMin: '-100',
-        sliderMax: '100',
-        sliderStart: '0',
-        sliderStep: '1',
-        sliderDirection: 'horizontal',
-        widgetReturn: 'center',
-      };
-    case 'arm-xy':
-      return {
-        ...base,
-        label: base.label || 'Arm XY',
-        command: base.command || 'arm_xy',
-        controlKind: 'xy',
-        xyXMin: '-100',
-        xyXMax: '100',
-        xyXStart: '0',
-        xyYMin: '-100',
-        xyYMax: '100',
-        xyYStart: '0',
-      };
-  }
-}
-
-function detectRoomMode(robot: { visibility: string; accessMode: string }): RoomMode {
-  if (robot.visibility === 'PRIVATE') return 'PRIVATE';
-  if (robot.accessMode === 'ALLOWED_USERS') return 'ALLOWED_USERS';
-  if (robot.accessMode === 'LINK_ONLY') return 'LINK_ONLY';
-  if (robot.accessMode === 'PASSWORD') return 'PASSWORD';
-  return 'PUBLIC';
-}
-
-function roomModeToFields(mode: RoomMode): {
-  visibility: 'PUBLIC' | 'UNLISTED' | 'PRIVATE';
-  accessMode: 'OPEN' | 'PASSWORD' | 'LINK_ONLY' | 'ALLOWED_USERS';
-} {
-  switch (mode) {
-    case 'PUBLIC': return { visibility: 'PUBLIC', accessMode: 'OPEN' };
-    case 'LINK_ONLY': return { visibility: 'UNLISTED', accessMode: 'LINK_ONLY' };
-    case 'PASSWORD': return { visibility: 'PUBLIC', accessMode: 'PASSWORD' };
-    case 'ALLOWED_USERS': return { visibility: 'UNLISTED', accessMode: 'ALLOWED_USERS' };
-    case 'PRIVATE': return { visibility: 'PRIVATE', accessMode: 'OPEN' };
-  }
-}
-
-function queueModeDescription(mode: RobotFormState['queueMode']) {
-  if (mode === 'VOTING') {
-    return 'Viewers can vote who should control next. The highest-voted person takes the next turn.';
-  }
-  if (mode === 'DISABLED') {
-    return 'There is no queue. Controls are handled without turn rotation.';
-  }
-  return 'First come, first served. The next person in line gets control when the current turn ends.';
-}
-
-function toUpdatePayload(form: RobotFormState) {
-  const bitrate = Number(form.targetBitrateKbps);
-  const hasBitrate = Number.isFinite(bitrate) && bitrate >= 150 && bitrate <= 3000;
-  const { visibility, accessMode } = roomModeToFields(form.roomMode);
-
-  return {
-    name: form.name.trim(),
-    slug: form.slug.trim() || undefined,
-    description: form.description.trim() || undefined,
-    thumbnailUrl: form.thumbnailUrl.trim() || undefined,
-    visibility,
-    accessMode,
-    queueMode: form.queueMode,
-    acl: {
-      video: form.aclVideo,
-      control: form.aclControl,
-      chat: form.aclChat,
-      estop: form.aclEStop,
-    },
-    stream: {
-      targetBitrateKbps: hasBitrate ? Math.round(bitrate) : undefined,
-    },
-    maxTurnTime: Number(form.maxTurnTime),
-    maxViewers: Number(form.maxViewers),
-    maxControllers: Number(form.maxControllers),
-    tags: form.tags
-      .split(',')
-      .map((tag) => tag.trim())
-      .filter(Boolean),
-    accessPassword: form.accessPassword.trim() || undefined,
-  };
-}
-
-function formFromRobot(robot: RobotManaged): RobotFormState {
-  const access = robot.metadata?.access;
-  const stream = robot.metadata?.stream;
-
-  return {
-    name: robot.name,
-    slug: robot.slug,
-    description: robot.description ?? '',
-    thumbnailUrl: robot.thumbnailUrl ?? '',
-    roomMode: detectRoomMode(robot),
-    queueMode: robot.queueMode,
-    aclVideo: access?.video ?? 'AUTHENTICATED',
-    aclControl: access?.control ?? 'AUTHENTICATED',
-    aclChat: access?.chat ?? 'AUTHENTICATED',
-    aclEStop: access?.estop ?? 'AUTHENTICATED',
-    targetBitrateKbps:
-      typeof stream?.targetBitrateKbps === 'number' ? String(stream.targetBitrateKbps) : '',
-    maxTurnTime: robot.maxTurnTime,
-    maxViewers: robot.maxViewers,
-    maxControllers: robot.maxControllers,
-    tags: robot.tags.join(', '),
-    accessPassword: '',
-  };
-}
-
-function buildWidgetSpec(draft: ControlButtonDraft): string | undefined {
-  if (draft.controlKind === 'button') {
-    return draft.icon.trim() || undefined;
-  }
-
-  const resetAfterMs = Number(draft.resetAfterMs);
-  const ttl = Number.isFinite(resetAfterMs) && resetAfterMs >= 100 ? String(Math.round(resetAfterMs)) : null;
-
-  if (draft.controlKind === 'slider') {
-    return [
-      'widget:s',
-      `min=${Number(draft.sliderMin)}`,
-      `max=${Number(draft.sliderMax)}`,
-      `start=${Number(draft.sliderStart)}`,
-      `step=${Number(draft.sliderStep)}`,
-      `dir=${draft.sliderDirection === 'vertical' ? 'v' : 'h'}`,
-      `r=${draft.widgetReturn === 'center' ? 'c' : 'n'}`,
-      `rq=${draft.resetOnQueueLoss ? 1 : 0}`,
-      `ro=${draft.resetOnOffline ? 1 : 0}`,
-      ttl ? `ttl=${ttl}` : null,
-    ]
-      .filter((entry): entry is string => Boolean(entry))
-      .join(':');
-  }
-
-  return [
-    'widget:xy',
-    `xn=${Number(draft.xyXMin)}`,
-    `xx=${Number(draft.xyXMax)}`,
-    `x0=${Number(draft.xyXStart)}`,
-    `yn=${Number(draft.xyYMin)}`,
-    `yx=${Number(draft.xyYMax)}`,
-    `y0=${Number(draft.xyYStart)}`,
-    `r=${draft.widgetReturn === 'center' ? 'c' : 'n'}`,
-    `rq=${draft.resetOnQueueLoss ? 1 : 0}`,
-    `ro=${draft.resetOnOffline ? 1 : 0}`,
-    ttl ? `ttl=${ttl}` : null,
-  ]
-    .filter((entry): entry is string => Boolean(entry))
-    .join(':');
-}
-
-function draftFromControl(button: ControlButtonRecord): ControlButtonDraft {
-  const draft: ControlButtonDraft = {
-    ...DEFAULT_CONTROL_DRAFT,
-    label: button.label,
-    command: button.command,
-    hotKey: button.hotKey ?? '',
-    cooldownMs: String(button.cooldownMs),
-    access: button.access,
-    color: button.color ?? '',
-  };
-
-  const icon = button.icon ?? '';
-  if (!icon.startsWith('widget:')) {
-    draft.icon = icon;
-    draft.controlKind = 'button';
-    return draft;
-  }
-
-  const parts = icon.split(':').map((part) => part.trim()).filter(Boolean);
-  const kind = parts[1]?.toLowerCase();
-  const kv = new Map<string, string>();
-  for (const segment of parts.slice(2)) {
-    const idx = segment.indexOf('=');
-    if (idx <= 0) continue;
-    kv.set(segment.slice(0, idx).toLowerCase(), segment.slice(idx + 1));
-  }
-
-  const get = (keys: string[], fallback: string) => {
-    for (const key of keys) {
-      const found = kv.get(key);
-      if (found !== undefined) return found;
-    }
-    return fallback;
-  };
-
-  draft.widgetReturn = get(['r', 'return'], 'n').toLowerCase() === 'c' ? 'center' : 'none';
-  draft.resetOnQueueLoss = get(['rq'], '0') === '1';
-  draft.resetOnOffline = get(['ro'], '1') !== '0';
-  draft.resetAfterMs = get(['ttl'], '');
-
-  if (kind === 's' || kind === 'slider') {
-    draft.controlKind = 'slider';
-    draft.sliderMin = get(['min'], '-100');
-    draft.sliderMax = get(['max'], '100');
-    draft.sliderStart = get(['start', 'v0', 'c'], '0');
-    draft.sliderStep = get(['step'], '1');
-    draft.sliderDirection = get(['dir'], 'h').toLowerCase() === 'v' ? 'vertical' : 'horizontal';
-    return draft;
-  }
-
-  draft.controlKind = 'xy';
-  draft.xyXMin = get(['xn', 'xmin'], '-100');
-  draft.xyXMax = get(['xx', 'xmax'], '100');
-  draft.xyXStart = get(['x0', 'xstart'], '0');
-  draft.xyYMin = get(['yn', 'ymin'], '-100');
-  draft.xyYMax = get(['yx', 'ymax'], '100');
-  draft.xyYStart = get(['y0', 'ystart'], '0');
-  return draft;
-}
+import { usePreferences } from '@/lib/preferences';
+import { MonitoringSection } from '@/components/dashboard/monitoring-section';
+import { CreateRobotPanel } from '@/components/dashboard/create-robot-panel';
+import { DashboardFleetSummary } from '@/components/dashboard/dashboard-fleet-summary';
+import { RobotCardGrid } from '@/components/dashboard/robot-card-grid';
+import { ControlButtonEditor } from '@/components/dashboard/control-button-editor';
+import { DashboardSidebar } from '@/components/dashboard/dashboard-sidebar';
+import { DashboardPreview } from '@/components/dashboard/dashboard-preview';
+import { DashboardTokenSection } from '@/components/dashboard/dashboard-token-section';
+import { DashboardOperationsSection } from '@/components/dashboard/dashboard-operations-section';
+import { DashboardAllowlistSection } from '@/components/dashboard/dashboard-allowlist-section';
+import { DashboardSettingsSection } from '@/components/dashboard/dashboard-settings-section';
+import {
+  type RemoteActionType,
+  type RoomMode,
+  DASHBOARD_SECTIONS,
+  detectRoomMode,
+  toUpdatePayload,
+  formFromRobot,
+  buildWidgetSpec,
+  draftFromControl,
+} from '@/components/dashboard/types';
 
 export default function DashboardPage() {
   const router = useRouter();
   const { accessToken, hasHydrated, username } = useAuth();
+  const dashboardMaskToken = usePreferences((state) => state.dashboardMaskToken);
+  const {
+    createForm,
+    setCreateForm,
+    resetCreateForm,
+    selectedId,
+    setSelectedId,
+    editForm,
+    setEditForm,
+    showToken,
+    setShowToken,
+    syncShowTokenWithMask,
+    controlDraft,
+    setControlDraft,
+    resetControlDraft,
+    controlPreset,
+    setControlPreset,
+    editingControlId,
+    setEditingControlId,
+    controlEditDraft,
+    setControlEditDraft,
+    clearControlEditDraft,
+    controlEditPreset,
+    setControlEditPreset,
+    allowlistUsername,
+    setAllowlistUsername,
+    resetAllowlistUsername,
+    newIngressCameraId,
+    setNewIngressCameraId,
+    newIngressLabel,
+    setNewIngressLabel,
+    newIngressCompatibilityMode,
+    setNewIngressCompatibilityMode,
+    resetIngressDraft,
+    obsHelpOpen,
+    setObsHelpOpen,
+    activeSectionId,
+    setActiveSectionId,
+  } = useDashboardStore();
 
   const [robots, setRobots] = useState<RobotManaged[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-
-  const [createForm, setCreateForm] = useState<RobotFormState>(DEFAULT_CREATE_FORM);
   const [creating, setCreating] = useState(false);
-
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const selectedRobot = useMemo(
     () => robots.find((robot) => robot.id === selectedId) ?? null,
     [robots, selectedId],
   );
-
-  const [editForm, setEditForm] = useState<RobotFormState>(DEFAULT_CREATE_FORM);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
@@ -467,33 +108,22 @@ export default function DashboardPage() {
   });
   const [preview, setPreview] = useState<{ token: string; url: string } | null>(null);
   const [previewVersion, setPreviewVersion] = useState(0);
-  const [showToken, setShowToken] = useState(false);
   const [controlButtons, setControlButtons] = useState<ControlButtonRecord[]>([]);
   const [controlsLoading, setControlsLoading] = useState(false);
-  const [controlDraft, setControlDraft] = useState<ControlButtonDraft>(DEFAULT_CONTROL_DRAFT);
-  const [controlPreset, setControlPreset] = useState<ControlPresetKey>('ptz-pan');
-  const [editingControlId, setEditingControlId] = useState<string | null>(null);
-  const [controlEditDraft, setControlEditDraft] = useState<ControlButtonDraft | null>(null);
-  const [controlEditPreset, setControlEditPreset] = useState<ControlPresetKey>('ptz-pan');
   const [creatingControl, setCreatingControl] = useState(false);
   const [controlOp, setControlOp] = useState<string | null>(null);
   const [allowedUsers, setAllowedUsers] = useState<AllowedUserRecord[]>([]);
   const [allowlistLoading, setAllowlistLoading] = useState(false);
-  const [allowlistUsername, setAllowlistUsername] = useState('');
   const [allowlistOp, setAllowlistOp] = useState<string | null>(null);
   const [ingressCameras, setIngressCameras] = useState<RobotCameraIngress[]>([]);
   const [ingressLoading, setIngressLoading] = useState(false);
   const [ingressOp, setIngressOp] = useState<string | null>(null);
-  const [newIngressCameraId, setNewIngressCameraId] = useState('');
-  const [newIngressLabel, setNewIngressLabel] = useState('');
-  const [newIngressCompatibilityMode, setNewIngressCompatibilityMode] = useState(false);
-  const [obsHelpOpen, setObsHelpOpen] = useState(false);
-  const [activeSectionId, setActiveSectionId] = useState<string>(DASHBOARD_SECTIONS[0].id);
   const previousPendingActionTypesRef = useRef<RemoteActionType[]>([]);
   const previewRefreshInFlightRef = useRef(false);
   const editFormRef = useRef<HTMLFormElement>(null);
   const thumbnailInputRef = useRef<HTMLInputElement>(null);
   const previewContainerRef = useRef<HTMLDivElement>(null);
+  const autoThumbnailAttemptedRef = useRef<Set<string>>(new Set());
   const [thumbnailOp, setThumbnailOp] = useState<'upload' | 'snapshot' | 'remove' | null>(null);
 
   useEffect(() => {
@@ -525,24 +155,19 @@ export default function DashboardPage() {
 
     load().catch(() => {});
 
-    try {
-      const raw = window.localStorage.getItem(LOCAL_SETTINGS_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as { dashboardMaskToken?: boolean };
-        setShowToken(parsed.dashboardMaskToken === false);
-      }
-    } catch {
-      setShowToken(false);
-    }
   }, [accessToken, hasHydrated, router]);
+
+  useEffect(() => {
+    syncShowTokenWithMask(dashboardMaskToken);
+  }, [dashboardMaskToken, syncShowTokenWithMask]);
 
   useEffect(() => {
     if (!selectedRobot) return;
     setEditForm(formFromRobot(selectedRobot));
-    setControlDraft(DEFAULT_CONTROL_DRAFT);
+    resetControlDraft();
     setEditingControlId(null);
-    setControlEditDraft(null);
-  }, [selectedRobot]);
+    clearControlEditDraft();
+  }, [clearControlEditDraft, resetControlDraft, selectedRobot, setEditForm, setEditingControlId]);
 
   useEffect(() => {
     if (!accessToken || !selectedRobot) {
@@ -838,7 +463,7 @@ export default function DashboardPage() {
       setRobots(next);
       setSelectedId(created.id);
       setEditForm(formFromRobot(created));
-      setCreateForm(DEFAULT_CREATE_FORM);
+      resetCreateForm();
       setStatus('Robot created. You can now copy the claim token into your client config.');
       pushToast('Robot created.', 'success', 3000);
     } catch (err) {
@@ -968,10 +593,17 @@ export default function DashboardPage() {
     return `/robot/${selectedRobot.owner.username}/${selectedRobot.slug}${inviteSuffix}`;
   }, [editForm.roomMode, selectedRobot]);
 
+  const buildSelectedRobotEmbedHref = useCallback(() => {
+    if (!selectedRobot) {
+      return '#';
+    }
+    return `/embed/${selectedRobot.owner.username}/${selectedRobot.slug}`;
+  }, [selectedRobot]);
+
   const applyUpdatedRobot = useCallback((updated: RobotManaged) => {
     setRobots((prev) => prev.map((robot) => (robot.id === updated.id ? updated : robot)));
     setEditForm(formFromRobot(updated));
-  }, []);
+  }, [setEditForm]);
 
   const updateThumbnailFromDataUrl = useCallback(async (dataUrl: string, mode: 'upload' | 'snapshot') => {
     if (!accessToken || !selectedRobot) {
@@ -1045,15 +677,20 @@ export default function DashboardPage() {
     reader.readAsDataURL(file);
   }, [updateThumbnailFromDataUrl]);
 
-  const capturePreviewThumbnail = useCallback(async () => {
+  const capturePreviewThumbnail = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent === true;
     if (!selectedRobot || (selectedRobot.status !== 'ONLINE' && selectedRobot.status !== 'BUSY')) {
-      pushToast('The robot must be live to capture a snapshot.', 'error', 2600);
+      if (!silent) {
+        pushToast('The robot must be live to capture a snapshot.', 'error', 2600);
+      }
       return;
     }
 
     const video = previewContainerRef.current?.querySelector('video') ?? null;
     if (!video || video.videoWidth <= 0 || video.videoHeight <= 0) {
-      pushToast('No live camera frame is available yet.', 'error', 2600);
+      if (!silent) {
+        pushToast('No live camera frame is available yet.', 'error', 2600);
+      }
       return;
     }
 
@@ -1064,7 +701,9 @@ export default function DashboardPage() {
     canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
     const ctx = canvas.getContext('2d');
     if (!ctx) {
-      pushToast('Snapshot capture is not available in this browser.', 'error', 2600);
+      if (!silent) {
+        pushToast('Snapshot capture is not available in this browser.', 'error', 2600);
+      }
       return;
     }
 
@@ -1072,6 +711,49 @@ export default function DashboardPage() {
     const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
     await updateThumbnailFromDataUrl(dataUrl, 'snapshot');
   }, [selectedRobot, updateThumbnailFromDataUrl]);
+
+  useEffect(() => {
+    if (!selectedRobot) {
+      return;
+    }
+
+    if (selectedRobot.thumbnailUrl) {
+      autoThumbnailAttemptedRef.current.delete(selectedRobot.id);
+      return;
+    }
+
+    if (selectedRobot.status !== 'ONLINE' && selectedRobot.status !== 'BUSY') {
+      return;
+    }
+
+    if (!preview || thumbnailOp !== null || autoThumbnailAttemptedRef.current.has(selectedRobot.id)) {
+      return;
+    }
+
+    autoThumbnailAttemptedRef.current.add(selectedRobot.id);
+    let attempts = 0;
+    const maxAttempts = 8;
+
+    const interval = window.setInterval(() => {
+      const video = previewContainerRef.current?.querySelector('video') ?? null;
+      const ready = Boolean(video && video.videoWidth > 0 && video.videoHeight > 0);
+      attempts += 1;
+
+      if (ready) {
+        window.clearInterval(interval);
+        void capturePreviewThumbnail({ silent: true });
+        return;
+      }
+
+      if (attempts >= maxAttempts) {
+        window.clearInterval(interval);
+      }
+    }, 1000);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [capturePreviewThumbnail, preview, selectedRobot, thumbnailOp]);
 
   useEffect(() => {
     if (!accessToken || !selectedRobot || editForm.roomMode !== 'LINK_ONLY' || selectedRobot.inviteCode) {
@@ -1174,6 +856,25 @@ export default function DashboardPage() {
     }
   };
 
+  const copyEmbedCode = async () => {
+    if (!selectedRobot) {
+      return;
+    }
+
+    const href = buildSelectedRobotEmbedHref();
+    const fullUrl =
+      typeof window !== 'undefined' ? new URL(href, window.location.origin).toString() : href;
+    const embedCode = `<iframe src="${fullUrl}" title="${selectedRobot.name} on BotParty" width="960" height="540" loading="lazy" allow="autoplay; fullscreen" style="border:0; width:100%; aspect-ratio:16 / 9;"></iframe>`;
+    try {
+      await navigator.clipboard.writeText(embedCode);
+      setStatus('Embed code copied to clipboard.');
+      pushToast('Embed code copied.', 'success', 2200);
+    } catch {
+      setError('Clipboard permission denied. Copy embed code manually.');
+      pushToast('Clipboard access denied - please copy manually.', 'error');
+    }
+  };
+
   const createIngressCamera = async () => {
     if (!accessToken || !selectedRobot) return;
     const cameraId = newIngressCameraId.trim();
@@ -1194,9 +895,7 @@ export default function DashboardPage() {
         const withoutExisting = prev.filter((entry) => entry.ingressId !== created.ingressId);
         return [...withoutExisting, created].sort((a, b) => (a.cameraId ?? '').localeCompare(b.cameraId ?? ''));
       });
-      setNewIngressCameraId('');
-      setNewIngressLabel('');
-      setNewIngressCompatibilityMode(false);
+      resetIngressDraft();
       pushToast('External camera ingress saved.', 'success', 2600);
     } catch (err) {
       pushToast(err instanceof Error ? err.message : 'Failed to create camera ingress.', 'error', 3200);
@@ -1317,7 +1016,7 @@ export default function DashboardPage() {
       setControlButtons((prev) =>
         [...prev, next].sort((a, b) => a.position - b.position),
       );
-      setControlDraft(DEFAULT_CONTROL_DRAFT);
+      resetControlDraft();
       pushToast('Control button created.', 'success', 2500);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create control button';
@@ -1392,7 +1091,7 @@ export default function DashboardPage() {
       });
       setControlButtons((prev) => prev.map((entry) => (entry.id === updated.id ? updated : entry)));
       setEditingControlId(null);
-      setControlEditDraft(null);
+      clearControlEditDraft();
       pushToast('Control button updated.', 'success', 2200);
     } catch (err) {
       pushToast(err instanceof Error ? err.message : 'Failed to update control.', 'error');
@@ -1470,7 +1169,7 @@ export default function DashboardPage() {
         if (prev.some((entry) => entry.id === added.id)) return prev;
         return [...prev, added];
       });
-      setAllowlistUsername('');
+      resetAllowlistUsername();
       pushToast('User added to allow list.', 'success', 2200);
     } catch (err) {
       pushToast(err instanceof Error ? err.message : 'Failed to add user.', 'error');
@@ -1518,95 +1217,14 @@ export default function DashboardPage() {
       {error && <p className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</p>}
       {status && <p className="mb-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300">{status}</p>}
 
-      <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <form onSubmit={handleCreate} autoComplete="off" className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 sm:p-5">
-          <h2 className="mb-4 text-lg font-bold">Create Robot</h2>
-
-          <div className="space-y-3">
-            <input
-              className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-              placeholder="Robot name"
-              value={createForm.name}
-              onChange={(event) => setCreateForm((prev) => ({ ...prev, name: event.target.value }))}
-              required
-            />
-            <div className="flex items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm">
-              <span className="shrink-0 text-[var(--muted-foreground)]">/robot/{createSlugOwner}/</span>
-              <input
-                className="min-w-0 flex-1 bg-transparent outline-none"
-                placeholder="custom-slug (optional)"
-                autoComplete="off"
-                inputMode="text"
-                spellCheck={false}
-                value={createForm.slug}
-                onChange={(event) =>
-                  setCreateForm((prev) => ({
-                    ...prev,
-                    slug: event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''),
-                  }))
-                }
-                pattern="[a-z0-9][a-z0-9-]*[a-z0-9]"
-                minLength={3}
-                maxLength={50}
-                title="3-50 lowercase letters, numbers, and hyphens. No leading or trailing hyphen."
-              />
-            </div>
-            <textarea
-              className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-              placeholder="Description"
-              rows={3}
-              value={createForm.description}
-              onChange={(event) => setCreateForm((prev) => ({ ...prev, description: event.target.value }))}
-            />
-            <input
-              className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-              placeholder="Tags (comma separated)"
-              value={createForm.tags}
-              onChange={(event) => setCreateForm((prev) => ({ ...prev, tags: event.target.value }))}
-            />
-          </div>
-
-          <button
-            type="submit"
-            disabled={creating || loading}
-            className="mt-4 inline-flex items-center gap-2 rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--primary-hover)] disabled:opacity-60"
-          >
-            <Plus className="h-4 w-4" />
-            {creating ? 'Creating...' : 'Create robot'}
-          </button>
-        </form>
-
-        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 sm:p-5">
-          <h2 className="mb-4 text-lg font-bold">Linux Robot Client Quickstart</h2>
-          <ol className="space-y-2 text-sm text-[var(--muted-foreground)]">
-            <li>1. Create a robot and copy the claim token.</li>
-            <li>2. On your robot host: clone the botparty-client repository.</li>
-            <li>3. Create a venv, install requirements, and copy config.example.yaml to config.yaml.</li>
-            <li>4. Paste your claim token in config.yaml.</li>
-            <li>5. Start with python -m botparty_robot.</li>
-          </ol>
-          <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--background)] p-3">
-            <div className="flex items-center gap-2 text-sm font-semibold">
-              <Cable className="h-4 w-4 text-violet-300" />
-              Controller schema
-            </div>
-            <p className="mt-2 text-sm text-[var(--muted-foreground)]">
-              Browser UI → BotParty API + LiveKit → Python robot client → hardware adapter
-            </p>
-            <div className="mt-3">
-              <a
-                href="https://github.com/onlybrezel/botparty-client/blob/main/docs/index.md"
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--foreground)] transition hover:border-[var(--muted-foreground)]"
-              >
-                <ExternalLink className="h-3.5 w-3.5" />
-                Robot Setup
-              </a>
-            </div>
-          </div>
-        </div>
-      </section>
+      <CreateRobotPanel
+        createForm={createForm}
+        setCreateForm={setCreateForm}
+        onSubmit={handleCreate}
+        creating={creating}
+        loading={loading}
+        slugOwner={createSlugOwner}
+      />
 
       <section className="mt-6 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 sm:p-5">
         <h2 className="mb-4 text-lg font-bold">My Robots</h2>
@@ -1614,1523 +1232,136 @@ export default function DashboardPage() {
         {loading ? (
           <p className="text-sm text-[var(--muted-foreground)]">Loading robots...</p>
         ) : robots.length === 0 ? (
-          <p className="text-sm text-[var(--muted-foreground)]">No robots yet. Create your first robot above.</p>
-        ) : !selectedRobot ? (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {robots.map((robot) => {
-                const _seed = robot.slug.split('').reduce((s, ch) => s + ch.charCodeAt(0), 0);
-                const _hue = _seed % 360;
-                return (
-                  <button
-                    key={robot.id}
-                    type="button"
-                    onClick={() => setSelectedId(robot.id)}
-                    className="group overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)] text-left transition hover:border-violet-500/40 hover:-translate-y-0.5"
-                  >
-                    <div
-                      className="relative flex h-28 items-center justify-center overflow-hidden"
-                      style={!robot.thumbnailUrl ? { background: `linear-gradient(135deg, hsla(${_hue}, 75%, 55%, 0.25), hsla(${(_hue + 50) % 360}, 80%, 50%, 0.08))` } : undefined}
-                    >
-                      {robot.thumbnailUrl ? (
-                        <img src={robot.thumbnailUrl} alt={robot.name} className="h-full w-full object-cover" />
-                      ) : (
-                        <>
-                          <div className="absolute inset-0 opacity-30" style={{ backgroundImage: 'radial-gradient(circle at 20% 20%, rgba(255,255,255,0.25), transparent 45%)' }} />
-                          <span className="relative text-3xl font-black text-white/60">{robot.name.trim().charAt(0).toUpperCase()}</span>
-                        </>
-                      )}
-                      <div className="absolute left-2 top-2">
-                        {robot.status === 'ONLINE' ? (
-                          <span className="flex items-center gap-1 rounded-full bg-[var(--live)]/90 px-2 py-0.5 text-[10px] font-semibold text-white">
-                            <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse-dot" />
-                            LIVE
-                          </span>
-                        ) : (
-                          <span className="rounded-full bg-zinc-700/90 px-2 py-0.5 text-[10px] font-medium text-zinc-300">Offline</span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="p-3">
-                      <p className="truncate text-sm font-semibold transition-colors group-hover:text-violet-400">{robot.name}</p>
-                      <p className="text-xs text-[var(--muted-foreground)]">/{robot.slug}</p>
-                      {robot.tags.length > 0 && (
-                        <div className="mt-1.5 flex flex-wrap gap-1">
-                          {robot.tags.slice(0, 3).map((tag) => (
-                            <span key={tag} className="rounded-full border border-[var(--border)] px-1.5 py-0.5 text-[10px] text-[var(--muted-foreground)]">{tag}</span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+          <div className="rounded-xl border border-dashed border-[var(--border)] p-6 text-center">
+            <p className="text-base font-semibold">No robots yet</p>
+            <p className="mt-1 text-sm text-[var(--muted-foreground)]">Create your first robot using the form above, then follow these steps to go live:</p>
+            <ol className="mt-4 space-y-2 text-left text-sm text-[var(--muted-foreground)] max-w-sm mx-auto">
+              <li className="flex items-start gap-2"><span className="shrink-0 font-bold text-violet-400">1.</span>Create a robot profile &amp; grab the claim token.</li>
+              <li className="flex items-start gap-2"><span className="shrink-0 font-bold text-violet-400">2.</span>Install the robot client on your hardware (<a href="/docs/getting-started" className="underline hover:text-[var(--foreground)]">Getting Started guide</a>).</li>
+              <li className="flex items-start gap-2"><span className="shrink-0 font-bold text-violet-400">3.</span>Configure <code className="rounded bg-[var(--muted)] px-1 py-0.5 text-xs">config.yaml</code> with your claim token &amp; start the client.</li>
+              <li className="flex items-start gap-2"><span className="shrink-0 font-bold text-violet-400">4.</span>Return here — the robot will appear as Online once connected.</li>
+            </ol>
+          </div>
+        ) : (
+          <>
+            <DashboardFleetSummary robots={robots} selectedId={selectedId} />
+            {!selectedRobot ? (
+            <RobotCardGrid robots={robots} onSelect={setSelectedId} />
           ) : (
             <div className="flex items-start gap-5">
-              <aside className="hidden w-[200px] shrink-0 lg:block">
-                <div className="pb-1 flex flex-col gap-3">
-                  <div className="space-y-1.5">
-                    {robots.map((robot) => {
-                      const _seed = robot.slug.split('').reduce((s, ch) => s + ch.charCodeAt(0), 0);
-                      const _hue = _seed % 360;
-                      return (
-                        <button
-                          key={robot.id}
-                          type="button"
-                          onClick={() => setSelectedId(robot.id)}
-                          className={`flex w-full items-center gap-2 rounded-lg border px-2 py-1.5 text-left text-xs transition ${
-                            selectedId === robot.id
-                              ? 'border-violet-500/50 bg-violet-500/10 text-[var(--foreground)]'
-                              : 'border-[var(--border)] text-[var(--muted-foreground)] hover:border-[var(--muted-foreground)] hover:text-[var(--foreground)]'
-                          }`}
-                        >
-                          <div
-                            className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-xs font-bold text-white"
-                            style={{ background: `linear-gradient(135deg, hsla(${_hue}, 75%, 55%, 0.5), hsla(${(_hue + 50) % 360}, 80%, 50%, 0.3))` }}
-                          >
-                            {robot.name.trim().charAt(0).toUpperCase()}
-                          </div>
-                          <span className="min-w-0 flex-1 truncate font-medium">{robot.name}</span>
-                          {robot.status === 'ONLINE' && (
-                            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" />
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <div className="space-y-0.5 border-t border-[var(--border)] pt-3">
-                    {DASHBOARD_SECTIONS.map((s) => (
-                      <button
-                        key={s.id}
-                        type="button"
-                        onClick={() => {
-                          setActiveSectionId(s.id);
-                          document.getElementById(s.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                        }}
-                        className={`w-full rounded px-2 py-1.5 text-left text-xs transition ${
-                          activeSectionId === s.id
-                            ? 'bg-violet-500/10 text-[var(--foreground)]'
-                            : 'text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)]'
-                        }`}
-                      >
-                        {s.label}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="space-y-2 border-t border-[var(--border)] pt-3">
-                    <button
-                      type="button"
-                      disabled={saving}
-                      onClick={() => editFormRef.current?.requestSubmit()}
-                      className="flex w-full items-center justify-center gap-2 rounded-lg bg-[var(--primary)] px-3 py-2 text-xs font-semibold text-white hover:bg-[var(--primary-hover)] disabled:opacity-60"
-                    >
-                      <Save className="h-3.5 w-3.5" />
-                      {saving ? 'Saving...' : 'Save'}
-                    </button>
-                    <button
-                      type="button"
-                      disabled={deleting}
-                      onClick={() => void handleDelete()}
-                      className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-red-500/40 px-3 py-2 text-xs font-semibold text-red-300 disabled:opacity-60"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      {deleting ? 'Deleting...' : 'Delete'}
-                    </button>
-                  </div>
-                </div>
-              </aside>
+              <DashboardSidebar
+                robots={robots}
+                selectedId={selectedId}
+                activeSectionId={activeSectionId}
+                saving={saving}
+                deleting={deleting}
+                editFormRef={editFormRef}
+                onSelect={setSelectedId}
+                onSectionSelect={(id) => {
+                  setActiveSectionId(id);
+                  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }}
+                onDelete={() => void handleDelete()}
+              />
               <div className="min-w-0 flex-1">
                 <>
-                  {/* Live preview */}
-                  <div className="mb-4 overflow-hidden rounded-xl border border-[var(--border)] bg-black">
-                    <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border)]">
-                      <div className="flex items-center gap-2">
-                        {selectedRobot.status === 'ONLINE' ? (
-                          <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
-                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse-dot" />
-                            LIVE
-                          </span>
-                        ) : (
-                          <span className="text-xs text-[var(--muted-foreground)]">Offline</span>
-                        )}
-                      </div>
-                      <a
-                        href={buildRobotRoomHref(selectedRobot)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition"
-                      >
-                        <ExternalLink className="h-3 w-3" />
-                        Open
-                      </a>
-                    </div>
-                    <div ref={previewContainerRef} className="relative aspect-video w-full bg-zinc-950">
-                      {preview ? (
-                        <LiveKitPlayer
-                          key={`${selectedRobot.id}-${previewVersion}`}
-                          token={preview.token}
-                          livekitUrl={preview.url}
-                          streamConfig={selectedRobot.metadata?.stream}
-                          onStreamStalled={() => {
-                            void refreshPreview(true);
-                          }}
-                        />
-                      ) : (
-                        <div className="flex h-full items-center justify-center text-xs text-[var(--muted-foreground)]">
-                          {selectedRobot.status === 'ONLINE' ? 'Connecting...' : 'Robot is offline'}
-                        </div>
-                      )}
-                    </div>
-                  </div>
+                  <DashboardPreview
+                    robot={selectedRobot}
+                    roomHref={buildRobotRoomHref(selectedRobot)}
+                    preview={preview}
+                    previewVersion={previewVersion}
+                    previewContainerRef={previewContainerRef}
+                    onStreamStalled={() => {
+                      void refreshPreview(true);
+                    }}
+                  />
 
                 <form ref={editFormRef} onSubmit={handleSave} autoComplete="off" className="flex flex-col gap-3">
-                  <div id="section-settings" className="scroll-mt-4 flex items-center gap-3">
-                    <span className="shrink-0 text-[11px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)]">Settings</span>
-                    <div className="h-px flex-1 bg-[var(--border)]" />
-                  </div>
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <div className="space-y-1">
-                      <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
-                        Robot Name
-                      </label>
-                      <input
-                        className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                        value={editForm.name}
-                        onChange={(event) => setEditForm((prev) => ({ ...prev, name: event.target.value }))}
-                        required
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
-                        URL Slug
-                      </label>
-                      <div className="flex items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm">
-                        <span className="shrink-0 text-[var(--muted-foreground)]">/robot/{selectedRobot.owner.username}/</span>
-                        <input
-                          className="min-w-0 flex-1 bg-transparent outline-none"
-                          autoComplete="off"
-                          inputMode="text"
-                          spellCheck={false}
-                          value={editForm.slug}
-                          onChange={(event) =>
-                            setEditForm((prev) => ({ ...prev, slug: event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') }))
-                          }
-                          placeholder={selectedRobot.slug}
-                          pattern="[a-z0-9][a-z0-9-]*[a-z0-9]"
-                          minLength={3}
-                          maxLength={50}
-                          title="3-50 lowercase letters, numbers, and hyphens. No leading or trailing hyphen."
-                        />
-                      </div>
-                      {editForm.slug && editForm.slug !== selectedRobot.slug && (
-                        <p className="text-[10px] text-amber-400">Old URL will redirect to the new one automatically.</p>
-                      )}
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
-                        Room Access
-                      </label>
-                      <Select
-                        className="bg-[var(--background)]"
-                        value={editForm.roomMode}
-                        onChange={(event) =>
-                          setEditForm((prev) => ({ ...prev, roomMode: event.target.value as RoomMode }))
-                        }
-                      >
-                        <option value="PUBLIC">Public (anyone can view and control)</option>
-                        <option value="LINK_ONLY">Link only (share via invite link)</option>
-                        <option value="PASSWORD">Password protected</option>
-                        <option value="ALLOWED_USERS">Allowed users only</option>
-                        <option value="PRIVATE">Private (owner only)</option>
-                      </Select>
-                    </div>
-                    {editForm.roomMode === 'PASSWORD' ? (
-                      <div className="space-y-1">
-                        <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
-                          Room Password
-                        </label>
-                        <input
-                          type="password"
-                          className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                          value={editForm.accessPassword}
-                          onChange={(event) =>
-                            setEditForm((prev) => ({ ...prev, accessPassword: event.target.value }))
-                          }
-                          placeholder="Room password"
-                        />
-                      </div>
-                    ) : null}
-                    {editForm.roomMode === 'LINK_ONLY' && selectedRobot.inviteCode ? (
-                      <div className="space-y-2 sm:col-span-2 rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
-                        <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Invite Link</p>
-                        <code className="block break-all text-xs text-[var(--foreground)]">{buildSelectedRobotRoomHref('LINK_ONLY')}</code>
-                        <p className="text-[11px] text-[var(--muted-foreground)]">
-                          Invite code: <span className="font-semibold text-[var(--foreground)]">{selectedRobot.inviteCode}</span>
-                        </p>
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            onClick={copyInviteLink}
-                            className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs"
-                          >
-                            <Copy className="h-3.5 w-3.5" />
-                            Copy invite link
-                          </button>
-                          <a
-                            href={buildSelectedRobotRoomHref('LINK_ONLY')}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs"
-                          >
-                            <ExternalLink className="h-3.5 w-3.5" />
-                            Open invite link
-                          </a>
-                          <button
-                            type="button"
-                            onClick={() => void regenerateInviteCode()}
-                            disabled={regeneratingInvite}
-                            className="inline-flex items-center gap-2 rounded-lg border border-amber-500/40 px-3 py-1.5 text-xs text-amber-300 disabled:opacity-60"
-                          >
-                            <RefreshCcw className="h-3.5 w-3.5" />
-                            {regeneratingInvite ? 'Regenerating...' : 'Renew invite link'}
-                          </button>
-                        </div>
-                      </div>
-                    ) : null}
-                    <div className="space-y-1">
-                      <label className="inline-flex items-center gap-1 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
-                        Queue Mode
-                        <span title="First come, first served gives control to the next user in line. Voting lets viewers vote for the next controller. Disabled turns queueing off entirely.">
-                          <CircleHelp className="h-3.5 w-3.5" />
-                        </span>
-                      </label>
-                      <Select
-                        className="bg-[var(--background)]"
-                        value={editForm.queueMode}
-                        onChange={(event) =>
-                          setEditForm((prev) => ({ ...prev, queueMode: event.target.value as RobotFormState['queueMode'] }))
-                        }
-                      >
-                        <option value="FIRST_COME">First come, first served</option>
-                        <option value="VOTING">Voting</option>
-                        <option value="DISABLED">Disabled</option>
-                      </Select>
-                      <p className="text-[11px] leading-relaxed text-[var(--muted-foreground)]">
-                        {queueModeDescription(editForm.queueMode)}
-                      </p>
-                    </div>
+                  <DashboardSettingsSection
+                    robot={selectedRobot}
+                    editForm={editForm}
+                    setEditForm={setEditForm}
+                    buildSelectedRobotRoomHref={buildSelectedRobotRoomHref}
+                    copyInviteLink={copyInviteLink}
+                    regenerateInviteCode={regenerateInviteCode}
+                    regeneratingInvite={regeneratingInvite}
+                    ingressLoading={ingressLoading}
+                    ingressCameras={ingressCameras}
+                    ingressOp={ingressOp}
+                    newIngressCameraId={newIngressCameraId}
+                    setNewIngressCameraId={setNewIngressCameraId}
+                    newIngressLabel={newIngressLabel}
+                    setNewIngressLabel={setNewIngressLabel}
+                    newIngressCompatibilityMode={newIngressCompatibilityMode}
+                    setNewIngressCompatibilityMode={setNewIngressCompatibilityMode}
+                    createIngressCamera={createIngressCamera}
+                    deleteIngressCamera={deleteIngressCamera}
+                    copyIngressEndpoint={copyIngressEndpoint}
+                    obsHelpOpen={obsHelpOpen}
+                    setObsHelpOpen={setObsHelpOpen}
+                    thumbnailInputRef={thumbnailInputRef}
+                    handleThumbnailFileChange={handleThumbnailFileChange}
+                    thumbnailOp={thumbnailOp}
+                    capturePreviewThumbnail={capturePreviewThumbnail}
+                    removeThumbnail={removeThumbnail}
+                  />
 
-                    <AclPicker
-                      title="Video Access"
-                      value={editForm.aclVideo}
-                      onChange={(value) => setEditForm((prev) => ({ ...prev, aclVideo: value }))}
-                    />
+                  <DashboardTokenSection
+                    robot={selectedRobot}
+                    showToken={showToken}
+                    regenerating={regenerating}
+                    embedCode={`<iframe src="${buildSelectedRobotEmbedHref()}" title="${selectedRobot.name} on BotParty" width="960" height="540" loading="lazy" allow="autoplay; fullscreen" style="border:0; width:100%; aspect-ratio:16 / 9;"></iframe>`}
+                    onToggleVisibility={() => setShowToken((prev) => !prev)}
+                    onCopyToken={() => void copyToken()}
+                    onCopyEmbedCode={() => void copyEmbedCode()}
+                    onRegenerate={() => void handleRegenerate()}
+                  />
 
-                    <AclPicker
-                      title="Control Access"
-                      value={editForm.aclControl}
-                      onChange={(value) => setEditForm((prev) => ({ ...prev, aclControl: value }))}
-                    />
+                  <DashboardOperationsSection
+                    telemetry={telemetry}
+                    opLoading={opLoading}
+                    pendingActionTypes={pendingActionTypes}
+                    logsLoading={logsLoading}
+                    diagLogs={diagLogs}
+                    onRunAction={(type, durationSec) => void runRobotAction(type, durationSec)}
+                    onRefreshLogs={() => void refreshLogs()}
+                  />
 
-                    <AclPicker
-                      title="Chat Access"
-                      value={editForm.aclChat}
-                      onChange={(value) => setEditForm((prev) => ({ ...prev, aclChat: value }))}
-                    />
+                  <DashboardAllowlistSection
+                    visible={editForm.roomMode === 'ALLOWED_USERS'}
+                    allowlistUsername={allowlistUsername}
+                    allowlistOp={allowlistOp}
+                    allowlistLoading={allowlistLoading}
+                    allowedUsers={allowedUsers}
+                    onUsernameChange={setAllowlistUsername}
+                    onAdd={() => void addAllowedUser()}
+                    onRemove={(user) => void removeAllowedUser(user)}
+                  />
 
-                    <AclPicker
-                      title="E-STOP Access"
-                      value={editForm.aclEStop}
-                      onChange={(value) => setEditForm((prev) => ({ ...prev, aclEStop: value }))}
-                    />
+                  <ControlButtonEditor
+                    controlButtons={controlButtons}
+                    controlsLoading={controlsLoading}
+                    controlDraft={controlDraft}
+                    setControlDraft={setControlDraft}
+                    controlPreset={controlPreset}
+                    setControlPreset={setControlPreset}
+                    editingControlId={editingControlId}
+                    controlEditDraft={controlEditDraft}
+                    setControlEditDraft={setControlEditDraft}
+                    controlEditPreset={controlEditPreset}
+                    setControlEditPreset={setControlEditPreset}
+                    setEditingControlId={setEditingControlId}
+                    controlOp={controlOp}
+                    creatingControl={creatingControl}
+                    onCreateControl={handleCreateControl}
+                    onToggleControl={handleToggleControl}
+                    onStartEditControl={startEditControl}
+                    onSaveControlEdit={saveControlEdit}
+                    onDeleteControl={handleDeleteControl}
+                    onMoveControl={moveControl}
+                  />
 
-                    <div className="sm:col-span-2 flex items-center gap-2">
-                      <span className="text-[10px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)]">Stream</span>
-                      <div className="h-px flex-1 bg-[var(--border)]" />
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
-                        Target Bitrate (kbps)
-                      </label>
-                      <input
-                        type="number"
-                        min={150}
-                        max={3000}
-                        className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                        value={editForm.targetBitrateKbps}
-                        onChange={(event) =>
-                          setEditForm((prev) => ({ ...prev, targetBitrateKbps: event.target.value }))
-                        }
-                        placeholder="e.g. 1800"
-                      />
-                    </div>
-
-                    <div className="space-y-2 rounded-lg border border-[var(--border)] bg-[var(--background)] p-3 sm:col-span-2">
-                      <div className="flex items-center justify-between gap-2 mb-2">
-                        <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
-                          External Camera Feed (OBS via WHIP)
-                        </label>
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => setObsHelpOpen(true)}
-                            className="rounded border border-[var(--border)] px-2 py-0.5 text-[10px] font-semibold text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
-                          >
-                            How to connect
-                          </button>
-                          <span className="text-[10px] text-[var(--muted-foreground)]">
-                            {ingressLoading ? 'Loading...' : `${ingressCameras.length} configured`}
-                          </span>
-                        </div>
-                      </div>
-
-                      <p className="text-xs text-[var(--muted-foreground)]">
-                        Add one or more camera feeds. Use camera IDs like front, rear, arm. In OBS, paste the endpoint URL as WHIP server.
-                      </p>
-
-                      <div className="flex gap-1.5 mb-2">
-                        <input
-                          className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-xs"
-                          placeholder="Camera ID (e.g. front)"
-                          value={newIngressCameraId}
-                          onChange={(event) => setNewIngressCameraId(event.target.value)}
-                        />
-                        <input
-                          className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-xs"
-                          placeholder="Display label (optional)"
-                          value={newIngressLabel}
-                          onChange={(event) => setNewIngressLabel(event.target.value)}
-                        />
-                        <button
-                          type="button"
-                          onClick={createIngressCamera}
-                          disabled={Boolean(ingressOp)}
-                          className="inline-flex items-center justify-center gap-1 rounded-lg border border-[var(--border)] px-2 py-1.5 text-xs font-semibold disabled:opacity-60"
-                        >
-                          <Plus className="h-3 w-3" />
-                          Add
-                        </button>
-                      </div>
-
-                      <label className="flex items-center gap-1.5 text-[10px] text-[var(--muted-foreground)]">
-                        <input
-                          type="checkbox"
-                          checked={newIngressCompatibilityMode}
-                          onChange={(event) => setNewIngressCompatibilityMode(event.target.checked)}
-                          className="h-3 w-3"
-                        />
-                        Compatibility mode (enable when OBS has WHIP handshake issues)
-                      </label>
-
-                      {ingressCameras.length === 0 ? (
-                        <p className="text-[10px] text-[var(--muted-foreground)] italic">No external camera feeds configured yet.</p>
-                      ) : (
-                        <div className="space-y-1.5 mt-2">
-                          {ingressCameras.map((entry) => {
-                            const deleting = ingressOp === `delete:${entry.ingressId}`;
-                            return (
-                              <div
-                                key={entry.ingressId}
-                                className="rounded border border-[var(--border)] bg-[var(--card)] p-1.5 text-xs"
-                              >
-                                <div className="flex items-center justify-between gap-2 mb-1">
-                                  <div className="truncate">
-                                    <p className="font-semibold truncate">{entry.cameraId ?? 'default'}</p>
-                                  </div>
-                                  <span
-                                    className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[8px] font-semibold whitespace-nowrap ${
-                                      entry.isLive
-                                        ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
-                                        : 'border-[var(--border)] text-[var(--muted-foreground)]'
-                                    }`}
-                                  >
-                                    {entry.isLive ? 'LIVE' : 'Off'}
-                                  </span>
-                                </div>
-                                <div className="flex gap-1">
-                                  <button
-                                    type="button"
-                                    onClick={() => void copyIngressEndpoint(entry.endpointUrl)}
-                                    className="flex-1 rounded border border-[var(--border)] px-1.5 py-0.5 text-[8px] hover:border-[var(--muted-foreground)]"
-                                  >
-                                    Copy URL
-                                  </button>
-                                  {entry.cameraId ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => void deleteIngressCamera(entry.ingressId)}
-                                      disabled={Boolean(ingressOp)}
-                                      className="rounded border border-red-500/40 px-1.5 py-0.5 text-[8px] text-red-300 disabled:opacity-60"
-                                    >
-                                      {deleting ? '...' : 'Del'}
-                                    </button>
-                                  ) : null}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-
-                    {obsHelpOpen ? (
-                      <div
-                        className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4"
-                        onClick={() => setObsHelpOpen(false)}
-                      >
-                        <div
-                          className="w-full max-w-2xl rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4"
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          <div className="mb-3 flex items-center justify-between gap-2">
-                            <h3 className="text-lg font-bold">OBS Low-Latency Setup</h3>
-                            <button
-                              type="button"
-                              onClick={() => setObsHelpOpen(false)}
-                              className="rounded border border-[var(--border)] p-1.5"
-                              aria-label="Close OBS help"
-                            >
-                              <X className="h-4 w-4" />
-                            </button>
-                          </div>
-
-                          <div className="space-y-3 text-sm">
-                            <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-amber-200">
-                              30s delay is usually OBS buffering/transcoding settings, not WHIP itself.
-                            </p>
-
-                            <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
-                              <p className="font-semibold">Recommended OBS output values</p>
-                              <ul className="mt-2 list-disc space-y-1 pl-5 text-[var(--muted-foreground)]">
-                                <li>Encoder: H.264 (NVENC/VAAPI/QSV or x264 veryfast)</li>
-                                <li>Keyframe interval: 1s (max 2s)</li>
-                                <li>B-frames: 0</li>
-                                <li>Rate control: CBR</li>
-                                <li>Bitrate: 1200-3500 kbps (depending on resolution)</li>
-                                <li>Disable any Stream Delay in OBS</li>
-                                <li>Advanced Network: Low Latency Mode ON</li>
-                              </ul>
-                            </div>
-
-                            <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
-                              <p className="font-semibold">In this dashboard</p>
-                              <ul className="mt-2 list-disc space-y-1 pl-5 text-[var(--muted-foreground)]">
-                                <li>Keep Compatibility mode OFF for minimum latency.</li>
-                                <li>Use Compatibility mode only if the stream fails to appear.</li>
-                                <li>Viewer only shows the camera when OBS is actively publishing.</li>
-                              </ul>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    ) : null}
-
-                    <div className="space-y-1">
-                      <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
-                        Max Turn Time (ms)
-                      </label>
-                      <input
-                        type="number"
-                        className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                        value={editForm.maxTurnTime}
-                        onChange={(event) =>
-                          setEditForm((prev) => ({ ...prev, maxTurnTime: Number(event.target.value) }))
-                        }
-                        placeholder="e.g. 60000"
-                      />
-                    </div>
-                  </div>
-
-                    <div className="space-y-1">
-                      <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
-                        Thumbnail
-                      </label>
-                      <input
-                        ref={thumbnailInputRef}
-                        type="file"
-                        accept="image/png,image/jpeg,image/webp"
-                        onChange={handleThumbnailFileChange}
-                        className="hidden"
-                      />
-                      <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => thumbnailInputRef.current?.click()}
-                            disabled={thumbnailOp !== null}
-                            className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm disabled:opacity-60"
-                          >
-                            {thumbnailOp === 'upload' ? 'Uploading...' : 'Upload image'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void capturePreviewThumbnail()}
-                            disabled={
-                              thumbnailOp !== null ||
-                              (selectedRobot.status !== 'ONLINE' && selectedRobot.status !== 'BUSY')
-                            }
-                            className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm disabled:opacity-60"
-                          >
-                            {thumbnailOp === 'snapshot' ? 'Capturing...' : 'Use live snapshot'}
-                          </button>
-                          {selectedRobot.thumbnailUrl && (
-                            <button
-                              type="button"
-                              onClick={() => void removeThumbnail()}
-                              disabled={thumbnailOp !== null}
-                              className="rounded-lg border border-red-500/40 px-3 py-2 text-sm text-red-300 disabled:opacity-60"
-                            >
-                              {thumbnailOp === 'remove' ? 'Removing...' : 'Remove thumbnail'}
-                            </button>
-                          )}
-                        </div>
-                        <p className="mt-2 text-xs text-[var(--muted-foreground)]">
-                          Upload an image, or capture the current frame from the first live camera when the robot is online.
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="space-y-1">
-                    <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
-                      Description
-                    </label>
-                    <textarea
-                      className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                      rows={3}
-                      value={editForm.description}
-                      onChange={(event) => setEditForm((prev) => ({ ...prev, description: event.target.value }))}
-                      placeholder="Describe your robot and how viewers should use it"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
-                      Tags
-                    </label>
-                    <input
-                      className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                      value={editForm.tags}
-                      onChange={(event) => setEditForm((prev) => ({ ...prev, tags: event.target.value }))}
-                      placeholder="comma separated, e.g. rover, camera, claw"
-                    />
-                  </div>
-
-                  <div id="section-token" className="order-2 scroll-mt-4 flex items-center gap-3 pt-2">
-                    <span className="shrink-0 text-[11px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)]">Token & Links</span>
-                    <div className="h-px flex-1 bg-[var(--border)]" />
-                  </div>
-
-                  <div className="order-2 rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
-                    <p className="mb-2 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Claim Token</p>
-                    <div className="flex items-center gap-2">
-                      <code className="block min-h-5 flex-1 break-all text-xs text-[var(--foreground)]">
-                        {showToken ? selectedRobot.claimToken : `${selectedRobot.claimToken.slice(0, 6)}••••••••••••••••••••`}
-                      </code>
-                      <button
-                        type="button"
-                        onClick={() => setShowToken((prev) => !prev)}
-                        className="rounded border border-[var(--border)] p-1.5"
-                        aria-label="Toggle token visibility"
-                      >
-                        {showToken ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                      </button>
-                    </div>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={copyToken}
-                        className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs"
-                      >
-                        <Copy className="h-3.5 w-3.5" />
-                        Copy token
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleRegenerate}
-                        disabled={regenerating}
-                        className="inline-flex items-center gap-2 rounded-lg border border-amber-500/40 px-3 py-1.5 text-xs text-amber-300 disabled:opacity-60"
-                      >
-                        <RefreshCcw className="h-3.5 w-3.5" />
-                        {regenerating ? 'Regenerating...' : 'Regenerate token'}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div id="section-operations" className="order-4 scroll-mt-4 flex items-center gap-3 pt-2">
-                    <span className="shrink-0 text-[11px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)]">Operations</span>
-                    <div className="h-px flex-1 bg-[var(--border)]" />
-                  </div>
-
-                  <div className="order-4 rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
-                    <p className="mb-2 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Remote Operations</p>
-                    <p className="mb-3 text-xs text-[var(--muted-foreground)]">
-                      Run maintenance actions on the robot client without SSH. Commands are queued and picked up on the next poll cycle.
-                    </p>
-                    {telemetry.latest && (
-                      <div className="mb-3 rounded-lg border border-[var(--border)] bg-black/20 px-3 py-2 text-xs text-[var(--muted-foreground)]">
-                        <p>
-                          Client build: <span className="font-semibold text-[var(--foreground)]">{formatClientBuild(telemetry.latest)}</span>
-                        </p>
-                        {telemetry.latest.pythonVersion && (
-                          <p className="mt-1">
-                            Python: <span className="font-semibold text-[var(--foreground)]">{telemetry.latest.pythonVersion}</span>
-                          </p>
-                        )}
-                        <p className="mt-1">
-                          Streamer: <span className="font-semibold text-[var(--foreground)]">{telemetry.latest.botpartyStreamerVersion ?? '-'}</span>
-                        </p>
-                      </div>
-                    )}
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => runRobotAction('restart_video')}
-                        disabled={opLoading !== null || pendingActionTypes.includes('restart_video')}
-                        className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs disabled:opacity-60"
-                      >
-                        {opLoading === 'restart_video'
-                          ? 'Queueing...'
-                          : pendingActionTypes.includes('restart_video')
-                            ? 'Queued, waiting for pickup'
-                            : 'Restart Video'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => runRobotAction('restart_control')}
-                        disabled={opLoading !== null || pendingActionTypes.includes('restart_control')}
-                        className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs disabled:opacity-60"
-                      >
-                        {opLoading === 'restart_control'
-                          ? 'Queueing...'
-                          : pendingActionTypes.includes('restart_control')
-                            ? 'Queued, waiting for pickup'
-                            : 'Restart Control'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => runRobotAction('restart_chat')}
-                        disabled={opLoading !== null || pendingActionTypes.includes('restart_chat')}
-                        className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs disabled:opacity-60"
-                      >
-                        {opLoading === 'restart_chat'
-                          ? 'Queueing...'
-                          : pendingActionTypes.includes('restart_chat')
-                            ? 'Queued, waiting for pickup'
-                            : 'Restart Chat Bridge'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => runRobotAction('update_client')}
-                        disabled={opLoading !== null || pendingActionTypes.includes('update_client')}
-                        className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/40 px-3 py-1.5 text-xs text-emerald-300 disabled:opacity-60"
-                      >
-                        {opLoading === 'update_client'
-                          ? 'Queueing...'
-                          : pendingActionTypes.includes('update_client')
-                            ? 'Queued, waiting for pickup'
-                            : 'Update Client'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => runRobotAction('set_log_stream', 120)}
-                        disabled={opLoading !== null || pendingActionTypes.includes('set_log_stream')}
-                        className="inline-flex items-center gap-2 rounded-lg border border-amber-500/40 px-3 py-1.5 text-xs text-amber-300 disabled:opacity-60"
-                      >
-                        {opLoading === 'set_log_stream'
-                          ? 'Queueing...'
-                          : pendingActionTypes.includes('set_log_stream')
-                            ? 'Queued, waiting for pickup'
-                            : 'Enable 2min Diagnostics'}
-                      </button>
-                    </div>
-
-                    <div className="mt-3 pt-3 border-t border-[var(--border)]">
-                      <div className="mb-2 flex items-center justify-between">
-                        <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Diagnostics Log</p>
-                        <button
-                          type="button"
-                          onClick={refreshLogs}
-                          disabled={logsLoading}
-                          className="rounded border border-[var(--border)] px-2 py-1 text-[10px] text-[var(--muted-foreground)] disabled:opacity-60"
-                        >
-                          {logsLoading ? 'Loading...' : 'Refresh'}
-                        </button>
-                      </div>
-                      <div className="max-h-48 overflow-auto rounded border border-[var(--border)] bg-black/70 p-2 font-mono text-[11px] leading-5 text-emerald-300">
-                        {diagLogs.length === 0 ? (
-                          <p className="text-[var(--muted-foreground)]">No logs. Enable diagnostics above.</p>
-                        ) : (
-                          diagLogs.map((row, idx) => (
-                            <p key={`${row.ts}-${idx}`}>[{new Date(row.ts).toLocaleTimeString()}] {row.line}</p>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {editForm.roomMode === 'ALLOWED_USERS' && (
-                    <div className="order-4 rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
-                      <div className="mb-3">
-                        <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Allow List</p>
-                        <p className="text-xs text-[var(--muted-foreground)]">
-                          Only these signed-in users can enter the room.
-                        </p>
-                      </div>
-                      <div className="mb-3 flex gap-2">
-                        <input
-                          className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-                          placeholder="Username"
-                          value={allowlistUsername}
-                          onChange={(event) => setAllowlistUsername(event.target.value)}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => void addAllowedUser()}
-                          disabled={allowlistOp === 'add'}
-                          className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm disabled:opacity-60"
-                        >
-                          {allowlistOp === 'add' ? 'Adding...' : 'Add'}
-                        </button>
-                      </div>
-                      {allowlistLoading ? (
-                        <p className="text-xs text-[var(--muted-foreground)]">Loading allow list...</p>
-                      ) : allowedUsers.length === 0 ? (
-                        <p className="text-xs text-[var(--muted-foreground)]">No users allow-listed yet.</p>
-                      ) : (
-                        <div className="space-y-2">
-                          {allowedUsers.map((user) => (
-                            <div
-                              key={user.id}
-                              className="flex items-center justify-between rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-                            >
-                              <div className="min-w-0">
-                                <p className="truncate font-medium">
-                                  {user.displayName ?? user.username}
-                                </p>
-                                <p className="truncate text-xs text-[var(--muted-foreground)]">
-                                  @{user.username}
-                                </p>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => void removeAllowedUser(user)}
-                                disabled={allowlistOp === user.id}
-                                className="rounded border border-red-500/40 px-2 py-1 text-xs text-red-300 disabled:opacity-50"
-                              >
-                                Remove
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  <div id="section-controls" className="order-3 scroll-mt-4 flex items-center gap-3 pt-2">
-                    <span className="shrink-0 text-[11px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)]">Controls</span>
-                    <div className="h-px flex-1 bg-[var(--border)]" />
-                  </div>
-
-                  <div className="order-3 rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
-                    <div className="mb-3 flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Control Buttons</p>
-                        <p className="text-xs text-[var(--muted-foreground)]">
-                          Manage the button deck shown on the public robot page.
-                        </p>
-                      </div>
-                      <span className="text-[10px] text-[var(--muted-foreground)]">
-                        {controlButtons.length} configured
-                      </span>
-                    </div>
-
-                    <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                      <Select
-                        className="bg-[var(--card)]"
-                        value={controlPreset}
-                        onChange={(event) => setControlPreset(event.target.value as ControlPresetKey)}
-                      >
-                        {CONTROL_PRESETS.map((preset) => (
-                          <option key={preset.key} value={preset.key}>
-                            Preset: {preset.label}
-                          </option>
-                        ))}
-                      </Select>
-                      <button
-                        type="button"
-                        onClick={() => setControlDraft((prev) => applyControlPreset(prev, controlPreset))}
-                        className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm"
-                      >
-                        Apply preset
-                      </button>
-                      <input
-                        className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-                        placeholder="Label"
-                        value={controlDraft.label}
-                        onChange={(event) =>
-                          setControlDraft((prev) => ({ ...prev, label: event.target.value }))
-                        }
-                      />
-                      <input
-                        className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-                        placeholder="Command"
-                        value={controlDraft.command}
-                        onChange={(event) =>
-                          setControlDraft((prev) => ({ ...prev, command: event.target.value }))
-                        }
-                      />
-                      <input
-                        className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-                        placeholder="Hotkey (optional)"
-                        maxLength={8}
-                        value={controlDraft.hotKey}
-                        onChange={(event) =>
-                          setControlDraft((prev) => ({ ...prev, hotKey: event.target.value }))
-                        }
-                      />
-                      <Select
-                        className="bg-[var(--card)]"
-                        value={controlDraft.controlKind}
-                        onChange={(event) =>
-                          setControlDraft((prev) => ({
-                            ...prev,
-                            controlKind: event.target.value as ControlButtonDraft['controlKind'],
-                          }))
-                        }
-                      >
-                        <option value="button">Type: Button</option>
-                        <option value="slider">Type: Slider</option>
-                        <option value="xy">Type: XY Pad</option>
-                      </Select>
-                      {controlDraft.controlKind === 'button' ? (
-                        <input
-                          className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-                          placeholder="Icon/emoji (optional)"
-                          value={controlDraft.icon}
-                          onChange={(event) =>
-                            setControlDraft((prev) => ({ ...prev, icon: event.target.value }))
-                          }
-                        />
-                      ) : controlDraft.controlKind === 'slider' ? (
-                        <>
-                          <input
-                            type="number"
-                            className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-                            placeholder="Slider min"
-                            value={controlDraft.sliderMin}
-                            onChange={(event) => setControlDraft((prev) => ({ ...prev, sliderMin: event.target.value }))}
-                          />
-                          <input
-                            type="number"
-                            className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-                            placeholder="Slider max"
-                            value={controlDraft.sliderMax}
-                            onChange={(event) => setControlDraft((prev) => ({ ...prev, sliderMax: event.target.value }))}
-                          />
-                          <input
-                            type="number"
-                            className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-                            placeholder="Start value"
-                            value={controlDraft.sliderStart}
-                            onChange={(event) => setControlDraft((prev) => ({ ...prev, sliderStart: event.target.value }))}
-                          />
-                          <input
-                            type="number"
-                            className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-                            placeholder="Step"
-                            value={controlDraft.sliderStep}
-                            onChange={(event) => setControlDraft((prev) => ({ ...prev, sliderStep: event.target.value }))}
-                          />
-                          <Select
-                            className="bg-[var(--card)]"
-                            value={controlDraft.sliderDirection}
-                            onChange={(event) =>
-                              setControlDraft((prev) => ({
-                                ...prev,
-                                sliderDirection: event.target.value as ControlButtonDraft['sliderDirection'],
-                              }))
-                            }
-                          >
-                            <option value="horizontal">Slider: Horizontal</option>
-                            <option value="vertical">Slider: Vertical</option>
-                          </Select>
-                          <Select
-                            className="bg-[var(--card)]"
-                            value={controlDraft.widgetReturn}
-                            onChange={(event) =>
-                              setControlDraft((prev) => ({
-                                ...prev,
-                                widgetReturn: event.target.value as ControlButtonDraft['widgetReturn'],
-                              }))
-                            }
-                          >
-                            <option value="none">Release: Keep value</option>
-                            <option value="center">Release: Return to start</option>
-                          </Select>
-                        </>
-                      ) : (
-                        <>
-                          <input
-                            type="number"
-                            className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-                            placeholder="X min"
-                            value={controlDraft.xyXMin}
-                            onChange={(event) => setControlDraft((prev) => ({ ...prev, xyXMin: event.target.value }))}
-                          />
-                          <input
-                            type="number"
-                            className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-                            placeholder="X max"
-                            value={controlDraft.xyXMax}
-                            onChange={(event) => setControlDraft((prev) => ({ ...prev, xyXMax: event.target.value }))}
-                          />
-                          <input
-                            type="number"
-                            className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-                            placeholder="X start"
-                            value={controlDraft.xyXStart}
-                            onChange={(event) => setControlDraft((prev) => ({ ...prev, xyXStart: event.target.value }))}
-                          />
-                          <input
-                            type="number"
-                            className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-                            placeholder="Y min"
-                            value={controlDraft.xyYMin}
-                            onChange={(event) => setControlDraft((prev) => ({ ...prev, xyYMin: event.target.value }))}
-                          />
-                          <input
-                            type="number"
-                            className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-                            placeholder="Y max"
-                            value={controlDraft.xyYMax}
-                            onChange={(event) => setControlDraft((prev) => ({ ...prev, xyYMax: event.target.value }))}
-                          />
-                          <input
-                            type="number"
-                            className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-                            placeholder="Y start"
-                            value={controlDraft.xyYStart}
-                            onChange={(event) => setControlDraft((prev) => ({ ...prev, xyYStart: event.target.value }))}
-                          />
-                        </>
-                      )}
-                      <input
-                        type="number"
-                        min={50}
-                        max={10000}
-                        className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-                        placeholder="Cooldown ms"
-                        value={controlDraft.cooldownMs}
-                        onChange={(event) =>
-                          setControlDraft((prev) => ({ ...prev, cooldownMs: event.target.value }))
-                        }
-                      />
-                      <Select
-                        className="bg-[var(--card)]"
-                        value={controlDraft.access}
-                        onChange={(event) =>
-                          setControlDraft((prev) => ({
-                            ...prev,
-                            access: event.target.value as ControlButtonAccess,
-                          }))
-                        }
-                      >
-                        {controlAccessOptions.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            Access: {option.label}
-                          </option>
-                        ))}
-                      </Select>
-                      <input
-                        className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-                        placeholder="Color (optional, e.g. #22c55e)"
-                        value={controlDraft.color}
-                        onChange={(event) =>
-                          setControlDraft((prev) => ({ ...prev, color: event.target.value }))
-                        }
-                      />
-                      <input
-                        type="number"
-                        min={100}
-                        className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-                        placeholder="Auto reset after ms (optional)"
-                        value={controlDraft.resetAfterMs}
-                        onChange={(event) => setControlDraft((prev) => ({ ...prev, resetAfterMs: event.target.value }))}
-                      />
-                      <label className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
-                        <input
-                          type="checkbox"
-                          checked={controlDraft.resetOnQueueLoss}
-                          onChange={(event) => setControlDraft((prev) => ({ ...prev, resetOnQueueLoss: event.target.checked }))}
-                        />
-                        Reset on queue loss
-                      </label>
-                      <label className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2 text-xs text-[var(--muted-foreground)] sm:col-span-2">
-                        <input
-                          type="checkbox"
-                          checked={controlDraft.resetOnOffline}
-                          onChange={(event) => setControlDraft((prev) => ({ ...prev, resetOnOffline: event.target.checked }))}
-                        />
-                        Reset when robot goes offline/restarts
-                      </label>
-                      <div className="sm:col-span-2">
-                        <ControlBuilderPreview draft={controlDraft} />
-                      </div>
-                      <div className="sm:col-span-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            void handleCreateControl();
-                          }}
-                          disabled={creatingControl}
-                          className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-medium disabled:opacity-60"
-                        >
-                          <Plus className="h-4 w-4" />
-                          {creatingControl ? 'Creating...' : 'Add control button'}
-                        </button>
-                      </div>
-                    </div>
-
-                    {editingControlId && controlEditDraft ? (
-                      <div className="mb-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
-                        <div className="mb-3 flex items-center justify-between gap-3">
-                          <div>
-                            <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Edit control button</p>
-                            <p className="text-xs text-[var(--muted-foreground)]">Update label, command, hotkey, cooldown, access, and color.</p>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setEditingControlId(null);
-                              setControlEditDraft(null);
-                            }}
-                            className="rounded border border-[var(--border)] px-2 py-1 text-xs text-[var(--muted-foreground)]"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                          <Select
-                            className="bg-[var(--background)]"
-                            value={controlEditPreset}
-                            onChange={(event) => setControlEditPreset(event.target.value as ControlPresetKey)}
-                          >
-                            {CONTROL_PRESETS.map((preset) => (
-                              <option key={preset.key} value={preset.key}>
-                                Preset: {preset.label}
-                              </option>
-                            ))}
-                          </Select>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setControlEditDraft((prev) => (prev ? applyControlPreset(prev, controlEditPreset) : prev))
-                            }
-                            className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm"
-                          >
-                            Apply preset
-                          </button>
-                          <input
-                            className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                            placeholder="Label"
-                            value={controlEditDraft.label}
-                            onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, label: event.target.value } : prev))}
-                          />
-                          <input
-                            className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                            placeholder="Command"
-                            value={controlEditDraft.command}
-                            onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, command: event.target.value } : prev))}
-                          />
-                          <input
-                            className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                            placeholder="Hotkey (optional)"
-                            maxLength={8}
-                            value={controlEditDraft.hotKey}
-                            onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, hotKey: event.target.value } : prev))}
-                          />
-                          <Select
-                            className="bg-[var(--background)]"
-                            value={controlEditDraft.controlKind}
-                            onChange={(event) =>
-                              setControlEditDraft((prev) =>
-                                prev
-                                  ? {
-                                      ...prev,
-                                      controlKind: event.target.value as ControlButtonDraft['controlKind'],
-                                    }
-                                  : prev,
-                              )
-                            }
-                          >
-                            <option value="button">Type: Button</option>
-                            <option value="slider">Type: Slider</option>
-                            <option value="xy">Type: XY Pad</option>
-                          </Select>
-                          {controlEditDraft.controlKind === 'button' ? (
-                            <input
-                              className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                              placeholder="Icon/emoji (optional)"
-                              value={controlEditDraft.icon}
-                              onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, icon: event.target.value } : prev))}
-                            />
-                          ) : controlEditDraft.controlKind === 'slider' ? (
-                            <>
-                              <input
-                                type="number"
-                                className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                                placeholder="Slider min"
-                                value={controlEditDraft.sliderMin}
-                                onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, sliderMin: event.target.value } : prev))}
-                              />
-                              <input
-                                type="number"
-                                className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                                placeholder="Slider max"
-                                value={controlEditDraft.sliderMax}
-                                onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, sliderMax: event.target.value } : prev))}
-                              />
-                              <input
-                                type="number"
-                                className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                                placeholder="Start value"
-                                value={controlEditDraft.sliderStart}
-                                onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, sliderStart: event.target.value } : prev))}
-                              />
-                              <input
-                                type="number"
-                                className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                                placeholder="Step"
-                                value={controlEditDraft.sliderStep}
-                                onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, sliderStep: event.target.value } : prev))}
-                              />
-                              <Select
-                                className="bg-[var(--background)]"
-                                value={controlEditDraft.sliderDirection}
-                                onChange={(event) =>
-                                  setControlEditDraft((prev) =>
-                                    prev
-                                      ? {
-                                          ...prev,
-                                          sliderDirection: event.target.value as ControlButtonDraft['sliderDirection'],
-                                        }
-                                      : prev,
-                                  )
-                                }
-                              >
-                                <option value="horizontal">Slider: Horizontal</option>
-                                <option value="vertical">Slider: Vertical</option>
-                              </Select>
-                              <Select
-                                className="bg-[var(--background)]"
-                                value={controlEditDraft.widgetReturn}
-                                onChange={(event) =>
-                                  setControlEditDraft((prev) =>
-                                    prev
-                                      ? {
-                                          ...prev,
-                                          widgetReturn: event.target.value as ControlButtonDraft['widgetReturn'],
-                                        }
-                                      : prev,
-                                  )
-                                }
-                              >
-                                <option value="none">Release: Keep value</option>
-                                <option value="center">Release: Return to start</option>
-                              </Select>
-                            </>
-                          ) : (
-                            <>
-                              <input
-                                type="number"
-                                className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                                placeholder="X min"
-                                value={controlEditDraft.xyXMin}
-                                onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, xyXMin: event.target.value } : prev))}
-                              />
-                              <input
-                                type="number"
-                                className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                                placeholder="X max"
-                                value={controlEditDraft.xyXMax}
-                                onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, xyXMax: event.target.value } : prev))}
-                              />
-                              <input
-                                type="number"
-                                className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                                placeholder="X start"
-                                value={controlEditDraft.xyXStart}
-                                onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, xyXStart: event.target.value } : prev))}
-                              />
-                              <input
-                                type="number"
-                                className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                                placeholder="Y min"
-                                value={controlEditDraft.xyYMin}
-                                onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, xyYMin: event.target.value } : prev))}
-                              />
-                              <input
-                                type="number"
-                                className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                                placeholder="Y max"
-                                value={controlEditDraft.xyYMax}
-                                onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, xyYMax: event.target.value } : prev))}
-                              />
-                              <input
-                                type="number"
-                                className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                                placeholder="Y start"
-                                value={controlEditDraft.xyYStart}
-                                onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, xyYStart: event.target.value } : prev))}
-                              />
-                            </>
-                          )}
-                          <input
-                            type="number"
-                            min={50}
-                            max={10000}
-                            className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                            placeholder="Cooldown ms"
-                            value={controlEditDraft.cooldownMs}
-                            onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, cooldownMs: event.target.value } : prev))}
-                          />
-                          <Select
-                            className="bg-[var(--background)]"
-                            value={controlEditDraft.access}
-                            onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, access: event.target.value as ControlButtonAccess } : prev))}
-                          >
-                            {controlAccessOptions.map((option) => (
-                              <option key={option.value} value={option.value}>
-                                Access: {option.label}
-                              </option>
-                            ))}
-                          </Select>
-                          <input
-                            className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                            placeholder="Color (optional, e.g. #22c55e)"
-                            value={controlEditDraft.color}
-                            onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, color: event.target.value } : prev))}
-                          />
-                          <input
-                            type="number"
-                            min={100}
-                            className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                            placeholder="Auto reset after ms (optional)"
-                            value={controlEditDraft.resetAfterMs}
-                            onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, resetAfterMs: event.target.value } : prev))}
-                          />
-                          <label className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
-                            <input
-                              type="checkbox"
-                              checked={controlEditDraft.resetOnQueueLoss}
-                              onChange={(event) =>
-                                setControlEditDraft((prev) => (prev ? { ...prev, resetOnQueueLoss: event.target.checked } : prev))
-                              }
-                            />
-                            Reset on queue loss
-                          </label>
-                          <label className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2 text-xs text-[var(--muted-foreground)] sm:col-span-2">
-                            <input
-                              type="checkbox"
-                              checked={controlEditDraft.resetOnOffline}
-                              onChange={(event) =>
-                                setControlEditDraft((prev) => (prev ? { ...prev, resetOnOffline: event.target.checked } : prev))
-                              }
-                            />
-                            Reset when robot goes offline/restarts
-                          </label>
-                          <div className="sm:col-span-2">
-                            <ControlBuilderPreview draft={controlEditDraft} />
-                          </div>
-                        </div>
-                        <div className="mt-3">
-                          <button
-                            type="button"
-                            onClick={() => void saveControlEdit()}
-                            disabled={controlOp === editingControlId}
-                            className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/40 px-3 py-2 text-sm font-medium text-emerald-300 disabled:opacity-60"
-                          >
-                            {controlOp === editingControlId ? 'Saving...' : 'Save control button'}
-                          </button>
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {controlsLoading ? (
-                      <p className="text-xs text-[var(--muted-foreground)]">Loading control buttons...</p>
-                    ) : controlButtons.length === 0 ? (
-                      <p className="text-xs text-[var(--muted-foreground)]">
-                        No custom controls yet. Add your first button above.
-                      </p>
-                    ) : (
-                      <div className="space-y-2">
-                        {controlButtons
-                          .slice()
-                          .sort((a, b) => a.position - b.position)
-                          .map((button, index) => (
-                            <div
-                              key={button.id}
-                              className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-                            >
-                              <div className="min-w-0 flex-1">
-                                <div className="flex items-center gap-2">
-                                  <span className="font-semibold">{button.label}</span>
-                                  <span className="rounded-full border border-[var(--border)] px-2 py-0.5 text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">
-                                    {button.command}
-                                  </span>
-                                  <span
-                                    className={`rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide ${
-                                      button.isEnabled === false
-                                        ? 'bg-zinc-700/60 text-zinc-300'
-                                        : 'bg-emerald-500/15 text-emerald-300'
-                                    }`}
-                                  >
-                                    {button.isEnabled === false ? 'Disabled' : 'Enabled'}
-                                  </span>
-                                </div>
-                                <p className="mt-1 text-xs text-[var(--muted-foreground)]">
-                                  Access: {button.access} · Cooldown: {button.cooldownMs}ms
-                                  {button.hotKey ? ` · Hotkey: ${button.hotKey}` : ''}
-                                  {button.icon?.startsWith('widget:') ? ` · Widget: ${button.icon}` : ''}
-                                  {button.color ? ` · Color: ${button.color}` : ''}
-                                </p>
-                              </div>
-                              <div className="flex flex-wrap items-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => startEditControl(button)}
-                                  disabled={controlOp === button.id}
-                                  className="rounded border border-[var(--border)] px-2 py-1 text-xs disabled:opacity-50"
-                                >
-                                  Edit
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => void moveControl(button.id, -1)}
-                                  disabled={index === 0 || controlOp === button.id}
-                                  className="rounded border border-[var(--border)] px-2 py-1 text-xs disabled:opacity-50"
-                                >
-                                  Up
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => void moveControl(button.id, 1)}
-                                  disabled={index === controlButtons.length - 1 || controlOp === button.id}
-                                  className="rounded border border-[var(--border)] px-2 py-1 text-xs disabled:opacity-50"
-                                >
-                                  Down
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => void handleToggleControl(button)}
-                                  disabled={controlOp === button.id}
-                                  className="rounded border border-[var(--border)] px-2 py-1 text-xs disabled:opacity-50"
-                                >
-                                  {button.isEnabled === false ? 'Enable' : 'Disable'}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => void handleDeleteControl(button)}
-                                  disabled={controlOp === button.id}
-                                  className="rounded border border-red-500/40 px-2 py-1 text-xs text-red-300 disabled:opacity-50"
-                                >
-                                  Delete
-                                </button>
-                              </div>
-                            </div>
-                          ))}
-                      </div>
-                    )}
-                  </div>
-
-                  <div id="section-monitoring" className="order-5 scroll-mt-4 flex items-center gap-3 pt-2">
-                    <span className="shrink-0 text-[11px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)]">Monitoring</span>
-                    <div className="h-px flex-1 bg-[var(--border)]" />
-                  </div>
-
-                  <div className="order-5 rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
-                    <div className="mb-2 flex items-center justify-between">
-                      <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Runtime Telemetry</p>
-                      <p className="text-[10px] text-[var(--muted-foreground)]">dashboard refreshes 5s, client updates ~30s</p>
-                    </div>
-                    {telemetry.latest ? (
-                      <>
-                        <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
-                          <div className="rounded border border-[var(--border)] px-2 py-1.5">
-                            <p className="text-[var(--muted-foreground)]">CPU</p>
-                            <p className="font-semibold">{formatPercent(telemetry.latest.cpuPercent)}</p>
-                          </div>
-                          <div className="rounded border border-[var(--border)] px-2 py-1.5">
-                            <p className="text-[var(--muted-foreground)]">Memory</p>
-                            <p className="font-semibold">{formatPercent(telemetry.latest.memoryPercent)}</p>
-                          </div>
-                          <div className="rounded border border-[var(--border)] px-2 py-1.5">
-                            <p className="text-[var(--muted-foreground)]">Temp</p>
-                            <p className="font-semibold">
-                              {telemetry.latest.temperatureC === null ? '-' : `${telemetry.latest.temperatureC.toFixed(1)} C`}
-                            </p>
-                          </div>
-                          <div className="rounded border border-[var(--border)] px-2 py-1.5">
-                            <p className="text-[var(--muted-foreground)]">Uptime</p>
-                            <p className="font-semibold">{formatUptime(telemetry.latest.uptimeSec)}</p>
-                          </div>
-                        </div>
-                        <div className="mt-2 grid grid-cols-2 gap-2 text-xs sm:grid-cols-6">
-                          <div className="rounded border border-[var(--border)] px-2 py-1.5 sm:col-span-2">
-                            <p className="text-[var(--muted-foreground)]">Client build</p>
-                            <p className="font-semibold">{formatClientBuild(telemetry.latest)}</p>
-                          </div>
-                          <div className="rounded border border-[var(--border)] px-2 py-1.5 sm:col-span-2">
-                            <p className="text-[var(--muted-foreground)]">Python</p>
-                            <p className="font-semibold">{telemetry.latest.pythonVersion ?? '-'}</p>
-                          </div>
-                          <div className="rounded border border-[var(--border)] px-2 py-1.5 sm:col-span-2">
-                            <p className="text-[var(--muted-foreground)]">Streamer Version</p>
-                            <p className="font-semibold">{telemetry.latest.botpartyStreamerVersion ?? '-'}</p>
-                          </div>
-                        </div>
-                        <div className="mt-2 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
-                          <div className="rounded border border-[var(--border)] px-2 py-1.5">
-                            <p className="text-[var(--muted-foreground)]">LiveKit</p>
-                            <p className="font-semibold">{telemetry.latest.livekitConnected ? 'Connected' : 'Offline'}</p>
-                          </div>
-                          <div className="rounded border border-[var(--border)] px-2 py-1.5">
-                            <p className="text-[var(--muted-foreground)]">Control WS</p>
-                            <p className="font-semibold">{telemetry.latest.controlConnected ? 'Connected' : 'Offline'}</p>
-                          </div>
-                          <div className="rounded border border-[var(--border)] px-2 py-1.5">
-                            <p className="text-[var(--muted-foreground)]">Commands</p>
-                            <p className="font-semibold">{telemetry.latest.commandsReceived}</p>
-                          </div>
-                          <div className="rounded border border-[var(--border)] px-2 py-1.5">
-                            <p className="text-[var(--muted-foreground)]">Frames</p>
-                            <p className="font-semibold">{telemetry.latest.cameraFrames}</p>
-                          </div>
-                        </div>
-                        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                          <TelemetryBars
-                            title="CPU trend"
-                            values={telemetry.history
-                              .map((point) => point.cpuPercent)
-                              .filter((value): value is number => typeof value === 'number')}
-                            suffix="%"
-                          />
-                          <TelemetryBars
-                            title="Memory trend"
-                            values={telemetry.history
-                              .map((point) => point.memoryPercent)
-                              .filter((value): value is number => typeof value === 'number')}
-                            suffix="%"
-                          />
-                        </div>
-                      </>
-                    ) : (
-                      <p className="text-xs text-[var(--muted-foreground)]">
-                        No telemetry yet. Start your robot client to stream runtime stats.
-                      </p>
-                    )}
-                  </div>
+                  <MonitoringSection telemetry={telemetry} />
 
                   <div className="order-5 flex flex-wrap gap-2 lg:hidden">
                     <button
@@ -3155,255 +1386,10 @@ export default function DashboardPage() {
                 </>
               </div>
             </div>
+            )}
+          </>
         )}
       </section>
-    </div>
-  );
-}
-
-function TelemetryBars({
-  title,
-  values,
-  suffix,
-}: {
-  title: string;
-  values: number[];
-  suffix: string;
-}) {
-  const recent = values.slice(-24);
-  const current = recent.length > 0 ? (recent[recent.length - 1] ?? null) : null;
-
-  return (
-    <div className="rounded border border-[var(--border)] p-2">
-      <div className="mb-1 flex items-center justify-between">
-        <p className="text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">{title}</p>
-        <p className="text-xs font-semibold">{current === null ? '-' : `${Math.round(current)}${suffix}`}</p>
-      </div>
-      {recent.length === 0 ? (
-        <p className="text-[10px] text-[var(--muted-foreground)]">No recent samples</p>
-      ) : (
-        <div className="flex h-14 items-end gap-1">
-          {recent.map((value, idx) => (
-            <div
-              key={`${title}-${idx}`}
-              className="flex-1 rounded-sm bg-[var(--primary)]/60"
-              style={{ height: `${Math.max(8, Math.min(100, value))}%` }}
-              title={`${Math.round(value)}${suffix}`}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ControlBuilderPreview({ draft }: { draft: ControlButtonDraft }) {
-  const [sliderValue, setSliderValue] = useState<number>(() => Number(draft.sliderStart) || 0);
-  const [xyValue, setXyValue] = useState<{ x: number; y: number }>(() => ({
-    x: Number(draft.xyXStart) || 0,
-    y: Number(draft.xyYStart) || 0,
-  }));
-
-  useEffect(() => {
-    setSliderValue(Number(draft.sliderStart) || 0);
-  }, [draft.sliderStart, draft.controlKind]);
-
-  useEffect(() => {
-    setXyValue({ x: Number(draft.xyXStart) || 0, y: Number(draft.xyYStart) || 0 });
-  }, [draft.xyXStart, draft.xyYStart, draft.controlKind]);
-
-  const sliderMin = Number(draft.sliderMin);
-  const sliderMax = Number(draft.sliderMax);
-  const sliderStep = Number(draft.sliderStep) || 1;
-
-  const xMin = Number(draft.xyXMin);
-  const xMax = Number(draft.xyXMax);
-  const yMin = Number(draft.xyYMin);
-  const yMax = Number(draft.xyYMax);
-
-  const xRange = xMax - xMin;
-  const yRange = yMax - yMin;
-  const xPercent = xRange > 0 ? ((xyValue.x - xMin) / xRange) * 100 : 50;
-  const yPercent = yRange > 0 ? ((xyValue.y - yMin) / yRange) * 100 : 50;
-  const colorStyle = draft.color.trim() ? { borderColor: draft.color.trim() } : undefined;
-
-  return (
-    <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
-      <p className="mb-3 text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">Live Preview</p>
-
-      {draft.controlKind === 'button' ? (
-        <div className="flex flex-wrap items-start gap-3">
-          <button
-            type="button"
-            style={colorStyle}
-            className="flex min-h-12 min-w-[3.25rem] items-center justify-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--muted)] px-3 py-2 text-sm font-bold transition select-none"
-          >
-            {draft.icon.trim() ? <span>{draft.icon.trim()}</span> : null}
-            {draft.label.trim() || 'Button'}
-            {draft.hotKey ? <span className="ml-1 text-xs opacity-40">[{draft.hotKey}]</span> : null}
-          </button>
-          <div className="text-xs text-[var(--muted-foreground)]">
-            <p>{draft.command.trim() || 'command'}</p>
-            <p>{draft.access} · {draft.cooldownMs}ms</p>
-          </div>
-        </div>
-      ) : draft.controlKind === 'slider' ? (
-        <div
-          className="min-w-[14rem] rounded-lg border border-[var(--border)] bg-[var(--muted)] px-3 py-2"
-          style={colorStyle}
-        >
-          <div className="mb-1 flex items-center justify-between gap-2">
-            <p className="text-xs font-semibold text-[var(--foreground)]">{draft.label.trim() || 'Slider'}</p>
-            <span className="text-[10px] text-[var(--muted-foreground)]">{sliderValue.toFixed(0)}</span>
-          </div>
-          <input
-            type="range"
-            min={Number.isFinite(sliderMin) ? sliderMin : -100}
-            max={Number.isFinite(sliderMax) ? sliderMax : 100}
-            step={sliderStep}
-            value={sliderValue}
-            onChange={(event) => setSliderValue(Number(event.target.value))}
-            onPointerUp={() => {
-              if (draft.widgetReturn === 'center') {
-                setSliderValue(Number(draft.sliderStart) || 0);
-              }
-            }}
-            className={`accent-[var(--primary)] ${
-              draft.sliderDirection === 'vertical'
-                ? 'h-28 w-6 [writing-mode:vertical-lr] [-webkit-appearance:slider-vertical]'
-                : 'w-full'
-            }`}
-          />
-          <div className="mt-1 flex items-center justify-between text-[10px] text-[var(--muted-foreground)]">
-            <span>{draft.sliderMin}</span>
-            <span className="opacity-80">
-              {draft.command.trim() || 'command'} · {draft.access} · {draft.cooldownMs}ms
-            </span>
-            <span>{draft.sliderMax}</span>
-          </div>
-        </div>
-      ) : (
-        <div
-          className="rounded-lg border border-[var(--border)] bg-[var(--muted)] px-3 py-2"
-          style={colorStyle}
-        >
-          <div className="mb-1 flex items-center justify-between gap-2">
-            <p className="text-xs font-semibold text-[var(--foreground)]">{draft.label.trim() || 'XY Pad'}</p>
-            <span className="text-[10px] text-[var(--muted-foreground)]">
-              x {xyValue.x.toFixed(0)} · y {xyValue.y.toFixed(0)}
-            </span>
-          </div>
-          <div
-            className="relative h-32 w-32 touch-none rounded border border-[var(--border)] bg-[var(--background)]"
-            onPointerDown={(event) => {
-              const target = event.currentTarget;
-              const rect = target.getBoundingClientRect();
-              const nx = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
-              const ny = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
-              const nextX = xMin + nx * (xMax - xMin);
-              const nextY = yMax - ny * (yMax - yMin);
-              setXyValue({ x: nextX, y: nextY });
-            }}
-            onPointerUp={() => {
-              if (draft.widgetReturn === 'center') {
-                setXyValue({
-                  x: Number(draft.xyXStart) || 0,
-                  y: Number(draft.xyYStart) || 0,
-                });
-              }
-            }}
-          >
-            <div className="absolute left-1/2 top-1/2 h-px w-full -translate-x-1/2 bg-[var(--border)]" />
-            <div className="absolute left-1/2 top-1/2 h-full w-px -translate-y-1/2 bg-[var(--border)]" />
-            <div
-              className="absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--primary)]"
-              style={{ left: `${xPercent}%`, top: `${100 - yPercent}%` }}
-            />
-          </div>
-          <div className="mt-1 text-[10px] text-[var(--muted-foreground)]">
-            {draft.command.trim() || 'command'} · {draft.access} · {draft.cooldownMs}ms
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function formatPercent(value: number | null | undefined) {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return '-';
-  return `${value.toFixed(1)}%`;
-}
-
-function formatUptime(value: number | null | undefined) {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return '-';
-
-  const totalSeconds = Math.floor(value);
-  const days = Math.floor(totalSeconds / 86400);
-  const hours = Math.floor((totalSeconds % 86400) / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-
-  if (days > 0) {
-    return `${days}d ${hours}h ${minutes}m`;
-  }
-  if (hours > 0) {
-    return `${hours}h ${minutes}m`;
-  }
-  return `${minutes}m`;
-}
-
-function formatClientBuild(telemetry: RobotTelemetryPoint | null | undefined) {
-  if (!telemetry) return '-';
-
-  const parts: string[] = [];
-  if (telemetry.clientVersion) {
-    parts.push(`v${telemetry.clientVersion}`);
-  }
-  if (telemetry.gitBranch) {
-    parts.push(telemetry.gitBranch);
-  }
-  if (telemetry.gitCommit) {
-    parts.push(telemetry.gitCommit);
-  }
-  if (telemetry.gitDirty) {
-    parts.push('dirty');
-  }
-
-  return parts.length > 0 ? parts.join(' • ') : '-';
-}
-
-function AclPicker({
-  title,
-  value,
-  onChange,
-}: {
-  title: string;
-  value: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
-  onChange: (value: 'ALL' | 'AUTHENTICATED' | 'DISABLED') => void;
-}) {
-  return (
-    <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-2">
-      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">{title}</p>
-      <div className="flex flex-wrap gap-2">
-        {accessModeOptions.map((option) => {
-          const active = option.value === value;
-          return (
-            <button
-              key={option.value}
-              type="button"
-              onClick={() => onChange(option.value)}
-              className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition ${
-                active
-                  ? 'border-[var(--primary)] bg-[var(--primary)]/15 text-[var(--foreground)]'
-                  : 'border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
-              }`}
-              title={option.description}
-            >
-              {active && <Check className="h-3 w-3" />}
-              {option.title}
-            </button>
-          );
-        })}
-      </div>
     </div>
   );
 }

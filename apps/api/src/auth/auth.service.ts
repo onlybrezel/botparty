@@ -19,6 +19,9 @@ import { MailService } from '../mail/mail.service';
 
 const asJwtExpiresIn = (value: string): StringValue => value as StringValue;
 
+const MAX_LOGIN_ATTEMPTS = 10;
+const LOGIN_LOCKOUT_SEC = 15 * 60; // 15 minutes
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -53,17 +56,55 @@ export class AuthService {
 
     const passwordHash = await hash(data.password, { type: 2 }); // argon2id
 
+    const requireVerification = this.config.get<string>('REQUIRE_EMAIL_VERIFICATION') === 'true';
+    const verificationToken = randomBytes(32).toString('hex');
+    const verificationExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
     const user = await this.prisma.user.create({
       data: {
         username: data.username,
         email: data.email,
         passwordHash,
         displayName: data.displayName ?? data.username,
+        emailVerified: !requireVerification,
+        emailVerificationToken: requireVerification ? verificationToken : null,
+        emailVerificationExpiry: requireVerification ? verificationExpiry : null,
       },
     });
 
+    if (requireVerification) {
+      this.mail.sendEmailVerification(user.email, verificationToken).catch((err: unknown) => {
+        this.logger.warn(`Failed to send verification email to ${user.email}`, err);
+      });
+    }
+
     this.logger.log(`User registered: ${user.username}`);
     return this.generateTokens(user);
+  }
+
+  async verifyEmail(token: string) {
+    const user = await this.prisma.user.findFirst({
+      where: {
+        emailVerificationToken: token,
+        emailVerificationExpiry: { gt: new Date() },
+      },
+    });
+
+    if (!user) {
+      throw new BadRequestException('Invalid or expired verification token');
+    }
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        emailVerified: true,
+        emailVerificationToken: null,
+        emailVerificationExpiry: null,
+      },
+    });
+
+    this.logger.log(`Email verified for user: ${user.username}`);
+    return { message: 'Email verified successfully' };
   }
 
   async login(input: z.infer<typeof loginSchema>) {
@@ -72,18 +113,39 @@ export class AuthService {
       email: input.email.trim().toLowerCase(),
     });
 
+    const lockoutKey = `auth:lockout:${data.email}`;
+    const attemptsKey = `auth:attempts:${data.email}`;
+
+    const lockout = await this.redis.get(lockoutKey);
+    if (lockout) {
+      throw new UnauthorizedException('Account temporarily locked due to too many failed login attempts. Please try again later.');
+    }
+
     const user = await this.prisma.user.findUnique({
       where: { email: data.email },
     });
 
     if (!user || !user.isActive) {
+      await this.redis.incr(attemptsKey);
+      await this.redis.expire(attemptsKey, LOGIN_LOCKOUT_SEC);
       throw new UnauthorizedException('Invalid credentials');
     }
 
     const valid = await verify(user.passwordHash, data.password);
     if (!valid) {
+      const attempts = await this.redis.incr(attemptsKey);
+      await this.redis.expire(attemptsKey, LOGIN_LOCKOUT_SEC);
+      if (attempts >= MAX_LOGIN_ATTEMPTS) {
+        await this.redis.set(lockoutKey, '1', 'EX', LOGIN_LOCKOUT_SEC);
+        await this.redis.del(attemptsKey);
+        this.logger.warn(`Account locked after ${MAX_LOGIN_ATTEMPTS} failed attempts: ${data.email}`);
+      }
       throw new UnauthorizedException('Invalid credentials');
     }
+
+    // Clear failed attempt counters on successful login
+    await this.redis.del(attemptsKey);
+    await this.redis.del(lockoutKey);
 
     // Update last login
     await this.prisma.user.update({

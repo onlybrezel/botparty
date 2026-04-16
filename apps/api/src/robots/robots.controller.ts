@@ -11,6 +11,7 @@ import {
   HttpCode,
   HttpStatus,
   BadRequestException,
+  NotFoundException,
   UnauthorizedException,
   ForbiddenException,
   Headers,
@@ -24,12 +25,20 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { LivekitService } from '../livekit/livekit.service';
 import { Role } from '@botparty/shared';
-import type { JwtPayload } from '@botparty/shared';
+import type { JwtPayload, CreateRobotInput, UpdateRobotInput } from '@botparty/shared';
 import { JwtService, type JwtSignOptions } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { createHash } from 'crypto';
 import { extractBearerToken, getAccessCookieName, parseCookie } from '../auth/auth.cookies';
 import type { FastifyReply } from 'fastify';
+import {
+  UploadThumbnailDto,
+  AddAllowedUserDto,
+  CreateIngressCameraDto,
+  VerifyRobotAccessDto,
+  ClaimRobotDto,
+  IngestRobotLogsDto,
+} from './robots.dto';
 
 @ApiTags('robots')
 @Controller('robots')
@@ -48,8 +57,10 @@ export class RobotsController {
     @Query('tag') tag?: string,
     @Query('q') q?: string,
     @Query('sort') sort?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
   ) {
-    return this.robotsService.findAll({ status, tag, q, sort });
+    return this.robotsService.findAll({ status, tag, q, sort, limit, offset });
   }
 
   @Get('featured')
@@ -104,9 +115,9 @@ export class RobotsController {
   @ApiOperation({ summary: 'Create a new robot' })
   async create(
     @CurrentUser() user: JwtPayload,
-    @Body() body: Record<string, unknown>,
+    @Body() body: CreateRobotInput,
   ) {
-    return this.robotsService.create(user.sub, body as never);
+    return this.robotsService.create(user.sub, body);
   }
 
   @Put(':id')
@@ -116,9 +127,9 @@ export class RobotsController {
   async update(
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,
-    @Body() body: Record<string, unknown>,
+    @Body() body: UpdateRobotInput,
   ) {
-    return this.robotsService.update(id, user.sub, body as never);
+    return this.robotsService.update(id, user.sub, body);
   }
 
   @Put('admin/:id')
@@ -128,9 +139,9 @@ export class RobotsController {
   @ApiOperation({ summary: 'Update robot settings as staff' })
   async updateAsStaff(
     @Param('id') id: string,
-    @Body() body: Record<string, unknown>,
+    @Body() body: UpdateRobotInput,
   ) {
-    return this.robotsService.updateByStaff(id, body as never);
+    return this.robotsService.updateByStaff(id, body);
   }
 
   @Delete(':id')
@@ -183,14 +194,9 @@ export class RobotsController {
   async uploadThumbnail(
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,
-    @Body() body: { dataUrl?: string },
+    @Body() body: UploadThumbnailDto,
   ) {
-    const dataUrl = body.dataUrl?.trim();
-    if (!dataUrl) {
-      throw new BadRequestException('dataUrl is required');
-    }
-
-    return this.robotsService.saveRobotThumbnail(id, user.sub, dataUrl);
+    return this.robotsService.saveRobotThumbnail(id, user.sub, body.dataUrl.trim());
   }
 
   @Delete(':id/thumbnail')
@@ -208,7 +214,7 @@ export class RobotsController {
     @Res({ passthrough: true }) reply: FastifyReply,
   ) {
     const file = await this.robotsService.readRobotThumbnail(id);
-    reply.header('Cache-Control', 'public, max-age=300');
+    reply.header('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
     reply.type(file.contentType);
     return file.buffer;
   }
@@ -228,13 +234,9 @@ export class RobotsController {
   async addAllowedUser(
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,
-    @Body() body: { username?: string },
+    @Body() body: AddAllowedUserDto,
   ) {
-    const username = body.username?.trim();
-    if (!username) {
-      throw new BadRequestException('username is required');
-    }
-    return this.robotsService.addAllowedUser(id, user.sub, username);
+    return this.robotsService.addAllowedUser(id, user.sub, body.username.trim());
   }
 
   @Delete(':id/allowed-users/:userId')
@@ -266,13 +268,10 @@ export class RobotsController {
   async createIngressCamera(
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,
-    @Body() body: { cameraId?: string; label?: string; compatibilityMode?: boolean },
+    @Body() body: CreateIngressCameraDto,
   ) {
     const robot = await this.requireRobotOwner(id, user.sub);
-    const cameraId = body.cameraId?.trim();
-    if (!cameraId) {
-      throw new BadRequestException('cameraId is required');
-    }
+    const cameraId = body.cameraId.trim();
 
     const ingress = await this.livekitService.ensureRobotCameraWhipIngress(
       robot.id,
@@ -309,7 +308,7 @@ export class RobotsController {
     await this.requireRobotOwner(id, user.sub);
     const deletedCameraId = await this.livekitService.deleteRobotCameraIngress(id, ingressId);
     if (!deletedCameraId) {
-      throw new BadRequestException('Ingress not found or not removable');
+      throw new NotFoundException('Ingress not found or not removable');
     }
     await this.robotsService.removeExternalStreamCamera(id, user.sub, deletedCameraId);
   }
@@ -320,7 +319,7 @@ export class RobotsController {
     @Param('id') id: string,
     @Headers('authorization') authorization?: string,
     @Headers('cookie') cookieHeader?: string,
-    @Body() body?: { password?: string; guestSessionId?: string; inviteCode?: string },
+    @Body() body: VerifyRobotAccessDto = {},
   ) {
     return this.robotsService.issueRoomAccessGrant({
       robotId: id,
@@ -333,13 +332,8 @@ export class RobotsController {
 
   @Post('claim')
   @ApiOperation({ summary: 'Claim a robot and get LiveKit token for hardware client' })
-  async claim(@Body() body: { claimToken?: string; deviceKey?: string; publishCameraIds?: string[] }) {
-    const claimToken = body.claimToken?.trim();
-    if (!claimToken) {
-      throw new BadRequestException('claimToken is required');
-    }
-
-    const robot = await this.robotsService.findByClaimToken(claimToken);
+  async claim(@Body() body: ClaimRobotDto) {
+    const robot = await this.robotsService.findByClaimToken(body.claimToken.trim());
     if (!robot) {
       throw new UnauthorizedException('Invalid claim token');
     }
@@ -347,6 +341,7 @@ export class RobotsController {
     const { deviceHash } = await this.robotsService.validateOrBindRobotDevice(robot.id, body.deviceKey);
     const robotJwtOptions: JwtSignOptions = {
       secret: this.getRobotJwtSecret(),
+      expiresIn: '30d',
     };
     const configuredRobotExpiry = this.configService.get<string>('ROBOT_JWT_EXPIRES_IN')?.trim();
     if (configuredRobotExpiry) {
@@ -441,11 +436,8 @@ export class RobotsController {
   @ApiOperation({ summary: 'Robot uploads temporary diagnostics logs using robot bearer auth' })
   async pushLogs(
     @Headers('authorization') authorization: string | undefined,
-    @Body() body: { lines?: string[] },
+    @Body() body: IngestRobotLogsDto,
   ) {
-    if (!Array.isArray(body.lines)) {
-      throw new BadRequestException('lines must be an array');
-    }
     return this.robotsService.ingestRobotLogsByRobotId(this.requireRobotAuth(authorization), body.lines);
   }
 
@@ -480,15 +472,8 @@ export class RobotsController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get recent temporary robot logs (owner only)' })
   async getLogs(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
-    try {
-      const logs = await this.robotsService.getRobotLogs(id, user.sub);
-      return { logs };
-    } catch (err) {
-      if (err instanceof ForbiddenException) {
-        throw err;
-      }
-      throw err;
-    }
+    const logs = await this.robotsService.getRobotLogs(id, user.sub);
+    return { logs };
   }
 
   @Get(':id/telemetry')

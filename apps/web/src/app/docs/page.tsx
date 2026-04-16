@@ -35,6 +35,15 @@ export default function DocsPage() {
             </p>
           </Link>
           <Link
+            href="/docs/obs-whip"
+            className="rounded-xl border border-[var(--border)] bg-[var(--background)] p-4 transition hover:border-[var(--primary)]/60"
+          >
+            <p className="text-sm font-semibold">OBS via WHIP</p>
+            <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+              Low-latency camera ingress setup for OBS, WHIP endpoints, and troubleshooting.
+            </p>
+          </Link>
+          <Link
             href="/dashboard"
             className="rounded-xl border border-[var(--border)] bg-[var(--background)] p-4 transition hover:border-[var(--primary)]/60"
           >
@@ -57,7 +66,7 @@ export default function DocsPage() {
           <a
             href="https://github.com/onlybrezel/botparty-client/blob/main/docs/index.md"
             target="_blank"
-            rel="noreferrer"
+            rel="noopener noreferrer"
             className="rounded-xl border border-[var(--border)] bg-[var(--background)] p-4 transition hover:border-[var(--primary)]/60"
           >
             <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted-foreground)]">Robot client</p>

@@ -3,10 +3,12 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Menu, X } from 'lucide-react';
 import { useAuth } from '@/lib/store';
 import { api } from '@/lib/api';
+import { Badge } from '@/components/ui/badge';
+import { usePreferences } from '@/lib/preferences';
 
 export default function Nav() {
   const pathname = usePathname();
@@ -15,6 +17,20 @@ export default function Nav() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [guestLabel, setGuestLabel] = useState('Guest');
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const theme = usePreferences((state) => state.theme);
+  const updatePreference = usePreferences((state) => state.updatePreference);
+
+  useEffect(() => {
+    if (!dropdownOpen) return;
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [dropdownOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -41,7 +57,7 @@ export default function Nav() {
       const stored = (window.localStorage.getItem(key) ?? '').trim().toLowerCase();
       const sessionId = /^[a-z0-9_-]{6,64}$/.test(stored)
         ? stored
-        : Math.random().toString(36).slice(2, 14);
+        : crypto.randomUUID().replace(/-/g, '').slice(0, 12);
       if (sessionId !== stored) {
         window.localStorage.setItem(key, sessionId);
       }
@@ -115,7 +131,7 @@ export default function Nav() {
           <a
             href="https://github.com/onlybrezel/botparty-client/blob/main/docs/index.md"
             target="_blank"
-            rel="noreferrer"
+            rel="noopener noreferrer"
             className="rounded-lg px-3 py-2 text-sm font-medium text-[var(--muted-foreground)] transition-colors hover:text-[var(--foreground)]"
           >
             Robot Setup
@@ -136,7 +152,7 @@ export default function Nav() {
           {!mounted ? (
             <div className="hidden h-8 w-20 rounded-lg bg-[var(--muted)] animate-pulse sm:block" />
           ) : accessToken && username ? (
-            <div className="relative">
+            <div className="relative" ref={dropdownRef}>
               <button
                 onClick={() => setDropdownOpen((open) => !open)}
                 className="hidden items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-sm font-medium transition hover:border-[var(--muted-foreground)] sm:flex"
@@ -153,7 +169,6 @@ export default function Nav() {
               {dropdownOpen && (
                 <div
                   className="absolute right-0 top-full mt-1 w-44 rounded-xl border border-[var(--border)] bg-[var(--card)] py-1 shadow-lg shadow-black/40 animate-fade-in"
-                  onBlur={() => setDropdownOpen(false)}
                 >
                   <Link
                     href="/dashboard"
@@ -178,6 +193,26 @@ export default function Nav() {
                   >
                     Settings
                   </Link>
+                  <div className="px-4 py-2">
+                    <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--muted-foreground)]">
+                      Theme
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {(['system', 'dark', 'light'] as const).map((option) => (
+                        <button
+                          key={option}
+                          type="button"
+                          onClick={() => updatePreference('theme', option)}
+                          className="rounded-full"
+                          aria-pressed={theme === option}
+                        >
+                          <Badge tone={theme === option ? 'success' : 'default'}>
+                            {option}
+                          </Badge>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   <div className="my-1 border-t border-[var(--border)]" />
                   <button
                     onClick={() => {
@@ -229,7 +264,7 @@ export default function Nav() {
             <a
               href="https://github.com/onlybrezel/botparty-client/blob/main/docs/index.md"
               target="_blank"
-              rel="noreferrer"
+              rel="noopener noreferrer"
               className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm font-medium text-[var(--muted-foreground)]"
             >
               Robot Setup

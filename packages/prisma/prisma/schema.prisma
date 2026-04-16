@@ -94,6 +94,9 @@ model User {
   credits      Int      @default(0) // Earned credits
   tokenVersion Int      @default(0) // For refresh token invalidation
   isActive     Boolean  @default(true)
+  emailVerified         Boolean   @default(true)  // false for new registrations; true grandfathers existing accounts
+  emailVerificationToken String?  @unique @db.VarChar(64)
+  emailVerificationExpiry DateTime?
   lastLoginAt  DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -291,6 +294,7 @@ model ChatMessage {
   createdAt DateTime @default(now())
 
   @@index([robotId, createdAt])
+  @@index([userId])
   @@map("chat_messages")
 }
 

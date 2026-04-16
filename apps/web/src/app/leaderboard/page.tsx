@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import type { PublicRobotOverview, RobotPublic } from '@botparty/shared';
 import { Trophy, Eye, Radio, Clock3 } from 'lucide-react';
 
@@ -13,16 +14,24 @@ type CreatorLeaderboardEntry = {
 export const metadata: Metadata = {
   title: 'Leaderboard',
   description: 'See which robot rooms are drawing a crowd right now.',
+  openGraph: {
+    title: 'Leaderboard — BotParty',
+    description: 'See which robot rooms are drawing a crowd right now.',
+    type: 'website',
+  },
+  twitter: {
+    card: 'summary',
+    title: 'Leaderboard — BotParty',
+    description: 'See which robot rooms are drawing a crowd right now.',
+  },
 };
 
-export const dynamic = 'force-dynamic';
+export const revalidate = 10;
 
 async function getRobots(): Promise<RobotPublic[]> {
   const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
   try {
-    const res = await fetch(`${apiUrl}/api/v1/robots`, {
-      cache: 'no-store',
-    });
+    const res = await fetch(`${apiUrl}/api/v1/robots`);
     if (!res.ok) return [];
     return res.json() as Promise<RobotPublic[]>;
   } catch {
@@ -33,9 +42,7 @@ async function getRobots(): Promise<RobotPublic[]> {
 async function getTopCreators(): Promise<CreatorLeaderboardEntry[]> {
   const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
   try {
-    const res = await fetch(`${apiUrl}/api/v1/users/leaderboard?limit=10`, {
-      cache: 'no-store',
-    });
+    const res = await fetch(`${apiUrl}/api/v1/users/leaderboard?limit=10`);
     if (!res.ok) return [];
     return res.json() as Promise<CreatorLeaderboardEntry[]>;
   } catch {
@@ -46,9 +53,7 @@ async function getTopCreators(): Promise<CreatorLeaderboardEntry[]> {
 async function getOverview(): Promise<PublicRobotOverview | null> {
   const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
   try {
-    const res = await fetch(`${apiUrl}/api/v1/robots/overview`, {
-      cache: 'no-store',
-    });
+    const res = await fetch(`${apiUrl}/api/v1/robots/overview`);
     if (!res.ok) return null;
     return res.json() as Promise<PublicRobotOverview>;
   } catch {
@@ -111,9 +116,12 @@ export default async function LeaderboardPage() {
                 </span>
 
                 <div className="col-span-5 sm:col-span-4">
-                  <p className="truncate font-semibold">
+                  <Link
+                    href={`/robot/${robot.owner.username}/${robot.slug}`}
+                    className="truncate font-semibold hover:text-violet-300 transition-colors"
+                  >
                     {robot.name}
-                  </p>
+                  </Link>
                 </div>
 
                 <span

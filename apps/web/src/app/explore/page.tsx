@@ -1,15 +1,27 @@
 import type { Metadata } from 'next';
+import { Suspense } from 'react';
 import type { PublicRobotOverview, RobotPublic } from '@botparty/shared';
 import RobotCard from '@/components/robot-card';
-import { Select } from '@/components/ui/select';
-import { Search, SlidersHorizontal, Bot } from 'lucide-react';
+import { Bot } from 'lucide-react';
+import { ExploreFilters } from './explore-filters';
+import { ExploreAutoRefresh } from './explore-refresh';
 
 export const metadata: Metadata = {
   title: 'Explore Robots',
   description: 'Browse live robot rooms, watch what is online, and jump into the queue.',
+  openGraph: {
+    title: 'Explore Robots — BotParty',
+    description: 'Browse live robot rooms, watch what is online, and jump into the queue.',
+    type: 'website',
+  },
+  twitter: {
+    card: 'summary',
+    title: 'Explore Robots — BotParty',
+    description: 'Browse live robot rooms, watch what is online, and jump into the queue.',
+  },
 };
 
-export const dynamic = 'force-dynamic';
+export const revalidate = 30;
 
 async function getRobots(params: { status?: string; tag?: string; q?: string; sort?: string }): Promise<RobotPublic[]> {
   const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
@@ -21,7 +33,7 @@ async function getRobots(params: { status?: string; tag?: string; q?: string; so
 
   try {
     const res = await fetch(`${apiUrl}/api/v1/robots?${qs.toString()}`, {
-      cache: 'no-store',
+      next: { revalidate: 30 },
     });
     if (!res.ok) return [];
     return res.json() as Promise<RobotPublic[]>;
@@ -34,7 +46,7 @@ async function getOverview(): Promise<PublicRobotOverview | null> {
   const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
   try {
     const res = await fetch(`${apiUrl}/api/v1/robots/overview`, {
-      cache: 'no-store',
+      next: { revalidate: 30 },
     });
     if (!res.ok) return null;
     return res.json() as Promise<PublicRobotOverview>;
@@ -42,19 +54,6 @@ async function getOverview(): Promise<PublicRobotOverview | null> {
     return null;
   }
 }
-
-const STATUS_OPTIONS = [
-  { value: '', label: 'All robots' },
-  { value: 'ONLINE', label: 'Online now' },
-  { value: 'OFFLINE', label: 'Offline' },
-];
-
-const SORT_OPTIONS = [
-  { value: '', label: 'Featured first' },
-  { value: 'new', label: 'Newest' },
-  { value: 'sessions', label: 'Most active' },
-  { value: 'name', label: 'Name A-Z' },
-];
 
 export default async function ExplorePage({
   searchParams,
@@ -67,6 +66,7 @@ export default async function ExplorePage({
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-6 sm:py-8">
+      <ExploreAutoRefresh />
       {/* Header */}
       <div className="mb-6 flex flex-col gap-3 sm:mb-7 sm:flex-row sm:items-end sm:justify-between">
         <div>
@@ -84,67 +84,9 @@ export default async function ExplorePage({
       </div>
 
       {/* Filters */}
-      <form method="get" className="mb-6 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3 sm:mb-7 sm:p-4">
-        <div className="flex flex-col gap-3">
-          <div className="relative w-full sm:max-w-md">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted-foreground)]" />
-            <input
-              type="text"
-              name="q"
-              defaultValue={params.q ?? ''}
-              placeholder="Search robot names, hosts, descriptions, or an exact tag..."
-              className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] py-3 pl-10 pr-4 text-sm outline-none transition-colors focus:border-[var(--primary)]"
-            />
-          </div>
-
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto] sm:items-center">
-            <label className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-3 text-sm text-[var(--muted-foreground)]">
-              <SlidersHorizontal className="h-4 w-4 flex-shrink-0" />
-              <Select
-                name="status"
-                defaultValue={params.status ?? ''}
-                className="w-full border-0 bg-transparent px-0 py-0 pr-7 text-sm outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
-              >
-                {STATUS_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </Select>
-            </label>
-
-            <label className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-3 text-sm text-[var(--muted-foreground)]">
-              <Select
-                name="sort"
-                defaultValue={params.sort ?? ''}
-                className="w-full border-0 bg-transparent px-0 py-0 pr-7 text-sm outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
-              >
-                {SORT_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </Select>
-            </label>
-
-            <button
-              type="submit"
-              className="rounded-xl bg-[var(--primary)] px-4 py-3 text-sm font-medium text-white transition hover:bg-[var(--primary-hover)]"
-            >
-              Apply filters
-            </button>
-
-            {(params.status || params.q || params.tag || params.sort) && (
-              <a
-                href="/explore"
-                className="rounded-xl border border-[var(--border)] px-4 py-3 text-center text-sm text-[var(--muted-foreground)] transition hover:text-[var(--foreground)]"
-              >
-                Clear
-              </a>
-            )}
-          </div>
-        </div>
-      </form>
+      <Suspense>
+        <ExploreFilters q={params.q} status={params.status} sort={params.sort} tag={params.tag} />
+      </Suspense>
 
       {overview && overview.topTags.length > 0 && !params.q && (
         <div className="mb-6">

@@ -132,6 +132,11 @@ export const WS_EVENTS = {
   SIGNAL_OFFER: 'signal:offer',
   SIGNAL_ANSWER: 'signal:answer',
   SIGNAL_ICE: 'signal:ice',
+
+  // Generic
+  ERROR: 'error',
+  ROOM_JOIN: 'room:join',
+  ROBOT_ACTIONS: 'robot:actions',
 } as const;
 
 // ─── Control Command Names ───────────────────────────
@@ -172,4 +177,7 @@ export const LIMITS = {
   CHAT_RATE_LIMIT_ADMIN_MS: 250, // Admins & moderators
   CHAT_HISTORY_ON_JOIN: 25,      // Messages loaded on room join
   MOD_TIMEOUT_MAX_SEC: 3600,     // Max 1-hour timeout
+  WS_EVENT_RATE_WINDOW_MS: 1000, // Sliding window for generic WS event rate limiting
+  WS_EVENT_RATE_LIMIT: 30,       // Max events per window (normal users & guests)
+  WS_EVENT_RATE_LIMIT_ADMIN: 60, // Max events per window (admin / mod / robot)
 } as const;

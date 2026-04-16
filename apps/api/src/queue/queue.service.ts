@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Logger,
   BadRequestException,
+  NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
@@ -199,7 +200,7 @@ export class QueueService {
       select: { queueMode: true },
     });
     if (!robot) {
-      throw new BadRequestException('Robot not found');
+      throw new NotFoundException('Robot not found');
     }
     if (robot.queueMode !== 'VOTING') {
       throw new BadRequestException('Voting is not enabled for this queue');
@@ -334,17 +335,16 @@ export class QueueService {
     }
 
     await this.prisma.$transaction(async (tx) => {
-      for (const entry of entries) {
-        const voteCount = nextVotes.get(entry.userId) ?? 0;
-        if (entry.votes === voteCount) {
-          continue;
-        }
-
-        await tx.queueEntry.update({
-          where: { id: entry.id },
-          data: { votes: voteCount },
-        });
-      }
+      await Promise.all(
+        entries
+          .filter((entry) => entry.votes !== (nextVotes.get(entry.userId) ?? 0))
+          .map((entry) =>
+            tx.queueEntry.update({
+              where: { id: entry.id },
+              data: { votes: nextVotes.get(entry.userId) ?? 0 },
+            }),
+          ),
+      );
     });
   }
 }

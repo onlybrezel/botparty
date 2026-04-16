@@ -9,262 +9,31 @@ import { api, type AdminRobotRecordingStatus } from '@/lib/api';
 import { useAuth } from '@/lib/store';
 import { LiveKitPlayer } from '@/components/livekit-player';
 import { pushToast } from '@/lib/toast';
+import { SliderControl, XYPadControl, ControlKey, formatCountdown } from '@/components/robot-view/controls';
+import { RobotViewersList } from '@/components/robot-view/viewers-list';
+import { RobotQueuePanel } from '@/components/robot-view/queue-panel';
+import { RobotChatPanel } from '@/components/robot-view/chat-panel';
+import { RobotPageHeader } from '@/components/robot-view/robot-page-header';
+import { usePreferences } from '@/lib/preferences';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface ControlButton {
-  id: string;
-  label: string;
-  command: string;
-  hotKey: string | null;
-  icon: string | null;
-  cooldownMs: number;
-  access: string;
-  position: number;
-  color: string | null;
-}
-
-interface ChatMsg {
-  userId: string;
-  username: string;
-  content: string;
-  timestamp: number;
-  isSystem?: boolean;
-  clientMessageId?: string;
-}
-
-interface Viewer {
-  userId: string;
-  username: string;
-  joinedAt: number;
-}
-
-interface QueueEntry {
-  userId: string;
-  username: string;
-  position: number;
-  votes?: number;
-}
-
-type SliderWidgetConfig = {
-  kind: 'slider';
-  min: number;
-  max: number;
-  start: number;
-  step: number;
-  direction: 'horizontal' | 'vertical';
-  returnMode: 'center' | 'none';
-  resetOnQueueLoss: boolean;
-  resetOnOffline: boolean;
-  resetAfterMs: number | null;
-};
-
-type XYWidgetConfig = {
-  kind: 'xy';
-  xMin: number;
-  xMax: number;
-  xStart: number;
-  yMin: number;
-  yMax: number;
-  yStart: number;
-  returnMode: 'center' | 'none';
-  resetOnQueueLoss: boolean;
-  resetOnOffline: boolean;
-  resetAfterMs: number | null;
-};
-
-type WidgetConfig = SliderWidgetConfig | XYWidgetConfig;
-
-type QueueEntryWire = {
-  userId: string;
-  username?: string;
-  position: number;
-  votes?: number;
-  user?: {
-    username?: string;
-    displayName?: string | null;
-  };
-};
-
-interface ActiveSessionState {
-  sessionId: string;
-  userId: string;
-  username: string;
-  startedAt: number;
-  expiresAt: number | null;
-}
-
-interface ReconnectNotice {
-  message: string;
-  reason: string;
-  retryAt: number;
-}
-
-type FocusMode = 'controls' | 'chat';
-
-function resolveWsUrl(): string {
-  const configured = process.env.NEXT_PUBLIC_API_URL;
-
-  if (!configured) {
-    return `${window.location.origin.replace(/^https?/, (m) => (m === 'https' ? 'wss' : 'ws'))}/ws`;
-  }
-
-  try {
-    const url = new URL(configured);
-    const isConfiguredLocalhost = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
-    const isCurrentHostLocalhost =
-      window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-
-    const base = isConfiguredLocalhost && !isCurrentHostLocalhost
-      ? window.location.origin
-      : configured;
-
-    return `${base.replace(/^https?/, (m) => (m === 'https' ? 'wss' : 'ws'))}/ws`;
-  } catch {
-    return `${window.location.origin.replace(/^https?/, (m) => (m === 'https' ? 'wss' : 'ws'))}/ws`;
-  }
-}
-
-// ─── WASD Keys ────────────────────────────────────────────────────────────────
-
-const WASD: Record<string, string> = {
-  w: 'forward', arrowup: 'forward',
-  s: 'backward', arrowdown: 'backward',
-  a: 'left', arrowleft: 'left',
-  d: 'right', arrowright: 'right',
-};
-
-function getOrCreateGuestSessionId(): string {
-  const fallback = Math.random().toString(36).slice(2, 14);
-  if (typeof window === 'undefined') return fallback;
-
-  try {
-    const key = 'botparty.guestSessionId.v1';
-    const stored = window.localStorage.getItem(key);
-    const normalized = (stored ?? '').trim().toLowerCase();
-    if (/^[a-z0-9_-]{6,64}$/.test(normalized)) {
-      return normalized;
-    }
-
-    window.localStorage.setItem(key, fallback);
-    return fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function normalizeQueueEntries(rows: QueueEntryWire[] | undefined): QueueEntry[] {
-  if (!rows?.length) {
-    return [];
-  }
-
-  return rows.map((row) => ({
-    userId: row.userId,
-    username: row.username ?? row.user?.displayName ?? row.user?.username ?? row.userId.slice(0, 8),
-    position: row.position,
-    votes: typeof row.votes === 'number' ? row.votes : 0,
-  }));
-}
-
-function buildGuestMessageId() {
-  return `guest-msg-${Math.random().toString(36).slice(2, 10)}-${Date.now().toString(36)}`;
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
-}
-
-function parseWidgetConfig(icon: string | null): WidgetConfig | null {
-  if (!icon) {
-    return null;
-  }
-
-  const raw = icon.trim();
-  if (!raw.startsWith('widget:')) {
-    return null;
-  }
-
-  const parts = raw.split(':').map((part) => part.trim()).filter(Boolean);
-  if (parts.length < 2) {
-    return null;
-  }
-
-  const kind = parts[1]?.toLowerCase();
-  const kv = new Map<string, string>();
-  for (const segment of parts.slice(2)) {
-    const eq = segment.indexOf('=');
-    if (eq <= 0) {
-      continue;
-    }
-    kv.set(segment.slice(0, eq).trim().toLowerCase(), segment.slice(eq + 1).trim());
-  }
-
-  const num = (keys: string[], fallback: number) => {
-    for (const key of keys) {
-      const value = kv.get(key);
-      if (value === undefined) {
-        continue;
-      }
-      const parsed = Number(value);
-      if (Number.isFinite(parsed)) {
-        return parsed;
-      }
-    }
-    return fallback;
-  };
-
-  const bool = (keys: string[], fallback: boolean) => {
-    for (const key of keys) {
-      const value = kv.get(key);
-      if (value === undefined) {
-        continue;
-      }
-      const normalized = value.toLowerCase();
-      if (['1', 'true', 'yes', 'y', 'on'].includes(normalized)) {
-        return true;
-      }
-      if (['0', 'false', 'no', 'n', 'off'].includes(normalized)) {
-        return false;
-      }
-    }
-    return fallback;
-  };
-
-  const returnRaw = (kv.get('r') ?? kv.get('return') ?? kv.get('mode') ?? 'c').toLowerCase();
-  const returnMode: 'center' | 'none' = returnRaw === 'n' || returnRaw === 'none' ? 'none' : 'center';
-  const resetOnQueueLoss = bool(['rq', 'resetqueue', 'reset_on_queue'], false);
-  const resetOnOffline = bool(['ro', 'resetoffline', 'reset_on_offline'], true);
-  const resetAfterRaw = num(['ttl', 'resetafter', 'reset_after_ms'], -1);
-  const resetAfterMs = resetAfterRaw >= 100 ? Math.round(resetAfterRaw) : null;
-
-  if (kind === 's' || kind === 'slider') {
-    const min = num(['min', 'n'], -100);
-    const max = num(['max', 'x'], 100);
-    if (max <= min) {
-      return null;
-    }
-    const start = clamp(num(['start', 'v0', 'center', 'c'], 0), min, max);
-    const step = Math.max(0.01, num(['step', 'st'], 1));
-    const dirRaw = (kv.get('dir') ?? kv.get('d') ?? 'h').toLowerCase();
-    const direction: 'horizontal' | 'vertical' = dirRaw === 'v' || dirRaw === 'vertical' ? 'vertical' : 'horizontal';
-    return { kind: 'slider', min, max, start, step, direction, returnMode, resetOnQueueLoss, resetOnOffline, resetAfterMs };
-  }
-
-  if (kind === 'xy' || kind === 'xypad') {
-    const xMin = num(['xmin', 'xn'], -100);
-    const xMax = num(['xmax', 'xx'], 100);
-    const yMin = num(['ymin', 'yn'], -100);
-    const yMax = num(['ymax', 'yx'], 100);
-    if (xMax <= xMin || yMax <= yMin) {
-      return null;
-    }
-    const xStart = clamp(num(['xstart', 'x0'], 0), xMin, xMax);
-    const yStart = clamp(num(['ystart', 'y0'], 0), yMin, yMax);
-    return { kind: 'xy', xMin, xMax, xStart, yMin, yMax, yStart, returnMode, resetOnQueueLoss, resetOnOffline, resetAfterMs };
-  }
-
-  return null;
-}
+import {
+  type ControlButton,
+  type ChatMsg,
+  type Viewer,
+  type QueueEntry,
+  type SliderWidgetConfig,
+  type XYWidgetConfig,
+  type QueueEntryWire,
+  type ActiveSessionState,
+  type ReconnectNotice,
+  type FocusMode,
+  resolveWsUrl,
+  WASD,
+  getOrCreateGuestSessionId,
+  normalizeQueueEntries,
+  buildGuestMessageId,
+  parseWidgetConfig,
+} from '@/components/robot-view/types';
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -275,6 +44,9 @@ interface Props {
 export default function RobotView({ robot }: Props) {
   const searchParams = useSearchParams();
   const { accessToken, userId, username, role, hasHydrated } = useAuth();
+  const tabSwitchOnlyWhenEmpty = usePreferences((state) => state.keyboardTabSwitchOnlyWhenEmpty);
+  const queuePositionNotifications = usePreferences((state) => state.queuePositionNotifications);
+  const queueTurnNotifications = usePreferences((state) => state.queueTurnNotifications);
 
   const [focusMode, setFocusMode] = useState<FocusMode>('controls');
   const [controlButtons, setControlButtons] = useState<ControlButton[]>([]);
@@ -296,7 +68,6 @@ export default function RobotView({ robot }: Props) {
   const [robotStatus, setRobotStatus] = useState(robot.status);
   const [chatRestriction, setChatRestriction] = useState<string | null>(null);
   const [votingForUserId, setVotingForUserId] = useState<string | null>(null);
-  const [tabSwitchOnlyWhenEmpty, setTabSwitchOnlyWhenEmpty] = useState(true);
   const [guestSessionId] = useState<string>(() => getOrCreateGuestSessionId());
   const currentViewerId = userId ? userId : `guest:${guestSessionId}`;
   const inviteCodeFromUrl =
@@ -327,6 +98,7 @@ export default function RobotView({ robot }: Props) {
   const lastErrorToastRef = useRef<{ message: string; timestamp: number } | null>(null);
   const activeMotionKeysRef = useRef<Set<string>>(new Set());
   const livekitRefreshInFlightRef = useRef(false);
+  const livekitRefreshAttemptRef = useRef(0);
   const allowListAccessAttemptedRef = useRef(false);
   const linkOnlyAccessAttemptedRef = useRef(false);
   const previousRobotStatusRef = useRef(robot.status);
@@ -336,6 +108,8 @@ export default function RobotView({ robot }: Props) {
   const reconnectRetryAfterRef = useRef<number | null>(null);
   const wasMyTurnRef = useRef(false);
   const wasOnlineRef = useRef(robot.status === 'ONLINE' || robot.status === 'BUSY');
+  const previousQueuePositionRef = useRef<number | null>(null);
+  const activeGamepadCommandsRef = useRef<Set<string>>(new Set());
 
   // ─── Fetch controls ────────────────────────────────────────────────────────
 
@@ -548,7 +322,6 @@ export default function RobotView({ robot }: Props) {
     return () => {
       active = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken, guestSessionId, inviteCodeFromUrl, robot.accessMode, robot.id, roomAccessToken]);
 
   // ─── Fetch LiveKit token (auth required) ──────────────────────────────────
@@ -581,6 +354,7 @@ export default function RobotView({ robot }: Props) {
           const { token, livekitUrl } = await api.getViewerToken(robot.id, false);
           setLivekitCreds({ token, url: publicUrl ?? livekitUrl });
           setVideoState('ready');
+          livekitRefreshAttemptRef.current = 0;
           if (forceRemount) {
             setLivekitVersion((value) => value + 1);
           }
@@ -594,10 +368,12 @@ export default function RobotView({ robot }: Props) {
       const { token, livekitUrl } = await api.getPublicViewerToken(robot.id);
       setLivekitCreds({ token, url: publicUrl ?? livekitUrl });
       setVideoState('ready');
+      livekitRefreshAttemptRef.current = 0;
       if (forceRemount) {
         setLivekitVersion((value) => value + 1);
       }
     } catch {
+      livekitRefreshAttemptRef.current += 1;
       setLivekitCreds(null);
       setVideoState('error');
     } finally {
@@ -617,7 +393,7 @@ export default function RobotView({ robot }: Props) {
 
     const timer = window.setTimeout(() => {
       void refreshViewerToken(true);
-    }, 3000);
+    }, Math.min(3000 * Math.pow(1.5, livekitRefreshAttemptRef.current), 30_000));
 
     return () => window.clearTimeout(timer);
   }, [livekitCreds, refreshViewerToken, robotStatus]);
@@ -697,17 +473,6 @@ export default function RobotView({ robot }: Props) {
     const interval = setInterval(tick, 250);
     return () => clearInterval(interval);
   }, [reconnectNotice]);
-
-  useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem('botparty.settings.v1');
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as { keyboardTabSwitchOnlyWhenEmpty?: boolean };
-      setTabSwitchOnlyWhenEmpty(parsed.keyboardTabSwitchOnlyWhenEmpty !== false);
-    } catch {
-      setTabSwitchOnlyWhenEmpty(true);
-    }
-  }, []);
 
   // ─── WebSocket ────────────────────────────────────────────────────────────
 
@@ -1440,10 +1205,9 @@ export default function RobotView({ robot }: Props) {
   }, [accessPasswordInput, accessToken, guestSessionId, inviteCodeFromUrl, robot.id]);
 
   const moderateChatUser = useCallback(
-    async (targetUserId: string, action: 'TIMEOUT' | 'BAN' | 'UNBAN', preferredName?: string | null) => {
+    async (targetUserId: string, action: 'TIMEOUT' | 'BAN' | 'UNBAN', _preferredName?: string | null) => {
       if (!canModerate || !accessToken) return;
       setModeratingUserId(targetUserId);
-      const targetLabel = resolveUserLabel(targetUserId, preferredName);
 
       try {
         api.setToken(accessToken);
@@ -1583,6 +1347,100 @@ export default function RobotView({ robot }: Props) {
   }, [isMyTurn, releaseLocalControls]);
 
   useEffect(() => {
+    if (!isOnline || focusMode === 'chat') {
+      return;
+    }
+
+    let frame = 0;
+    const threshold = 0.45;
+
+    const syncGamepad = () => {
+      const pads = navigator.getGamepads?.() ?? [];
+      const pad = pads.find((entry) => entry?.connected);
+      const nextCommands = new Set<string>();
+
+      if (pad && isMyTurn) {
+        const x = pad.axes[0] ?? 0;
+        const y = pad.axes[1] ?? 0;
+
+        if (y <= -threshold || pad.buttons[12]?.pressed) nextCommands.add('forward');
+        if (y >= threshold || pad.buttons[13]?.pressed) nextCommands.add('backward');
+        if (x <= -threshold || pad.buttons[14]?.pressed) nextCommands.add('left');
+        if (x >= threshold || pad.buttons[15]?.pressed) nextCommands.add('right');
+      }
+
+      const previousCommands = activeGamepadCommandsRef.current;
+
+      for (const command of nextCommands) {
+        if (!previousCommands.has(command)) {
+          sendCommand(command, { cooldownMs: 0, access: 'QUEUE_TURN' });
+        }
+      }
+
+      const hadCommands = previousCommands.size > 0;
+      activeGamepadCommandsRef.current = nextCommands;
+
+      if (hadCommands && nextCommands.size === 0) {
+        sendCommand('stop', { cooldownMs: 0, access: 'QUEUE_TURN' });
+      }
+
+      frame = window.setTimeout(syncGamepad, 120);
+    };
+
+    frame = window.setTimeout(syncGamepad, 120);
+
+    return () => {
+      window.clearTimeout(frame);
+      if (activeGamepadCommandsRef.current.size > 0) {
+        activeGamepadCommandsRef.current.clear();
+        sendCommand('stop', { cooldownMs: 0, access: 'QUEUE_TURN' });
+      }
+    };
+  }, [focusMode, isMyTurn, isOnline, sendCommand]);
+
+  useEffect(() => {
+    const previousPosition = previousQueuePositionRef.current;
+    previousQueuePositionRef.current = myQueuePosition > 0 ? myQueuePosition : null;
+
+    if (
+      typeof window === 'undefined' ||
+      !('Notification' in window) ||
+      Notification.permission !== 'granted' ||
+      document.visibilityState === 'visible' ||
+      !inQueue ||
+      myQueuePosition <= 0
+    ) {
+      return;
+    }
+
+    if (
+      queuePositionNotifications &&
+      previousPosition !== null &&
+      previousPosition !== myQueuePosition &&
+      myQueuePosition > 1
+    ) {
+      new Notification(`${robot.name}: queue update`, {
+        body: `You moved to position #${myQueuePosition}.`,
+        tag: `botparty-queue-${robot.id}`,
+      });
+    }
+
+    if (queueTurnNotifications && previousPosition !== 1 && myQueuePosition === 1) {
+      new Notification(`${robot.name}: it is your turn`, {
+        body: 'Return to BotParty now. Controls are unlocked for you.',
+        tag: `botparty-turn-${robot.id}`,
+      });
+    }
+  }, [
+    inQueue,
+    myQueuePosition,
+    queuePositionNotifications,
+    queueTurnNotifications,
+    robot.id,
+    robot.name,
+  ]);
+
+  useEffect(() => {
     const wasMyTurn = wasMyTurnRef.current;
     if (wasMyTurn && !isMyTurn) {
       setWidgetQueueResetEpoch((value) => value + 1);
@@ -1602,47 +1460,15 @@ export default function RobotView({ robot }: Props) {
 
   return (
     <div className="safe-pb mx-auto max-w-7xl px-4 py-4 pb-24 sm:py-6 lg:pb-6">
-      {/* Breadcrumb */}
-      <div className="mb-4 flex flex-wrap items-center gap-2 text-sm text-[var(--muted-foreground)]">
-        <Link href="/explore" className="hover:text-[var(--foreground)] transition-colors">Explore</Link>
-        <span>/</span>
-        <span className="max-w-full truncate text-[var(--foreground)]">{robot.name}</span>
-        <div className="ml-0 flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 sm:ml-auto">
-          <span className={`h-2 w-2 rounded-full ${connected ? 'bg-[var(--online)]' : 'bg-zinc-600'}`} />
-          <span className="text-xs">
-            {viewerLabel}
-          </span>
-        </div>
-      </div>
-
-      {reconnectNotice && !connected && (
-        <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-          <p className="font-medium">
-            {reconnectNotice.reason === 'maintenance'
-              ? 'Maintenance window'
-              : reconnectNotice.reason === 'update' || reconnectNotice.reason === 'deploy'
-                ? 'Update in progress'
-                : 'Realtime restart'}
-          </p>
-          <p className="mt-1 text-amber-100/85">
-            {reconnectNotice.message}
-            {reconnectSeconds !== null ? ` Trying again in about ${reconnectSeconds}s.` : ''}
-          </p>
-        </div>
-      )}
-
-      <div className="mb-5 grid grid-cols-2 gap-3 lg:hidden">
-        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 py-3">
-          <p className="text-[10px] uppercase tracking-[0.18em] text-[var(--muted-foreground)]">Status</p>
-          <p className="mt-2 text-sm font-semibold text-[var(--foreground)]">
-            {robotStatus.charAt(0) + robotStatus.slice(1).toLowerCase()}
-          </p>
-        </div>
-        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 py-3">
-          <p className="text-[10px] uppercase tracking-[0.18em] text-[var(--muted-foreground)]">Queue</p>
-          <p className="mt-2 text-sm font-semibold text-[var(--foreground)]">{queueSummary}</p>
-        </div>
-      </div>
+      <RobotPageHeader
+        robotName={robot.name}
+        connected={connected}
+        viewerLabel={viewerLabel}
+        reconnectNotice={reconnectNotice}
+        reconnectSeconds={reconnectSeconds}
+        robotStatus={robotStatus}
+        queueSummary={queueSummary}
+      />
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         {/* ─── Left column: video + controls ─── */}
@@ -1684,6 +1510,7 @@ export default function RobotView({ robot }: Props) {
                       onChange={(event) => setAccessPasswordInput(event.target.value)}
                       className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-3 text-sm text-[var(--foreground)]"
                       placeholder="Room password"
+                      aria-label="Room password"
                     />
                     <button
                       type="button"
@@ -1766,7 +1593,9 @@ export default function RobotView({ robot }: Props) {
           {/* Focus toggles */}
           <div className="flex flex-wrap items-center gap-2">
             <button
+              type="button"
               onClick={activateControlsPanel}
+              aria-label="Focus controls panel"
               className={`rounded-lg px-3 py-2 text-xs font-semibold transition-all ${
                 focusMode === 'controls'
                   ? 'bg-[var(--primary)] text-white'
@@ -1779,7 +1608,9 @@ export default function RobotView({ robot }: Props) {
               </span>
             </button>
             <button
+              type="button"
               onClick={activateChatPanel}
+              aria-label="Focus chat panel"
               className={`rounded-lg px-3 py-2 text-xs font-semibold transition-all ${
                 focusMode === 'chat'
                   ? 'bg-[var(--primary)] text-white'
@@ -1895,8 +1726,10 @@ export default function RobotView({ robot }: Props) {
                 {extraButtonControls.map((btn) => (
                   <button
                     key={btn.id}
+                    type="button"
                     onPointerDown={() => sendCommand(btn.command, { cooldownMs: btn.cooldownMs, access: btn.access })}
                     disabled={!canUseButton(btn)}
+                    aria-label={`Send ${btn.label} command`}
                     style={btn.color ? { borderColor: btn.color, color: btn.color } : undefined}
                     className={`flex min-h-12 min-w-[3.25rem] items-center justify-center gap-1 rounded-lg border px-3 py-2 text-sm font-bold transition select-none lg:min-h-11 lg:min-w-[2.75rem] ${
                       isCrowdActive(btn.command)
@@ -1958,7 +1791,9 @@ export default function RobotView({ robot }: Props) {
               {/* E-STOP */}
               {canUseEStop && (
                 <button
+                  type="button"
                   onPointerDown={triggerEStop}
+                  aria-label="Emergency stop"
                   className="flex h-14 w-full max-w-[12rem] flex-col items-center justify-center rounded-xl bg-[var(--destructive)] text-xs font-black text-white shadow-lg shadow-red-500/20 transition hover:brightness-110 active:scale-95 select-none sm:w-28 lg:max-w-[10rem] lg:rounded-xl lg:shadow-lg"
                 >
                     <AlertTriangle className="h-4 w-4" />
@@ -1969,6 +1804,7 @@ export default function RobotView({ robot }: Props) {
 
             <p className="mt-3 text-center text-xs text-[var(--muted-foreground)]">
               WASD or arrow keys &middot; <span className="text-amber-400">amber</span> = another player just pressed
+              {' '}· gamepad left stick / D-pad supported
               {canUseEStop ? ' · ESC = emergency stop' : ''}
             </p>
             {queueEnabled && !isMyTurn && (
@@ -2061,29 +1897,7 @@ export default function RobotView({ robot }: Props) {
           </div>
 
           {/* Viewers */}
-          {viewers.length > 0 && (
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
-                Watching ({viewers.length})
-              </p>
-              <div className="flex flex-wrap gap-1">
-                {viewers.slice(0, 15).map((v) => (
-                  <span
-                    key={v.userId}
-                    className="rounded-full bg-[var(--muted)] px-2 py-0.5 text-xs text-[var(--muted-foreground)]"
-                    title={v.username}
-                  >
-                    {v.username.slice(0, 14)}
-                  </span>
-                ))}
-                {viewers.length > 15 && (
-                  <span className="rounded-full bg-[var(--muted)] px-2 py-0.5 text-xs text-[var(--muted-foreground)]">
-                    +{viewers.length - 15}
-                  </span>
-                )}
-              </div>
-            </div>
-          )}
+          <RobotViewersList viewers={viewers} />
 
           {isAdmin && (
             <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
@@ -2140,201 +1954,38 @@ export default function RobotView({ robot }: Props) {
           )}
 
           {/* Queue */}
-          {queueEnabled && (
-          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
-              Control queue
-            </p>
-
-            {accessToken ? (
-              <button
-                onClick={toggleQueue}
-                className={`w-full rounded-lg py-2 text-sm font-semibold transition ${
-                  inQueue
-                    ? 'border border-[var(--border)] text-[var(--muted-foreground)] hover:border-red-500 hover:text-red-400'
-                    : 'bg-[var(--primary)] text-white hover:bg-[var(--primary-hover)]'
-                }`}
-              >
-                {inQueue ? 'Leave queue' : 'Join queue'}
-              </button>
-            ) : (
-              <Link
-                href="/login"
-                className="block w-full rounded-lg border border-[var(--border)] py-2 text-center text-sm text-[var(--muted-foreground)] transition hover:text-[var(--foreground)]"
-              >
-                Sign in to join queue
-              </Link>
-            )}
-
-            {queue.length > 0 && (
-              <div className="mt-3 space-y-2">
-                {queue.slice(0, 5).map((entry, i) => (
-                  <div key={entry.userId} className="flex flex-wrap items-center gap-2 text-sm">
-                    <span
-                      className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold ${
-                        i === 0 ? 'bg-[var(--primary)] text-white' : 'bg-[var(--muted)] text-[var(--muted-foreground)]'
-                      }`}
-                    >
-                      {i + 1}
-                    </span>
-                    <span className={`min-w-0 flex-1 truncate ${i === 0 ? 'font-medium' : 'text-[var(--muted-foreground)]'}`}>
-                      {entry.username}
-                    </span>
-                    {robot.queueMode === 'VOTING' && (
-                      <span className="rounded-full border border-[var(--border)] px-1.5 py-0.5 text-[10px] text-[var(--muted-foreground)]">
-                        {entry.votes ?? 0} votes
-                      </span>
-                    )}
-                    {i === 0 && (
-                      <span className="ml-auto text-xs text-[var(--online)]">Controlling</span>
-                    )}
-                    {userId && entry.userId === userId && i > 0 && (
-                      <span className="ml-auto text-xs text-amber-300">You</span>
-                    )}
-                    {robot.queueMode === 'VOTING' && accessToken && userId && entry.userId !== userId && i > 0 && (
-                      <button
-                        type="button"
-                        disabled={votingForUserId === entry.userId}
-                        onClick={() => void voteForQueueUser(entry.userId)}
-                        className="ml-auto rounded border border-[var(--border)] px-2 py-0.5 text-[10px] text-[var(--muted-foreground)] hover:text-[var(--foreground)] disabled:opacity-60"
-                      >
-                        {votingForUserId === entry.userId ? 'Voting...' : 'Vote'}
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-          )}
+          <RobotQueuePanel
+            queue={queue}
+            queueEnabled={queueEnabled}
+            accessToken={accessToken}
+            userId={userId}
+            inQueue={inQueue}
+            activeSession={activeSession}
+            votingForUserId={votingForUserId}
+            robot={robot}
+            onToggleQueue={() => void toggleQueue()}
+            onVoteForUser={(uid) => void voteForQueueUser(uid)}
+          />
 
           {/* Chat */}
-          <div
-            ref={chatPanelRef}
-            className={`rounded-xl border p-4 transition-colors ${
-              focusMode === 'chat' ? 'border-[var(--primary)]/50 bg-[var(--card)]' : 'border-[var(--border)] bg-[var(--card)]'
-            }`}
-          >
-            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
-              Chat
-            </p>
-
-            <div
-              ref={chatScrollRef}
-              onScroll={(event) => {
-                const container = event.currentTarget;
-                const distanceFromBottom =
-                  container.scrollHeight - container.scrollTop - container.clientHeight;
-                chatShouldStickRef.current = distanceFromBottom < 80;
-              }}
-                className="mb-2 h-64 overflow-y-auto rounded-lg bg-[var(--background)] px-2 py-1.5 text-sm sm:h-52 lg:h-44"
-            >
-              <div className="flex min-h-full flex-col justify-end gap-1.5">
-                {messages.map((msg, i) => (
-                  <div
-                    key={i}
-                    className={`animate-fade-in rounded-md border px-2.5 py-1.5 ${
-                      msg.isSystem
-                        ? 'border-[var(--border)] bg-[var(--muted)]/30'
-                        : msg.userId === currentViewerId
-                          ? 'border-violet-500/25 bg-violet-500/7'
-                          : 'border-[var(--border)] bg-[var(--card)]/70'
-                    }`}
-                  >
-                  {msg.isSystem ? (
-                    <div className="space-y-0.5">
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--muted-foreground)]">
-                          System
-                        </span>
-                        <span className="text-[10px] text-[var(--muted-foreground)]">
-                          {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                      </div>
-                      <p className="text-xs italic text-[var(--muted-foreground)]">{msg.content}</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-1">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="text-xs font-semibold text-violet-400">{msg.username}</span>
-                        <span className="text-[10px] text-[var(--muted-foreground)]">
-                          {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                      </div>
-                      <p className="whitespace-pre-wrap break-words text-xs text-[var(--foreground)]/90">{msg.content}</p>
-                      {canModerate &&
-                        msg.userId !== 'system' &&
-                        msg.userId !== currentViewerId && (
-                          <div className="inline-flex flex-wrap items-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() => void moderateChatUser(msg.userId, 'TIMEOUT', msg.username)}
-                              disabled={moderatingUserId === msg.userId}
-                              className="rounded border border-amber-500/40 px-1.5 py-0.5 text-[10px] text-amber-300 transition-all hover:border-amber-500/80 hover:bg-amber-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                              Timeout
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void moderateChatUser(msg.userId, 'BAN', msg.username)}
-                              disabled={moderatingUserId === msg.userId}
-                              className="rounded border border-red-500/40 px-1.5 py-0.5 text-[10px] text-red-300 transition-all hover:border-red-500/80 hover:bg-red-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                              Ban
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void moderateChatUser(msg.userId, 'UNBAN', msg.username)}
-                              disabled={moderatingUserId === msg.userId}
-                              className="rounded border border-emerald-500/40 px-1.5 py-0.5 text-[10px] text-emerald-300 transition-all hover:border-emerald-500/80 hover:bg-emerald-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                              Unban
-                            </button>
-                          </div>
-                        )}
-                    </div>
-                  )}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex gap-2">
-              <input
-                ref={chatInputRef}
-                type="text"
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') { e.preventDefault(); sendChat(); }
-                  if (e.key === 'Tab') {
-                    if (!tabSwitchOnlyWhenEmpty || chatInput.trim().length === 0) {
-                      e.preventDefault();
-                      setFocusMode('controls');
-                    }
-                  }
-                }}
-                placeholder={focusMode === 'chat' ? 'Say something...' : 'Tab to chat...'}
-                maxLength={300}
-                className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm outline-none transition-colors focus:border-[var(--primary)]"
-              />
-              <button
-                onClick={sendChat}
-                disabled={!chatInput.trim()}
-                className="rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-medium text-white transition-all hover:bg-[var(--primary-hover)] active:scale-95 disabled:opacity-50"
-              >
-                Send
-              </button>
-            </div>
-            <p className="mt-1 text-right text-[10px] text-[var(--muted-foreground)]">
-              {chatInput.length}/300
-            </p>
-            {chatRestriction && (
-              <p className="mt-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-300">
-                {chatRestriction}
-              </p>
-            )}
-          </div>
+          <RobotChatPanel
+            messages={messages}
+            chatInput={chatInput}
+            setChatInput={setChatInput}
+            chatRestriction={chatRestriction}
+            focusMode={focusMode}
+            setFocusMode={setFocusMode}
+            currentViewerId={currentViewerId}
+            canModerate={canModerate}
+            moderatingUserId={moderatingUserId}
+            tabSwitchOnlyWhenEmpty={tabSwitchOnlyWhenEmpty}
+            chatScrollRef={chatScrollRef}
+            chatPanelRef={chatPanelRef}
+            chatInputRef={chatInputRef}
+            chatShouldStickRef={chatShouldStickRef}
+            onSend={sendChat}
+            onModerate={(uid, action, uname) => void moderateChatUser(uid, action, uname)}
+          />
         </div>
 
       </div>
@@ -2343,6 +1994,7 @@ export default function RobotView({ robot }: Props) {
         <button
           type="button"
           onClick={activateControlsPanel}
+          aria-label="Show controls"
           className={`flex-1 rounded-xl px-3 py-2 text-xs font-semibold transition ${
             focusMode === 'controls' ? 'bg-[var(--primary)] text-white' : 'bg-[var(--card)] text-[var(--foreground)]'
           }`}
@@ -2352,6 +2004,7 @@ export default function RobotView({ robot }: Props) {
         <button
           type="button"
           onClick={activateChatPanel}
+          aria-label="Show chat"
           className={`flex-1 rounded-xl px-3 py-2 text-xs font-semibold transition ${
             focusMode === 'chat' ? 'bg-[var(--primary)] text-white' : 'bg-[var(--card)] text-[var(--foreground)]'
           }`}
@@ -2382,6 +2035,7 @@ export default function RobotView({ robot }: Props) {
           <button
             type="button"
             onPointerDown={triggerEStop}
+            aria-label="Emergency stop"
             className="rounded-xl bg-[var(--destructive)] px-3 py-2 text-xs font-black text-white"
           >
             STOP
@@ -2390,351 +2044,4 @@ export default function RobotView({ robot }: Props) {
       </div>
     </div>
   );
-}
-
-// ─── Advanced controls ───────────────────────────────────────────────────────
-
-function SliderControl({
-  label,
-  command,
-  config,
-  color,
-  cooldownMs,
-  access,
-  isCrowd,
-  disabled,
-  queueResetEpoch,
-  offlineResetEpoch,
-  onSendValue,
-}: {
-  label: string;
-  command: string;
-  config: SliderWidgetConfig;
-  color: string | null;
-  cooldownMs: number;
-  access: ControlButton['access'];
-  isCrowd: boolean;
-  disabled: boolean;
-  queueResetEpoch: number;
-  offlineResetEpoch: number;
-  onSendValue: (value: number) => void;
-}) {
-  const [value, setValue] = useState<number>(config.start);
-  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    setValue(config.start);
-  }, [config.start, config.min, config.max, command]);
-
-  useEffect(() => {
-    if (!config.resetOnQueueLoss || queueResetEpoch === 0) {
-      return;
-    }
-    setValue(config.start);
-    onSendValue(config.start);
-  }, [config.resetOnQueueLoss, config.start, onSendValue, queueResetEpoch]);
-
-  useEffect(() => {
-    if (!config.resetOnOffline || offlineResetEpoch === 0) {
-      return;
-    }
-    setValue(config.start);
-    onSendValue(config.start);
-  }, [config.resetOnOffline, config.start, onSendValue, offlineResetEpoch]);
-
-  useEffect(() => {
-    if (resetTimerRef.current) {
-      clearTimeout(resetTimerRef.current);
-      resetTimerRef.current = null;
-    }
-
-    if (config.resetAfterMs === null || value === config.start) {
-      return;
-    }
-
-    resetTimerRef.current = setTimeout(() => {
-      setValue(config.start);
-      onSendValue(config.start);
-      resetTimerRef.current = null;
-    }, config.resetAfterMs);
-
-    return () => {
-      if (resetTimerRef.current) {
-        clearTimeout(resetTimerRef.current);
-        resetTimerRef.current = null;
-      }
-    };
-  }, [config.resetAfterMs, config.start, onSendValue, value]);
-
-  const emit = useCallback(
-    (nextValue: number) => {
-      onSendValue(nextValue);
-    },
-    [onSendValue],
-  );
-
-  return (
-    <div
-      className={`min-w-[14rem] rounded-lg border px-3 py-2 ${
-        isCrowd ? 'border-amber-500 bg-amber-500/10' : 'border-[var(--border)] bg-[var(--muted)]'
-      }`}
-      style={color ? { borderColor: color } : undefined}
-    >
-      <div className="mb-1 flex items-center justify-between gap-2">
-        <p className="text-xs font-semibold text-[var(--foreground)]">{label}</p>
-        <span className="text-[10px] text-[var(--muted-foreground)]">{value.toFixed(0)}</span>
-      </div>
-      <input
-        type="range"
-        min={config.min}
-        max={config.max}
-        step={config.step}
-        disabled={disabled}
-        value={value}
-        onChange={(event) => {
-          const next = Number(event.target.value);
-          setValue(next);
-          emit(next);
-        }}
-        onPointerUp={() => {
-          if (config.returnMode !== 'center') {
-            return;
-          }
-          setValue(config.start);
-          emit(config.start);
-        }}
-        className={`accent-[var(--primary)] ${config.direction === 'vertical' ? 'h-28 w-6 [writing-mode:vertical-lr] [-webkit-appearance:slider-vertical]' : 'w-full'}`}
-      />
-      <div className="mt-1 flex items-center justify-between text-[10px] text-[var(--muted-foreground)]">
-        <span>{config.min}</span>
-        <span className="opacity-80">
-          {command} · {access} · {cooldownMs}ms{config.resetAfterMs ? ` · reset ${config.resetAfterMs}ms` : ''}
-        </span>
-        <span>{config.max}</span>
-      </div>
-    </div>
-  );
-}
-
-function XYPadControl({
-  label,
-  command,
-  config,
-  color,
-  cooldownMs,
-  access,
-  isCrowd,
-  disabled,
-  queueResetEpoch,
-  offlineResetEpoch,
-  onSendValue,
-}: {
-  label: string;
-  command: string;
-  config: XYWidgetConfig;
-  color: string | null;
-  cooldownMs: number;
-  access: ControlButton['access'];
-  isCrowd: boolean;
-  disabled: boolean;
-  queueResetEpoch: number;
-  offlineResetEpoch: number;
-  onSendValue: (value: { x: number; y: number }) => void;
-}) {
-  const padRef = useRef<HTMLDivElement>(null);
-  const [point, setPoint] = useState<{ x: number; y: number }>({ x: config.xStart, y: config.yStart });
-  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    setPoint({ x: config.xStart, y: config.yStart });
-  }, [config.xStart, config.yStart, config.xMin, config.xMax, config.yMin, config.yMax, command]);
-
-  useEffect(() => {
-    if (!config.resetOnQueueLoss || queueResetEpoch === 0) {
-      return;
-    }
-    const nextPoint = { x: config.xStart, y: config.yStart };
-    setPoint(nextPoint);
-    onSendValue(nextPoint);
-  }, [config.resetOnQueueLoss, config.xStart, config.yStart, onSendValue, queueResetEpoch]);
-
-  useEffect(() => {
-    if (!config.resetOnOffline || offlineResetEpoch === 0) {
-      return;
-    }
-    const nextPoint = { x: config.xStart, y: config.yStart };
-    setPoint(nextPoint);
-    onSendValue(nextPoint);
-  }, [config.resetOnOffline, config.xStart, config.yStart, onSendValue, offlineResetEpoch]);
-
-  useEffect(() => {
-    if (resetTimerRef.current) {
-      clearTimeout(resetTimerRef.current);
-      resetTimerRef.current = null;
-    }
-
-    const isAtStart = point.x === config.xStart && point.y === config.yStart;
-    if (config.resetAfterMs === null || isAtStart) {
-      return;
-    }
-
-    resetTimerRef.current = setTimeout(() => {
-      const nextPoint = { x: config.xStart, y: config.yStart };
-      setPoint(nextPoint);
-      onSendValue(nextPoint);
-      resetTimerRef.current = null;
-    }, config.resetAfterMs);
-
-    return () => {
-      if (resetTimerRef.current) {
-        clearTimeout(resetTimerRef.current);
-        resetTimerRef.current = null;
-      }
-    };
-  }, [config.resetAfterMs, config.xStart, config.yStart, onSendValue, point.x, point.y]);
-
-  const toPercent = (value: number, min: number, max: number) => ((value - min) / (max - min)) * 100;
-
-  const sendPoint = useCallback(
-    (nextPoint: { x: number; y: number }) => {
-      onSendValue(nextPoint);
-    },
-    [onSendValue],
-  );
-
-  const updateFromPointer = useCallback(
-    (clientX: number, clientY: number) => {
-      const rect = padRef.current?.getBoundingClientRect();
-      if (!rect) {
-        return;
-      }
-
-      const nx = clamp((clientX - rect.left) / rect.width, 0, 1);
-      const ny = clamp((clientY - rect.top) / rect.height, 0, 1);
-
-      const x = config.xMin + nx * (config.xMax - config.xMin);
-      const y = config.yMax - ny * (config.yMax - config.yMin);
-      const nextPoint = {
-        x: Math.round(x * 100) / 100,
-        y: Math.round(y * 100) / 100,
-      };
-
-      setPoint(nextPoint);
-      sendPoint(nextPoint);
-    },
-    [config.xMax, config.xMin, config.yMax, config.yMin, sendPoint],
-  );
-
-  const resetToStart = useCallback(() => {
-    if (config.returnMode !== 'center') {
-      return;
-    }
-    const nextPoint = { x: config.xStart, y: config.yStart };
-    setPoint(nextPoint);
-    sendPoint(nextPoint);
-  }, [config.returnMode, config.xStart, config.yStart, sendPoint]);
-
-  const cx = toPercent(point.x, config.xMin, config.xMax);
-  const cy = 100 - toPercent(point.y, config.yMin, config.yMax);
-
-  return (
-    <div
-      className={`rounded-lg border px-3 py-2 ${
-        isCrowd ? 'border-amber-500 bg-amber-500/10' : 'border-[var(--border)] bg-[var(--muted)]'
-      }`}
-      style={color ? { borderColor: color } : undefined}
-    >
-      <div className="mb-1 flex items-center justify-between gap-2">
-        <p className="text-xs font-semibold text-[var(--foreground)]">{label}</p>
-        <span className="text-[10px] text-[var(--muted-foreground)]">
-          x {point.x.toFixed(0)} · y {point.y.toFixed(0)}
-        </span>
-      </div>
-      <div
-        ref={padRef}
-        className="relative h-32 w-32 touch-none rounded border border-[var(--border)] bg-[var(--background)]"
-        onPointerDown={(event) => {
-          if (disabled) {
-            return;
-          }
-          (event.currentTarget as HTMLDivElement).setPointerCapture(event.pointerId);
-          updateFromPointer(event.clientX, event.clientY);
-        }}
-        onPointerMove={(event) => {
-          if (disabled) {
-            return;
-          }
-          if ((event.buttons & 1) === 0) {
-            return;
-          }
-          updateFromPointer(event.clientX, event.clientY);
-        }}
-        onPointerUp={resetToStart}
-        onPointerCancel={resetToStart}
-      >
-        <div className="absolute left-1/2 top-1/2 h-px w-full -translate-x-1/2 bg-[var(--border)]" />
-        <div className="absolute left-1/2 top-1/2 h-full w-px -translate-y-1/2 bg-[var(--border)]" />
-        <div
-          className="absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--primary)]"
-          style={{ left: `${cx}%`, top: `${cy}%` }}
-        />
-      </div>
-      <div className="mt-1 text-[10px] text-[var(--muted-foreground)]">
-        {command} · {access} · {cooldownMs}ms{config.resetAfterMs ? ` · reset ${config.resetAfterMs}ms` : ''}
-      </div>
-    </div>
-  );
-}
-
-// ─── ControlKey helper ────────────────────────────────────────────────────────
-
-function ControlKey({
-  label,
-  hotKey,
-  command,
-  isDown,
-  isCrowd,
-  disabled,
-  onPress,
-  onRelease,
-}: {
-  label: string;
-  hotKey: string;
-  command: string;
-  isDown: boolean;
-  isCrowd: boolean;
-  disabled?: boolean;
-  onPress: () => void;
-  onRelease?: () => void;
-}) {
-  const isMotionKey = ['forward', 'backward', 'left', 'right'].includes(command);
-
-  return (
-    <button
-      onPointerDown={disabled ? undefined : onPress}
-      onPointerUp={disabled || !isMotionKey ? undefined : onRelease}
-      onPointerCancel={disabled || !isMotionKey ? undefined : onRelease}
-      onPointerLeave={disabled || !isMotionKey ? undefined : onRelease}
-      title={hotKey.toUpperCase()}
-      disabled={disabled}
-      className={`flex h-16 w-16 touch-none items-center justify-center rounded-2xl border text-base font-bold transition select-none sm:h-14 sm:w-14 sm:rounded-xl sm:text-sm lg:h-11 lg:w-11 lg:rounded-lg lg:text-sm ${
-        disabled
-          ? 'cursor-not-allowed border-[var(--border)] bg-[var(--background)] text-[var(--muted-foreground)] opacity-50'
-          : isDown
-          ? 'border-[var(--primary)] bg-[var(--primary)] text-white scale-95'
-          : isCrowd
-          ? 'border-amber-500 bg-amber-500/20 text-amber-300'
-          : 'border-[var(--border)] bg-[var(--muted)] hover:bg-[var(--primary)] hover:border-[var(--primary)] hover:text-white'
-      }`}
-    >
-      {label}
-    </button>
-  );
-}
-
-function formatCountdown(valueMs: number) {
-  const totalSeconds = Math.max(0, Math.ceil(valueMs / 1000));
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }

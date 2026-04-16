@@ -33,6 +33,73 @@ export class UsersService {
     return user;
   }
 
+  async exportOwnData(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        displayName: true,
+        avatarUrl: true,
+        role: true,
+        balance: true,
+        credits: true,
+        createdAt: true,
+        emailVerified: true,
+        robots: {
+          orderBy: { createdAt: 'desc' },
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            description: true,
+            visibility: true,
+            accessMode: true,
+            queueMode: true,
+            status: true,
+            tags: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        },
+        sessions: {
+          orderBy: { startedAt: 'desc' },
+          take: 100,
+          select: {
+            id: true,
+            robotId: true,
+            startedAt: true,
+            endedAt: true,
+            durationMs: true,
+            status: true,
+            createdAt: true,
+          },
+        },
+        queueEntries: {
+          orderBy: { joinedAt: 'desc' },
+          take: 100,
+          select: {
+            id: true,
+            robotId: true,
+            position: true,
+            votes: true,
+            joinedAt: true,
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    return {
+      exportedAt: new Date().toISOString(),
+      profile: user,
+    };
+  }
+
   async findByUsername(username: string) {
     const user = await this.prisma.user.findUnique({
       where: { username },
@@ -314,8 +381,23 @@ export class UsersService {
     });
   }
 
-  private async ensureAnotherActiveAdminExists(tx: Prisma.TransactionClient, excludedUserId: string) {
-    const otherAdminCount = await tx.user.count({
+  async deleteOwnAccount(userId: string) {
+    await this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.findUnique({
+        where: { id: userId },
+        select: { id: true, role: true, isActive: true },
+      });
+      if (!user || !user.isActive) {
+        return;
+      }
+      if (user.role === 'ADMIN') {
+        await this.ensureAnotherActiveAdminExists(tx, userId);
+      }
+      await tx.user.delete({ where: { id: userId } });
+    });
+  }
+
+  private async ensureAnotherActiveAdminExists(tx: Prisma.TransactionClient, excludedUserId: string) {    const otherAdminCount = await tx.user.count({
       where: {
         role: 'ADMIN',
         isActive: true,

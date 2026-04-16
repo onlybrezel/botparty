@@ -15,6 +15,7 @@ import { HealthModule } from './health/health.module';
 import { ControlsModule } from './controls/controls.module';
 import { ModerationModule } from './moderation/moderation.module';
 import { MailModule } from './mail/mail.module';
+import { MaintenanceModule } from './maintenance/maintenance.module';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { MailModule } from './mail/mail.module';
     HealthModule,
     ControlsModule,
     ModerationModule,
+    MaintenanceModule,
   ],
   providers: [
     {

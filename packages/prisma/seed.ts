@@ -124,7 +124,8 @@ async function main() {
   });
   console.log(`  ✅ Admin user: ${admin.username} (${admin.email})`);
   if (!isProduction) {
-    console.log(`     Password: ${adminPasswordPlain}`);
+    // Show dev-only credentials in stdout (not in logs). Never run seed in production.
+    process.stdout.write(`     Password: ${adminPasswordPlain}\n`);
   }
 
   let user:
@@ -148,7 +149,7 @@ async function main() {
     });
     console.log(`  ✅ User: ${user.username}`);
     if (!isProduction) {
-      console.log(`     Password: ${demoUserPasswordPlain}`);
+      process.stdout.write(`     Password: ${demoUserPasswordPlain}\n`);
     }
   } else {
     console.log('  ℹ️  Demo user skipped (SEED_DEMO_USER_PASSWORD not set).');

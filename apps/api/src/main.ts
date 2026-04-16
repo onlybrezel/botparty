@@ -7,9 +7,22 @@ import { Logger, ValidationPipe } from '@nestjs/common';
 import helmet, { type FastifyHelmetOptions } from '@fastify/helmet';
 import type { FastifyPluginAsync } from 'fastify';
 import { AppModule } from './app.module';
+import { loadFileBackedEnv } from './common/env-file';
+import { AllExceptionsFilter } from './filters/all-exceptions.filter';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
+  loadFileBackedEnv(process.env, logger);
+
+  // ─── Security sanity checks ───────────────────────
+  const insecureJwtDefaults = ['CHANGE_ME_IN_PRODUCTION_min_32_chars_long!!', 'CHANGE_ME_REFRESH_SECRET_min_32_chars!!'];
+  if (insecureJwtDefaults.includes(process.env.JWT_SECRET ?? '') || insecureJwtDefaults.includes(process.env.JWT_REFRESH_SECRET ?? '')) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('JWT_SECRET / JWT_REFRESH_SECRET must be changed from example defaults before running in production');
+    } else {
+      logger.warn('⚠️  JWT secrets are using example defaults — change them before deploying to production');
+    }
+  }
 
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
@@ -22,7 +35,9 @@ async function bootstrap() {
             ? { target: 'pino-pretty', options: { colorize: true } }
             : undefined,
       },
-      trustProxy: true,
+      // Trust proxy headers from private-network addresses only (loopback,
+      // Docker bridge, RFC-1918).  Override via TRUST_PROXY env var if needed.
+      trustProxy: process.env.TRUST_PROXY ?? 'loopback, linklocal, uniquelocal',
     }),
   );
 
@@ -38,24 +53,40 @@ async function bootstrap() {
 
     await registerHelmet(instance, {
       global: true,
-      contentSecurityPolicy: false,
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          imgSrc: ["'self'", 'data:', 'blob:'],
+          connectSrc: ["'self'"],
+          mediaSrc: ["'self'", 'blob:'],
+          fontSrc: ["'self'"],
+          objectSrc: ["'none'"],
+          frameAncestors: ["'none'"],
+          upgradeInsecureRequests: [],
+        },
+      },
     } satisfies FastifyHelmetOptions);
   }) as unknown as Parameters<typeof app.register>[0];
 
   await app.register(helmetRegistration);
 
+  // ─── Global exception filter ─────────────────────
+  app.useGlobalFilters(new AllExceptionsFilter());
+
   // ─── Global validation ────────────────────────────
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,      // strip unknown fields
-      forbidNonWhitelisted: false,
+      forbidNonWhitelisted: true,
       transform: true,      // auto-cast primitives (e.g. string -> number)
     }),
   );
 
   // ─── CORS (strict) ────────────────────────────────
   app.enableCors({
-    origin: process.env.CORS_ORIGIN?.split(',') ?? ['http://localhost:3000'],
+    origin: process.env.CORS_ORIGIN?.split(',').map((o) => o.trim()).filter(Boolean) ?? ['http://localhost:3000'],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token'],
@@ -65,7 +96,8 @@ async function bootstrap() {
   app.setGlobalPrefix('api/v1');
 
   // ─── Swagger / OpenAPI ─────────────────────────────
-  if (process.env.NODE_ENV !== 'production') {
+  const enableSwagger = process.env.NODE_ENV !== 'production' || process.env.SWAGGER_DOCS === 'true';
+  if (enableSwagger) {
     const config = new DocumentBuilder()
       .setTitle('BotParty API')
       .setDescription('Real-time robot teleoperation platform API')

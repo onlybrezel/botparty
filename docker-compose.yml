@@ -25,6 +25,8 @@ services:
       POSTGRES_USER: botparty
       POSTGRES_PASSWORD: ${DB_PASSWORD:-botparty_secret}
     ports:
+      # Exposed on 5433 (not 5432) to avoid clashing with a local Postgres install.
+      # The API container connects on the default 5432 via the internal Docker network.
       - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -60,7 +62,7 @@ services:
   # LiveKit Server (SFU)
   # ═══════════════════════════════════════════════════
   livekit:
-    image: livekit/livekit-server:latest
+    image: livekit/livekit-server:v1.8
     container_name: botparty-livekit
     restart: unless-stopped
     command: --config /etc/livekit.yaml
@@ -86,7 +88,7 @@ services:
       retries: 5
 
   livekit-ingress:
-    image: livekit/ingress:latest
+    image: livekit/ingress:v1.4
     container_name: botparty-livekit-ingress
     restart: unless-stopped
     ports:
@@ -123,7 +125,7 @@ services:
       retries: 5
 
   livekit-egress:
-    image: livekit/egress:latest
+    image: livekit/egress:v1.8
     container_name: botparty-livekit-egress
     restart: unless-stopped
     environment:
@@ -156,6 +158,8 @@ services:
     image: gcr.io/cadvisor/cadvisor:v0.49.2
     container_name: botparty-cadvisor
     restart: unless-stopped
+    # privileged: required by cAdvisor to read hardware and container metrics from /sys and /dev.
+    # All volume mounts below are read-only — the elevated privilege is limited to kernel metric access.
     privileged: true
     command:
       - --docker_only=true
@@ -181,6 +185,7 @@ services:
     build:
       context: .
       dockerfile: docker/api/Dockerfile
+    image: botparty-api:${APP_VERSION:-latest}
     container_name: botparty-api
     restart: unless-stopped
     expose:
@@ -189,11 +194,15 @@ services:
       NODE_ENV: production
       PORT: 4000
       DATABASE_URL: postgresql://botparty:${DB_PASSWORD:-botparty_secret}@postgres:5432/botparty?schema=public
+      DATABASE_URL_FILE: ${DATABASE_URL_FILE:-/run/secrets/api_database_url}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD:-botparty_redis_secret}
+      REDIS_PASSWORD_FILE: ${REDIS_PASSWORD_FILE:-/run/secrets/redis_password}
       JWT_SECRET: ${JWT_SECRET:-change_me_in_production_min_32_chars_long!!}
+      JWT_SECRET_FILE: ${JWT_SECRET_FILE:-/run/secrets/jwt_secret}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change_me_refresh_secret_min_32_chars!!}
+      JWT_REFRESH_SECRET_FILE: ${JWT_REFRESH_SECRET_FILE:-/run/secrets/jwt_refresh_secret}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
       JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-7d}
       PASSWORD_RESET_TTL_SEC: ${PASSWORD_RESET_TTL_SEC:-3600}
@@ -203,9 +212,11 @@ services:
       SMTP_SECURE: ${SMTP_SECURE:-false}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_PASSWORD_FILE: ${SMTP_PASSWORD_FILE:-/run/secrets/smtp_password}
       SMTP_FROM: ${SMTP_FROM:-BotParty <no-reply@botparty.live>}
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-secret_that_is_at_least_32_characters_long}
+      LIVEKIT_API_SECRET_FILE: ${LIVEKIT_API_SECRET_FILE:-/run/secrets/livekit_api_secret}
       LIVEKIT_URL: ${LIVEKIT_URL:-ws://livekit:7880}
       LIVEKIT_PUBLIC_URL: ${LIVEKIT_PUBLIC_URL:-wss://botparty.live/rtc}
       LIVEKIT_RECORDING_FILEPATH_TEMPLATE: ${LIVEKIT_RECORDING_FILEPATH_TEMPLATE:-/out/{room_name}-{time}.mp4}
@@ -217,7 +228,9 @@ services:
       FASTIFY_BODY_LIMIT: ${FASTIFY_BODY_LIMIT:-5242880}
       THUMBNAIL_STORAGE_DIR: ${THUMBNAIL_STORAGE_DIR:-/app/data/robot-thumbnails}
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
+      SEED_ADMIN_PASSWORD_FILE: ${SEED_ADMIN_PASSWORD_FILE:-/run/secrets/seed_admin_password}
       SEED_DEMO_USER_PASSWORD: ${SEED_DEMO_USER_PASSWORD:-}
+      SEED_DEMO_USER_PASSWORD_FILE: ${SEED_DEMO_USER_PASSWORD_FILE:-/run/secrets/seed_demo_user_password}
     depends_on:
       postgres:
         condition: service_healthy
@@ -233,8 +246,9 @@ services:
       - internal
       - frontend
     volumes:
-      - ./data/livekit-recordings:/recordings:ro
+      - ./data/livekit-recordings:/recordings
       - ./data/robot-thumbnails:/app/data/robot-thumbnails
+      - ./docker/secrets:/run/secrets:ro
     healthcheck:
       test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:4000/api/v1/health/live 2>/dev/null && echo ok || exit 1"]
       interval: 3s
@@ -249,6 +263,7 @@ services:
     build:
       context: .
       dockerfile: docker/web/Dockerfile
+    image: botparty-web:${APP_VERSION:-latest}
     container_name: botparty-web
     restart: unless-stopped
     environment:
@@ -289,6 +304,11 @@ services:
         condition: service_started
     networks:
       - frontend
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:80/ 2>/dev/null && echo ok || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   postgres_data:

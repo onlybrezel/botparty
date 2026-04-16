@@ -3,10 +3,12 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  OnModuleDestroy,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateControlButtonDto, UpdateControlButtonDto, ReorderControlButtonsDto } from './controls.dto';
 import { LIMITS, ControlButtonAccess, Role } from '@botparty/shared';
+import { assertRobotOwner } from '../common/robot-access';
 
 type EnabledControlButtonRecord = {
   id: string;
@@ -29,13 +31,26 @@ type VisibleControlsRequester = {
 const ENABLED_BUTTON_CACHE_TTL_MS = 5_000;
 
 @Injectable()
-export class ControlsService {
+export class ControlsService implements OnModuleDestroy {
   private readonly enabledButtonsCache = new Map<
     string,
     { expiresAt: number; buttons: EnabledControlButtonRecord[] }
   >();
+  private readonly _cacheSweeper: ReturnType<typeof setInterval>;
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {
+    // Sweep expired entries every 60s to prevent unbounded Map growth.
+    this._cacheSweeper = setInterval(() => {
+      const now = Date.now();
+      for (const [key, entry] of this.enabledButtonsCache) {
+        if (entry.expiresAt <= now) this.enabledButtonsCache.delete(key);
+      }
+    }, 60_000);
+  }
+
+  onModuleDestroy() {
+    clearInterval(this._cacheSweeper);
+  }
 
   /** Returns all enabled buttons for a robot, sorted by position. */
   async getPublicButtons(robotId: string) {
@@ -135,78 +150,80 @@ export class ControlsService {
   async create(robotId: string, dto: CreateControlButtonDto, requesterId: string) {
     await this._assertOwner(robotId, requesterId);
 
-    let count = await this.prisma.controlButton.count({ where: { robotId } });
-    if (count === 0) {
-      await this.prisma.controlButton.createMany({
-        data: [
-          {
-            robotId,
-            label: 'Forward',
-            command: 'forward',
-            hotKey: 'w',
-            icon: '▲',
-            cooldownMs: LIMITS.DEFAULT_CONTROL_COOLDOWN_MS,
-            access: 'QUEUE_TURN',
-            position: 0,
-            isEnabled: true,
-          },
-          {
-            robotId,
-            label: 'Left',
-            command: 'left',
-            hotKey: 'a',
-            icon: '◀',
-            cooldownMs: LIMITS.DEFAULT_CONTROL_COOLDOWN_MS,
-            access: 'QUEUE_TURN',
-            position: 1,
-            isEnabled: true,
-          },
-          {
-            robotId,
-            label: 'Back',
-            command: 'backward',
-            hotKey: 's',
-            icon: '▼',
-            cooldownMs: LIMITS.DEFAULT_CONTROL_COOLDOWN_MS,
-            access: 'QUEUE_TURN',
-            position: 2,
-            isEnabled: true,
-          },
-          {
-            robotId,
-            label: 'Right',
-            command: 'right',
-            hotKey: 'd',
-            icon: '▶',
-            cooldownMs: LIMITS.DEFAULT_CONTROL_COOLDOWN_MS,
-            access: 'QUEUE_TURN',
-            position: 3,
-            isEnabled: true,
-          },
-        ],
+    const button = await this.prisma.$transaction(async (tx) => {
+      let count = await tx.controlButton.count({ where: { robotId } });
+      if (count === 0) {
+        await tx.controlButton.createMany({
+          data: [
+            {
+              robotId,
+              label: 'Forward',
+              command: 'forward',
+              hotKey: 'w',
+              icon: '▲',
+              cooldownMs: LIMITS.DEFAULT_CONTROL_COOLDOWN_MS,
+              access: 'QUEUE_TURN',
+              position: 0,
+              isEnabled: true,
+            },
+            {
+              robotId,
+              label: 'Left',
+              command: 'left',
+              hotKey: 'a',
+              icon: '◀',
+              cooldownMs: LIMITS.DEFAULT_CONTROL_COOLDOWN_MS,
+              access: 'QUEUE_TURN',
+              position: 1,
+              isEnabled: true,
+            },
+            {
+              robotId,
+              label: 'Back',
+              command: 'backward',
+              hotKey: 's',
+              icon: '▼',
+              cooldownMs: LIMITS.DEFAULT_CONTROL_COOLDOWN_MS,
+              access: 'QUEUE_TURN',
+              position: 2,
+              isEnabled: true,
+            },
+            {
+              robotId,
+              label: 'Right',
+              command: 'right',
+              hotKey: 'd',
+              icon: '▶',
+              cooldownMs: LIMITS.DEFAULT_CONTROL_COOLDOWN_MS,
+              access: 'QUEUE_TURN',
+              position: 3,
+              isEnabled: true,
+            },
+          ],
+        });
+        count = 4;
+      }
+
+      if (count >= LIMITS.MAX_CONTROL_BUTTONS) {
+        throw new BadRequestException(
+          `Maximum of ${LIMITS.MAX_CONTROL_BUTTONS} control buttons allowed per robot`,
+        );
+      }
+
+      return tx.controlButton.create({
+        data: {
+          robotId,
+          label: dto.label,
+          command: dto.command,
+          hotKey: dto.hotKey,
+          icon: dto.icon,
+          cooldownMs: dto.cooldownMs ?? LIMITS.DEFAULT_CONTROL_COOLDOWN_MS,
+          access: dto.access ?? 'QUEUE_TURN',
+          position: dto.position ?? count,
+          isEnabled: dto.isEnabled ?? true,
+          color: dto.color,
+        },
       });
-      count = 4;
-    }
-
-    if (count >= LIMITS.MAX_CONTROL_BUTTONS) {
-      throw new BadRequestException(
-        `Maximum of ${LIMITS.MAX_CONTROL_BUTTONS} control buttons allowed per robot`,
-      );
-    }
-
-    const button = await this.prisma.controlButton.create({
-      data: {
-        robotId,
-        label: dto.label,
-        command: dto.command,
-        hotKey: dto.hotKey,
-        icon: dto.icon,
-        cooldownMs: dto.cooldownMs ?? LIMITS.DEFAULT_CONTROL_COOLDOWN_MS,
-        access: dto.access ?? 'QUEUE_TURN',
-        position: dto.position ?? count,
-        isEnabled: dto.isEnabled ?? true,
-        color: dto.color,
-      },
     });
 
     this.invalidateEnabledButtonsCache(robotId);
@@ -282,8 +299,7 @@ export class ControlsService {
 
   private async _assertOwner(robotId: string, userId: string) {
     const robot = await this.prisma.robot.findUnique({ where: { id: robotId } });
-    if (!robot) throw new NotFoundException('Robot not found');
-    if (robot.ownerId !== userId) throw new ForbiddenException('Not the robot owner');
+    assertRobotOwner(robot, userId);
   }
 
   private invalidateEnabledButtonsCache(robotId: string) {

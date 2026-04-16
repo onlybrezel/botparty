@@ -7,6 +7,8 @@ import {
   Patch,
   Body,
   Delete,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { UsersService } from './users.service';
@@ -31,12 +33,29 @@ export class UsersController {
     return this.usersService.findById(user.sub);
   }
 
+  @Get('me/export')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Export own account data' })
+  async exportMe(@CurrentUser() user: JwtPayload) {
+    return this.usersService.exportOwnData(user.sub);
+  }
+
   @Patch('me')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update current user profile' })
   async updateMe(@CurrentUser() user: JwtPayload, @Body() dto: UpdateMeDto) {
     return this.usersService.updateMe(user.sub, dto);
+  }
+
+  @Delete('me')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete own account (GDPR self-service)' })
+  async deleteMe(@CurrentUser() user: JwtPayload) {
+    await this.usersService.deleteOwnAccount(user.sub);
   }
 
   @Get('admin/list')

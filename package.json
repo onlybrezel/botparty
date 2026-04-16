@@ -6,7 +6,7 @@
   "license": "MIT",
   "packageManager": "pnpm@9.15.4",
   "engines": {
-    "node": ">=24.0.0",
+    "node": ">=22.0.0",
     "pnpm": ">=9.15.0"
   },
   "scripts": {
@@ -14,6 +14,12 @@
     "dev": "turbo run dev",
     "lint": "turbo run lint",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "docker:build:api": "docker compose build api",
+    "docker:build:web": "docker compose build web",
+    "docker:build:app": "docker compose build api web nginx",
+    "docker:build:infra": "docker compose build postgres redis livekit livekit-ingress livekit-egress cadvisor",
+    "docker:up:core": "docker compose up -d postgres redis livekit livekit-ingress livekit-egress cadvisor",
+    "docker:up:app": "docker compose up -d api web nginx",
     "db:generate": "turbo run db:generate",
     "db:push": "turbo run db:push",
     "db:migrate": "turbo run db:migrate",

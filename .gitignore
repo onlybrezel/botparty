@@ -13,6 +13,7 @@ out/
 
 # Environment
 .env
+.env.bak
 .env.local
 .env.*.local
 

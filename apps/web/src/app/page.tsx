@@ -3,7 +3,7 @@ import type { PublicRobotOverview, RobotPublic } from '@botparty/shared';
 import RobotCard from '@/components/robot-card';
 import { ArrowRight, Bot, Gamepad2, Shield, Sparkles, TimerReset, Users } from 'lucide-react';
 
-export const dynamic = 'force-dynamic';
+export const revalidate = 10;
 
 interface PlatformStats {
   totalUsers: number;
@@ -17,11 +17,9 @@ interface PlatformStats {
 async function getPublicRobots(): Promise<RobotPublic[]> {
   const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
   try {
-    const res = await fetch(`${apiUrl}/api/v1/robots`, {
-      cache: 'no-store',
-    });
-    if (!res.ok) return [];
-    return res.json() as Promise<RobotPublic[]>;
+    const res = await fetch(`${apiUrl}/api/v1/robots`);
+      if (!res.ok) return [];
+      return res.json() as Promise<RobotPublic[]>;
   } catch {
     return [];
   }
@@ -30,11 +28,9 @@ async function getPublicRobots(): Promise<RobotPublic[]> {
 async function getPlatformStats(): Promise<PlatformStats | null> {
   const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
   try {
-    const res = await fetch(`${apiUrl}/api/v1/health/stats`, {
-      cache: 'no-store',
-    });
-    if (!res.ok) return null;
-    return res.json() as Promise<PlatformStats>;
+    const res = await fetch(`${apiUrl}/api/v1/health/stats`);
+      if (!res.ok) return null;
+      return res.json() as Promise<PlatformStats>;
   } catch {
     return null;
   }
@@ -44,7 +40,7 @@ async function getRobotsOverview(): Promise<PublicRobotOverview | null> {
   const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
   try {
     const res = await fetch(`${apiUrl}/api/v1/robots/overview`, {
-      cache: 'no-store',
+      next: { revalidate: 10 },
     });
     if (!res.ok) return null;
     return res.json() as Promise<PublicRobotOverview>;

@@ -2,14 +2,23 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Shield, Search, Ban, Clock3, Trash2, RefreshCw, Activity, Server, Users, Bot, UserRound, Siren, ChevronRight, Save, X } from 'lucide-react';
+import { Shield, RefreshCw, Activity, Server, Users, Bot, UserRound, Siren, ChevronRight, Ban } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/store';
 import { pushToast } from '@/lib/toast';
-import { Select } from '@/components/ui/select';
 import { useDesktopMotionPreference } from '@/lib/use-desktop-motion';
+import { RuntimeView } from '@/components/mod/runtime-view';
+import { ModerationView } from '@/components/mod/moderation-view';
+import { UsersView } from '@/components/mod/users-view';
+import { RobotsView } from '@/components/mod/robots-view';
+import {
+  formatBitrate,
+  formatPercent,
+  secondaryButtonClass,
+  detectRoomMode,
+  roomModeToFields,
+} from '@/components/mod/utils';
 
 type StaffUser = {
   id: string;
@@ -54,57 +63,6 @@ type RobotDraft = {
 
 type ModView = 'moderation' | 'runtime' | 'robots' | 'users';
 
-const formatPercent = (value: number | null | undefined) => {
-  if (typeof value !== 'number') return '-';
-  if (value > 0 && value < 1) return '<1%';
-  if (value < 10) return `${value.toFixed(1)}%`;
-  return `${Math.round(value)}%`;
-};
-
-const formatAge = (value: number | null | undefined) => {
-  if (typeof value !== 'number') return '-';
-  if (value < 60) return `${value}s ago`;
-  if (value < 3600) return `${Math.floor(value / 60)}m ago`;
-  return `${Math.floor(value / 3600)}h ago`;
-};
-
-const formatBitrate = (value: number | null | undefined) => {
-  if (typeof value !== 'number') return '-';
-  if (value <= 0) return '0 kbps';
-  if (value >= 1000) return `${(value / 1000).toFixed(1)} Mbps`;
-  return `${value.toFixed(value < 10 ? 1 : 0)} kbps`;
-};
-
-const formatBytes = (value: number | null | undefined) => {
-  if (typeof value !== 'number' || value <= 0) return '-';
-  if (value >= 1024 ** 3) return `${(value / 1024 ** 3).toFixed(1)} GB`;
-  if (value >= 1024 ** 2) return `${(value / 1024 ** 2).toFixed(1)} MB`;
-  if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`;
-  return `${value} B`;
-};
-
-const formatUptime = (value: number | null | undefined) => {
-  if (typeof value !== 'number' || value < 0) return '-';
-  const days = Math.floor(value / 86400);
-  const hours = Math.floor((value % 86400) / 3600);
-  const minutes = Math.floor((value % 3600) / 60);
-  if (days > 0) return `${days}d ${hours}h`;
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  return `${minutes}m`;
-};
-
-const formatDurationClock = (seconds: number) => {
-  if (!Number.isFinite(seconds) || seconds <= 0) return '0:00';
-  const totalSeconds = Math.floor(seconds);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const secs = totalSeconds % 60;
-  if (hours > 0) {
-    return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-  }
-  return `${minutes}:${String(secs).padStart(2, '0')}`;
-};
-
 const parseCompactRecordingTime = (value: string): Date | null => {
   const match = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2})(\d{2})(\d{2})$/);
   if (!match) return null;
@@ -145,95 +103,6 @@ const parseRecordingMeta = (file: { fileName: string; robotId: string | null; mo
   };
 };
 
-const formatClientBuild = (
-  telemetry:
-    | {
-        clientVersion: string | null;
-        botpartyStreamerVersion?: string | null;
-        gitBranch: string | null;
-        gitCommit: string | null;
-        gitDirty: boolean;
-      }
-    | null
-    | undefined,
-) => {
-  if (!telemetry) return '-';
-  const parts: string[] = [];
-  if (telemetry.clientVersion) parts.push(`v${telemetry.clientVersion}`);
-  if (telemetry.gitBranch) parts.push(telemetry.gitBranch);
-  if (telemetry.gitCommit) parts.push(telemetry.gitCommit);
-  if (telemetry.gitDirty) parts.push('dirty');
-  return parts.length > 0 ? parts.join(' • ') : '-';
-};
-
-const statusClassName = (status: 'ONLINE' | 'OFFLINE' | 'BUSY' | 'MAINTENANCE') => {
-  switch (status) {
-    case 'ONLINE':
-      return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
-    case 'BUSY':
-      return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
-    case 'MAINTENANCE':
-      return 'border-sky-500/30 bg-sky-500/10 text-sky-300';
-    default:
-      return 'border-[var(--border)] bg-[var(--muted)] text-[var(--muted-foreground)]';
-  }
-};
-
-const baseButtonClass =
-  'inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition duration-200 hover:-translate-y-0.5 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0 disabled:active:scale-100';
-
-const secondaryButtonClass = `${baseButtonClass} border-[var(--border)] bg-[var(--background)] text-[var(--foreground)]`;
-const primaryButtonClass = `${baseButtonClass} border-sky-400/40 bg-sky-500/10 text-sky-200`;
-const successButtonClass = `${baseButtonClass} border-emerald-500/40 bg-emerald-500/10 text-emerald-200`;
-const dangerButtonClass = `${baseButtonClass} border-red-500/40 bg-red-500/10 text-red-200`;
-
-function detectRoomMode(robot: { visibility: string; accessMode: string }) {
-  if (robot.visibility === 'PRIVATE') return 'PRIVATE' as const;
-  if (robot.accessMode === 'ALLOWED_USERS') return 'ALLOWED_USERS' as const;
-  if (robot.accessMode === 'LINK_ONLY') return 'LINK_ONLY' as const;
-  if (robot.accessMode === 'PASSWORD') return 'PASSWORD' as const;
-  return 'PUBLIC' as const;
-}
-
-function roomModeToFields(mode: RobotDraft['roomMode']) {
-  switch (mode) {
-    case 'PUBLIC':
-      return { visibility: 'PUBLIC' as const, accessMode: 'OPEN' as const };
-    case 'LINK_ONLY':
-      return { visibility: 'UNLISTED' as const, accessMode: 'LINK_ONLY' as const };
-    case 'PASSWORD':
-      return { visibility: 'PUBLIC' as const, accessMode: 'PASSWORD' as const };
-    case 'ALLOWED_USERS':
-      return { visibility: 'UNLISTED' as const, accessMode: 'ALLOWED_USERS' as const };
-    case 'PRIVATE':
-      return { visibility: 'PRIVATE' as const, accessMode: 'OPEN' as const };
-  }
-}
-
-function queueModeDescription(mode: RobotDraft['queueMode']) {
-  if (mode === 'VOTING') {
-    return 'Viewers vote who gets the next turn.';
-  }
-  if (mode === 'DISABLED') {
-    return 'No queue rotation. Controls stay directly available.';
-  }
-  return 'First come, first served turn rotation.';
-}
-
-function roomModeDescription(mode: RobotDraft['roomMode']) {
-  switch (mode) {
-    case 'PUBLIC':
-      return 'Everyone can open the room directly.';
-    case 'LINK_ONLY':
-      return 'The room stays unlisted and requires the invite link.';
-    case 'PASSWORD':
-      return 'The room stays public, but viewers need the shared room password.';
-    case 'ALLOWED_USERS':
-      return 'Only explicitly allowed accounts can enter.';
-    case 'PRIVATE':
-      return 'The room is hidden and only visible to the owner and staff.';
-  }
-}
 
 function createRobotDraft(
   robot: NonNullable<Awaited<ReturnType<typeof api.getModerationOverview>>['robots']>[number],
@@ -585,9 +454,11 @@ export default function ModDashboardPage() {
     return recordingFiles
       .map((file) => {
         const parsed = parseRecordingMeta(file);
+        const { recordedAt: _ignoredRecordedAt, ...rest } = file;
+        void _ignoredRecordedAt;
         return {
-          ...file,
-          parsedRobotId: parsed.robotId,
+          ...rest,
+          parsedRobotId: parsed.robotId ?? null,
           parsedCameraId: parsed.cameraId,
           recordedAt: parsed.recordedAt,
           robotName: parsed.robotId ? (recordingRobotNameMap.get(parsed.robotId) ?? parsed.robotId) : null,
@@ -967,998 +838,80 @@ export default function ModDashboardPage() {
       </section>
 
       {activeView === 'runtime' ? (
-        <section className="mb-6 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-bold">Runtime Overview</h2>
-            <p className="text-sm text-[var(--muted-foreground)]">
-              Host load from robot telemetry plus active LiveKit rooms, publishers, clients, and queue pressure.
-            </p>
-          </div>
-          <p className="text-xs text-[var(--muted-foreground)]">
-            Snapshot {runtimeOverview ? new Date(runtimeOverview.generatedAt).toLocaleTimeString() : '-'}
-          </p>
-        </div>
-
-        <div className="mb-4 grid gap-3 lg:grid-cols-3">
-          <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
-            <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Fleet Status</p>
-            <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
-              <p>Online: <span className="font-semibold">{runtimeOverview?.summary.onlineRobots ?? 0}</span></p>
-              <p>Busy: <span className="font-semibold">{runtimeOverview?.summary.busyRobots ?? 0}</span></p>
-              <p>Offline: <span className="font-semibold">{runtimeOverview?.summary.offlineRobots ?? 0}</span></p>
-              <p>Maint: <span className="font-semibold">{runtimeOverview?.summary.maintenanceRobots ?? 0}</span></p>
-            </div>
-          </div>
-          <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
-            <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">LiveKit</p>
-            <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
-              <p>Rooms: <span className="font-semibold">{runtimeOverview?.livekit.totals.rooms ?? 0}</span></p>
-              <p>Publishers: <span className="font-semibold">{runtimeOverview?.livekit.totals.publishers ?? 0}</span></p>
-              <p>Subscribers: <span className="font-semibold">{runtimeOverview?.livekit.totals.subscribers ?? 0}</span></p>
-              <p>Ingress est.: <span className="font-semibold">{formatBitrate(runtimeOverview?.livekit.totals.estimatedIngressKbps)}</span></p>
-            </div>
-          </div>
-          <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
-            <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Connectivity</p>
-            <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
-              <p>Telemetry fresh: <span className="font-semibold">{runtimeOverview?.summary.telemetryFreshRobots ?? 0}</span></p>
-              <p>Control WS: <span className="font-semibold">{runtimeOverview?.summary.controlConnectedRobots ?? 0}</span></p>
-              <p>LiveKit OK: <span className="font-semibold">{runtimeOverview?.summary.livekitConnectedRobots ?? 0}</span></p>
-              <p>Active sessions: <span className="font-semibold">{runtimeOverview?.summary.activeSessions ?? 0}</span></p>
-            </div>
-          </div>
-        </div>
-
-        {!runtimeOverview?.livekit.available && runtimeOverview?.livekit.error ? (
-          <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
-            LiveKit room stats are currently unavailable: {runtimeOverview.livekit.error}
-          </div>
-        ) : null}
-
-        {!runtimeOverview?.platform.available && runtimeOverview?.platform.error ? (
-          <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
-            Container and host metrics are currently unavailable: {runtimeOverview.platform.error}
-          </div>
-        ) : null}
-
-        <div className="mb-4 rounded-lg border border-[var(--border)] bg-[var(--background)] p-4">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-base font-bold">Docker Host</h3>
-            <p className="text-xs text-[var(--muted-foreground)]">cAdvisor snapshot</p>
-          </div>
-          {runtimeOverview?.platform.host ? (
-            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
-                <p className="text-[var(--muted-foreground)]">CPU</p>
-                <p className="mt-1 text-sm font-semibold">{formatPercent(runtimeOverview.platform.host.cpuPercent)}</p>
-              </div>
-              <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
-                <p className="text-[var(--muted-foreground)]">Memory</p>
-                <p className="mt-1 text-sm font-semibold">{formatPercent(runtimeOverview.platform.host.memoryPercent)}</p>
-                <p className="mt-1 text-[10px] text-[var(--muted-foreground)]">
-                  {formatBytes(runtimeOverview.platform.host.memoryUsageBytes)} / {formatBytes(runtimeOverview.platform.host.memoryBytes)}
-                </p>
-              </div>
-              <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
-                <p className="text-[var(--muted-foreground)]">Ingress</p>
-                <p className="mt-1 text-sm font-semibold">{formatBitrate(runtimeOverview.platform.host.rxKbps)}</p>
-              </div>
-              <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
-                <p className="text-[var(--muted-foreground)]">Egress</p>
-                <p className="mt-1 text-sm font-semibold">{formatBitrate(runtimeOverview.platform.host.txKbps)}</p>
-              </div>
-            </div>
-          ) : (
-            <p className="text-sm text-[var(--muted-foreground)]">No Docker host metrics available right now.</p>
-          )}
-        </div>
-
-        <div className="mb-4 rounded-lg border border-[var(--border)] bg-[var(--background)] p-4">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-base font-bold">Docker Containers</h3>
-            <p className="text-xs text-[var(--muted-foreground)]">API, web, LiveKit, nginx, redis, postgres, cAdvisor</p>
-          </div>
-          {(runtimeOverview?.platform.containers ?? []).length > 0 ? (
-            <div className="grid gap-3 xl:grid-cols-2">
-              {(runtimeOverview?.platform.containers ?? []).map((container) => (
-                <div key={container.service} className="rounded border border-[var(--border)] p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <p className="text-sm font-semibold">{container.service}</p>
-                      <p className="text-[10px] text-[var(--muted-foreground)]">{container.containerName ?? 'container name unavailable'}</p>
-                    </div>
-                    <p className="text-xs text-[var(--muted-foreground)]">CPU {formatPercent(container.cpuPercent)}</p>
-                  </div>
-                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
-                    <div className="rounded border border-[var(--border)] px-2 py-1.5">
-                      <p className="text-[var(--muted-foreground)]">CPU</p>
-                      <p className="font-semibold">{formatPercent(container.cpuPercent)}</p>
-                    </div>
-                    <div className="rounded border border-[var(--border)] px-2 py-1.5">
-                      <p className="text-[var(--muted-foreground)]">Memory</p>
-                      <p className="font-semibold">{formatPercent(container.memoryPercent)}</p>
-                    </div>
-                    <div className="rounded border border-[var(--border)] px-2 py-1.5">
-                      <p className="text-[var(--muted-foreground)]">Ingress</p>
-                      <p className="font-semibold">{formatBitrate(container.rxKbps)}</p>
-                    </div>
-                    <div className="rounded border border-[var(--border)] px-2 py-1.5">
-                      <p className="text-[var(--muted-foreground)]">Egress</p>
-                      <p className="font-semibold">{formatBitrate(container.txKbps)}</p>
-                    </div>
-                  </div>
-                  <p className="mt-2 text-[10px] text-[var(--muted-foreground)]">
-                    Memory {formatBytes(container.memoryUsageBytes)} / {formatBytes(container.memoryLimitBytes)}
-                  </p>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-[var(--muted-foreground)]">No Docker container metrics available right now.</p>
-          )}
-        </div>
-
-        {viewerIsAdmin ? (
-          <div className="mb-4 rounded-lg border border-[var(--border)] bg-[var(--background)] p-4">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h3 className="text-base font-bold">Recording Control (Admin)</h3>
-                <p className="text-xs text-[var(--muted-foreground)]">Live view of active room recordings with direct stop controls.</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => void stopAllRecordings()}
-                disabled={activeRecordings.length === 0 || recordingActionLoading !== null}
-                className={dangerButtonClass}
-              >
-                {recordingActionLoading === '__all__' ? 'Stopping all...' : 'Stop all'}
-              </button>
-            </div>
-
-            {activeRecordings.length === 0 ? (
-              <p className="text-sm text-[var(--muted-foreground)]">No active recordings right now.</p>
-            ) : (
-              <div className="grid gap-2 xl:grid-cols-2">
-                {activeRecordings.map((robot) => (
-                  <div key={robot.id} className="rounded border border-[var(--border)] bg-[var(--card)] px-3 py-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <div>
-                        <p className="text-sm font-semibold">{robot.name}</p>
-                        <p className="text-[10px] text-[var(--muted-foreground)]">/{robot.slug}</p>
-                      </div>
-                      <span className="rounded-full border border-red-500/40 bg-red-500/10 px-2 py-0.5 text-[10px] font-semibold text-red-300">
-                        Recording
-                      </span>
-                    </div>
-                    <div className="mt-2 flex items-center justify-between gap-2">
-                      <p className="text-xs text-[var(--muted-foreground)]">
-                        Clients: {robot.livekit?.participants ?? 0} · Publishers: {robot.livekit?.publishers ?? 0}
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => void stopRecordingForRobot(robot.id)}
-                        disabled={recordingActionLoading !== null}
-                        className={dangerButtonClass}
-                      >
-                        {recordingActionLoading === robot.id ? 'Stopping...' : 'Stop'}
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        ) : null}
-
-        {viewerIsAdmin ? (
-          <div className="mb-4 rounded-lg border border-[var(--border)] bg-[var(--background)] p-4">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h3 className="text-base font-bold">Recordings Library (Admin)</h3>
-                <p className="text-xs text-[var(--muted-foreground)]">Recent .mp4 files from livekit-egress output.</p>
-              </div>
-              <span className="text-xs text-[var(--muted-foreground)]">{recordingFiles.length} files</span>
-            </div>
-
-            {recordingFiles.length === 0 ? (
-              <p className="text-sm text-[var(--muted-foreground)]">No recordings found yet.</p>
-            ) : (
-              <div className="grid gap-3 xl:grid-cols-[0.95fr,1.05fr]">
-                <div className="rounded border border-[var(--border)] bg-[var(--card)]">
-                  <div className="sticky top-0 z-10 border-b border-[var(--border)] bg-[var(--background)]/95 p-2 backdrop-blur">
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      <Select
-                        value={recordingRobotFilter}
-                        onChange={(event) => setRecordingRobotFilter(event.target.value)}
-                        className="h-8 bg-[var(--card)] text-xs"
-                      >
-                        <option value="ALL">All robots</option>
-                        {recordingRobotOptions.map((robot) => (
-                          <option key={robot.id} value={robot.id}>
-                            {robot.label}
-                          </option>
-                        ))}
-                      </Select>
-                      <Select
-                        value={recordingCameraFilter}
-                        onChange={(event) => setRecordingCameraFilter(event.target.value)}
-                        className="h-8 bg-[var(--card)] text-xs"
-                      >
-                        <option value="ALL">All cameras</option>
-                        {recordingCameraOptions.map((cameraId) => (
-                          <option key={cameraId} value={cameraId}>
-                            {cameraId}
-                          </option>
-                        ))}
-                      </Select>
-                    </div>
-                    <p className="mt-2 text-[11px] text-[var(--muted-foreground)]">
-                      Showing {filteredRecordingEntries.length} of {recordingEntries.length}
-                    </p>
-                  </div>
-                  <div className="max-h-[28rem] overflow-y-auto overscroll-contain">
-                  {filteredRecordingEntries.slice(0, 200).map((file) => (
-                    <button
-                      key={file.fileName}
-                      type="button"
-                      onClick={() => setSelectedRecordingFile(file.fileName)}
-                      className={`w-full border-b border-[var(--border)] px-3 py-2 text-left text-xs hover:bg-[var(--muted)] ${
-                        selectedRecordingFile === file.fileName ? 'bg-[var(--muted)]' : ''
-                      }`}
-                    >
-                      <p className="truncate font-semibold text-[var(--foreground)]">{file.fileName}</p>
-                      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[var(--muted-foreground)]">
-                        <span>{new Date(file.modifiedAt).toLocaleString()}</span>
-                        <span>· {(file.sizeBytes / (1024 * 1024)).toFixed(1)} MB</span>
-                        {file.parsedCameraId ? <span>· cam: {file.parsedCameraId}</span> : null}
-                      </div>
-                    </button>
-                  ))}
-                  </div>
-                </div>
-
-                <div className="rounded border border-[var(--border)] bg-[var(--card)] p-3">
-                  {selectedRecording && selectedRecordingEntry ? (
-                    <>
-                      <p className="mb-2 text-xs text-[var(--muted-foreground)]">Previewing {selectedRecording.fileName}</p>
-                      <video
-                        ref={recordingVideoRef}
-                        key={selectedRecording.fileName}
-                        controls
-                        preload="metadata"
-                        className="h-auto w-full rounded border border-[var(--border)] bg-black"
-                        src={api.getAdminRecordingStreamUrl(selectedRecording.fileName)}
-                        onTimeUpdate={(event) => {
-                          setPlayerCurrentSec(event.currentTarget.currentTime || 0);
-                        }}
-                        onLoadedMetadata={(event) => {
-                          setPlayerDurationSec(event.currentTarget.duration || 0);
-                        }}
-                      />
-                      <div className="mt-2 rounded border border-[var(--border)] bg-[var(--background)] px-3 py-2">
-                        <input
-                          type="range"
-                          min={0}
-                          max={playerDurationSec > 0 ? playerDurationSec : 0}
-                          step={0.25}
-                          value={Math.min(playerCurrentSec, playerDurationSec || playerCurrentSec)}
-                          onChange={(event) => {
-                            const nextTime = Number(event.target.value);
-                            if (!Number.isFinite(nextTime)) return;
-                            setPlayerCurrentSec(nextTime);
-                            if (recordingVideoRef.current) {
-                              recordingVideoRef.current.currentTime = nextTime;
-                            }
-                          }}
-                          className="w-full accent-sky-400"
-                          aria-label="Recording timeline"
-                        />
-                        <div className="mt-2 flex items-center justify-between gap-3 text-[11px]">
-                          <span className="text-[var(--muted-foreground)]">
-                            Start: {selectedRecordingEntry.recordedAt ? selectedRecordingEntry.recordedAt.toLocaleTimeString() : '-'}
-                          </span>
-                          <span className="font-medium text-[var(--foreground)]">
-                            {formatDurationClock(playerCurrentSec)} / {formatDurationClock(playerDurationSec)}
-                          </span>
-                          <span className="text-[var(--muted-foreground)]">
-                            End: {selectedRecordingEndClock ? selectedRecordingEndClock.toLocaleTimeString() : '-'}
-                          </span>
-                        </div>
-                        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--muted)]">
-                          <div className="h-full rounded-full bg-sky-400 transition-[width]" style={{ width: `${playerProgressPercent}%` }} />
-                        </div>
-                      </div>
-                      <div className="mt-2 rounded border border-[var(--border)] bg-[var(--background)] p-2 text-xs">
-                        <div className="grid gap-1 sm:grid-cols-2">
-                          <span className="text-[var(--muted-foreground)]">Robot: {selectedRecordingEntry.robotName ?? selectedRecordingEntry.parsedRobotId ?? 'unknown'}</span>
-                          <span className="text-[var(--muted-foreground)]">Camera: {selectedRecordingEntry.parsedCameraId ?? 'default'}</span>
-                          <span className="text-[var(--muted-foreground)]">Recorded: {selectedRecordingEntry.recordedAt ? selectedRecordingEntry.recordedAt.toLocaleString() : new Date(selectedRecordingEntry.modifiedAt).toLocaleString()}</span>
-                          <span className="text-[var(--muted-foreground)]">Duration: {playerDurationSec > 0 ? `${Math.floor(playerDurationSec / 60)}m ${Math.floor(playerDurationSec % 60)}s` : '-'}</span>
-                        </div>
-                        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border)] pt-2">
-                          <span className="font-medium text-[var(--foreground)]">
-                            Playback clock: {selectedRecordingClock ? selectedRecordingClock.toLocaleString() : '-'}
-                          </span>
-                          <span className="text-[var(--muted-foreground)]">
-                            End clock: {selectedRecordingEndClock ? selectedRecordingEndClock.toLocaleString() : '-'}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="mt-2 flex items-center justify-end gap-2 text-xs">
-                        <a
-                          href={api.getAdminRecordingStreamUrl(selectedRecording.fileName)}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="rounded border border-[var(--border)] px-2 py-1 text-[var(--foreground)]"
-                        >
-                          Open in new tab
-                        </a>
-                      </div>
-                    </>
-                  ) : (
-                    <p className="text-sm text-[var(--muted-foreground)]">Select a recording to preview.</p>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        ) : null}
-
-        <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-4">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h3 className="text-base font-bold">Robot Runtime</h3>
-              <p className="text-xs text-[var(--muted-foreground)]">Select one robot to inspect instead of rendering the full fleet list.</p>
-            </div>
-            <Select
-              value={selectedRuntimeRobotId}
-              onChange={(event) => setSelectedRuntimeRobotId(event.target.value)}
-              disabled={(runtimeOverview?.robots ?? []).length === 0}
-              className="min-w-56 bg-[var(--card)] disabled:opacity-60"
-            >
-              {(runtimeOverview?.robots ?? []).map((robot) => (
-                <option key={robot.id} value={robot.id}>
-                  {robot.name}
-                </option>
-              ))}
-            </Select>
-          </div>
-
-          {selectedRuntimeRobot ? (
-            <article key={selectedRuntimeRobot.id} className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="text-base font-bold">{selectedRuntimeRobot.name}</h3>
-                    <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${statusClassName(selectedRuntimeRobot.status)}`}>
-                      {selectedRuntimeRobot.status}
-                    </span>
-                    <span className="rounded-full border border-[var(--border)] px-2 py-0.5 text-[10px] font-semibold text-[var(--muted-foreground)]">
-                      {selectedRuntimeRobot.visibility}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-xs text-[var(--muted-foreground)]">
-                    /{selectedRuntimeRobot.slug} · owner {selectedRuntimeRobot.owner.displayName ?? selectedRuntimeRobot.owner.username}
-                  </p>
-                  <p className="mt-1 text-xs text-[var(--muted-foreground)]">
-                    Client {formatClientBuild(selectedRuntimeRobot.telemetry)} · Python {selectedRuntimeRobot.telemetry?.pythonVersion ?? '-'}
-                  </p>
-                  <p className="mt-1 text-xs text-[var(--muted-foreground)]">
-                    Streamer {selectedRuntimeRobot.telemetry?.botpartyStreamerVersion ?? '-'}
-                  </p>
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void handleRuntimeRobotUpdate()}
-                    disabled={runtimeActionLoading === selectedRuntimeRobot.id}
-                    className={successButtonClass}
-                  >
-                    {runtimeActionLoading === selectedRuntimeRobot.id ? 'Queueing...' : 'Force Update'}
-                  </button>
-                  <Link
-                    href={`/robot/${selectedRuntimeRobot.owner.username}/${selectedRuntimeRobot.slug}`}
-                    className={primaryButtonClass}
-                  >
-                    Preview
-                  </Link>
-                </div>
-              </div>
-
-              <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
-                  <p className="text-[var(--muted-foreground)]">Viewers</p>
-                  <p className="mt-1 text-sm font-semibold">{selectedRuntimeRobot.viewerCount}</p>
-                </div>
-                <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
-                  <p className="text-[var(--muted-foreground)]">Queue</p>
-                  <p className="mt-1 text-sm font-semibold">{selectedRuntimeRobot.queueLength} · {selectedRuntimeRobot.queueMode}</p>
-                </div>
-                <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
-                  <p className="text-[var(--muted-foreground)]">Controller</p>
-                  <p className="mt-1 text-sm font-semibold">{selectedRuntimeRobot.activeSession?.user.displayName ?? selectedRuntimeRobot.activeSession?.user.username ?? selectedRuntimeRobot.queueHead?.displayName ?? selectedRuntimeRobot.queueHead?.username ?? '-'}</p>
-                </div>
-                <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
-                  <p className="text-[var(--muted-foreground)]">Heartbeat</p>
-                  <p className="mt-1 text-sm font-semibold">{formatAge(selectedRuntimeRobot.heartbeatAgeSec)}</p>
-                </div>
-                <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
-                  <p className="text-[var(--muted-foreground)]">Telemetry</p>
-                  <p className="mt-1 text-sm font-semibold">{formatAge(selectedRuntimeRobot.telemetryAgeSec)}</p>
-                </div>
-                <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
-                  <p className="text-[var(--muted-foreground)]">LiveKit Room</p>
-                  <p className="mt-1 text-sm font-semibold">{selectedRuntimeRobot.livekit ? `${selectedRuntimeRobot.livekit.participants} clients` : '-'}</p>
-                </div>
-              </div>
-
-              <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
-                  <p className="text-[var(--muted-foreground)]">CPU</p>
-                  <p className="mt-1 text-sm font-semibold">{formatPercent(selectedRuntimeRobot.telemetry?.cpuPercent)}</p>
-                </div>
-                <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
-                  <p className="text-[var(--muted-foreground)]">RAM</p>
-                  <p className="mt-1 text-sm font-semibold">{formatPercent(selectedRuntimeRobot.telemetry?.memoryPercent)}</p>
-                </div>
-                <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
-                  <p className="text-[var(--muted-foreground)]">Temp</p>
-                  <p className="mt-1 text-sm font-semibold">
-                    {typeof selectedRuntimeRobot.telemetry?.temperatureC === 'number' ? `${selectedRuntimeRobot.telemetry.temperatureC.toFixed(1)} C` : '-'}
-                  </p>
-                </div>
-                <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
-                  <p className="text-[var(--muted-foreground)]">Uptime</p>
-                  <p className="mt-1 text-sm font-semibold">{formatUptime(selectedRuntimeRobot.telemetry?.uptimeSec)}</p>
-                </div>
-              </div>
-
-              <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                <div className="rounded border border-[var(--border)] px-3 py-2 text-xs xl:col-span-2">
-                  <p className="text-[var(--muted-foreground)]">Client Build</p>
-                  <p className="mt-1 text-sm font-semibold">{formatClientBuild(selectedRuntimeRobot.telemetry)}</p>
-                </div>
-                <div className="rounded border border-[var(--border)] px-3 py-2 text-xs xl:col-span-2">
-                  <p className="text-[var(--muted-foreground)]">Python</p>
-                  <p className="mt-1 text-sm font-semibold">{selectedRuntimeRobot.telemetry?.pythonVersion ?? '-'}</p>
-                </div>
-              </div>
-
-              <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
-                  <p className="text-[var(--muted-foreground)]">Control WS</p>
-                  <p className="mt-1 text-sm font-semibold">{selectedRuntimeRobot.telemetry?.controlConnected ? 'Connected' : 'Offline'}</p>
-                </div>
-                <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
-                  <p className="text-[var(--muted-foreground)]">LiveKit</p>
-                  <p className="mt-1 text-sm font-semibold">{selectedRuntimeRobot.telemetry?.livekitConnected ? 'Connected' : 'Offline'}</p>
-                </div>
-                <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
-                  <p className="text-[var(--muted-foreground)]">Commands</p>
-                  <p className="mt-1 text-sm font-semibold">{selectedRuntimeRobot.telemetry?.commandsReceived ?? '-'}</p>
-                </div>
-                <div className="rounded border border-[var(--border)] px-3 py-2 text-xs">
-                  <p className="text-[var(--muted-foreground)]">Ingress est.</p>
-                  <p className="mt-1 text-sm font-semibold">{formatBitrate(selectedRuntimeRobot.livekit?.estimatedIngressKbps)}</p>
-                </div>
-              </div>
-
-              <div className="mt-3 rounded border border-[var(--border)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
-                <p>
-                  LiveKit clients: {selectedRuntimeRobot.livekit?.participantNames.length ? selectedRuntimeRobot.livekit.participantNames.join(', ') : 'none'}
-                </p>
-                <p className="mt-1">
-                  Publishers {selectedRuntimeRobot.livekit?.publishers ?? 0} · Subscribers {selectedRuntimeRobot.livekit?.subscribers ?? 0} · Recording {selectedRuntimeRobot.livekit?.activeRecording ? 'on' : 'off'}
-                </p>
-              </div>
-            </article>
-          ) : (
-            <p className="text-sm text-[var(--muted-foreground)]">No robot runtime data available right now.</p>
-          )}
-        </div>
-      </section>
+        <RuntimeView
+          runtimeOverview={runtimeOverview}
+          selectedRuntimeRobotId={selectedRuntimeRobotId}
+          onSelectedRuntimeRobotIdChange={setSelectedRuntimeRobotId}
+          runtimeActionLoading={runtimeActionLoading}
+          onRuntimeRobotUpdate={handleRuntimeRobotUpdate}
+          viewerIsAdmin={viewerIsAdmin}
+          activeRecordings={activeRecordings}
+          recordingActionLoading={recordingActionLoading}
+          onStopRecording={stopRecordingForRobot}
+          onStopAllRecordings={stopAllRecordings}
+          recordingFiles={recordingFiles}
+          recordingRobotFilter={recordingRobotFilter}
+          onRecordingRobotFilterChange={setRecordingRobotFilter}
+          recordingCameraFilter={recordingCameraFilter}
+          onRecordingCameraFilterChange={setRecordingCameraFilter}
+          recordingRobotOptions={recordingRobotOptions}
+          recordingCameraOptions={recordingCameraOptions}
+          filteredRecordingEntries={filteredRecordingEntries}
+          recordingEntries={recordingEntries}
+          selectedRecordingFile={selectedRecordingFile}
+          onSelectRecordingFile={setSelectedRecordingFile}
+          selectedRecording={selectedRecording}
+          selectedRecordingEntry={selectedRecordingEntry}
+          recordingVideoRef={recordingVideoRef}
+          playerCurrentSec={playerCurrentSec}
+          onPlayerCurrentSecChange={setPlayerCurrentSec}
+          playerDurationSec={playerDurationSec}
+          onPlayerDurationSecChange={setPlayerDurationSec}
+          selectedRecordingClock={selectedRecordingClock}
+          selectedRecordingEndClock={selectedRecordingEndClock}
+          playerProgressPercent={playerProgressPercent}
+        />
       ) : null}
 
       {activeView === 'moderation' ? (
-        <section className="mb-6 grid gap-6 xl:grid-cols-[1.2fr,0.8fr]">
-          <div className="space-y-6">
-            <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-bold">Active Restrictions</h2>
-                  <p className="text-sm text-[var(--muted-foreground)]">Robot-specific bans and timeouts that may need follow-up.</p>
-                </div>
-                <div className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs font-semibold text-red-200">
-                  {(overview?.activeRestrictions ?? []).length} open
-                </div>
-              </div>
-              <div className="space-y-2">
-                {(overview?.activeRestrictions ?? []).length === 0 ? (
-                  <p className="text-xs text-[var(--muted-foreground)]">No active timeouts or bans.</p>
-                ) : (
-                  overview?.activeRestrictions.map((entry) => (
-                    <div key={entry.id} className="rounded-2xl border border-[var(--border)] bg-[var(--background)] p-3 text-sm">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="rounded bg-[var(--muted)] px-2 py-0.5 text-xs font-semibold">{entry.action}</span>
-                        <span>{entry.user.displayName ?? entry.user.username}</span>
-                        <span className="text-[var(--muted-foreground)]">on /{entry.robot.slug}</span>
-                        <span className="text-[var(--muted-foreground)]">by {entry.moderator?.username ?? 'unknown'}</span>
-                        <button
-                          type="button"
-                          onClick={() => void unrestrict(entry.robot.id, entry.user.id)}
-                          className={`ml-auto ${successButtonClass}`}
-                        >
-                          Unban
-                        </button>
-                      </div>
-                      {entry.reason && <p className="mt-1 text-xs text-[var(--muted-foreground)]">{entry.reason}</p>}
-                    </div>
-                  ))
-                )}
-              </div>
-            </section>
-
-            <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-              <div className="mb-3 flex flex-wrap items-center gap-2">
-                <div>
-                  <h2 className="text-lg font-bold">Profanity Log</h2>
-                  <p className="text-sm text-[var(--muted-foreground)]">Recent blocked messages across the fleet.</p>
-                </div>
-                <Select
-                  value={selectedRobotId}
-                  onChange={(event) => setSelectedRobotId(event.target.value || 'ALL')}
-                  className="ml-auto bg-[var(--background)]"
-                >
-                  <option value="ALL">All robots</option>
-                  {(overview?.robots ?? []).map((robot) => (
-                    <option key={robot.id} value={robot.id}>{robot.name}</option>
-                  ))}
-                </Select>
-              </div>
-
-              <div className="grid gap-3 lg:grid-cols-2">
-                <div className="rounded-2xl border border-[var(--border)] bg-[var(--background)] p-3">
-                  <p className="mb-2 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Top Users</p>
-                  {(profanity?.byUser ?? []).length === 0 ? (
-                    <p className="text-xs text-[var(--muted-foreground)]">No entries yet.</p>
-                  ) : (
-                    profanity?.byUser.slice(0, 12).map((entry) => (
-                      <p key={entry.userId} className="text-sm">{entry.userId.slice(0, 8)}...: {entry.count}</p>
-                    ))
-                  )}
-                </div>
-                <div className="max-h-72 overflow-auto rounded-2xl border border-[var(--border)] bg-[var(--background)] p-3">
-                  <p className="mb-2 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Recent Events</p>
-                  {filteredProfanityEvents.length === 0 ? (
-                    <p className="text-xs text-[var(--muted-foreground)]">No events yet.</p>
-                  ) : (
-                    filteredProfanityEvents.map((event, idx) => (
-                      <p key={`${event.ts}-${idx}`} className="mb-1 text-xs text-[var(--muted-foreground)]">
-                        [{new Date(event.ts).toLocaleTimeString()}] <span className="text-[var(--foreground)]">{event.username}</span> in <span className="text-sky-300">{event.robotName}</span>: {event.content}
-                      </p>
-                    ))
-                  )}
-                </div>
-              </div>
-            </section>
-          </div>
-
-          <aside className="space-y-6">
-            <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-              <h2 className="text-lg font-bold">Moderation Snapshot</h2>
-              <div className="mt-4 grid gap-3">
-                <div className="rounded-2xl border border-[var(--border)] bg-[var(--background)] p-3">
-                  <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Active bans</p>
-                  <p className="mt-2 flex items-center gap-2 text-2xl font-black"><Ban className="h-5 w-5 text-red-300" />{overview?.counts.bans ?? 0}</p>
-                </div>
-                <div className="rounded-2xl border border-[var(--border)] bg-[var(--background)] p-3">
-                  <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Active timeouts</p>
-                  <p className="mt-2 flex items-center gap-2 text-2xl font-black"><Clock3 className="h-5 w-5 text-amber-300" />{overview?.counts.timeouts ?? 0}</p>
-                </div>
-                <div className="rounded-2xl border border-[var(--border)] bg-[var(--background)] p-3">
-                  <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Blocked profanities</p>
-                  <p className="mt-2 text-2xl font-black">{profanity?.total ?? 0}</p>
-                </div>
-              </div>
-            </section>
-
-            <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-              <h2 className="text-lg font-bold">Escalation Signals</h2>
-              <div className="mt-4 space-y-3 text-sm">
-                <div className="rounded-2xl border border-[var(--border)] bg-[var(--background)] p-3">
-                  <p className="font-semibold">Queue pressure</p>
-                  <p className="mt-1 text-xs text-[var(--muted-foreground)]">{runtimeOverview?.summary.queuedUsers ?? 0} users are waiting for control.</p>
-                </div>
-                <div className="rounded-2xl border border-[var(--border)] bg-[var(--background)] p-3">
-                  <p className="font-semibold">Robot availability</p>
-                  <p className="mt-1 text-xs text-[var(--muted-foreground)]">
-                    {runtimeOverview?.summary.onlineRobots ?? 0} online, {runtimeOverview?.summary.maintenanceRobots ?? 0} in maintenance.
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-[var(--border)] bg-[var(--background)] p-3">
-                  <p className="font-semibold">LiveKit health</p>
-                  <p className="mt-1 text-xs text-[var(--muted-foreground)]">
-                    {runtimeOverview?.livekit.available ? `${runtimeOverview?.livekit.totals.publishers ?? 0} publishers active.` : runtimeOverview?.livekit.error ?? 'Unavailable'}
-                  </p>
-                </div>
-              </div>
-            </section>
-          </aside>
-        </section>
+        <ModerationView
+          overview={overview}
+          profanity={profanity}
+          runtimeOverview={runtimeOverview}
+          selectedRobotId={selectedRobotId}
+          onSelectedRobotIdChange={setSelectedRobotId}
+          filteredProfanityEvents={filteredProfanityEvents}
+          onUnrestrict={unrestrict}
+        />
       ) : null}
 
       {activeView === 'users' ? (
-        <section className="mb-6 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-        <div className="mb-3 flex items-center gap-2">
-          <h2 className="text-lg font-bold">Users</h2>
-          <div className="relative ml-auto w-full max-w-xs">
-            <Search className="pointer-events-none absolute left-2 top-2.5 h-4 w-4 text-[var(--muted-foreground)]" />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] py-2 pl-8 pr-3 text-sm"
-              placeholder="Search users..."
-            />
-          </div>
-        </div>
-
-        <div className="max-h-[36rem] space-y-3 overflow-auto rounded-lg">
-          {filteredUsers.map((user) => {
-            const isEditing = editingUserId === user.id && userDraft;
-            return (
-              <div key={user.id} className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--background)]">
-                <button
-                  type="button"
-                  onClick={() => startUserEdit(user)}
-                  className="grid w-full grid-cols-12 gap-2 px-3 py-3 text-left text-sm transition hover:bg-[var(--muted)]/70"
-                >
-                  <span className="col-span-4 truncate font-medium">{user.displayName ?? user.username}</span>
-                  <span className="col-span-4 truncate text-[var(--muted-foreground)]">{user.email}</span>
-                  <span className="col-span-2 text-xs text-[var(--muted-foreground)]">{user.role}</span>
-                  <span className="col-span-1 text-right text-xs text-[var(--muted-foreground)]">{user.credits} cr</span>
-                  <span className="col-span-1 text-right text-xs text-sky-300">{isEditing ? 'Open' : 'Edit'}</span>
-                </button>
-
-                {isEditing ? (
-                  <div className="border-t border-[var(--border)] bg-[var(--card)]/80 p-4">
-                    <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Edit user</p>
-                        <p className="mt-1 text-sm font-semibold">{user.username}</p>
-                        <p className="text-xs text-[var(--muted-foreground)]">
-                          {viewerIsAdmin
-                            ? 'All staff-editable account fields are available here.'
-                            : 'Mods can update the visible profile and economy fields. Credentials stay admin-only.'}
-                        </p>
-                      </div>
-                      <div className="rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
-                        <p>Role: {user.role}</p>
-                        <p>Status: {user.isActive ? 'Active' : 'Inactive'}</p>
-                        <p>Last login: {user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString() : 'Never'}</p>
-                      </div>
-                    </div>
-
-                    <div className="grid gap-4 lg:grid-cols-3">
-                      <div className="space-y-2 rounded-2xl border border-[var(--border)] bg-[var(--background)] p-3">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">Identity</p>
-                        <input
-                          value={userDraft.username}
-                          onChange={(event) => setUserDraft((prev) => (prev ? { ...prev, username: event.target.value } : prev))}
-                          placeholder="Username"
-                          disabled={!viewerIsAdmin}
-                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
-                        />
-                        <input
-                          value={userDraft.email}
-                          onChange={(event) => setUserDraft((prev) => (prev ? { ...prev, email: event.target.value } : prev))}
-                          placeholder="Email"
-                          type="email"
-                          disabled={!viewerIsAdmin}
-                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
-                        />
-                        <input
-                          value={userDraft.displayName}
-                          onChange={(event) => setUserDraft((prev) => (prev ? { ...prev, displayName: event.target.value } : prev))}
-                          placeholder="Display name"
-                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-                        />
-                      </div>
-
-                      <div className="space-y-2 rounded-2xl border border-[var(--border)] bg-[var(--background)] p-3">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">Access & status</p>
-                        <Select
-                          value={userDraft.role}
-                          onChange={(event) => setUserDraft((prev) => (prev ? { ...prev, role: event.target.value as UserDraft['role'] } : prev))}
-                          disabled={!viewerIsAdmin}
-                          className="h-[42px] rounded-xl border bg-[var(--card)] px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          <option value="USER">USER</option>
-                          <option value="MOD">MOD</option>
-                          <option value="ADMIN">ADMIN</option>
-                        </Select>
-                        <label className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm">
-                          <input
-                            type="checkbox"
-                            checked={userDraft.isActive}
-                            onChange={(event) => setUserDraft((prev) => (prev ? { ...prev, isActive: event.target.checked } : prev))}
-                          />
-                          Account active
-                        </label>
-                        <input
-                          value={userDraft.password}
-                          onChange={(event) => setUserDraft((prev) => (prev ? { ...prev, password: event.target.value } : prev))}
-                          placeholder={viewerIsAdmin ? 'New password (optional)' : 'Password changes are admin-only'}
-                          type="password"
-                          autoComplete="new-password"
-                          disabled={!viewerIsAdmin}
-                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
-                        />
-                        <p className="text-xs text-[var(--muted-foreground)]">
-                          Leave the password empty to keep the current one.
-                        </p>
-                      </div>
-
-                      <div className="space-y-2 rounded-2xl border border-[var(--border)] bg-[var(--background)] p-3">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">Economy</p>
-                        <input
-                          value={userDraft.credits}
-                          onChange={(event) => setUserDraft((prev) => (prev ? { ...prev, credits: event.target.value } : prev))}
-                          placeholder="Credits"
-                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-                        />
-                        <input
-                          value={userDraft.balance}
-                          onChange={(event) => setUserDraft((prev) => (prev ? { ...prev, balance: event.target.value } : prev))}
-                          placeholder="Balance"
-                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-                        />
-                        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
-                          Credits affect platform usage, while balance is the wallet-style numeric field used elsewhere in staff tooling.
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 flex flex-wrap items-center gap-2">
-                      <button type="button" onClick={() => void saveUserEdit()} className={successButtonClass}>
-                        <Save className="h-4 w-4" />
-                        Save user
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingUserId(null);
-                          setUserDraft(null);
-                        }}
-                        className={secondaryButtonClass}
-                      >
-                        <X className="h-4 w-4" />
-                        Cancel
-                      </button>
-                      {viewerIsAdmin ? (
-                        <button type="button" onClick={() => void deleteUserAsStaff()} className={`ml-auto ${dangerButtonClass}`}>
-                          <Trash2 className="h-4 w-4" />
-                          Delete user
-                        </button>
-                      ) : null}
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-            );
-          })}
-        </div>
-      </section>
+        <UsersView
+          filteredUsers={filteredUsers}
+          query={query}
+          onQueryChange={setQuery}
+          editingUserId={editingUserId}
+          userDraft={userDraft}
+          onStartUserEdit={startUserEdit}
+          onUserDraftChange={setUserDraft}
+          onSaveUserEdit={saveUserEdit}
+          onCancelUserEdit={() => { setEditingUserId(null); setUserDraft(null); }}
+          onDeleteUser={deleteUserAsStaff}
+          viewerIsAdmin={viewerIsAdmin}
+        />
       ) : null}
 
       {activeView === 'robots' ? (
-        <section className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-        <h3 className="mb-4 text-lg font-bold">Manage Robots</h3>
-        <div className="space-y-3">
-          {(overview?.robots ?? []).map((robot) => {
-            const isEditing = editingRobotId === robot.id && robotDraft;
-            return (
-              <div key={robot.id} className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--background)]">
-                <div className="flex flex-wrap items-center gap-2 px-3 py-3 text-sm">
-                  <span className="font-medium">{robot.name}</span>
-                  <span className="text-[var(--muted-foreground)]">/{robot.slug}</span>
-                  <span className="rounded-full bg-[var(--muted)] px-2 py-0.5 text-xs">{robot.status}</span>
-                  <span className="rounded-full bg-[var(--muted)] px-2 py-0.5 text-xs">{robot.visibility}</span>
-                  <span className="rounded-full bg-[var(--muted)] px-2 py-0.5 text-xs">{robot.accessMode}</span>
-                  <span className="text-[var(--muted-foreground)]">Owner: {robot.owner.displayName ?? robot.owner.username}</span>
-                  <div className="ml-auto flex flex-wrap items-center gap-2">
-                    <Link href={`/robot/${robot.owner.username}/${robot.slug}`} className={primaryButtonClass}>
-                      Preview
-                    </Link>
-                    <button type="button" onClick={() => startRobotEdit(robot)} className={successButtonClass}>
-                      {isEditing ? 'Editing' : 'Edit'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void deleteRobotAsStaff(robot.id, robot.name)}
-                      className={dangerButtonClass}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                      Delete
-                    </button>
-                  </div>
-                </div>
-
-                {isEditing ? (
-                  <div className="border-t border-[var(--border)] bg-[var(--card)]/80 p-4">
-                    <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Edit robot</p>
-                        <p className="mt-1 text-sm font-semibold">{robot.name}</p>
-                        <p className="text-xs text-[var(--muted-foreground)]">
-                          This mirrors the current dashboard settings more closely, including slug, room access, queue mode, ACL and stream tuning.
-                        </p>
-                      </div>
-                      <div className="rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
-                        <p>Status: {robot.status}</p>
-                        <p>Owner: {robot.owner.displayName ?? robot.owner.username}</p>
-                        <p>{queueModeDescription(robotDraft.queueMode)}</p>
-                      </div>
-                    </div>
-
-                    <div className="grid gap-4 xl:grid-cols-3">
-                      <div className="space-y-2 rounded-2xl border border-[var(--border)] bg-[var(--background)] p-3 xl:col-span-1">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">Identity</p>
-                        <input
-                          value={robotDraft.name}
-                          onChange={(event) => setRobotDraft((prev) => (prev ? { ...prev, name: event.target.value } : prev))}
-                          placeholder="Name"
-                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-                        />
-                        <input
-                          value={robotDraft.slug}
-                          onChange={(event) => setRobotDraft((prev) => (prev ? { ...prev, slug: event.target.value } : prev))}
-                          placeholder="Slug"
-                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-                        />
-                        <input
-                          value={robotDraft.tags}
-                          onChange={(event) => setRobotDraft((prev) => (prev ? { ...prev, tags: event.target.value } : prev))}
-                          placeholder="Tags (comma separated)"
-                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-                        />
-                        <textarea
-                          value={robotDraft.description}
-                          onChange={(event) => setRobotDraft((prev) => (prev ? { ...prev, description: event.target.value } : prev))}
-                          placeholder="Description"
-                          rows={5}
-                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-                        />
-                      </div>
-
-                      <div className="space-y-2 rounded-2xl border border-[var(--border)] bg-[var(--background)] p-3 xl:col-span-1">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">Room access</p>
-                        <Select
-                          value={robotDraft.roomMode}
-                          onChange={(event) => setRobotDraft((prev) => (prev ? { ...prev, roomMode: event.target.value as RobotDraft['roomMode'] } : prev))}
-                          className="h-[42px] rounded-xl border bg-[var(--card)] px-3 py-2 text-sm"
-                        >
-                          <option value="PUBLIC">PUBLIC</option>
-                          <option value="LINK_ONLY">LINK_ONLY</option>
-                          <option value="PASSWORD">PASSWORD</option>
-                          <option value="ALLOWED_USERS">ALLOWED_USERS</option>
-                          <option value="PRIVATE">PRIVATE</option>
-                        </Select>
-                        <p className="text-xs text-[var(--muted-foreground)]">{roomModeDescription(robotDraft.roomMode)}</p>
-                        {robotDraft.roomMode === 'PASSWORD' ? (
-                          <input
-                            value={robotDraft.accessPassword}
-                            onChange={(event) => setRobotDraft((prev) => (prev ? { ...prev, accessPassword: event.target.value } : prev))}
-                            placeholder="Set new room password"
-                            className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-                          />
-                        ) : null}
-                        <Select
-                          value={robotDraft.queueMode}
-                          onChange={(event) => setRobotDraft((prev) => (prev ? { ...prev, queueMode: event.target.value as RobotDraft['queueMode'] } : prev))}
-                          className="h-[42px] rounded-xl border bg-[var(--card)] px-3 py-2 text-sm"
-                        >
-                          <option value="FIRST_COME">FIRST_COME</option>
-                          <option value="VOTING">VOTING</option>
-                          <option value="DISABLED">DISABLED</option>
-                        </Select>
-                        <p className="text-xs text-[var(--muted-foreground)]">{queueModeDescription(robotDraft.queueMode)}</p>
-                        <div className="grid gap-2 sm:grid-cols-2">
-                          <Select
-                            value={robotDraft.aclVideo}
-                            onChange={(event) => setRobotDraft((prev) => (prev ? { ...prev, aclVideo: event.target.value as RobotDraft['aclVideo'] } : prev))}
-                            className="h-[42px] rounded-xl border bg-[var(--card)] px-3 py-2 text-sm"
-                          >
-                            <option value="ALL">Video: ALL</option>
-                            <option value="AUTHENTICATED">Video: AUTHENTICATED</option>
-                            <option value="DISABLED">Video: DISABLED</option>
-                          </Select>
-                          <Select
-                            value={robotDraft.aclControl}
-                            onChange={(event) => setRobotDraft((prev) => (prev ? { ...prev, aclControl: event.target.value as RobotDraft['aclControl'] } : prev))}
-                            className="h-[42px] rounded-xl border bg-[var(--card)] px-3 py-2 text-sm"
-                          >
-                            <option value="ALL">Control: ALL</option>
-                            <option value="AUTHENTICATED">Control: AUTHENTICATED</option>
-                            <option value="DISABLED">Control: DISABLED</option>
-                          </Select>
-                          <Select
-                            value={robotDraft.aclChat}
-                            onChange={(event) => setRobotDraft((prev) => (prev ? { ...prev, aclChat: event.target.value as RobotDraft['aclChat'] } : prev))}
-                            className="h-[42px] rounded-xl border bg-[var(--card)] px-3 py-2 text-sm"
-                          >
-                            <option value="ALL">Chat: ALL</option>
-                            <option value="AUTHENTICATED">Chat: AUTHENTICATED</option>
-                            <option value="DISABLED">Chat: DISABLED</option>
-                          </Select>
-                          <Select
-                            value={robotDraft.aclEStop}
-                            onChange={(event) => setRobotDraft((prev) => (prev ? { ...prev, aclEStop: event.target.value as RobotDraft['aclEStop'] } : prev))}
-                            className="h-[42px] rounded-xl border bg-[var(--card)] px-3 py-2 text-sm"
-                          >
-                            <option value="ALL">E-Stop: ALL</option>
-                            <option value="AUTHENTICATED">E-Stop: AUTHENTICATED</option>
-                            <option value="DISABLED">E-Stop: DISABLED</option>
-                          </Select>
-                        </div>
-                      </div>
-
-                      <div className="space-y-2 rounded-2xl border border-[var(--border)] bg-[var(--background)] p-3 xl:col-span-1">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">Limits & stream</p>
-                        <input
-                          value={robotDraft.maxTurnTime}
-                          onChange={(event) => setRobotDraft((prev) => (prev ? { ...prev, maxTurnTime: event.target.value } : prev))}
-                          placeholder="Max turn time (ms)"
-                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-                        />
-                        <input
-                          value={robotDraft.maxViewers}
-                          onChange={(event) => setRobotDraft((prev) => (prev ? { ...prev, maxViewers: event.target.value } : prev))}
-                          placeholder="Max viewers"
-                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-                        />
-                        <input
-                          value={robotDraft.maxControllers}
-                          onChange={(event) => setRobotDraft((prev) => (prev ? { ...prev, maxControllers: event.target.value } : prev))}
-                          placeholder="Max controllers"
-                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-                        />
-                        <input
-                          value={robotDraft.targetBitrateKbps}
-                          onChange={(event) => setRobotDraft((prev) => (prev ? { ...prev, targetBitrateKbps: event.target.value } : prev))}
-                          placeholder="Target bitrate kbps"
-                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-                        />
-                        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
-                          Leave bitrate empty to keep the current stream tuning. Valid values stay in the 150-3000 kbps range.
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 flex flex-wrap items-center gap-2">
-                      <button type="button" onClick={() => void saveRobotEdit()} className={successButtonClass}>
-                        <Save className="h-4 w-4" />
-                        Save robot
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingRobotId(null);
-                          setRobotDraft(null);
-                        }}
-                        className={secondaryButtonClass}
-                      >
-                        <X className="h-4 w-4" />
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-            );
-          })}
-        </div>
-      </section>
+        <RobotsView
+          robots={overview?.robots ?? []}
+          editingRobotId={editingRobotId}
+          robotDraft={robotDraft}
+          onStartRobotEdit={startRobotEdit}
+          onRobotDraftChange={setRobotDraft}
+          onSaveRobotEdit={saveRobotEdit}
+          onCancelRobotEdit={() => { setEditingRobotId(null); setRobotDraft(null); }}
+          onDeleteRobot={deleteRobotAsStaff}
+        />
       ) : null}
     </div>
   );

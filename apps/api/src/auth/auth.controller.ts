@@ -1,4 +1,4 @@
-import { Controller, Post, Body, HttpCode, HttpStatus, Headers, Res } from '@nestjs/common';
+import { Controller, Post, Get, Query, Body, HttpCode, HttpStatus, Headers, Res, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
@@ -15,6 +15,7 @@ import {
   parseCookie,
   shouldUseSecureAuthCookies,
 } from './auth.cookies';
+import { CsrfOriginGuard } from './guards/csrf-origin.guard';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -25,6 +26,7 @@ export class AuthController {
   ) {}
 
   @Post('register')
+  @UseGuards(CsrfOriginGuard)
   @ApiOperation({ summary: 'Register a new user' })
   async register(
     @Body() body: { username: string; email: string; password: string; displayName?: string },
@@ -37,6 +39,7 @@ export class AuthController {
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(CsrfOriginGuard)
   @ApiOperation({ summary: 'Login with email/password' })
   async login(
     @Body() body: { email: string; password: string },
@@ -49,6 +52,7 @@ export class AuthController {
 
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(CsrfOriginGuard)
   @ApiOperation({ summary: 'Refresh access token' })
   async refresh(
     @Body() body: { refreshToken?: string } | undefined,
@@ -65,6 +69,7 @@ export class AuthController {
 
   @Post('logout')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(CsrfOriginGuard)
   @ApiOperation({ summary: 'Logout / revoke refresh tokens' })
   async logout(
     @Headers('authorization') authorization: string | undefined,
@@ -92,6 +97,7 @@ export class AuthController {
 
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(CsrfOriginGuard)
   @ApiOperation({ summary: 'Request a password reset email' })
   async forgotPassword(@Body() body: { email: string }) {
     return this.authService.requestPasswordReset(body);
@@ -99,9 +105,17 @@ export class AuthController {
 
   @Post('reset-password')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(CsrfOriginGuard)
   @ApiOperation({ summary: 'Reset password with token' })
   async resetPassword(@Body() body: { token: string; password: string }) {
     return this.authService.resetPassword(body);
+  }
+
+  @Get('verify-email')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Verify email address with one-time token' })
+  async verifyEmail(@Query('token') token: string) {
+    return this.authService.verifyEmail(token);
   }
 
   private applyAuthCookies(reply: FastifyReply, accessToken: string, refreshToken: string) {

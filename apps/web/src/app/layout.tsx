@@ -2,7 +2,9 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { Inter } from 'next/font/google';
 import './globals.css';
+import { CookieBanner } from '@/components/cookie-banner';
 import Nav from '@/components/nav';
+import { ThemeController } from '@/components/theme-controller';
 import { ToastStack } from '@/components/ui/toast-stack';
 
 const inter = Inter({
@@ -54,8 +56,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className="dark">
       <body className={`${inter.variable} flex min-h-screen flex-col bg-[var(--background)] text-[var(--foreground)] antialiased`}>
+        <ThemeController />
         <Nav />
         <ToastStack />
+        <CookieBanner />
         <main className="flex-1">{children}</main>
         <footer className="border-t border-[var(--border)] bg-[var(--background)]/96">
           <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-6 text-sm text-[var(--muted-foreground)] sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
@@ -75,7 +79,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <a
                 href="https://github.com/onlybrezel/botparty-client/blob/main/docs/index.md"
                 target="_blank"
-                rel="noreferrer"
+                rel="noopener noreferrer"
                 className="transition hover:text-[var(--foreground)]"
               >
                 Robot Setup

@@ -201,6 +201,16 @@ docker compose up -d --build
 
 The API container runs `prisma db push` and seeds the database on first start. Check logs with `docker compose logs -f api`.
 
+For faster iteration you can build or start only the parts you changed:
+
+```bash
+pnpm docker:build:api
+pnpm docker:build:web
+pnpm docker:build:app
+pnpm docker:up:core
+pnpm docker:up:app
+```
+
 ### SSL with Let's Encrypt
 
 The setup wizard walks through this, but the short version:

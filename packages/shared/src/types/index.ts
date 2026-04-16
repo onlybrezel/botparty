@@ -153,3 +153,88 @@ export interface LatencyReport {
   rttMs: number;
   timestamp: number;
 }
+
+// ─── WebSocket Event Payloads ─────────────────────────
+// These are the data shapes sent/received over the WebSocket gateway.
+// Both API gateway and frontend consumers should use these types.
+
+export interface WsPresenceUser {
+  userId: string;
+  username: string;
+  displayName: string | null;
+}
+
+export interface WsPresenceJoinPayload {
+  userId: string;
+  username: string;
+  displayName: string | null;
+}
+
+export interface WsPresenceUpdatePayload {
+  viewers: WsPresenceUser[];
+}
+
+export interface WsQueueEntry {
+  userId: string;
+  username: string;
+  displayName: string | null;
+  position: number;
+  joinedAt: string;
+  votes?: number;
+}
+
+export interface WsQueueUpdatePayload {
+  queue: WsQueueEntry[];
+}
+
+export interface WsQueueTurnStartPayload {
+  userId: string;
+  durationSec: number;
+  expiresAt: string;
+}
+
+export interface WsRobotStatusPayload {
+  status: RobotStatus;
+}
+
+export interface WsChatMessagePayload {
+  id: string;
+  userId: string;
+  username: string;
+  displayName: string | null;
+  content: string;
+  ts: number;
+  isStaff?: boolean;
+  isMod?: boolean;
+}
+
+export interface WsModActionPayload {
+  action: 'TIMEOUT' | 'KICK' | 'BAN' | 'UNBAN' | 'WARN';
+  targetUserId: string;
+  reason?: string;
+  durationSec?: number;
+  expiresAt?: string;
+  moderatorUsername?: string;
+}
+
+export interface WsSessionStartPayload {
+  userId: string;
+  username: string;
+  displayName: string | null;
+  expiresAt: string;
+}
+
+export interface WsCrowdInputPayload {
+  command: string;
+  userId: string;
+  username: string;
+}
+
+export interface WsControlLatencyWarningPayload {
+  rttMs: number;
+}
+
+export interface WsChatSystemPayload {
+  message: string;
+  level?: 'info' | 'warning' | 'error';
+}

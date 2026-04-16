@@ -127,13 +127,25 @@ export class SessionsService {
 
   async endAllActiveSessions() {
     const now = new Date();
-    await this.prisma.session.updateMany({
+    const active = await this.prisma.session.findMany({
       where: { status: 'ACTIVE' },
-      data: {
-        status: 'ENDED',
-        endedAt: now,
-      },
+      select: { id: true, startedAt: true },
     });
+
+    if (active.length === 0) return;
+
+    for (const session of active) {
+      await this.prisma.session.update({
+        where: { id: session.id },
+        data: {
+          status: 'ENDED',
+          endedAt: now,
+          durationMs: now.getTime() - session.startedAt.getTime(),
+        },
+      });
+    }
+
+    this.logger.log(`Reconciled ${active.length} orphaned active session(s) on startup`);
   }
 
   private async findByRobotUnsafe(robotId: string, limit = 50) {
