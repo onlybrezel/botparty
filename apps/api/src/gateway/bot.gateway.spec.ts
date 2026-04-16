@@ -136,7 +136,7 @@ describe('BotGateway', () => {
       });
 
       // Connection should close socket on auth failure
-      await gateway.handleConnection(mockSocket, []);
+      await gateway.handleConnection(mockSocket, {});
       expect(mockSocket.close).toHaveBeenCalledWith(4001, expect.any(String));
     });
 
@@ -150,7 +150,7 @@ describe('BotGateway', () => {
 
       jwtService.verify.mockReturnValueOnce({ userId: 'user-1', sub: 'user-1' });
 
-      await gateway.handleConnection(mockSocket, []);
+      await gateway.handleConnection(mockSocket, {});
       // Socket should not be closed on valid token
       expect(mockSocket.close).not.toHaveBeenCalled();
     });
@@ -162,7 +162,7 @@ describe('BotGateway', () => {
       } as any;
 
       jwtService.verify.mockReturnValueOnce({ userId: 'user-1', sub: 'user-1' });
-      await gateway.handleConnection(mockSocket, []);
+      await gateway.handleConnection(mockSocket, {});
 
       await gateway.handleDisconnect(mockSocket);
       // Should clean up client state without throwing
