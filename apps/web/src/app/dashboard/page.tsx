@@ -37,6 +37,7 @@ import {
   DASHBOARD_SECTIONS,
   detectRoomMode,
   toUpdatePayload,
+  validateRobotFormSchedule,
   formFromRobot,
   buildWidgetSpec,
   draftFromControl,
@@ -452,6 +453,13 @@ export default function DashboardPage() {
     event.preventDefault();
     if (!accessToken) return;
 
+    const scheduleError = validateRobotFormSchedule(createForm);
+    if (scheduleError) {
+      setError(scheduleError);
+      pushToast(scheduleError, 'error', 3200);
+      return;
+    }
+
     setCreating(true);
     setError(null);
     setStatus(null);
@@ -478,6 +486,13 @@ export default function DashboardPage() {
   const handleSave = async (event: FormEvent) => {
     event.preventDefault();
     if (!accessToken || !selectedRobot) return;
+
+    const scheduleError = validateRobotFormSchedule(editForm);
+    if (scheduleError) {
+      setError(scheduleError);
+      pushToast(scheduleError, 'error', 3200);
+      return;
+    }
 
     setSaving(true);
     setError(null);

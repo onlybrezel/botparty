@@ -18,6 +18,31 @@ const robotSlugSchema = z
     'Slug must be 3-50 lowercase alphanumeric characters and hyphens, without a leading or trailing hyphen',
   );
 
+const robotScheduleDateTimeSchema = z.string().datetime({ offset: true });
+
+function validateRobotScheduleRange(
+  data: { scheduleStart?: string | null; scheduleEnd?: string | null },
+  ctx: z.RefinementCtx,
+) {
+  if (!data.scheduleStart || !data.scheduleEnd) {
+    return;
+  }
+
+  const start = Date.parse(data.scheduleStart);
+  const end = Date.parse(data.scheduleEnd);
+  if (Number.isNaN(start) || Number.isNaN(end)) {
+    return;
+  }
+
+  if (end <= start) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['scheduleEnd'],
+      message: 'Schedule end must be later than schedule start',
+    });
+  }
+}
+
 // ─── Auth Schemas ────────────────────────────────────
 export const usernameSchema = z
   .string()
@@ -51,7 +76,7 @@ export const resetPasswordSchema = z.object({
 });
 
 // ─── Robot Schemas ───────────────────────────────────
-export const createRobotSchema = z.object({
+const robotWriteSchema = z.object({
   name: z.string().min(1).max(LIMITS.MAX_ROBOT_NAME_LENGTH),
   slug: robotSlugSchema.optional(),
   description: z.string().max(LIMITS.MAX_ROBOT_DESCRIPTION_LENGTH).optional(),
@@ -87,11 +112,16 @@ export const createRobotSchema = z.object({
       cameras: z.array(robotStreamCameraSchema).max(8).optional(),
     })
     .optional(),
+  scheduleStart: robotScheduleDateTimeSchema.nullable().optional(),
+  scheduleEnd: robotScheduleDateTimeSchema.nullable().optional(),
+  timezone: z.string().trim().min(1).max(64).default('UTC'),
 });
 
-export const updateRobotSchema = createRobotSchema.partial().extend({
+export const createRobotSchema = robotWriteSchema.superRefine(validateRobotScheduleRange);
+
+export const updateRobotSchema = robotWriteSchema.partial().extend({
   slug: robotSlugSchema.optional(),
-});
+}).superRefine(validateRobotScheduleRange);
 
 // ─── Control Schemas ─────────────────────────────────
 export const controlCommandSchema = z.object({

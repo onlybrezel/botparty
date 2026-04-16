@@ -21,6 +21,7 @@ import { isStaffRole } from '../common/robot-access';
 import { RobotTelemetryService } from './robot-telemetry.service';
 import { RobotThumbnailService } from './robot-thumbnail.service';
 import { RobotAccessService } from './robot-access.service';
+import { RobotWebhookService } from './robot-webhook.service';
 import { SLUG_PROFANITY_TERMS } from './profanity-terms';
 
 export type GuestAccess = 'ALL' | 'AUTHENTICATED' | 'DISABLED';
@@ -147,6 +148,7 @@ export class RobotsService implements OnModuleDestroy {
     private readonly telemetry: RobotTelemetryService,
     private readonly thumbnail: RobotThumbnailService,
     private readonly access: RobotAccessService,
+    private readonly webhooks: RobotWebhookService,
   ) {}
 
   onModuleDestroy() {
@@ -686,13 +688,22 @@ export class RobotsService implements OnModuleDestroy {
     return this.access.removeAllowedUser(robotId, ownerId, userId);
   }
   async updateStatus(id: string, status: 'ONLINE' | 'OFFLINE' | 'BUSY' | 'MAINTENANCE') {
-    return this.prisma.robot.update({
+    const previous = await this.prisma.robot.findUnique({
+      where: { id },
+      select: { status: true },
+    });
+    const updated = await this.prisma.robot.update({
       where: { id },
       data: {
         status,
         lastOnlineAt: status === 'ONLINE' ? new Date() : undefined,
       },
+      select: { id: true, name: true, slug: true, status: true },
     });
+    if (previous?.status !== updated.status) {
+      this.webhooks.emitRobotStatus(updated);
+    }
+    return updated;
   }
 
   async touchHeartbeat(id: string) {
@@ -1226,6 +1237,9 @@ export class RobotsService implements OnModuleDestroy {
       visibility: string;
       accessMode: string;
       queueMode: string;
+      scheduleStart?: Date | null;
+      scheduleEnd?: Date | null;
+      timezone?: string;
       maxTurnTime: number;
       maxViewers: number;
       maxControllers: number;
@@ -1250,6 +1264,9 @@ export class RobotsService implements OnModuleDestroy {
       visibility: robot.visibility,
       accessMode: robot.accessMode,
       queueMode: robot.queueMode,
+      scheduleStart: robot.scheduleStart ? robot.scheduleStart.toISOString() : null,
+      scheduleEnd: robot.scheduleEnd ? robot.scheduleEnd.toISOString() : null,
+      timezone: robot.timezone ?? 'UTC',
       maxTurnTime: robot.maxTurnTime,
       maxViewers: robot.maxViewers,
       maxControllers: robot.maxControllers,

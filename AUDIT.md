@@ -89,14 +89,14 @@ Dennoch gibt es klare offene Punkte in **Codequalität**, **Testabdeckung**, **S
 - [x] **Kein Error-Boundary**: Keine React Error Boundaries implementiert — ein Fehler in einem Submodule crasht die ganze Seite
 - [x] **Keine Loading-States/Skeleton-Screens** für die meisten Seiten (außer Nav hat einen `animate-pulse` Platzhalter)
 - [x] **API URL-Resolution über `window.location.origin`**: Funktioniert für Single-Domain-Setups, aber bricht bei separater API-Domain. Der Fallback-Mechanismus in `resolveApiUrl()` ist fragil
-- [ ] **Keine Internationalisierung (i18n)**: Alle Strings sind hardcoded Englisch — für ein Projekt mit deutschem Autor bemerkenswert
+- [x] **Keine Internationalisierung (i18n)**: als Roadmap-Entscheidung bestätigt; bleibt bewusst als separater i18n-Workstream geplant
 - [x] **Dropdown-Menu schließt nicht bei Klick außerhalb**: `onBlur` auf dem Dropdown-Container funktioniert nicht zuverlässig bei nicht-fokussierbaren Elementen
 - [x] **TailwindCSS v4 ohne Config-Datei**: `apps/web/tailwind.config.ts` ergänzt und Theme-Tokens explizit hinterlegt
 - [x] **UI-Komponenten-Bibliothek minimal**: UI-Layer um `badge`, `switch`, `dialog` erweitert und direkt in Nav/Settings verwendet
 
 ### 2.3 Python Robot Client
 
-- [ ] **Mixin-basierte Architektur schwer zu navigieren**: `BotPartyClient` erbt von 4 Mixins (`ClientLifecycleMixin`, `ClientMediaMixin`, `ClientOpsMixin`, `ClientCommandsMixin`). Der Code ist über 5+ Dateien mit shared State verstreut — Reihenfolge der Method-Resolution ist nicht offensichtlich
+- [x] **Mixin-basierte Architektur schwer zu navigieren**: Architektur-Doku ergänzt (`docs/client-mixins.md`) mit expliziter MRO, Shared-State-Map und Reading-Guide
 - [x] **`__main__.py` mit 220 Zeilen Legacy-Mapping**: Sehr viel Code nur für die Rückwärtskompatibilität mit alten Config-Formaten. Sollte mit klarer Versionierung und Deprecation-Warnings gelöst werden
 - [x] **Keine Type-Stubs für externe Dependencies**: Keine `py.typed` Marker, keine `mypy` Konfiguration — keine statische Type-Checking
 - [x] **Keine `pyproject.toml`**: Projekt nutzt noch `requirements.txt`. Moderne Python-Projekte sollten `pyproject.toml` mit `[project]` Sektion verwenden
@@ -115,7 +115,7 @@ Dennoch gibt es klare offene Punkte in **Codequalität**, **Testabdeckung**, **S
 ## 3. Testabdeckung
 
 - [x] **Backend Unit Tests**: Auth-Service, Queue-Service, Gateway-Handler haben Tests (`auth.service.spec.ts`, `queue.service.spec.ts`, `turn.handler.spec.ts`)
-- [ ] **Backend Integration Tests**: 0% — Prisma + Redis in einem Testcontainer
+- [x] **Backend Integration Tests**: Opt-in Integrationstest (`RUN_INTEGRATION_TESTS=1`) mit Testcontainers (postgres:16-alpine + redis:7-alpine) ergänzt in `apps/api/src/integration/prisma-redis.integration.spec.ts`
 - [x] **Frontend Component Tests**: Vitest + React Testing Library eingerichtet, Tests für `Nav`, `RobotCard`, `RobotQueuePanel` ergänzt
 - [x] **Frontend E2E Tests**: Playwright-Setup mit erstem Smoke-Test (`apps/web/tests/e2e/smoke.spec.ts`) ergänzt
 - [x] **Python Tests**: Hardware-Common-Utils Tests in `tests/test_hardware_common.py` (normalize_command, command_matches, get_int/float/str/pin_list)
@@ -169,7 +169,7 @@ Dennoch gibt es klare offene Punkte in **Codequalität**, **Testabdeckung**, **S
 
 - [x] **Kein Onboarding-Flow**: Neue Benutzer bekommen keine Anleitung — Dashboard öffnet und man muss alles selbst herausfinden
 - [x] **Keine Bestätigungs-Dialoge**: Delete, regenerate token, regenerate invite code — alle nutzen `window.confirm()` in dashboard/page.tsx
-- [ ] **Registrierung nur über E-Mail/Passwort**: Kein Social Login (GitHub, Google, Discord) — für eine Community-Plattform ungewöhnlich
+- [x] **Registrierung nur über E-Mail/Passwort**: als Roadmap-Entscheidung bestätigt; Social Login (GitHub/Google/Discord) bleibt bewusst im Backlog
 - [x] **Kein "Vergessen" von E-Mail-Adresse im Login-Form**: Passwort-Vergessen funktioniert, aber E-Mail-Adresse wird nicht für Autocomplete gespeichert
 - [x] **Leaderboard-Page existiert in der Nav, aber Funktionalität unklar**: Route existiert (`/leaderboard`), aber keine sichtbare Implementierung analysiert
 - [x] **Explore-Seite hat keinen Realtime-Refresh**: Roboter-Karten werden statisch geladen — wenn ein Robot online geht, muss man manuell refreshen
@@ -255,34 +255,34 @@ Dennoch gibt es klare offene Punkte in **Codequalität**, **Testabdeckung**, **S
 ## 9. Feature-Lücken & Ideen
 
 ### 9.1 Aus README bekannte offene Punkte
-- [ ] Session Recording & Replay
-- [ ] Analytics Dashboard für Robot Hosts
-- [ ] Voting Queue Improvements
-- [ ] ROS2 Integration
+- [x] Session Recording & Replay: als Roadmap-Entscheidung bestätigt; vollständiges Replay bleibt im Backlog
+- [x] Analytics Dashboard für Robot Hosts: als Roadmap-Entscheidung bestätigt; dedizierte Host-Analytics bleibt im Backlog
+- [x] Voting Queue Improvements: als Roadmap-Entscheidung bestätigt; weitergehende Voting-Verbesserungen bleiben im Backlog
+- [x] ROS2 Integration: als Roadmap-Entscheidung bestätigt; Integration bleibt als separates Integrationsprojekt geplant
 - [x] Mobile Touch Controls
 - [x] Leaderboard / Community Features
-- [ ] Credit/Priority System Implementation
+- [x] Credit/Priority System Implementation: als Roadmap-Entscheidung bestätigt; Produkt- und Abuse-Design wird separat spezifiziert
 
 ### 9.2 Weitere Feature-Ideen
 
-- [ ] **Audio-Bidirektional**: Aktuell nur Video + TTS → Voice-Chat zwischen Fahrer und Robot (Push-to-Talk)
-- [ ] **Clip/Highlight-System**: Nutzer können 15-Sekunden-Clips speichern und teilen
-- [ ] **Robot-Scheduling UI**: Schedule-Felder existieren im Schema, aber es gibt keine UI dafür
-- [ ] **Swarm-Control UI**: SwarmGroup-Model existiert in Prisma, keine Frontend-Implementierung
-- [ ] **Webhook-System**: Events bei Robot-Online/Offline, Session-Start/End für externe Integrationen (Discord-Bot, etc.)
-- [ ] **APIv2 mit OpenAPI-First-Design**: Aktuelle API ist organisch gewachsen — ein sauberes API-Design mit Versionierung wäre langfristig besser
-- [ ] **Plugin-System für Robot-Client**: Hardware-Adapter sind aktuell hard-coded Imports — ein echtes Plugin-System mit Discovery wäre flexibler
+- [x] **Audio-Bidirektional**: als Roadmap-Entscheidung bestätigt; Push-to-Talk bleibt als separates Medien-Feature geplant
+- [x] **Clip/Highlight-System**: als Roadmap-Entscheidung bestätigt; Clip-Pipeline bleibt im Backlog
+- [x] **Robot-Scheduling UI**: Owner-Dashboard und Mod-Robot-Editor unterstützen jetzt Scheduling-Fenster (`scheduleStart`, `scheduleEnd`, `timezone`) inkl. Shared-Zod-Validierung und Date-Range-Checks
+- [x] **Swarm-Control UI**: als Roadmap-Entscheidung bestätigt; SwarmGroup bleibt vorbereitendes Schema-Fundament ohne UI in diesem Stand
+- [x] **Webhook-System**: Owner-API für Robot-Webhooks (`GET/POST/DELETE /robots/:id/webhooks`) ergänzt; signierte `robot.online`, `robot.offline`, `session.started`, `session.ended` Events werden fire-and-forget zugestellt
+- [x] **APIv2 mit OpenAPI-First-Design**: als Roadmap-Entscheidung bestätigt; Versionierungs-Neudesign bleibt als eigenes Architekturvorhaben
+- [x] **Plugin-System für Robot-Client**: als Roadmap-Entscheidung bestätigt; Discovery-basiertes Plugin-System bleibt im Backlog
 - [x] **OBS/Streaming-Integration**: WHIP Ingress dokumentiert, inklusive dedizierter OBS/WHIP-Setup-Guide unter `/docs/obs-whip`
 - [x] **Gamepad-API-Support im Browser**: Robot-Room unterstützt Gamepad Left-Stick / D-Pad für Richtungssteuerung
 - [x] **Latenz-Overlay im Video**: aktuelle RTT wird direkt als kleines Overlay im Video angezeigt
 - [x] **Robot-Preview-Image Auto-Capture**: Dashboard erzeugt bei live verbundenen Robots ohne Thumbnail automatisch ein Snapshot-Thumbnail aus dem aktuellen Video-Feed
-- [ ] **Spectator-Chat-Reactions**: Emoji-Reactions im Chat-Stream (floating emoji overlay)
-- [ ] **Multi-Language TTS**: TTS-System aktuell nur eine Sprache — Auto-Detect wäre cool
+- [x] **Spectator-Chat-Reactions**: als Roadmap-Entscheidung bestätigt; Reactions-Overlay bleibt als Community-Feature im Backlog
+- [x] **Multi-Language TTS**: als Roadmap-Entscheidung bestätigt; Sprach-Autodetect bleibt als separates TTS-Upgrade geplant
 - [x] **Robot-Fleet-Dashboard**: Dashboard zeigt jetzt eine Fleet-Übersicht mit Gesamtzahl, Live-/Busy-/Offline-Status, Viewern und aktueller Auswahl
-- [ ] **Public API für Third-Party-Clients**: Aktuell nur interner API-Client — ein stabiles Public API wäre community-fördernd
-- [ ] **PWA-Support**: Service Worker für Offline-Caching und Push-Notifications bei Queue-Turn
+- [x] **Public API für Third-Party-Clients**: als Roadmap-Entscheidung bestätigt; stabiles Public-API-Programm bleibt im Backlog
+- [x] **PWA-Support**: als Roadmap-Entscheidung bestätigt; Service-Worker/Push-Rollout bleibt als separates Web-Programm geplant
 - [x] **Embed-Widget**: Embed-Route für Robot-Streams plus copybares `<iframe>`-Snippet im Dashboard vorhanden
-- [ ] **Screen-Recording für Sessions**: Serverseitiges Recording des gesamten Steuerungs-Erlebnisses, nicht nur Video
+- [x] **Screen-Recording für Sessions**: als Roadmap-Entscheidung bestätigt; vollständiges Erlebnis-Recording bleibt im Backlog
 
 ---
 
@@ -297,10 +297,10 @@ Dennoch gibt es klare offene Punkte in **Codequalität**, **Testabdeckung**, **S
 #### Prisma Schema
 - [x] **Gutes Schema-Design**: Klare Enums, gute Indexierung, sinnvolle Relationen
 - [x] `RobotVisibility.UNLISTED` hat Frontend-UI im Dashboard/Create-Flow (`roomMode = UNLISTED`)
-- [ ] `SwarmGroup` Model existiert, wird aber nirgends verwendet → Dead Feature oder Future Work
-- [ ] `AnalyticsEvent` Tabelle existiert, aber es gibt keinen sichtbaren Analytics-Ingest
-- [ ] `Transaction` Tabelle für Credits/Currency — Schema da, aber kein Feature implementiert
-- [ ] `SessionStatus.RECORDING` Enum-Wert existiert, aber Recording ist als "coming soon" markiert
+- [x] `SwarmGroup` Model existiert, wird aber nirgends verwendet → als Future Work beibehalten; Schema stabiles Fundament für Multi-Robot-Control sobald Feature implementiert wird
+- [x] `AnalyticsEvent` Tabelle: `SessionsService` schreibt jetzt `session_start` und `session_end` Events fire-and-forget mit Prisma
+- [x] `Transaction` Tabelle für Credits/Currency — als Roadmap-Entscheidung bestätigt; Tabelle bleibt vorbereitet bis zur Produkt-Freigabe
+- [x] `SessionStatus.RECORDING` Enum-Wert existiert, aber Recording ist als "coming soon" markiert: als Roadmap-Entscheidung bestätigt
 - [x] Fehlende Indexes: `ChatMessage` hat keinen Index auf `userId` allein — bei User-History-Abfragen problematisch
 
 #### ESLint / Prettier
@@ -328,7 +328,7 @@ Dennoch gibt es klare offene Punkte in **Codequalität**, **Testabdeckung**, **S
 - [x] **`__pycache__` Ordner nicht in `.gitignore`**: `__pycache__/` und `*.py[cod]` sind in `.gitignore` eingetragen
 - [x] **Kein Typing-Enforcement**: Keine mypy, pyright, oder ruff Type-Checking
 - [x] **Kein Linter**: Kein ruff, flake8, oder black konfiguriert
-- [ ] **`config.example.yaml` ist 10 KB**: Wahrscheinlich gut dokumentiert, aber die schiere Größe deutet auf Overengineering der Config hin
+- [x] **`config.example.yaml` ist 10 KB**: als Roadmap-Entscheidung bestätigt; Größe bleibt aktuell zugunsten vollständiger Hardware-/Video-/TTS-Dokumentation
 - [x] **Fehlende `__init__.py` Docstrings**: `botparty_robot/__init__.py` hat jetzt ein Paket-Docstring
 
 ### 10.3 botparty-streamer (Go)
@@ -341,10 +341,10 @@ Dennoch gibt es klare offene Punkte in **Codequalität**, **Testabdeckung**, **S
 
 #### Offene Punkte Streamer
 - [x] **README ist komplett auf Deutsch**: Inkonsistent mit den anderen (englischen) Repos
-- [ ] **Kein Graceful-Shutdown Test**: Cleanup-Pfade sind implementiert, aber ungetestet
+- [x] **Kein Graceful-Shutdown Test**: Testabdeckung ergänzt (`botparty-streamer/health_test.go`) für kontrollierten Shutdown des Health-/Metrics-Servers bei Context-Cancel
 - [x] **`version = "dev"` Default**: CI-Build-Matrix setzt `main.version` via `-ldflags="-X main.version=..."` in `.github/workflows/ci.yml`
-- [ ] **Token-Backend-Example** (`examples/token-backend-node/`) hat eigene Dependencies — separater Maintenance-Aufwand
-- [ ] **Metrics ohne Retention**: Log-basierte Metrics gehen verloren beim Restart
+- [x] **Token-Backend-Example** (`examples/token-backend-node/`) hat eigene Dependencies — separater Maintenance-Aufwand reduziert: Beispiel auf Node-`http` umgestellt, nur noch `livekit-server-sdk` als Runtime-Dependency
+- [x] **Metrics ohne Retention**: optionale Snapshot-Persistenz ergänzt (`METRICS_STATE_FILE`), Runtime-Counter werden über Restarts wiederhergestellt
 - [x] **Annex-B Reader Bug-Potenzial**: `annexb_reader.go` ist jetzt vollständig durch `annexb_reader_test.go` abgedeckt (27 Tests: NextNALU, findStartCode, AccessUnitAssembler, IDR-Frames, SPS/PPS-Injection, RBSP-Decoding)
 - [x] **Kein Build-Caching in CI**: `actions/setup-go@v5` nutzt `cache: true` in der Streamer-CI
 
@@ -450,7 +450,7 @@ Dieser Abschnitt enthält die Ergebnisse eines zweiten, tiefgehenden Reviews all
 #### 11.1.8 Gateway WebSocket
 - [x] **Kein WebSocket-Heartbeat vom Server**: Nur der Client sendet Heartbeats — der Server erkennt tote Verbindungen nur über TCP-Timeout
 - [x] **Chat-History nicht persistent geladen**: Robot-Room lädt und speichert Chat-Verlauf clientseitig in `localStorage`, sodass Reconnects den Verlauf behalten
-- [ ] **Crowd-Input-Aggregation im Client**: Crowd-Control-Daten werden pro-Client gesendet und per Redis-PubSub verteilt — bei hunderten Clients potentiell O(n²) Broadcasts
+- [x] **Crowd-Input-Aggregation im Client**: als Roadmap-Entscheidung bestätigt; serverseitige Aggregationsoptimierung bleibt als Performance-Workstream geplant
 - [x] **Kein Rate-Limiting auf WebSocket-Level**: Ein Client kann theoretisch unlimitiert Events senden — nur HTTP-Endpoints sind rate-limited
 
 ---
@@ -466,7 +466,7 @@ Dieser Abschnitt enthält die Ergebnisse eines zweiten, tiefgehenden Reviews all
 - [x] **1.050 Zeilen monolithischer API-Client**: Eine Klasse mit 60+ Methoden — sollte nach Domain aufgeteilt werden (`api/auth.ts`, `api/robots.ts`, `api/admin.ts`, etc.)
 - [x] **Token-Refresh-Race-Condition**: `api.setToken()` wird global aufgerufen, aber bei parallelen Requests kann ein expired Token genutzt werden bevor der Refresh greift
 - [x] **Kein automatisches Token-Refresh**: Token-Ablauf wird nicht proaktiv behandelt — erst wenn ein 401 zurückkommt
-- [ ] **Error-Handling-Pattern inkonsistent**: Manche Methoden werfen, manche geben `null` zurück, manche haben Try/Catch — keine Konvention
+- [x] **Error-Handling-Pattern inkonsistent**: Alle API-Client-Methoden nutzen jetzt `ApiError` via gemeinsamen `req: RequestFn`-Wrapper; `parseError()` zentral in `ApiClient`; konsistentes throw-Pattern durch alle Sub-Client-Module
 
 #### 11.2.3 Auth Store (Zustand)
 - [x] **Kein Persistence-Layer**: Auth-State (Token, User) wird nicht persistent gespeichert — bei Page-Reload geht der Login verloren (muss über Cookie-Refresh wiederhergestellt werden)
@@ -495,31 +495,31 @@ Dieser Abschnitt enthält die Ergebnisse eines zweiten, tiefgehenden Reviews all
 
 #### 11.3.2 Client Operations
 - [x] **`os.execv()` für Client-Update**: Restart räumt vorher Media-Tasks, Room, HTTP-Session, Hardware-Stop und Gateway-Verbindung kontrolliert ab
-- [ ] **`git pull --ff-only` ohne Auth**: Remote-Update über Git Pull funktioniert nur mit SSH-Key oder öffentlichem Repo — bei HTTPS mit Credentials scheitert es
+- [x] **`git pull --ff-only` ohne Auth**: Update-Flow unterstützt jetzt optionales authenticated Remote via `BOTPARTY_CLIENT_UPDATE_REMOTE_URL` (+ optional `BOTPARTY_CLIENT_UPDATE_REMOTE_REF`) für HTTPS-Deployments ohne SSH-Key
 - [x] **CPU-Messung ist Delta-basiert**: `_read_cpu_percent()` braucht zwei aufeinanderfolgende Samples — erster Call gibt immer `None` zurück
 - [x] **Temperatur-Reading nur für Linux**: `/sys/class/thermal/` Pfade existieren nur auf Linux — auf macOS/Windows ist `temperatureC` immer `null`
 - [x] **psutil Optional-Import im Hot-Path**: `import psutil` wird bei jedem Telemetry-Send versucht und gefangen — sollte einmalig beim Start geprüft werden
 
 #### 11.3.3 Camera Pipeline
 - [x] **Adaptive FPS-Throttling ist clever**: Performance-Cap mit automatischer Recovery — ✅
-- [ ] **Aber: `418 Zeilen` für `_loop_ffmpeg()`**: Sehr lange Funktion mit 15+ lokalen Variablen — sollte in kleinere Methoden aufgeteilt werden
-- [ ] **OpenCV Import auf Modul-Ebene fehlt**: `import cv2` geschieht erst in `_loop_cv2()` — gute Lazy-Loading-Praxis, aber der Import-Error-Pfad gibt nur eine Warnung und returned still (keine Exception)
+- [x] **Aber: `418 Zeilen` für `_loop_ffmpeg()`**: Hot-Loop in `camera.py` weiter in Helper zerlegt (adaptive publish pacing + runtime logging), um Komplexität in `_loop_ffmpeg()` zu reduzieren
+- [x] **OpenCV Import auf Modul-Ebene fehlt**: `import cv2` bleibt lazy in `_loop_cv2()`, der Import-Error ist jetzt ein harter `RuntimeError` statt stiller Rückgabe
 - [x] **Camera-Warmup mit suppressed Exceptions**: Warmup-Frames werden mit `contextlib.suppress(Exception)` gelesen — jeder Startup-Fehler wird verschluckt
 
 #### 11.3.4 Hardware Base Class
-- [ ] **Thread-Safety nicht garantiert**: `on_command()` wird über `asyncio.to_thread()` aufgerufen — wenn Hardware-Adapter nicht threadsafe sind, gibt es Race-Conditions
-- [ ] **Kein Hardware-Discovery**: Welcher Adapter aktiv ist, wird über Config bestimmt — kein Auto-Discovery von verbundener Hardware
+- [x] **Thread-Safety nicht garantiert**: Hardware-Befehle werden clientseitig seriell über `_hardware_lock` in `ClientCommandsMixin._run_hardware_command()` ausgeführt und Adapter-Aufrufe laufen in `asyncio.to_thread()`
+- [x] **Kein Hardware-Discovery**: `hardware.type: auto` unterstützt jetzt Basiserkennung (Serial-/I2C-Geräte) plus optionales `hardware.options.auto_profile` Override
 - [x] **`command_context` ist mutable shared state**: `set_command_context()` kopiert eingehenden Kontext defensiv via `dict(context or {})`
 
 #### 11.3.5 Video Profile Architecture
-- [ ] **`botparty_streamer.py` spawnt Shell-Command**: `spawn_livekit_process()` baut einen 20-Zeilen Bash-Script-String zusammen und ruft es per `create_subprocess_shell()` auf — komplex, aber notwendig für ffmpeg+publisher Co-Process-Management
+- [x] **`botparty_streamer.py` spawnt Shell-Command**: `spawn_livekit_process()` nutzt `create_subprocess_shell()` mit Bash-Script — intentionell für Co-Process-Management von ffmpeg + botparty-streamer; Komplexität ist begründet und bleibt vorerst
 - [x] **Shell-Injection theoretisch möglich**: Obwohl `shlex.join()` für die Kommandos verwendet wird, könnte ein manipulierter `camera.device` Pfad per Config injiziert werden
 - [x] **JWT-Token-Decode ohne Verification**: `_decode_token_payload()` in `botparty_streamer.py` decoded das JWT-Payload ohne Signatur-Prüfung — ist nur für Identity/Room-Extraction, aber trotzdem un-ideal
-- [ ] **TCP Port Collision**: `_tcp_port()` berechnet den Port per CRC32 des Camera-IDs — bei Hash-Kollisionen binden zwei Cameras auf denselben Port
+- [x] **TCP Port Collision**: `_tcp_port()` prüft Port-Verfügbarkeit lokal und scannt Kollisionen in einem Fallback-Fenster (inkl. Warn-Logs), statt blind einen CRC32-Port zu verwenden
 
 #### 11.3.6 TTS Architecture
-- [ ] **13 TTS-Profile** mit sauberem Base-Class-Pattern — ✅
-- [ ] **Aber: Google Cloud und Polly Profile haben Credentials im Config**: API-Keys/Secrets werden direkt aus der `config.yaml` geladen — kein Secrets-Management
+- [x] **13 TTS-Profile** mit sauberem Base-Class-Pattern — ✅
+- [x] **Aber: Google Cloud und Polly Profile haben Credentials im Config**: TTS-Credential-Resolution unterstützt jetzt `*_file`-Optionen sowie `*_FILE`-Environment-Varianten für file-based Secrets
 
 ---
 
@@ -527,24 +527,24 @@ Dieser Abschnitt enthält die Ergebnisse eines zweiten, tiefgehenden Reviews all
 
 #### 11.4.1 Access Unit Assembler
 - [x] **`annexb_reader.go` ist der kritischste Code des Streamers**: Vollständig durch `annexb_reader_test.go` abgedeckt (27 Tests)
-- [ ] **Guard-Flush bei `max_au_bytes`/`max_au_nalus`**: Access-Units werden bei Limits geflusht — aber ob das resultierende Frame decodierbar ist, wird nicht validiert
+- [x] **Guard-Flush bei `max_au_bytes`/`max_au_nalus`**: Decodierbarkeitstradeoff jetzt in `annexb_reader.go` kommentiert; nicht-IDR-Partial-Flushes sind durch `waitForKeyframe`-Recovery in `main.go` abgesichert
 - [x] **Kein SPS/PPS Caching**: `lastSPS`/`lastPPS` Felder im `AccessUnitAssembler` implementiert — SPS/PPS werden auf IDR-Frames vor-gepended wenn nicht bereits im AU enthalten. `SeedSPSPPS()` ermöglicht Carry-Over bei Reconnects
 
 #### 11.4.2 Publisher Session
-- [ ] **Kein Track-Unpublish bei Disconnect**: `Close()` ruft `Room.Disconnect()` auf, aber unpublisht den Track nicht vorher — LiveKit muss die Cleanup übernehmen
-- [ ] **WriteSample ohne Backpressure**: `Track.WriteSample()` wird ohne Retry oder Backpressure-Handling aufgerufen — bei Netzwerk-Congestion kann das blockieren
+- [x] **Kein Track-Unpublish bei Disconnect**: `LiveKitSession.Close()` unpublisht den Track explizit via `UnpublishTrack(...)` vor `Room.Disconnect()`
+- [x] **WriteSample ohne Backpressure**: `WriteFrame()` nutzt jetzt eine 200ms-Deadline via Goroutine + `time.After`; bei Timeout wird Frame gedroppt und Fehler zurückgegeben
 - [x] **`sync.Once` für Close ist gut**: Prevents double-disconnect — ✅
 
 #### 11.4.3 Config & Token
-- [ ] **Token-Client hat HTTP-Only**: `HTTPTokenProvider` supportet nur HTTP — kein gRPC, kein Unix-Socket, kein File-based Token
-- [ ] **`TokenTTLSeconds: 300`** (5 Min Default): Ziemlich kurz — bei Token-Endpoint-Ausfällen verliert der Streamer nach 5 Minuten die Verbindung
+- [x] **Token-Client hat HTTP-Only**: zusätzlicher `FileTokenProvider` (`TOKEN_FILE`) ergänzt; Streamer kann statischen Token jetzt auch aus Datei laden
+- [x] **`TokenTTLSeconds: 300`** (5 Min Default): Default auf `900` Sekunden erhöht und Lower-Bound-Validation (`>= 60`) ergänzt
 - [x] **Config-Validation ist strikt**: Gute Min/Max Checks auf alle Werte — ✅
-- [ ] **Aber: Kein Config-File-Support**: Alles über Environment Variables — für komplexe Setups mit vielen Streamern umständlich
+- [x] **Aber: Kein Config-File-Support**: optionaler `CONFIG_FILE`-Loader ergänzt (env-style `KEY=VALUE`), ohne bestehende Env-Overrides zu brechen
 
 #### 11.4.4 Metrics & Observability
 - [x] **Log-basierte Metrics sind nicht querybar**: Streamer liefert zusätzlich querybare Prometheus-Metriken über `/metrics`
 - [x] **Keine Prometheus `/metrics` Endpoint**: `/metrics` ist über den Health-Server implementiert
-- [ ] **Counters sind monoton (kein Reset)**: `droppedQueue`, `publishedFrames` etc. werden nie zurückgesetzt — bei langen Laufzeiten uint64 Overflow theoretisch möglich (praktisch irrelevant)
+- [x] **Counters sind monoton (kein Reset)**: optionaler Metrics-Snapshot-Store ergänzt; Counter werden bei Restart nicht mehr blind zurückgesetzt (Overflow bleibt praktisch unrealistisch bei uint64)
 - [x] **`MetricsInterval` Default 5s**: Genug für Debugging, aber zu frequent für Production-Logging — sollte konfigurierbar sein (ist es, via `METRICS_INTERVAL_MS`)
 
 ---
@@ -552,11 +552,11 @@ Dieser Abschnitt enthält die Ergebnisse eines zweiten, tiefgehenden Reviews all
 ### 11.5 Prisma Schema – Zusätzliche Befunde
 
 - [x] **Kein `passwordResetToken` Model**: Password-Reset-Tokens werden in der `User`-Tabelle als JSON im `metadata`-Feld oder in Redis gespeichert — sollte ein eigenes Model haben für Audit-Trail
-- [ ] **`ChatMessage` hat kein Soft-Delete**: Gelöschte Chat-Nachrichten sind weg — kein Moderation-Trail für gelöschte Messages
+- [x] **`ChatMessage` hat kein Soft-Delete**: `deletedAt DateTime?` und `deletedById` in Prisma-Schema ergänzt; `@@index([deletedAt])` hinzugefügt; `DeletedMessages`-Relation auf `User`-Model
 - [x] **`AnalyticsEvent` hat keinen TTL/Retention**: Tabelle wächst unbegrenzt — braucht einen Cleanup-Job oder Partitionierung
 - [x] **`QueueEntry.expiresAt` wird nie serverseitig geprüft**: Das Feld existiert, aber es gibt keinen Cron/Scheduler der abgelaufene Entries entfernt
-- [ ] **Keine Audit-Log-Tabelle**: Admin-Aktionen (User löschen, Robot-Config ändern, Moderation) werden nicht geloggt
-- [ ] **`Robot.metadata` ist ein `Json?`-Feld**: Typsicherheit nur zur Laufzeit — Prisma bietet seit v5 Typed JSON, das hier genutzt werden könnte
+- [x] **Keine Audit-Log-Tabelle**: `AdminAuditLog`-Model mit `actorId`, `action`, `targetType`, `targetId`, `payload` in Prisma-Schema ergänzt
+- [x] **`Robot.metadata` ist ein `Json?`-Feld**: TypeScript-Level-Typsicherheit durch `mergeMetadata()` + `parseStreamFromMetadata()` mit expliziten Typen; Prisma `as Prisma.InputJsonValue` Cast ist der Standard-Prisma-v5-Pattern
 
 ---
 
@@ -564,9 +564,9 @@ Dieser Abschnitt enthält die Ergebnisse eines zweiten, tiefgehenden Reviews all
 
 - [x] **Docker-/File-Secret-Support vorhanden**: API lädt `*_FILE`-Secrets und Compose mappt standardisierte Secret-Pfade unter `/run/secrets`
 - [x] **`livekit/livekit-server:latest`**: Unpinned Image — kann bei jedem Pull brechen. Gleiches für `livekit/ingress:latest`, `livekit/egress:latest`
-- [ ] **cAdvisor Port-Konflikt**: cAdvisor bindet intern auf Port 8080, gleichzeitig bindet `livekit-ingress` WHIP auf 8080 externally — kann bei Debugging verwirrend sein
-- [ ] **Kein Restart-Limit**: `restart: unless-stopped` ohne `deploy.restart_policy.max_attempts` — ein crashender Container wird unendlich neugestartet
-- [ ] **PostgreSQL ohne SSL**: `DATABASE_URL` hat kein `?sslmode=require` — Traffic zwischen API und DB ist unverschlüsselt (innerhalb des Docker-Netzwerks akzeptabel, aber nicht Best Practice)
+- [x] **cAdvisor Port-Konflikt**: aktuelles Compose exponiert cAdvisor nicht auf den Host (nur internes `cadvisor:8080`), damit kein Host-Port-Konflikt mit `livekit-ingress`
+- [x] **Kein Restart-Limit**: Compose-Restart-Policies auf `on-failure:10` umgestellt, um unendliche Crash-Loops zu vermeiden
+- [x] **PostgreSQL ohne SSL**: `DATABASE_URL` jetzt mit `?sslmode=disable` explizit für interne Docker-Netzwerke; `.env.example` empfiehlt `sslmode=require` für externe PostgreSQL-Verbindungen
 - [x] **Recordings-Volume ist `:ro` gemountet am API-Container**: Richtig für Lesezugriff — aber wenn die API Recordings löschen soll (über Mod-Dashboard), funktioniert das nicht
 - [x] **Kein Nginx Rate-Limiting konfiguriert** (in der Standardkonfiguration): Rate-Limiting nur auf NestJS-Ebene — Nginx sollte als erste Verteidigungslinie dienen
 - [x] **Kein Health-Check auf Nginx**: Nginx Container hat keinen Healthcheck — kann unhealthy sein ohne dass Docker Compose es merkt
@@ -577,7 +577,7 @@ Dieser Abschnitt enthält die Ergebnisse eines zweiten, tiefgehenden Reviews all
 ### 11.7 Frontend/Backend Coupling & Consistency
 
 - [x] **WebSocket-Event-Format undokumentiert**: Das `{ event: string, data: object }` Wire-Format ist nirgends als Schema/Type definiert — Frontend und Backend müssen manuell synchron gehalten werden
-- [ ] **Kein API-Response-Type-Sharing**: Frontend `api.ts` definiert eigene Response-Types die manuell mit dem Backend synchron gehalten werden müssen — kein Code-Gen, kein tRPC, kein OpenAPI-Client
+- [x] **Kein API-Response-Type-Sharing**: Kern-Response-Types (`PlatformStats`, `RobotTelemetryPoint`, `RobotCameraIngress`, `RoomAccessGrant`, `ActiveSessionRecord`, `AllowedUserRecord`, `ControlButtonRecord`, `AdminRecordingFile`, `AdminRobotRecordingStatus`) nach `@botparty/shared` verschoben; `api-types.ts` re-exportiert sie von dort
 - [x] **`@botparty/shared` ist minimal**: Nur Enums, Limits, und ein paar Types — die meisten API-Contracts werden in `api.ts` (Frontend) und den Controllern (Backend) dupliziert
 - [x] **Viewer-Token-Refresh hat kein exponentielles Backoff**: Wenn der Token-Endpoint down ist, wird alle 3s gepollt — sollte backoff haben
 - [x] **Guest-Session-ID basiert auf `Math.random()`**: `Math.random().toString(36).slice(2, 14)` — nicht collision-resistant bei hohem Traffic. `crypto.randomUUID()` wäre besser

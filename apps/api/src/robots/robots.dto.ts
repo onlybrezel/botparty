@@ -3,8 +3,13 @@ import {
   IsOptional,
   IsBoolean,
   IsArray,
+  ArrayNotEmpty,
+  IsIn,
+  IsUrl,
   MaxLength,
 } from 'class-validator';
+
+const ROBOT_WEBHOOK_EVENTS = ['robot.online', 'robot.offline', 'session.started', 'session.ended'] as const;
 
 export class UploadThumbnailDto {
   @IsString()
@@ -69,4 +74,20 @@ export class IngestRobotLogsDto {
   @IsString({ each: true })
   @MaxLength(4096, { each: true })
   lines!: string[];
+}
+
+export class CreateRobotWebhookDto {
+  @IsUrl({ require_tld: false })
+  @MaxLength(1024)
+  url!: string;
+
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsString({ each: true })
+  @IsIn(ROBOT_WEBHOOK_EVENTS, { each: true })
+  events!: Array<(typeof ROBOT_WEBHOOK_EVENTS)[number]>;
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
 }

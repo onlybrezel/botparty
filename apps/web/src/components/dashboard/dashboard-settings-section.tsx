@@ -210,6 +210,59 @@ export function DashboardSettingsSection({
           </p>
         </div>
 
+        <div className="space-y-2 rounded-lg border border-[var(--border)] bg-[var(--background)] p-3 sm:col-span-2">
+          <label className="flex items-center justify-between gap-3 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
+            <span>Scheduling Window</span>
+            <input
+              type="checkbox"
+              checked={editForm.scheduleEnabled}
+              onChange={(event) =>
+                setEditForm((prev) => ({
+                  ...prev,
+                  scheduleEnabled: event.target.checked,
+                  scheduleStart: event.target.checked ? prev.scheduleStart : '',
+                  scheduleEnd: event.target.checked ? prev.scheduleEnd : '',
+                }))
+              }
+              className="h-4 w-4"
+            />
+          </label>
+          <p className="text-[11px] leading-relaxed text-[var(--muted-foreground)]">
+            Use this to publish an expected availability window for your robot. The selected timezone is stored alongside the UTC timestamps.
+          </p>
+          {editForm.scheduleEnabled ? (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Start</label>
+                <input
+                  type="datetime-local"
+                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                  value={editForm.scheduleStart}
+                  onChange={(event) => setEditForm((prev) => ({ ...prev, scheduleStart: event.target.value }))}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">End</label>
+                <input
+                  type="datetime-local"
+                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                  value={editForm.scheduleEnd}
+                  onChange={(event) => setEditForm((prev) => ({ ...prev, scheduleEnd: event.target.value }))}
+                />
+              </div>
+              <div className="space-y-1 sm:col-span-2">
+                <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Timezone</label>
+                <input
+                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                  value={editForm.timezone}
+                  onChange={(event) => setEditForm((prev) => ({ ...prev, timezone: event.target.value }))}
+                  placeholder="Europe/Berlin"
+                />
+              </div>
+            </div>
+          ) : null}
+        </div>
+
         <AclPicker
           title="Video Access"
           value={editForm.aclVideo}

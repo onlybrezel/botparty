@@ -61,6 +61,9 @@ export class ModerationApi {
         visibility: 'PUBLIC' | 'UNLISTED' | 'PRIVATE';
         accessMode: 'OPEN' | 'PASSWORD' | 'LINK_ONLY' | 'ALLOWED_USERS';
         queueMode: 'FIRST_COME' | 'VOTING' | 'DISABLED';
+        scheduleStart: string | null;
+        scheduleEnd: string | null;
+        timezone: string;
         maxTurnTime: number;
         maxViewers: number;
         maxControllers: number;

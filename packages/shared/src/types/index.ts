@@ -10,7 +10,7 @@ import type {
   chatMessageSchema,
   queueJoinSchema,
 } from '../schemas/index.js';
-import type { Role, RobotVisibility, RobotAccessMode, QueueMode, RobotStatus } from '../constants/index.js';
+import type { Role, RobotVisibility, RobotAccessMode, QueueMode, RobotStatus, ControlButtonAccess } from '../constants/index.js';
 
 // ─── Auth ────────────────────────────────────────────
 export type LoginInput = z.infer<typeof loginSchema>;
@@ -64,6 +64,9 @@ export interface RobotPublic {
   visibility: RobotVisibility;
   accessMode: RobotAccessMode;
   queueMode: QueueMode;
+  scheduleStart?: string | null;
+  scheduleEnd?: string | null;
+  timezone?: string;
   maxTurnTime: number;
   maxViewers: number;
   maxControllers: number;
@@ -238,3 +241,105 @@ export interface WsChatSystemPayload {
   message: string;
   level?: 'info' | 'warning' | 'error';
 }
+
+  // ─── API Response Types ──────────────────────────────
+  // Canonical response shapes shared between API and web.
+
+  export interface PlatformStats {
+    totalUsers: number;
+    totalRobots: number;
+    liveRobots: number;
+    totalLiveViewers: number;
+    activeQueueEntries: number;
+    totalSessions: number;
+    timestamp: string;
+  }
+
+  export interface RobotTelemetryPoint {
+    ts: number;
+    clientVersion: string | null;
+    botpartyStreamerVersion?: string | null;
+    gitBranch: string | null;
+    gitCommit: string | null;
+    gitDirty: boolean;
+    pythonVersion: string | null;
+    cpuPercent: number | null;
+    memoryPercent: number | null;
+    temperatureC: number | null;
+    uptimeSec: number | null;
+    controlConnected: boolean;
+    livekitConnected: boolean;
+    commandsReceived: number;
+    cameraFrames: number;
+  }
+
+  export interface RobotCameraIngress {
+    type: 'WHIP';
+    ingressId: string;
+    url: string;
+    streamKey: string;
+    endpointUrl: string;
+    participantIdentity?: string;
+    participantName?: string;
+    enableTranscoding: boolean;
+    cameraId: string | null;
+    isLive: boolean;
+  }
+
+  export interface RoomAccessGrant {
+    token: string;
+    expiresAt: string;
+  }
+
+  export interface ActiveSessionRecord {
+    id: string;
+    startedAt: string;
+    endedAt?: string | null;
+    user: Pick<UserPublic, 'id' | 'username' | 'displayName'>;
+  }
+
+  export interface AllowedUserRecord {
+    id: string;
+    username: string;
+    displayName: string | null;
+    avatarUrl: string | null;
+    addedAt: string;
+  }
+
+  export interface ControlButtonRecord {
+    id: string;
+    label: string;
+    command: string;
+    hotKey: string | null;
+    icon: string | null;
+    cooldownMs: number;
+    access: ControlButtonAccess;
+    position: number;
+    color: string | null;
+    isEnabled?: boolean;
+  }
+
+  export interface AdminRecordingFile {
+    fileName: string;
+    sizeBytes: number;
+    modifiedAt: string;
+    robotId: string | null;
+    cameraId?: string | null;
+    recordedAt?: string | null;
+  }
+
+  export interface AdminRobotRecordingStatus {
+    roomName: string;
+    active: boolean;
+    activeCount: number;
+    egressId: string | null;
+    startedAt: string | null;
+    sessions: Array<{
+      egressId: string;
+      cameraId: string | null;
+      videoTrackId: string | null;
+      audioTrackId: string | null;
+      startedAt: string | null;
+    }>;
+    updatedAt: string;
+  }

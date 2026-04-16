@@ -22,6 +22,10 @@ type RobotDraft = {
   description: string;
   roomMode: 'PUBLIC' | 'LINK_ONLY' | 'PASSWORD' | 'ALLOWED_USERS' | 'PRIVATE';
   queueMode: 'FIRST_COME' | 'VOTING' | 'DISABLED';
+  scheduleEnabled: boolean;
+  scheduleStart: string;
+  scheduleEnd: string;
+  timezone: string;
   aclVideo: AclLevel;
   aclControl: AclLevel;
   aclChat: AclLevel;
@@ -167,6 +171,42 @@ export function RobotsView({
                         <option value="DISABLED">DISABLED</option>
                       </Select>
                       <p className="text-xs text-[var(--muted-foreground)]">{queueModeDescription(robotDraft.queueMode)}</p>
+                      <label className="flex items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
+                        <span>Scheduling window</span>
+                        <input
+                          type="checkbox"
+                          checked={robotDraft.scheduleEnabled}
+                          onChange={(event) => onRobotDraftChange((prev) => (prev ? {
+                            ...prev,
+                            scheduleEnabled: event.target.checked,
+                            scheduleStart: event.target.checked ? prev.scheduleStart : '',
+                            scheduleEnd: event.target.checked ? prev.scheduleEnd : '',
+                          } : prev))}
+                          className="h-4 w-4"
+                        />
+                      </label>
+                      {robotDraft.scheduleEnabled ? (
+                        <>
+                          <input
+                            type="datetime-local"
+                            value={robotDraft.scheduleStart}
+                            onChange={(event) => onRobotDraftChange((prev) => (prev ? { ...prev, scheduleStart: event.target.value } : prev))}
+                            className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                          />
+                          <input
+                            type="datetime-local"
+                            value={robotDraft.scheduleEnd}
+                            onChange={(event) => onRobotDraftChange((prev) => (prev ? { ...prev, scheduleEnd: event.target.value } : prev))}
+                            className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                          />
+                          <input
+                            value={robotDraft.timezone}
+                            onChange={(event) => onRobotDraftChange((prev) => (prev ? { ...prev, timezone: event.target.value } : prev))}
+                            placeholder="Timezone (e.g. Europe/Berlin)"
+                            className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                          />
+                        </>
+                      ) : null}
                       <div className="grid gap-2 sm:grid-cols-2">
                         <Select
                           value={robotDraft.aclVideo}

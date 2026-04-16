@@ -74,6 +74,50 @@ export function CreateRobotPanel({ createForm, setCreateForm, onSubmit, creating
             <option value="ALLOWED_USERS">Allowed users only</option>
             <option value="PRIVATE">Private room</option>
           </Select>
+
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
+            <label className="flex items-center justify-between gap-3 text-sm font-medium">
+              <span>Scheduling window</span>
+              <input
+                type="checkbox"
+                checked={createForm.scheduleEnabled}
+                onChange={(event) =>
+                  setCreateForm((prev) => ({
+                    ...prev,
+                    scheduleEnabled: event.target.checked,
+                    scheduleStart: event.target.checked ? prev.scheduleStart : '',
+                    scheduleEnd: event.target.checked ? prev.scheduleEnd : '',
+                  }))
+                }
+                className="h-4 w-4"
+              />
+            </label>
+            <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+              Limit when the robot is expected to be available. Times are stored in UTC with the selected timezone for display context.
+            </p>
+            {createForm.scheduleEnabled ? (
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <input
+                  type="datetime-local"
+                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                  value={createForm.scheduleStart}
+                  onChange={(event) => setCreateForm((prev) => ({ ...prev, scheduleStart: event.target.value }))}
+                />
+                <input
+                  type="datetime-local"
+                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                  value={createForm.scheduleEnd}
+                  onChange={(event) => setCreateForm((prev) => ({ ...prev, scheduleEnd: event.target.value }))}
+                />
+                <input
+                  className="sm:col-span-2 w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+                  placeholder="Timezone, e.g. Europe/Berlin"
+                  value={createForm.timezone}
+                  onChange={(event) => setCreateForm((prev) => ({ ...prev, timezone: event.target.value }))}
+                />
+              </div>
+            ) : null}
+          </div>
         </div>
 
         <button

@@ -52,12 +52,35 @@ export type RobotFormState = {
   aclChat: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
   aclEStop: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
   targetBitrateKbps: string;
+  scheduleEnabled: boolean;
+  scheduleStart: string;
+  scheduleEnd: string;
+  timezone: string;
   maxTurnTime: number;
   maxViewers: number;
   maxControllers: number;
   tags: string;
   accessPassword: string;
 };
+
+function detectDefaultTimezone() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+}
+
+function toLocalDateTimeInput(value?: string | null) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const pad = (part: number) => String(part).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function toIsoDateTime(value: string) {
+  if (!value.trim()) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString();
+}
 
 export const LOCAL_SETTINGS_KEY = 'botparty.settings.v1';
 
@@ -73,6 +96,10 @@ export const DEFAULT_CREATE_FORM: RobotFormState = {
   aclChat: 'AUTHENTICATED',
   aclEStop: 'AUTHENTICATED',
   targetBitrateKbps: '1800',
+  scheduleEnabled: false,
+  scheduleStart: '',
+  scheduleEnd: '',
+  timezone: detectDefaultTimezone(),
   maxTurnTime: 60000,
   maxViewers: 1000,
   maxControllers: 10,
@@ -196,6 +223,8 @@ export function toUpdatePayload(form: RobotFormState) {
   const bitrate = Number(form.targetBitrateKbps);
   const hasBitrate = Number.isFinite(bitrate) && bitrate >= 150 && bitrate <= 3000;
   const { visibility, accessMode } = roomModeToFields(form.roomMode);
+  const scheduleStart = form.scheduleEnabled ? toIsoDateTime(form.scheduleStart) : null;
+  const scheduleEnd = form.scheduleEnabled ? toIsoDateTime(form.scheduleEnd) : null;
 
   return {
     name: form.name.trim(),
@@ -214,6 +243,9 @@ export function toUpdatePayload(form: RobotFormState) {
     stream: {
       targetBitrateKbps: hasBitrate ? Math.round(bitrate) : undefined,
     },
+    scheduleStart,
+    scheduleEnd,
+    timezone: form.timezone.trim() || detectDefaultTimezone(),
     maxTurnTime: Number(form.maxTurnTime),
     maxViewers: Number(form.maxViewers),
     maxControllers: Number(form.maxControllers),
@@ -222,9 +254,36 @@ export function toUpdatePayload(form: RobotFormState) {
   };
 }
 
+export function validateRobotFormSchedule(form: RobotFormState) {
+  if (!form.scheduleEnabled) {
+    return null;
+  }
+
+  if (!form.scheduleStart || !form.scheduleEnd) {
+    return 'Select both a schedule start and end time.';
+  }
+
+  const scheduleStart = Date.parse(form.scheduleStart);
+  const scheduleEnd = Date.parse(form.scheduleEnd);
+  if (Number.isNaN(scheduleStart) || Number.isNaN(scheduleEnd)) {
+    return 'Schedule dates must be valid.';
+  }
+
+  if (scheduleEnd <= scheduleStart) {
+    return 'Schedule end must be later than the start time.';
+  }
+
+  if (!form.timezone.trim()) {
+    return 'Timezone is required when scheduling is enabled.';
+  }
+
+  return null;
+}
+
 export function formFromRobot(robot: RobotManaged): RobotFormState {
   const access = robot.metadata?.access;
   const stream = robot.metadata?.stream;
+  const scheduleEnabled = Boolean(robot.scheduleStart && robot.scheduleEnd);
 
   return {
     name: robot.name,
@@ -238,6 +297,10 @@ export function formFromRobot(robot: RobotManaged): RobotFormState {
     aclChat: access?.chat ?? 'AUTHENTICATED',
     aclEStop: access?.estop ?? 'AUTHENTICATED',
     targetBitrateKbps: typeof stream?.targetBitrateKbps === 'number' ? String(stream.targetBitrateKbps) : '',
+    scheduleEnabled,
+    scheduleStart: toLocalDateTimeInput(robot.scheduleStart),
+    scheduleEnd: toLocalDateTimeInput(robot.scheduleEnd),
+    timezone: robot.timezone ?? detectDefaultTimezone(),
     maxTurnTime: robot.maxTurnTime,
     maxViewers: robot.maxViewers,
     maxControllers: robot.maxControllers,
@@ -300,7 +363,7 @@ export function draftFromControl(button: ControlButtonRecord): ControlButtonDraf
     return draft;
   }
 
-  const parts = icon.split(':').map((part) => part.trim()).filter(Boolean);
+  const parts = icon.split(':').map((part: string) => part.trim()).filter(Boolean);
   const kind = parts[1]?.toLowerCase();
   const kv = new Map<string, string>();
   for (const segment of parts.slice(2)) {

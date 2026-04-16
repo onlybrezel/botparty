@@ -102,15 +102,17 @@ model User {
   updatedAt    DateTime @updatedAt
 
   // Relations
-  robots            Robot[]
-  transactions      Transaction[]
-  sessions          Session[]         @relation("SessionUser")
-  queueEntries      QueueEntry[]
-  chatMessages      ChatMessage[]
-  allowedRobots     RobotAllowedUser[]
-  analyticsEvents   AnalyticsEvent[]
-  moderationEntries RobotModerationEntry[]
-  givenModerations  RobotModerationEntry[] @relation("ModeratorActions")
+  robots              Robot[]
+  transactions        Transaction[]
+  sessions            Session[]         @relation("SessionUser")
+  queueEntries        QueueEntry[]
+  chatMessages        ChatMessage[]
+  deletedMessages     ChatMessage[]     @relation("DeletedMessages")
+  allowedRobots       RobotAllowedUser[]
+  analyticsEvents     AnalyticsEvent[]
+  moderationEntries   RobotModerationEntry[]
+  givenModerations    RobotModerationEntry[] @relation("ModeratorActions")
+  adminAuditLogs      AdminAuditLog[]
 
   @@index([email])
   @@index([username])
@@ -185,6 +187,7 @@ model Robot {
   allowedUsers    RobotAllowedUser[]
   analyticsEvents AnalyticsEvent[]
   controlButtons  ControlButton[]
+  webhooks        RobotWebhook[]
   moderationEntries RobotModerationEntry[]
 
   @@index([ownerId])
@@ -284,18 +287,42 @@ model QueueEntry {
 // ═════════════════════════════════════════════════════
 
 model ChatMessage {
-  id        String   @id @default(uuid()) @db.Uuid
-  robotId   String   @db.Uuid
-  robot     Robot    @relation(fields: [robotId], references: [id], onDelete: Cascade)
-  userId    String   @db.Uuid
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  content   String   @db.VarChar(500)
-  isSystem  Boolean  @default(false)
-  createdAt DateTime @default(now())
+  id          String    @id @default(uuid()) @db.Uuid
+  robotId     String    @db.Uuid
+  robot       Robot     @relation(fields: [robotId], references: [id], onDelete: Cascade)
+  userId      String    @db.Uuid
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content     String    @db.VarChar(500)
+  isSystem    Boolean   @default(false)
+  deletedAt   DateTime?
+  deletedById String?   @db.Uuid
+  deletedBy   User?     @relation("DeletedMessages", fields: [deletedById], references: [id], onDelete: SetNull)
+  createdAt   DateTime  @default(now())
 
   @@index([robotId, createdAt])
   @@index([userId])
+  @@index([deletedAt])
   @@map("chat_messages")
+}
+
+// ═════════════════════════════════════════════════════
+// ADMIN AUDIT LOG
+// ═════════════════════════════════════════════════════
+
+model AdminAuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  actorId    String?  @db.Uuid
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  action     String   @db.VarChar(64)  // e.g. "ban_user", "delete_message", "mute_user"
+  targetType String?  @db.VarChar(32)  // e.g. "user", "robot", "message"
+  targetId   String?  @db.Uuid
+  payload    Json?
+  createdAt  DateTime @default(now())
+
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
+  @@index([targetType, targetId, createdAt])
+  @@map("admin_audit_logs")
 }
 
 // ═════════════════════════════════════════════════════
@@ -331,6 +358,28 @@ model AnalyticsEvent {
   @@index([userId, event, createdAt])
   @@index([createdAt])
   @@map("analytics_events")
+}
+
+// ═════════════════════════════════════════════════════
+// ROBOT WEBHOOKS
+// ═════════════════════════════════════════════════════
+
+model RobotWebhook {
+  id              String   @id @default(uuid()) @db.Uuid
+  robotId         String   @db.Uuid
+  robot           Robot    @relation(fields: [robotId], references: [id], onDelete: Cascade)
+  url             String   @db.VarChar(1024)
+  secret          String   @db.VarChar(64)
+  events          String[] @default([])
+  isActive        Boolean  @default(true)
+  lastTriggeredAt DateTime?
+  lastStatusCode  Int?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([robotId, isActive])
+  @@index([robotId, createdAt])
+  @@map("robot_webhooks")
 }
 
 // ═════════════════════════════════════════════════════

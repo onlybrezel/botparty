@@ -1,6 +1,7 @@
 import { Injectable, Logger, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RobotsService } from '../robots/robots.service';
+import { RobotWebhookService } from '../robots/robot-webhook.service';
 
 @Injectable()
 export class SessionsService {
@@ -9,6 +10,7 @@ export class SessionsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly robotsService: RobotsService,
+    private readonly robotWebhookService: RobotWebhookService,
   ) {}
 
   async create(robotId: string, userId: string) {
@@ -43,6 +45,10 @@ export class SessionsService {
     });
 
     this.logger.log(`Session started: ${session.id} (robot: ${robotId}, user: ${userId})`);
+    this.robotWebhookService.emitSessionStarted(session);
+    this.prisma.analyticsEvent
+      .create({ data: { robotId, userId, event: 'session_start', payload: { sessionId: session.id } } })
+      .catch((err) => this.logger.warn(`analytics ingest failed: ${err?.message}`));
     return session;
   }
 
@@ -53,7 +59,7 @@ export class SessionsService {
     const now = new Date();
     const durationMs = now.getTime() - session.startedAt.getTime();
 
-    return this.prisma.session.update({
+    const ended = await this.prisma.session.update({
       where: { id: sessionId },
       data: {
         status: 'ENDED',
@@ -61,6 +67,18 @@ export class SessionsService {
         durationMs,
       },
     });
+    this.prisma.analyticsEvent
+      .create({
+        data: {
+          robotId: ended.robotId,
+          userId: ended.userId,
+          event: 'session_end',
+          payload: { sessionId: ended.id, durationMs: ended.durationMs },
+        },
+      })
+      .catch((err) => this.logger.warn(`analytics ingest failed: ${err?.message}`));
+    this.robotWebhookService.emitSessionEnded(ended);
+    return ended;
   }
 
   async findByRobot(robotId: string, limit = 50) {

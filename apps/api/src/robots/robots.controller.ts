@@ -19,6 +19,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { RobotsService } from './robots.service';
+import { RobotWebhookService } from './robot-webhook.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -38,6 +39,7 @@ import {
   VerifyRobotAccessDto,
   ClaimRobotDto,
   IngestRobotLogsDto,
+  CreateRobotWebhookDto,
 } from './robots.dto';
 
 @ApiTags('robots')
@@ -45,6 +47,7 @@ import {
 export class RobotsController {
   constructor(
     private readonly robotsService: RobotsService,
+    private readonly robotWebhookService: RobotWebhookService,
     private readonly livekitService: LivekitService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
@@ -151,6 +154,39 @@ export class RobotsController {
   @ApiOperation({ summary: 'Delete a robot' })
   async delete(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
     await this.robotsService.delete(id, user.sub);
+  }
+
+  @Get(':id/webhooks')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'List robot webhooks (owner only)' })
+  async listWebhooks(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.robotWebhookService.listForOwner(id, user.sub);
+  }
+
+  @Post(':id/webhooks')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Create robot webhook (owner only)' })
+  async createWebhook(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+    @Body() body: CreateRobotWebhookDto,
+  ) {
+    return this.robotWebhookService.createForOwner(id, user.sub, body);
+  }
+
+  @Delete(':id/webhooks/:webhookId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Delete robot webhook (owner only)' })
+  async deleteWebhook(
+    @Param('id') id: string,
+    @Param('webhookId') webhookId: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    await this.robotWebhookService.deleteForOwner(id, user.sub, webhookId);
   }
 
   @Delete('admin/:id')

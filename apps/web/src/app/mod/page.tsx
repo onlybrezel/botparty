@@ -49,6 +49,10 @@ type RobotDraft = {
   description: string;
   roomMode: 'PUBLIC' | 'LINK_ONLY' | 'PASSWORD' | 'ALLOWED_USERS' | 'PRIVATE';
   queueMode: 'FIRST_COME' | 'VOTING' | 'DISABLED';
+  scheduleEnabled: boolean;
+  scheduleStart: string;
+  scheduleEnd: string;
+  timezone: string;
   aclVideo: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
   aclControl: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
   aclChat: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
@@ -103,6 +107,49 @@ const parseRecordingMeta = (file: { fileName: string; robotId: string | null; mo
   };
 };
 
+const detectDefaultTimezone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+
+const toLocalDateTimeInput = (value?: string | null) => {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const pad = (part: number) => String(part).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+};
+
+const toIsoDateTime = (value: string) => {
+  if (!value.trim()) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString();
+};
+
+const validateRobotDraftSchedule = (draft: RobotDraft) => {
+  if (!draft.scheduleEnabled) {
+    return null;
+  }
+
+  if (!draft.scheduleStart || !draft.scheduleEnd) {
+    return 'Select both a schedule start and end time.';
+  }
+
+  const start = Date.parse(draft.scheduleStart);
+  const end = Date.parse(draft.scheduleEnd);
+  if (Number.isNaN(start) || Number.isNaN(end)) {
+    return 'Schedule dates must be valid.';
+  }
+
+  if (end <= start) {
+    return 'Schedule end must be later than the start time.';
+  }
+
+  if (!draft.timezone.trim()) {
+    return 'Timezone is required when scheduling is enabled.';
+  }
+
+  return null;
+};
+
 
 function createRobotDraft(
   robot: NonNullable<Awaited<ReturnType<typeof api.getModerationOverview>>['robots']>[number],
@@ -116,6 +163,10 @@ function createRobotDraft(
     description: robot.description ?? '',
     roomMode: detectRoomMode(robot),
     queueMode: robot.queueMode,
+    scheduleEnabled: Boolean(robot.scheduleStart && robot.scheduleEnd),
+    scheduleStart: toLocalDateTimeInput(robot.scheduleStart),
+    scheduleEnd: toLocalDateTimeInput(robot.scheduleEnd),
+    timezone: robot.timezone || detectDefaultTimezone(),
     aclVideo: access?.video ?? 'AUTHENTICATED',
     aclControl: access?.control ?? 'AUTHENTICATED',
     aclChat: access?.chat ?? 'AUTHENTICATED',
@@ -649,6 +700,13 @@ export default function ModDashboardPage() {
 
   const saveRobotEdit = async () => {
     if (!editingRobotId || !robotDraft || !accessToken) return;
+
+    const scheduleError = validateRobotDraftSchedule(robotDraft);
+    if (scheduleError) {
+      pushToast(scheduleError, 'error');
+      return;
+    }
+
     try {
       api.setToken(accessToken);
       const { visibility, accessMode } = roomModeToFields(robotDraft.roomMode);
@@ -656,6 +714,8 @@ export default function ModDashboardPage() {
       const maxTurnTime = Math.max(1000, Math.round(Number(robotDraft.maxTurnTime) || 60000));
       const maxViewers = Math.max(1, Math.round(Number(robotDraft.maxViewers) || 1000));
       const maxControllers = Math.max(1, Math.round(Number(robotDraft.maxControllers) || 1));
+      const scheduleStart = robotDraft.scheduleEnabled ? toIsoDateTime(robotDraft.scheduleStart) : null;
+      const scheduleEnd = robotDraft.scheduleEnabled ? toIsoDateTime(robotDraft.scheduleEnd) : null;
       await api.updateRobotAsStaff(editingRobotId, {
         name: robotDraft.name.trim(),
         slug: robotDraft.slug.trim() || undefined,
@@ -663,6 +723,9 @@ export default function ModDashboardPage() {
         visibility,
         accessMode,
         queueMode: robotDraft.queueMode,
+        scheduleStart,
+        scheduleEnd,
+        timezone: robotDraft.timezone.trim() || detectDefaultTimezone(),
         maxTurnTime,
         maxViewers,
         maxControllers,

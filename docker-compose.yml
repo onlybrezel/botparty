@@ -19,7 +19,7 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: botparty-postgres
-    restart: unless-stopped
+    restart: on-failure:10
     environment:
       POSTGRES_DB: botparty
       POSTGRES_USER: botparty
@@ -44,7 +44,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: botparty-redis
-    restart: unless-stopped
+    restart: on-failure:10
     command: redis-server --requirepass ${REDIS_PASSWORD:-botparty_redis_secret} --maxmemory 256mb --maxmemory-policy allkeys-lru
     ports:
       - "127.0.0.1:6379:6379"
@@ -64,7 +64,7 @@ services:
   livekit:
     image: livekit/livekit-server:v1.8
     container_name: botparty-livekit
-    restart: unless-stopped
+    restart: on-failure:10
     command: --config /etc/livekit.yaml
     environment:
       LIVEKIT_KEYS: "${LIVEKIT_API_KEY:-devkey}: ${LIVEKIT_API_SECRET:-secret_that_is_at_least_32_characters_long}"
@@ -90,7 +90,7 @@ services:
   livekit-ingress:
     image: livekit/ingress:v1.4
     container_name: botparty-livekit-ingress
-    restart: unless-stopped
+    restart: on-failure:10
     ports:
       - "8080:8080"
       - "7882:7882/tcp"
@@ -127,7 +127,7 @@ services:
   livekit-egress:
     image: livekit/egress:v1.8
     container_name: botparty-livekit-egress
-    restart: unless-stopped
+    restart: on-failure:10
     environment:
       EGRESS_CONFIG_BODY: |
         api_key: ${LIVEKIT_API_KEY:-devkey}
@@ -157,7 +157,7 @@ services:
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:v0.49.2
     container_name: botparty-cadvisor
-    restart: unless-stopped
+    restart: on-failure:10
     # privileged: required by cAdvisor to read hardware and container metrics from /sys and /dev.
     # All volume mounts below are read-only — the elevated privilege is limited to kernel metric access.
     privileged: true
@@ -187,13 +187,13 @@ services:
       dockerfile: docker/api/Dockerfile
     image: botparty-api:${APP_VERSION:-latest}
     container_name: botparty-api
-    restart: unless-stopped
+    restart: on-failure:10
     expose:
       - "4000"
     environment:
       NODE_ENV: production
       PORT: 4000
-      DATABASE_URL: postgresql://botparty:${DB_PASSWORD:-botparty_secret}@postgres:5432/botparty?schema=public
+      DATABASE_URL: postgresql://botparty:${DB_PASSWORD:-botparty_secret}@postgres:5432/botparty?schema=public&sslmode=disable
       DATABASE_URL_FILE: ${DATABASE_URL_FILE:-/run/secrets/api_database_url}
       REDIS_HOST: redis
       REDIS_PORT: 6379
@@ -265,7 +265,7 @@ services:
       dockerfile: docker/web/Dockerfile
     image: botparty-web:${APP_VERSION:-latest}
     container_name: botparty-web
-    restart: unless-stopped
+    restart: on-failure:10
     environment:
       # SSR-internal URL (used by Next.js server-side fetch, container-to-container)
       API_URL: http://api:4000
@@ -290,7 +290,7 @@ services:
   nginx:
     image: nginx:1.27-alpine
     container_name: botparty-nginx
-    restart: unless-stopped
+    restart: on-failure:10
     ports:
       - "80:80"
       - "443:443"
