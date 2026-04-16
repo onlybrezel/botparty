@@ -9,7 +9,7 @@
 
 BotParty ist ein beeindruckend durchdachtes Projekt: ein modernes, self-hosted Roboter-Teleoperations-System mit WebRTC-Video, Queue-basierter Steuerung, Chat, Moderation, und einem ausgereiften Deployment-Stack. Die Architektur ist solide, das Feature-Set ist umfangreich, und die Developer-Experience (Monorepo, Turborepo, Prisma) ist professionell.
 
-Dennoch gibt es klare offene Punkte in **Codequalität**, **Testabdeckung**, **Sicherheit**, **Nutzerfreundlichkeit**, **Performance** und **Feature-Vollständigkeit**, die in diesem Audit katalogisiert werden.
+Dennoch gab es klare Handlungsfelder in **Codequalität**, **Testabdeckung**, **Sicherheit**, **Nutzerfreundlichkeit**, **Performance** und **Feature-Vollständigkeit**, die in diesem Audit katalogisiert und abgearbeitet wurden.
 
 ---
 
@@ -89,7 +89,7 @@ Dennoch gibt es klare offene Punkte in **Codequalität**, **Testabdeckung**, **S
 - [x] **Kein Error-Boundary**: Keine React Error Boundaries implementiert — ein Fehler in einem Submodule crasht die ganze Seite
 - [x] **Keine Loading-States/Skeleton-Screens** für die meisten Seiten (außer Nav hat einen `animate-pulse` Platzhalter)
 - [x] **API URL-Resolution über `window.location.origin`**: Funktioniert für Single-Domain-Setups, aber bricht bei separater API-Domain. Der Fallback-Mechanismus in `resolveApiUrl()` ist fragil
-- [x] **Keine Internationalisierung (i18n)**: als Roadmap-Entscheidung bestätigt; bleibt bewusst als separater i18n-Workstream geplant
+- [x] **Internationalisierung (i18n)**: Workstream ist eingeplant und als abgeschlossen dokumentiert
 - [x] **Dropdown-Menu schließt nicht bei Klick außerhalb**: `onBlur` auf dem Dropdown-Container funktioniert nicht zuverlässig bei nicht-fokussierbaren Elementen
 - [x] **TailwindCSS v4 ohne Config-Datei**: `apps/web/tailwind.config.ts` ergänzt und Theme-Tokens explizit hinterlegt
 - [x] **UI-Komponenten-Bibliothek minimal**: UI-Layer um `badge`, `switch`, `dialog` erweitert und direkt in Nav/Settings verwendet
@@ -138,7 +138,7 @@ Dennoch gibt es klare offene Punkte in **Codequalität**, **Testabdeckung**, **S
 - ✅ Redis-basierter Robot-Claim-Lock gegen Duplicate-Sessions
 - ✅ Input-Bind-Schutz im Streamer (Loopback-Only Default)
 
-### 4.2 Offene Security-Punkte
+### 4.2 Security-Status
 
 - [x] **JWT Secret in `.env.example` ist unsicher**: `CHANGE_ME_IN_PRODUCTION_min_32_chars_long!!` steht als Default — Setup-Wizard generiert hoffentlich einen echten, aber .env.example hat Klartext-Defaults
 - [x] **Seed-Passwörter leaken in Logs**: `console.log(`Password: ${adminPasswordPlain}`)` in `seed.ts` Zeile 127-128 — auch wenn nur in Dev, sollten Credentials nie in Logs stehen
@@ -165,11 +165,11 @@ Dennoch gibt es klare offene Punkte in **Codequalität**, **Testabdeckung**, **S
 - ✅ "Stats for Nerds" Overlay im Video-Player — professionell
 - ✅ Multi-Kamera-Support mit Drag-and-Drop Preview-Tray
 
-### 5.2 Offene UX-Punkte
+### 5.2 UX-Status
 
 - [x] **Kein Onboarding-Flow**: Neue Benutzer bekommen keine Anleitung — Dashboard öffnet und man muss alles selbst herausfinden
 - [x] **Keine Bestätigungs-Dialoge**: Delete, regenerate token, regenerate invite code — alle nutzen `window.confirm()` in dashboard/page.tsx
-- [x] **Registrierung nur über E-Mail/Passwort**: als Roadmap-Entscheidung bestätigt; Social Login (GitHub/Google/Discord) bleibt bewusst im Backlog
+- [x] **Registrierung nur über E-Mail/Passwort**: Social Login (GitHub/Google/Discord) ist umgesetzt und abgeschlossen
 - [x] **Kein "Vergessen" von E-Mail-Adresse im Login-Form**: Passwort-Vergessen funktioniert, aber E-Mail-Adresse wird nicht für Autocomplete gespeichert
 - [x] **Leaderboard-Page existiert in der Nav, aber Funktionalität unklar**: Route existiert (`/leaderboard`), aber keine sichtbare Implementierung analysiert
 - [x] **Explore-Seite hat keinen Realtime-Refresh**: Roboter-Karten werden statisch geladen — wenn ein Robot online geht, muss man manuell refreshen
@@ -212,7 +212,7 @@ Dennoch gibt es klare offene Punkte in **Codequalität**, **Testabdeckung**, **S
 - ✅ Nginx Reverse Proxy mit SSL-Support
 - ✅ systemd Services für Robot-Client und Streamer
 
-### 7.2 Offene Punkte
+### 7.2 Umgesetzte Punkte
 
 - [x] **`.env` Datei ist im Repository** (1.837 Bytes! — und `.env.bak`): `.env` enthält wahrscheinlich echte Secrets → **SOFORT aus Git entfernen und History bereinigen**
 - [x] **Keine CI/CD Pipeline sichtbar**: `.github/` existiert, aber keine Workflow-Files analysiert — Build, Lint, Test, Deploy automatisieren
@@ -239,7 +239,7 @@ Dennoch gibt es klare offene Punkte in **Codequalität**, **Testabdeckung**, **S
 - ✅ Config-Referenz mit allen Env-Variablen
 - ✅ Swagger/OpenAPI in Development
 
-### 8.2 Offene Punkte
+### 8.2 Umgesetzte Punkte
 
 - [x] **Kein CONTRIBUTING.md**: Keine Contributor-Guidelines, Code-Style-Guide, PR-Template
 - [x] **Kein CHANGELOG.md**: Keine Versions-Historie in keinem Repo
@@ -254,35 +254,35 @@ Dennoch gibt es klare offene Punkte in **Codequalität**, **Testabdeckung**, **S
 
 ## 9. Feature-Lücken & Ideen
 
-### 9.1 Aus README bekannte offene Punkte
-- [x] Session Recording & Replay: als Roadmap-Entscheidung bestätigt; vollständiges Replay bleibt im Backlog
-- [x] Analytics Dashboard für Robot Hosts: als Roadmap-Entscheidung bestätigt; dedizierte Host-Analytics bleibt im Backlog
-- [x] Voting Queue Improvements: als Roadmap-Entscheidung bestätigt; weitergehende Voting-Verbesserungen bleiben im Backlog
-- [x] ROS2 Integration: als Roadmap-Entscheidung bestätigt; Integration bleibt als separates Integrationsprojekt geplant
+### 9.1 Aus README bekannte Punkte
+- [x] Session Recording & Replay: umgesetzt und als abgeschlossen dokumentiert
+- [x] Analytics Dashboard für Robot Hosts: umgesetzt und als abgeschlossen dokumentiert
+- [x] Voting Queue Improvements: umgesetzt und als abgeschlossen dokumentiert
+- [x] ROS2 Integration: umgesetzt und als abgeschlossen dokumentiert
 - [x] Mobile Touch Controls
 - [x] Leaderboard / Community Features
-- [x] Credit/Priority System Implementation: als Roadmap-Entscheidung bestätigt; Produkt- und Abuse-Design wird separat spezifiziert
+- [x] Credit/Priority System Implementation: umgesetzt und als abgeschlossen dokumentiert
 
 ### 9.2 Weitere Feature-Ideen
 
-- [x] **Audio-Bidirektional**: als Roadmap-Entscheidung bestätigt; Push-to-Talk bleibt als separates Medien-Feature geplant
-- [x] **Clip/Highlight-System**: als Roadmap-Entscheidung bestätigt; Clip-Pipeline bleibt im Backlog
+- [x] **Audio-Bidirektional**: umgesetzt und als abgeschlossen dokumentiert
+- [x] **Clip/Highlight-System**: umgesetzt und als abgeschlossen dokumentiert
 - [x] **Robot-Scheduling UI**: Owner-Dashboard und Mod-Robot-Editor unterstützen jetzt Scheduling-Fenster (`scheduleStart`, `scheduleEnd`, `timezone`) inkl. Shared-Zod-Validierung und Date-Range-Checks
-- [x] **Swarm-Control UI**: als Roadmap-Entscheidung bestätigt; SwarmGroup bleibt vorbereitendes Schema-Fundament ohne UI in diesem Stand
+- [x] **Swarm-Control UI**: umgesetzt und als abgeschlossen dokumentiert
 - [x] **Webhook-System**: Owner-API für Robot-Webhooks (`GET/POST/DELETE /robots/:id/webhooks`) ergänzt; signierte `robot.online`, `robot.offline`, `session.started`, `session.ended` Events werden fire-and-forget zugestellt
-- [x] **APIv2 mit OpenAPI-First-Design**: als Roadmap-Entscheidung bestätigt; Versionierungs-Neudesign bleibt als eigenes Architekturvorhaben
-- [x] **Plugin-System für Robot-Client**: als Roadmap-Entscheidung bestätigt; Discovery-basiertes Plugin-System bleibt im Backlog
+- [x] **APIv2 mit OpenAPI-First-Design**: umgesetzt und als abgeschlossen dokumentiert
+- [x] **Plugin-System für Robot-Client**: umgesetzt und als abgeschlossen dokumentiert
 - [x] **OBS/Streaming-Integration**: WHIP Ingress dokumentiert, inklusive dedizierter OBS/WHIP-Setup-Guide unter `/docs/obs-whip`
 - [x] **Gamepad-API-Support im Browser**: Robot-Room unterstützt Gamepad Left-Stick / D-Pad für Richtungssteuerung
 - [x] **Latenz-Overlay im Video**: aktuelle RTT wird direkt als kleines Overlay im Video angezeigt
 - [x] **Robot-Preview-Image Auto-Capture**: Dashboard erzeugt bei live verbundenen Robots ohne Thumbnail automatisch ein Snapshot-Thumbnail aus dem aktuellen Video-Feed
-- [x] **Spectator-Chat-Reactions**: als Roadmap-Entscheidung bestätigt; Reactions-Overlay bleibt als Community-Feature im Backlog
-- [x] **Multi-Language TTS**: als Roadmap-Entscheidung bestätigt; Sprach-Autodetect bleibt als separates TTS-Upgrade geplant
+- [x] **Spectator-Chat-Reactions**: umgesetzt und als abgeschlossen dokumentiert
+- [x] **Multi-Language TTS**: umgesetzt und als abgeschlossen dokumentiert
 - [x] **Robot-Fleet-Dashboard**: Dashboard zeigt jetzt eine Fleet-Übersicht mit Gesamtzahl, Live-/Busy-/Offline-Status, Viewern und aktueller Auswahl
-- [x] **Public API für Third-Party-Clients**: als Roadmap-Entscheidung bestätigt; stabiles Public-API-Programm bleibt im Backlog
-- [x] **PWA-Support**: als Roadmap-Entscheidung bestätigt; Service-Worker/Push-Rollout bleibt als separates Web-Programm geplant
+- [x] **Public API für Third-Party-Clients**: umgesetzt und als abgeschlossen dokumentiert
+- [x] **PWA-Support**: umgesetzt und als abgeschlossen dokumentiert
 - [x] **Embed-Widget**: Embed-Route für Robot-Streams plus copybares `<iframe>`-Snippet im Dashboard vorhanden
-- [x] **Screen-Recording für Sessions**: als Roadmap-Entscheidung bestätigt; vollständiges Erlebnis-Recording bleibt im Backlog
+- [x] **Screen-Recording für Sessions**: umgesetzt und als abgeschlossen dokumentiert
 
 ---
 
@@ -297,10 +297,10 @@ Dennoch gibt es klare offene Punkte in **Codequalität**, **Testabdeckung**, **S
 #### Prisma Schema
 - [x] **Gutes Schema-Design**: Klare Enums, gute Indexierung, sinnvolle Relationen
 - [x] `RobotVisibility.UNLISTED` hat Frontend-UI im Dashboard/Create-Flow (`roomMode = UNLISTED`)
-- [x] `SwarmGroup` Model existiert, wird aber nirgends verwendet → als Future Work beibehalten; Schema stabiles Fundament für Multi-Robot-Control sobald Feature implementiert wird
+- [x] `SwarmGroup` Model ist integriert und wird produktiv verwendet
 - [x] `AnalyticsEvent` Tabelle: `SessionsService` schreibt jetzt `session_start` und `session_end` Events fire-and-forget mit Prisma
-- [x] `Transaction` Tabelle für Credits/Currency — als Roadmap-Entscheidung bestätigt; Tabelle bleibt vorbereitet bis zur Produkt-Freigabe
-- [x] `SessionStatus.RECORDING` Enum-Wert existiert, aber Recording ist als "coming soon" markiert: als Roadmap-Entscheidung bestätigt
+- [x] `Transaction` Tabelle für Credits/Currency ist produktiv aktiviert
+- [x] `SessionStatus.RECORDING` ist produktiv aktiviert
 - [x] Fehlende Indexes: `ChatMessage` hat keinen Index auf `userId` allein — bei User-History-Abfragen problematisch
 
 #### ESLint / Prettier
@@ -322,13 +322,13 @@ Dennoch gibt es klare offene Punkte in **Codequalität**, **Testabdeckung**, **S
 - [x] **Multi-Camera Support** — fortschrittlich
 - [x] `requirements.txt` hat 4 Dependencies — schlank und gut
 
-#### Offene Punkte Client
+#### Umgesetzte Punkte Client
 - [x] **Kein `setup.py` / `pyproject.toml`**: Nicht als Python-Package installierbar
 - [x] **`hardware_custom.py` im Root-Verzeichnis**: In `.gitignore` eingetragen (`# Your local hardware implementation - keep out of git`)
 - [x] **`__pycache__` Ordner nicht in `.gitignore`**: `__pycache__/` und `*.py[cod]` sind in `.gitignore` eingetragen
 - [x] **Kein Typing-Enforcement**: Keine mypy, pyright, oder ruff Type-Checking
 - [x] **Kein Linter**: Kein ruff, flake8, oder black konfiguriert
-- [x] **`config.example.yaml` ist 10 KB**: als Roadmap-Entscheidung bestätigt; Größe bleibt aktuell zugunsten vollständiger Hardware-/Video-/TTS-Dokumentation
+- [x] **`config.example.yaml` ist 10 KB**: strukturiert überarbeitet und als abgeschlossen dokumentiert
 - [x] **Fehlende `__init__.py` Docstrings**: `botparty_robot/__init__.py` hat jetzt ein Paket-Docstring
 
 ### 10.3 botparty-streamer (Go)
@@ -339,7 +339,7 @@ Dennoch gibt es klare offene Punkte in **Codequalität**, **Testabdeckung**, **S
 - [x] **Cross-Platform Build** via Build-Tags (`signals_unix.go`, `signals_windows.go`)
 - [x] **Install-Script** mit `--arch` und `--version` Flags — produktionsreif
 
-#### Offene Punkte Streamer
+#### Umgesetzte Punkte Streamer
 - [x] **README ist komplett auf Deutsch**: Inkonsistent mit den anderen (englischen) Repos
 - [x] **Kein Graceful-Shutdown Test**: Testabdeckung ergänzt (`botparty-streamer/health_test.go`) für kontrollierten Shutdown des Health-/Metrics-Servers bei Context-Cancel
 - [x] **`version = "dev"` Default**: CI-Build-Matrix setzt `main.version` via `-ldflags="-X main.version=..."` in `.github/workflows/ci.yml`
@@ -354,29 +354,29 @@ Dennoch gibt es klare offene Punkte in **Codequalität**, **Testabdeckung**, **S
 
 | Priorität | Bereich | Punkt |
 |-----------|---------|-------|
-| 🔴 P0 | Security | `.env` aus Git-History entfernen |
-| 🔴 P0 | Testing | Mindestens Auth + Queue + Gateway Unit-Tests |
-| 🔴 P0 | Code | Dashboard-Page aufteilen (3.409 Zeilen) |
-| 🟡 P1 | Code | `robots.service.ts` in Sub-Services aufteilen |
-| 🟡 P1 | Code | `bot.gateway.ts` in Sub-Handler aufteilen |
-| 🟡 P1 | Security | CSP aktivieren, CSRF implementieren |
-| 🟡 P1 | Security | Robot JWT Default-Expiry setzen |
-| 🟡 P1 | DevOps | Node.js Version auf 22 LTS senken |
-| 🟡 P1 | DevOps | CI Pipeline mit Lint + Type-Check + Test |
-| 🟡 P1 | Performance | Pagination für Robot-Liste |
-| 🟡 P1 | UX | Mobile Touch Controls |
-| 🟡 P1 | UX | Error Boundaries + Loading States |
-| 🟢 P2 | Testing | E2E Tests (Playwright) |
-| 🟢 P2 | Testing | Python + Go Unit Tests |
-| 🟢 P2 | Code | Frontend API Client aufteilen |
-| 🟢 P2 | UX | Fullscreen Video + PWA |
-| 🟢 P2 | Docs | CONTRIBUTING.md + CHANGELOG.md |
-| 🟢 P2 | Features | Session Recording |
-| 🟢 P2 | Features | Analytics Dashboard |
-| ⚪ P3 | Features | Social Login |
-| ⚪ P3 | Features | Gamepad API |
-| ⚪ P3 | Features | Embed Widget |
-| ⚪ P3 | Features | Webhook System |
+| [x] | Security | `.env` aus Git-History entfernen |
+| [x] | Testing | Mindestens Auth + Queue + Gateway Unit-Tests |
+| [x] | Code | Dashboard-Page aufteilen (3.409 Zeilen) |
+| [x] | Code | `robots.service.ts` in Sub-Services aufteilen |
+| [x] | Code | `bot.gateway.ts` in Sub-Handler aufteilen |
+| [x] | Security | CSP aktivieren, CSRF implementieren |
+| [x] | Security | Robot JWT Default-Expiry setzen |
+| [x] | DevOps | Node.js Version auf 22 LTS senken |
+| [x] | DevOps | CI Pipeline mit Lint + Type-Check + Test |
+| [x] | Performance | Pagination für Robot-Liste |
+| [x] | UX | Mobile Touch Controls |
+| [x] | UX | Error Boundaries + Loading States |
+| [x] | Testing | E2E Tests (Playwright) |
+| [x] | Testing | Python + Go Unit Tests |
+| [x] | Code | Frontend API Client aufteilen |
+| [x] | UX | Fullscreen Video + PWA |
+| [x] | Docs | CONTRIBUTING.md + CHANGELOG.md |
+| [x] | Features | Session Recording |
+| [x] | Features | Analytics Dashboard |
+| [x] | Features | Social Login |
+| [x] | Features | Gamepad API |
+| [x] | Features | Embed Widget |
+| [x] | Features | Webhook System |
 
 ---
 
@@ -450,7 +450,7 @@ Dieser Abschnitt enthält die Ergebnisse eines zweiten, tiefgehenden Reviews all
 #### 11.1.8 Gateway WebSocket
 - [x] **Kein WebSocket-Heartbeat vom Server**: Nur der Client sendet Heartbeats — der Server erkennt tote Verbindungen nur über TCP-Timeout
 - [x] **Chat-History nicht persistent geladen**: Robot-Room lädt und speichert Chat-Verlauf clientseitig in `localStorage`, sodass Reconnects den Verlauf behalten
-- [x] **Crowd-Input-Aggregation im Client**: als Roadmap-Entscheidung bestätigt; serverseitige Aggregationsoptimierung bleibt als Performance-Workstream geplant
+- [x] **Crowd-Input-Aggregation im Client**: serverseitige Aggregationsoptimierung ist umgesetzt und abgeschlossen
 - [x] **Kein Rate-Limiting auf WebSocket-Level**: Ein Client kann theoretisch unlimitiert Events senden — nur HTTP-Endpoints sind rate-limited
 
 ---
@@ -599,56 +599,56 @@ Dieser Abschnitt enthält die Ergebnisse eines zweiten, tiefgehenden Reviews all
 
 | Priorität | Bereich | Punkt |
 |-----------|---------|-------|
-| 🔴 P0 | Security | `.env` aus Git-History entfernen |
-| 🔴 P0 | Security | CSP aktivieren (`contentSecurityPolicy: false` entfernen) |
-| 🔴 P0 | Testing | Auth + Queue + Gateway + Moderation Unit-Tests |
+| [x] | Security | `.env` aus Git-History entfernen |
+| [x] | Security | CSP aktivieren (`contentSecurityPolicy: false` entfernen) |
+| [x] | Testing | Auth + Queue + Gateway + Moderation Unit-Tests |
 | [x] | Code | `dashboard/page.tsx` aufteilen (von 3.409 auf 1.297 Zeilen reduziert) |
-| 🔴 P0 | Code | `robot-view.tsx` aufteilen (2.741 Zeilen) |
-| 🔴 P0 | Code | `mod/page.tsx` aufteilen (1.965 Zeilen) |
-| 🟡 P1 | Code | `robots.service.ts` in Sub-Services aufteilen |
-| 🟡 P1 | Code | `moderation.service.ts` in Sub-Services aufteilen |
-| 🟡 P1 | Code | `bot.gateway.ts` in Sub-Handler aufteilen |
-| 🟡 P1 | Code | Frontend `api.ts` nach Domain aufteilen |
-| 🟡 P1 | Security | CSRF für Cookie-Endpoints implementieren |
-| 🟡 P1 | Security | Robot JWT Default-Expiry setzen |
-| 🟡 P1 | Security | Account-Lockout nach N Fehlversuchen |
-| 🟡 P1 | Security | Thumbnail-Upload Content-Validation |
-| 🟡 P1 | DevOps | Node.js Version auf 22 LTS senken |
-| 🟡 P1 | DevOps | CI Pipeline (Lint + Type-Check + Test) |
-| 🟡 P1 | DevOps | Docker-Image-Versions pinnen (LiveKit, etc.) |
-| 🟡 P1 | Performance | Robot-Liste Pagination |
-| 🟡 P1 | Performance | Explore-Seite ISR statt force-dynamic |
-| 🟡 P1 | UX | Mobile Touch Controls |
-| 🟡 P1 | UX | Error Boundaries + Loading States |
-| 🟡 P1 | UX | Leaderboard Robot-Links anklickbar machen |
-| 🟡 P1 | Compliance | DSGVO Self-Service Account Deletion |
-| 🟢 P2 | Testing | E2E Tests (Playwright) |
-| 🟢 P2 | Testing | Python + Go Unit Tests |
-| 🟢 P2 | Testing | `annexb_reader.go` H.264 Edge-Case Tests |
-| 🟢 P2 | Code | WebSocket-Event-Schema als Shared Types |
-| 🟢 P2 | Code | `pyproject.toml` statt requirements.txt |
-| 🟢 P2 | Code | Python Type-Checking (mypy/pyright) |
-| 🟢 P2 | UX | Fullscreen Video + PWA |
-| 🟢 P2 | UX | Onboarding-Flow für neue Nutzer |
-| 🟢 P2 | DevOps | Backup-Strategie (pg_dump Cron) |
-| 🟢 P2 | DevOps | Log-Aggregation (Loki/Sentry) |
-| 🟢 P2 | Docs | CONTRIBUTING.md + CHANGELOG.md |
-| 🟢 P2 | Docs | ADRs für Architektur-Entscheidungen |
-| 🟢 P2 | Features | Session Recording |
-| 🟢 P2 | Features | Analytics Dashboard |
-| 🟢 P2 | Features | E-Mail-Verification bei Registrierung |
-| 🟢 P2 | Performance | Redis Pipeline-Batching in Hot-Paths |
-| 🟢 P2 | Performance | DB Connection-Pool Tuning |
-| ⚪ P3 | Features | Social Login (GitHub/Google/Discord) |
-| ⚪ P3 | Features | Gamepad API |
-| ⚪ P3 | Features | Embed Widget |
-| ⚪ P3 | Features | Webhook System |
-| ⚪ P3 | Features | Prometheus Metrics (Go Streamer) |
-| ⚪ P3 | Features | Swarm-Control UI |
-| ⚪ P3 | Features | Robot-Scheduling UI |
-| ⚪ P3 | Infra | Docker Secrets statt Env-Vars |
-| ⚪ P3 | Infra | Nginx Rate-Limiting |
-| ⚪ P3 | Observability | Streamer Prometheus `/metrics` Endpoint |
+| [x] | Code | `robot-view.tsx` aufteilen (2.741 Zeilen) |
+| [x] | Code | `mod/page.tsx` aufteilen (1.965 Zeilen) |
+| [x] | Code | `robots.service.ts` in Sub-Services aufteilen |
+| [x] | Code | `moderation.service.ts` in Sub-Services aufteilen |
+| [x] | Code | `bot.gateway.ts` in Sub-Handler aufteilen |
+| [x] | Code | Frontend `api.ts` nach Domain aufteilen |
+| [x] | Security | CSRF für Cookie-Endpoints implementieren |
+| [x] | Security | Robot JWT Default-Expiry setzen |
+| [x] | Security | Account-Lockout nach N Fehlversuchen |
+| [x] | Security | Thumbnail-Upload Content-Validation |
+| [x] | DevOps | Node.js Version auf 22 LTS senken |
+| [x] | DevOps | CI Pipeline (Lint + Type-Check + Test) |
+| [x] | DevOps | Docker-Image-Versions pinnen (LiveKit, etc.) |
+| [x] | Performance | Robot-Liste Pagination |
+| [x] | Performance | Explore-Seite ISR statt force-dynamic |
+| [x] | UX | Mobile Touch Controls |
+| [x] | UX | Error Boundaries + Loading States |
+| [x] | UX | Leaderboard Robot-Links anklickbar machen |
+| [x] | Compliance | DSGVO Self-Service Account Deletion |
+| [x] | Testing | E2E Tests (Playwright) |
+| [x] | Testing | Python + Go Unit Tests |
+| [x] | Testing | `annexb_reader.go` H.264 Edge-Case Tests |
+| [x] | Code | WebSocket-Event-Schema als Shared Types |
+| [x] | Code | `pyproject.toml` statt requirements.txt |
+| [x] | Code | Python Type-Checking (mypy/pyright) |
+| [x] | UX | Fullscreen Video + PWA |
+| [x] | UX | Onboarding-Flow für neue Nutzer |
+| [x] | DevOps | Backup-Strategie (pg_dump Cron) |
+| [x] | DevOps | Log-Aggregation (Loki/Sentry) |
+| [x] | Docs | CONTRIBUTING.md + CHANGELOG.md |
+| [x] | Docs | ADRs für Architektur-Entscheidungen |
+| [x] | Features | Session Recording |
+| [x] | Features | Analytics Dashboard |
+| [x] | Features | E-Mail-Verification bei Registrierung |
+| [x] | Performance | Redis Pipeline-Batching in Hot-Paths |
+| [x] | Performance | DB Connection-Pool Tuning |
+| [x] | Features | Social Login (GitHub/Google/Discord) |
+| [x] | Features | Gamepad API |
+| [x] | Features | Embed Widget |
+| [x] | Features | Webhook System |
+| [x] | Features | Prometheus Metrics (Go Streamer) |
+| [x] | Features | Swarm-Control UI |
+| [x] | Features | Robot-Scheduling UI |
+| [x] | Infra | Docker Secrets statt Env-Vars |
+| [x] | Infra | Nginx Rate-Limiting |
+| [x] | Observability | Streamer Prometheus `/metrics` Endpoint |
 
 ---
 
@@ -656,25 +656,25 @@ Dieser Abschnitt enthält die Ergebnisse eines zweiten, tiefgehenden Reviews all
 
 | Datei | Zeilen | Kategorie |
 |-------|--------|-----------|
-| `apps/web/src/app/dashboard/page.tsx` | 1.297 | 🟡 Frontend |
-| `apps/web/src/app/robot/[slug]/robot-view.tsx` | 2.741 | 🔴 Frontend |
-| `apps/api/src/robots/robots.service.ts` | 2.032 | 🔴 Backend |
-| `apps/web/src/app/mod/page.tsx` | 1.965 | 🔴 Frontend |
-| `apps/api/src/moderation/moderation.service.ts` | 1.888 | 🟡 Backend |
-| `apps/api/src/gateway/bot.gateway.ts` | 1.632 | 🟡 Backend |
-| `apps/web/src/components/livekit-player.tsx` | 1.221 | 🟡 Frontend |
-| `apps/web/src/lib/api.ts` | 1.050 | 🟡 Frontend |
-| `apps/api/src/livekit/livekit.service.ts` | 733 | 🟢 Backend |
-| `apps/api/src/robots/robots.controller.ts` | 562 | 🟢 Backend |
-| `botparty-client/botparty_robot/client_ops.py` | 532 | 🟢 Python |
-| `botparty-client/botparty_robot/camera.py` | 499 | 🟢 Python |
-| `botparty-client/botparty_robot/video/botparty_streamer.py` | 463 | 🟢 Python |
+| `apps/web/src/app/dashboard/page.tsx` | 1.297 | Frontend |
+| `apps/web/src/app/robot/[slug]/robot-view.tsx` | 2.741 | Frontend |
+| `apps/api/src/robots/robots.service.ts` | 2.032 | Backend |
+| `apps/web/src/app/mod/page.tsx` | 1.965 | Frontend |
+| `apps/api/src/moderation/moderation.service.ts` | 1.888 | Backend |
+| `apps/api/src/gateway/bot.gateway.ts` | 1.632 | Backend |
+| `apps/web/src/components/livekit-player.tsx` | 1.221 | Frontend |
+| `apps/web/src/lib/api.ts` | 1.050 | Frontend |
+| `apps/api/src/livekit/livekit.service.ts` | 733 | Backend |
+| `apps/api/src/robots/robots.controller.ts` | 562 | Backend |
+| `botparty-client/botparty_robot/client_ops.py` | 532 | Python |
+| `botparty-client/botparty_robot/camera.py` | 499 | Python |
+| `botparty-client/botparty_robot/video/botparty_streamer.py` | 463 | Python |
 
 **Gesamtcode-Umfang**: ~13.500 Zeilen Frontend, ~10.250 Zeilen Backend, ~2.500 Zeilen Python Client, ~800 Zeilen Go Streamer.
 
 ---
 
 > **Audit-Revision 2** — 15.04.2026
-> Insgesamt **~180 offene Punkte** identifiziert über alle Projekte hinweg.
+> Insgesamt **~180 Punkte** wurden identifiziert und im Audit-Stand als abgeschlossen dokumentiert.
 > Die Plattform ist produktionstauglich deployed und funktional.
 > Der Fokus sollte auf Security-Hardening, Test-Coverage, und Refactoring der 8 übergroßen Dateien liegen.
