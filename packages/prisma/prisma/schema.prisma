@@ -94,7 +94,7 @@ model User {
   credits      Int      @default(0) // Earned credits
   tokenVersion Int      @default(0) // For refresh token invalidation
   isActive     Boolean  @default(true)
-  emailVerified         Boolean   @default(true)  // false for new registrations; true grandfathers existing accounts
+  emailVerified         Boolean   @default(false) // existing users are backfilled true in migration; new users default to unverified
   emailVerificationToken String?  @unique @db.VarChar(64)
   emailVerificationExpiry DateTime?
   lastLoginAt  DateTime?
