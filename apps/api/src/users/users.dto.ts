@@ -19,7 +19,7 @@ export class UpdateMeDto {
   displayName?: string;
 
   @IsOptional()
-  @IsUrl({ require_tld: false, require_protocol: true, protocols: ['http', 'https'] })
+  @IsUrl({ require_tld: false, require_protocol: true, protocols: ['https'] })
   @MaxLength(512)
   avatarUrl?: string;
 }

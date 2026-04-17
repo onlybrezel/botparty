@@ -1,6 +1,10 @@
 'use client';
 
 import { create } from 'zustand';
+import { createJSONStorage, persist } from 'zustand/middleware';
+
+export const AUTH_SYNC_STORAGE_KEY = 'botparty.auth.sync.v1';
+const AUTH_STORE_STORAGE_KEY = 'botparty.auth.session.v1';
 
 interface AuthState {
   accessToken: string | null;
@@ -20,41 +24,81 @@ interface AuthActions {
     role?: 'ADMIN' | 'MOD' | 'USER' | null;
   }) => void;
   logout: () => void;
+  syncLogout: () => void;
   setAccessToken: (token: string | null) => void;
   setSession: (data: Partial<AuthState>) => void;
   setHasHydrated: (value: boolean) => void;
 }
 
-export const useAuth = create<AuthState & AuthActions>((set) => ({
-  accessToken: null,
-  username: null,
-  userId: null,
-  displayName: null,
-  role: null,
-  hasHydrated: false,
+function buildLoggedOutState(state: AuthState) {
+  return {
+    accessToken: null,
+    username: null,
+    userId: null,
+    displayName: null,
+    role: null,
+    hasHydrated: state.hasHydrated,
+  };
+}
 
-  login: ({ accessToken, username, userId, displayName, role }) =>
-    set({
-      accessToken,
-      username,
-      userId,
-      displayName: displayName ?? null,
-      role: role ?? null,
-    }),
+function broadcastAuthLogout() {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  window.localStorage.setItem(
+    AUTH_SYNC_STORAGE_KEY,
+    JSON.stringify({ type: 'logout', at: Date.now() }),
+  );
+}
 
-  logout: () =>
-    set((state) => ({
+export const useAuth = create<AuthState & AuthActions>()(
+  persist(
+    (set) => ({
       accessToken: null,
       username: null,
       userId: null,
       displayName: null,
       role: null,
-      hasHydrated: state.hasHydrated,
-    })),
+      hasHydrated: false,
 
-  setAccessToken: (token) => set({ accessToken: token }),
+      login: ({ accessToken, username, userId, displayName, role }) =>
+        set({
+          accessToken,
+          username,
+          userId,
+          displayName: displayName ?? null,
+          role: role ?? null,
+          hasHydrated: true,
+        }),
 
-  setSession: (data) => set((state) => ({ ...state, ...data })),
+      logout: () =>
+        set((state) => {
+          broadcastAuthLogout();
+          return buildLoggedOutState(state);
+        }),
 
-  setHasHydrated: (value) => set({ hasHydrated: value }),
-}));
+      syncLogout: () =>
+        set((state) => buildLoggedOutState(state)),
+
+      setAccessToken: (token) => set({ accessToken: token }),
+
+      setSession: (data) => set((state) => ({ ...state, ...data })),
+
+      setHasHydrated: (value) => set({ hasHydrated: value }),
+    }),
+    {
+      name: AUTH_STORE_STORAGE_KEY,
+      storage: createJSONStorage(() => sessionStorage),
+      partialize: (state) => ({
+        accessToken: state.accessToken,
+        username: state.username,
+        userId: state.userId,
+        displayName: state.displayName,
+        role: state.role,
+      }),
+      onRehydrateStorage: () => (state) => {
+        state?.setHasHydrated(true);
+      },
+    },
+  ),
+);

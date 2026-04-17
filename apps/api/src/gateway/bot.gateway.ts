@@ -11,7 +11,7 @@ import { BeforeApplicationShutdown, Logger, OnModuleDestroy, OnModuleInit } from
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Server, WebSocket } from 'ws';
-import { WS_EVENTS, LIMITS, ControlButtonAccess } from '@botparty/shared';
+import { WS_EVENTS, LIMITS, ControlButtonAccess, chatMessageSchema, controlCommandSchema } from '@botparty/shared';
 import type { JwtPayload } from '@botparty/shared';
 import { RobotsService } from '../robots/robots.service';
 import { SessionsService } from '../sessions/sessions.service';
@@ -21,12 +21,64 @@ import { ModerationService } from '../moderation/moderation.service';
 import { ControlsService } from '../controls/controls.service';
 import { getAccessCookieName, parseCookie } from '../auth/auth.cookies';
 import Redis from 'ioredis';
-import { createHash } from 'crypto';
 import type { ActiveTurnState, CommandMetadata, SharedPresenceSnapshot, WsClient } from './gateway-types';
 import { PresenceHandler } from './presence.handler';
 import { RobotClaimLockHandler } from './robot-claim-lock.handler';
 import { TurnHandler } from './turn.handler';
 import { ModerationEnforcerHandler } from './moderation-enforcer.handler';
+import { z, type ZodTypeAny } from 'zod';
+
+const roomJoinSchema = z.object({
+  robotId: z.string().uuid(),
+  accessToken: z.string().min(1).optional(),
+  guestSessionId: z.string().regex(/^[a-zA-Z0-9_-]{6,64}$/).optional(),
+  roomAccessToken: z.string().min(1).max(1024).optional(),
+}).strict();
+
+const roomPingSchema = z.object({
+  robotId: z.string().uuid(),
+}).strict();
+
+const robotClaimSchema = z.object({
+  robotAuthToken: z.string().min(1),
+}).strict();
+
+const robotTelemetrySchema = z.object({
+  clientVersion: z.string().max(64).optional(),
+  gitBranch: z.string().max(128).optional(),
+  gitCommit: z.string().max(64).optional(),
+  gitDirty: z.boolean().optional(),
+  botpartyStreamerVersion: z.string().max(64).optional(),
+  streamerVersion: z.string().max(64).optional(),
+  pythonVersion: z.string().max(64).optional(),
+  cpuPercent: z.number().finite().optional(),
+  memoryPercent: z.number().finite().optional(),
+  temperatureC: z.number().finite().optional(),
+  uptimeSec: z.number().finite().optional(),
+  controlConnected: z.boolean().optional(),
+  livekitConnected: z.boolean().optional(),
+  commandsReceived: z.number().finite().optional(),
+  cameraFrames: z.number().finite().optional(),
+}).strict();
+
+const emergencyStopSchema = z.object({
+  robotId: z.string().uuid(),
+}).strict();
+
+const emptyPayloadSchema = z.undefined().or(z.object({}).strict());
+
+const WS_EVENT_TYPE_LIMITS: Record<string, { normal: number; privileged: number }> = {
+  generic: { normal: LIMITS.WS_EVENT_RATE_LIMIT, privileged: LIMITS.WS_EVENT_RATE_LIMIT_ADMIN },
+  'room:join': { normal: 5, privileged: 10 },
+  'room:ping': { normal: 8, privileged: 16 },
+  'robot:claim': { normal: 2, privileged: 4 },
+  'robot:heartbeat': { normal: 6, privileged: 12 },
+  'robot:telemetry': { normal: 4, privileged: 8 },
+  'robot:actions:pull': { normal: 4, privileged: 8 },
+  control: { normal: 30, privileged: 45 },
+  estop: { normal: 4, privileged: 8 },
+  chat: { normal: 6, privileged: 12 },
+};
 
 @WebSocketGateway({
   path: '/ws',
@@ -190,17 +242,23 @@ export class BotGateway
     }
   }
 
-  private _checkEventRateLimit(client: WsClient): boolean {
+  private _checkEventRateLimit(client: WsClient, eventType = 'generic'): boolean {
     const now = Date.now();
     if (!client.wsEventWindowStart || now - client.wsEventWindowStart > LIMITS.WS_EVENT_RATE_WINDOW_MS) {
       client.wsEventWindowStart = now;
       client.wsEventCount = 1;
+      client.wsEventTypeCounts = { [eventType]: 1 };
       return true;
     }
+
     client.wsEventCount = (client.wsEventCount ?? 0) + 1;
+    client.wsEventTypeCounts = client.wsEventTypeCounts ?? {};
+    client.wsEventTypeCounts[eventType] = (client.wsEventTypeCounts[eventType] ?? 0) + 1;
     const isPrivileged = client.isRobot || client.role === 'ADMIN' || client.role === 'MOD';
-    const limit = isPrivileged ? LIMITS.WS_EVENT_RATE_LIMIT_ADMIN : LIMITS.WS_EVENT_RATE_LIMIT;
-    return client.wsEventCount <= limit;
+    const globalLimit = isPrivileged ? LIMITS.WS_EVENT_RATE_LIMIT_ADMIN : LIMITS.WS_EVENT_RATE_LIMIT;
+    const bucket = WS_EVENT_TYPE_LIMITS[eventType] ?? WS_EVENT_TYPE_LIMITS.generic!;
+    const bucketLimit = isPrivileged ? bucket.privileged : bucket.normal;
+    return client.wsEventCount <= globalLimit && client.wsEventTypeCounts[eventType] <= bucketLimit;
   }
 
   handleConnection(client: WsClient, request?: { headers?: { cookie?: string } }) {
@@ -245,16 +303,15 @@ export class BotGateway
   @SubscribeMessage('room:join')
   async handleRoomJoin(
     @ConnectedSocket() client: WsClient,
-    @MessageBody()
-    data: {
-      robotId: string;
-      accessToken?: string;
-      guestSessionId?: string;
-      roomAccessToken?: string;
-    },
+    @MessageBody() data: unknown,
   ) {
-    if (!this._checkEventRateLimit(client)) {
+    if (!this._checkEventRateLimit(client, 'room:join')) {
       client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Too many requests' } }));
+      return;
+    }
+
+    const parsed = this.parseWsPayload(client, data, roomJoinSchema, 'Invalid room join payload');
+    if (!parsed) {
       return;
     }
 
@@ -262,20 +319,21 @@ export class BotGateway
       await this._leaveRoom(client);
     }
 
-    const providedAccessToken = data.accessToken?.trim();
+    const providedAccessToken = parsed.accessToken?.trim();
     const authPayload = this.resolveSocketUser(providedAccessToken, client.cookieHeader);
 
-    client.watchingRobotId = data.robotId;
+    client.watchingRobotId = parsed.robotId;
     const isGuest = !authPayload;
     client.isGuest = isGuest;
 
     if (isGuest) {
-      const rawSessionId = data.guestSessionId?.trim().toLowerCase() ?? '';
-      const safeSessionId = /^[a-z0-9_-]{6,64}$/.test(rawSessionId)
-        ? rawSessionId
-        : client.id.replace(/-/g, '').slice(0, 16);
-      client.userId = `guest:${safeSessionId}`;
-      client.username = `Guest-${safeSessionId.slice(0, 6)}`;
+      const grantedActorId = await this.robotsService.resolveRoomAccessActorId(parsed.robotId, parsed.roomAccessToken);
+      const derivedGuestId =
+        grantedActorId && grantedActorId.startsWith('guest:')
+          ? grantedActorId.slice('guest:'.length)
+          : client.id.replace(/-/g, '').slice(0, 16);
+      client.userId = `guest:${derivedGuestId}`;
+      client.username = `Guest-${derivedGuestId.slice(0, 6)}`;
       client.role = undefined;
     } else {
       client.userId = authPayload.sub;
@@ -284,9 +342,9 @@ export class BotGateway
     }
 
     const allowed = await this.robotsService.validateRoomAccess({
-      robotId: data.robotId,
+      robotId: parsed.robotId,
       actorId: client.userId,
-      roomAccessToken: data.roomAccessToken,
+      roomAccessToken: parsed.roomAccessToken,
     });
     if (!allowed) {
       client.watchingRobotId = undefined;
@@ -303,7 +361,7 @@ export class BotGateway
       | null = null;
 
     if (client.userId) {
-      const restriction = await this.moderationService.getActiveRestriction(data.robotId, client.userId);
+      const restriction = await this.moderationService.getActiveRestriction(parsed.robotId, client.userId);
       if (restriction) {
         const action = typeof restriction.action === 'string' ? restriction.action : 'TIMEOUT';
         const event =
@@ -327,17 +385,17 @@ export class BotGateway
       }
     }
 
-    if (!this.rooms.has(data.robotId)) this.rooms.set(data.robotId, new Set());
-    this.rooms.get(data.robotId)!.add(client.id);
+    if (!this.rooms.has(parsed.robotId)) this.rooms.set(parsed.robotId, new Set());
+    this.rooms.get(parsed.robotId)!.add(client.id);
 
     client.presenceJoinedAt = Date.now();
-    const presenceSnapshot = await this.refreshSharedPresenceState(client, data.robotId);
+    const presenceSnapshot = await this.refreshSharedPresenceState(client, parsed.robotId);
     this.robotsService
-      .setViewerCount(data.robotId, presenceSnapshot.viewerCount)
+      .setViewerCount(parsed.robotId, presenceSnapshot.viewerCount)
       .catch(() => {});
 
     if (presenceSnapshot.focusUserConnections === 1) {
-      this._broadcastToRoom(data.robotId, WS_EVENTS.PRESENCE_JOIN, {
+      this._broadcastToRoom(parsed.robotId, WS_EVENTS.PRESENCE_JOIN, {
         userId: client.userId,
         username: client.username,
       }, client.id);
@@ -355,12 +413,21 @@ export class BotGateway
   }
 
   @SubscribeMessage('room:ping')
-  async handleRoomPing(@ConnectedSocket() client: WsClient, @MessageBody() data: { robotId: string }) {
-    if (!client.watchingRobotId || client.watchingRobotId !== data.robotId || !client.userId) {
+  async handleRoomPing(@ConnectedSocket() client: WsClient, @MessageBody() data: unknown) {
+    if (!this._checkEventRateLimit(client, 'room:ping')) {
       return;
     }
 
-    await this.touchSharedPresenceState(client, data.robotId);
+    const parsed = this.parseWsPayload(client, data, roomPingSchema, 'Invalid room ping payload');
+    if (!parsed) {
+      return;
+    }
+
+    if (!client.watchingRobotId || client.watchingRobotId !== parsed.robotId || !client.userId) {
+      return;
+    }
+
+    await this.touchSharedPresenceState(client, parsed.robotId);
   }
 
   // ─── Robot authentication ───────────────────────────────────────────────────
@@ -368,10 +435,20 @@ export class BotGateway
   @SubscribeMessage(WS_EVENTS.ROBOT_CLAIM)
   async handleRobotClaim(
     @ConnectedSocket() client: WsClient,
-    @MessageBody() data: { robotAuthToken?: string },
+    @MessageBody() data: unknown,
   ) {
+    if (!this._checkEventRateLimit(client, 'robot:claim')) {
+      client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Too many requests' } }));
+      return;
+    }
+
+    const parsed = this.parseWsPayload(client, data, robotClaimSchema, 'Invalid robot claim payload');
+    if (!parsed) {
+      return;
+    }
+
     try {
-      const robotId = this.resolveRobotSocketIdentity(data.robotAuthToken);
+      const robotId = this.resolveRobotSocketIdentity(parsed.robotAuthToken);
       if (!robotId) {
         client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Invalid robot authorization' } }));
         try {
@@ -441,6 +518,10 @@ export class BotGateway
 
   @SubscribeMessage(WS_EVENTS.ROBOT_HEARTBEAT)
   handleHeartbeat(@ConnectedSocket() client: WsClient) {
+    if (!this._checkEventRateLimit(client, 'robot:heartbeat')) {
+      return { event: WS_EVENTS.ERROR, data: { message: 'Too many requests' } };
+    }
+
     if (client.robotId) {
       this.redis.set(`robot:heartbeat:${client.robotId}`, Date.now().toString(), 'EX', 30);
       void this.refreshRobotClaimLock(client.robotId, client.id);
@@ -452,21 +533,40 @@ export class BotGateway
   @SubscribeMessage(WS_EVENTS.ROBOT_TELEMETRY)
   async handleTelemetry(
     @ConnectedSocket() client: WsClient,
-    @MessageBody() data: Record<string, unknown>,
+    @MessageBody() data: unknown,
   ) {
+    if (!this._checkEventRateLimit(client, 'robot:telemetry')) {
+      client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Too many requests' } }));
+      return;
+    }
+
+    const parsed = this.parseWsPayload(client, data, robotTelemetrySchema, 'Invalid telemetry payload');
+    if (!parsed) {
+      return;
+    }
+
     if (!client.isRobot || !client.robotId) {
       client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Only robot clients can send telemetry' } }));
       return;
     }
     try {
-      await this.robotsService.ingestRobotTelemetryByRobotId(client.robotId, data);
+      await this.robotsService.ingestRobotTelemetryByRobotId(client.robotId, parsed);
     } catch (err) {
       this.logger.warn(`Telemetry ingest failed for robot ${client.robotId}: ${(err as Error).message}`);
     }
   }
 
   @SubscribeMessage('robot:actions:pull')
-  async handleRobotActionsPull(@ConnectedSocket() client: WsClient) {
+  async handleRobotActionsPull(@ConnectedSocket() client: WsClient, @MessageBody() data?: unknown) {
+    if (!this._checkEventRateLimit(client, 'robot:actions:pull')) {
+      client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Too many requests' } }));
+      return;
+    }
+
+    if (!this.parseWsPayload(client, data, emptyPayloadSchema, 'Invalid robot action poll payload')) {
+      return;
+    }
+
     if (!client.isRobot || !client.robotId) {
       client.send(
         JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Only robot clients can pull actions' } }),
@@ -487,28 +587,37 @@ export class BotGateway
   @SubscribeMessage(WS_EVENTS.CONTROL_COMMAND)
   async handleControlCommand(
     @ConnectedSocket() client: WsClient,
-    @MessageBody()
-    data: { robotId: string; command: string; value?: unknown; timestamp: number },
+    @MessageBody() data: unknown,
   ) {
-    if (!this._checkEventRateLimit(client)) {
+    if (!this._checkEventRateLimit(client, 'control')) {
       client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Too many requests' } }));
       return;
     }
 
-    const command = typeof data.command === 'string' ? data.command.trim() : '';
+    const parsed = this.parseWsPayload(
+      client,
+      data,
+      controlCommandSchema.extend({ robotId: z.string().uuid() }).strict(),
+      'Invalid control command payload',
+    );
+    if (!parsed) {
+      return;
+    }
+
+    const command = typeof parsed.command === 'string' ? parsed.command.trim() : '';
     if (!command) {
       client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Invalid control command' } }));
       return;
     }
 
-    if (client.watchingRobotId !== data.robotId) {
+    if (client.watchingRobotId !== parsed.robotId) {
       client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Join the room before sending controls' } }));
       return;
     }
 
-    const robot = await this.robotsService.findById(data.robotId);
+    const robot = await this.robotsService.findById(parsed.robotId);
 
-    const access = await this.robotsService.getAccessPolicy(data.robotId);
+    const access = await this.robotsService.getAccessPolicy(parsed.robotId);
     if (access.control === 'DISABLED') {
       client.send(
         JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Control is disabled for this robot' } }),
@@ -525,7 +634,7 @@ export class BotGateway
     const currentControllerUserId =
       robot.queueMode === 'DISABLED'
         ? null
-        : await this.queueService.getCurrentControllerUserId(data.robotId);
+        : await this.queueService.getCurrentControllerUserId(parsed.robotId);
     const commandAccess = await this.authorizeControlCommand({
       robot,
       client,
@@ -537,13 +646,13 @@ export class BotGateway
       return;
     }
 
-    if (!this.consumeControlCooldown(client, data.robotId, command, commandAccess.cooldownMs)) {
+    if (!this.consumeControlCooldown(client, parsed.robotId, command, commandAccess.cooldownMs)) {
       return;
     }
 
     // Moderation check
     if (client.userId) {
-      const restriction = await this.moderationService.getActiveRestriction(data.robotId, client.userId);
+      const restriction = await this.moderationService.getActiveRestriction(parsed.robotId, client.userId);
       if (restriction) {
         client.send(
           JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'You are restricted in this room', restriction } }),
@@ -554,13 +663,13 @@ export class BotGateway
 
     // Crowd input echo: broadcast to all viewers so they see button presses
     this._broadcastToRoom(
-      data.robotId,
+      parsed.robotId,
       WS_EVENTS.CROWD_INPUT,
       { userId: client.userId, username: client.username, command },
       client.id, // exclude sender
     );
 
-    const robotClient = this._getOpenRobotClient(data.robotId);
+    const robotClient = this._getOpenRobotClient(parsed.robotId);
     if (!robotClient) {
       client.send(
         JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Robot realtime control channel is offline' } }),
@@ -574,19 +683,19 @@ export class BotGateway
         event: WS_EVENTS.CONTROL_COMMAND,
         data: {
           command,
-          value: data.value,
-          metadata: this._buildCommandMetadata(client, data.robotId, robot.ownerId),
+          value: parsed.value,
+          metadata: this._buildCommandMetadata(client, parsed.robotId, robot.ownerId),
           userId: client.userId,
           // Use server timestamp for robot-side latency checks to avoid clock-skew false positives.
           timestamp: Date.now(),
-          clientTimestamp: data.timestamp,
+          clientTimestamp: parsed.timestamp,
         },
       }),
     );
 
     // Browser timestamps are useful for diagnostics, but not reliable enough to gate realtime control.
-    if (Number.isFinite(data.timestamp)) {
-      const clientServerDeltaMs = Date.now() - data.timestamp;
+    if (Number.isFinite(parsed.timestamp)) {
+      const clientServerDeltaMs = Date.now() - parsed.timestamp;
       const withinExpectedRange =
         clientServerDeltaMs >= 0 &&
         clientServerDeltaMs <= LIMITS.MAX_CONTROL_CLOCK_SKEW_MS;
@@ -699,9 +808,19 @@ export class BotGateway
   @SubscribeMessage(WS_EVENTS.CONTROL_EMERGENCY_STOP)
   async handleEmergencyStopMessage(
     @ConnectedSocket() client: WsClient,
-    @MessageBody() data: { robotId: string },
+    @MessageBody() data: unknown,
   ) {
-    if (client.watchingRobotId !== data.robotId || !client.userId) {
+    if (!this._checkEventRateLimit(client, 'estop')) {
+      client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Too many requests' } }));
+      return;
+    }
+
+    const parsed = this.parseWsPayload(client, data, emergencyStopSchema, 'Invalid emergency stop payload');
+    if (!parsed) {
+      return;
+    }
+
+    if (client.watchingRobotId !== parsed.robotId || !client.userId) {
       client.send(
         JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Join the room before using E-STOP' } }),
       );
@@ -709,7 +828,7 @@ export class BotGateway
     }
 
     try {
-      const access = await this.robotsService.getAccessPolicy(data.robotId);
+      const access = await this.robotsService.getAccessPolicy(parsed.robotId);
       if (access.estop === 'DISABLED') {
         client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'E-STOP is disabled for this room' } }));
         return;
@@ -721,7 +840,7 @@ export class BotGateway
         return;
       }
 
-      this._triggerEmergencyStop(data.robotId, `Manual E-STOP by ${client.userId}`);
+      this._triggerEmergencyStop(parsed.robotId, `Manual E-STOP by ${client.userId}`);
     } catch {
       client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Failed to validate E-STOP access' } }));
     }
@@ -732,20 +851,30 @@ export class BotGateway
   @SubscribeMessage(WS_EVENTS.CHAT_MESSAGE)
   async handleChatMessage(
     @ConnectedSocket() client: WsClient,
-    @MessageBody() data: { robotId: string; content: string; clientMessageId?: string },
+    @MessageBody() data: unknown,
   ) {
-    if (!this._checkEventRateLimit(client)) {
+    if (!this._checkEventRateLimit(client, 'chat')) {
       client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Too many requests' } }));
       return;
     }
 
-    if (client.watchingRobotId !== data.robotId) {
+    const parsed = this.parseWsPayload(
+      client,
+      data,
+      chatMessageSchema.extend({ clientMessageId: z.string().max(128).optional() }).strict(),
+      'Invalid chat payload',
+    );
+    if (!parsed) {
+      return;
+    }
+
+    if (client.watchingRobotId !== parsed.robotId) {
       client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Join the room before chatting' } }));
       return;
     }
 
-    const robot = await this.robotsService.findById(data.robotId);
-    const access = await this.robotsService.getAccessPolicy(data.robotId);
+    const robot = await this.robotsService.findById(parsed.robotId);
+    const access = await this.robotsService.getAccessPolicy(parsed.robotId);
     if (access.chat === 'DISABLED') {
       client.send(
         JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Chat is disabled for this robot' } }),
@@ -759,14 +888,14 @@ export class BotGateway
       return;
     }
 
-    if (!data.content?.trim() || data.content.length > LIMITS.MAX_CHAT_MESSAGE_LENGTH) {
+    if (!parsed.content?.trim() || parsed.content.length > LIMITS.MAX_CHAT_MESSAGE_LENGTH) {
       client.send(
         JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: `Chat messages must be 1-${LIMITS.MAX_CHAT_MESSAGE_LENGTH} chars` } }),
       );
       return;
     }
 
-    const { sanitized, hasIllegalChars } = this.moderationService.sanitizeChatContent(data.content);
+    const { sanitized, hasIllegalChars } = this.moderationService.sanitizeChatContent(parsed.content);
     if (!sanitized) {
       return;
     }
@@ -781,7 +910,7 @@ export class BotGateway
       if (client.userId) {
         this.moderationService
           .recordProfanityEvent({
-            robotId: data.robotId,
+            robotId: parsed.robotId,
             userId: client.userId,
             username: client.username ?? 'unknown',
             content: sanitized,
@@ -798,7 +927,7 @@ export class BotGateway
       if (client.userId) {
         this.moderationService
           .recordProfanityEvent({
-            robotId: data.robotId,
+            robotId: parsed.robotId,
             userId: client.userId,
             username: client.username ?? 'unknown',
             content: sanitized,
@@ -822,7 +951,7 @@ export class BotGateway
 
     // Moderation check
     if (client.userId) {
-      const restriction = await this.moderationService.getActiveRestriction(data.robotId, client.userId);
+      const restriction = await this.moderationService.getActiveRestriction(parsed.robotId, client.userId);
       if (restriction) {
         client.send(
           JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'You are restricted in this room', restriction } }),
@@ -835,16 +964,16 @@ export class BotGateway
     const isSiteAdmin = client.role === 'ADMIN';
     const isSiteModerator = client.role === 'MOD' || client.role === 'MODERATOR';
 
-    this._broadcastToRoom(data.robotId, WS_EVENTS.CHAT_MESSAGE, {
+    this._broadcastToRoom(parsed.robotId, WS_EVENTS.CHAT_MESSAGE, {
       userId: client.userId,
       username: client.username,
       content: sanitized,
       timestamp: now,
-      clientMessageId: typeof data.clientMessageId === 'string' ? data.clientMessageId : undefined,
+      clientMessageId: parsed.clientMessageId,
     });
 
     // Forward chat to the robot client so it can drive TTS
-    const robotClient = this._getOpenRobotClient(data.robotId);
+    const robotClient = this._getOpenRobotClient(parsed.robotId);
     if (robotClient) {
       robotClient.send(
         JSON.stringify({
@@ -864,9 +993,9 @@ export class BotGateway
                 isSiteAdmin,
                 isSiteModerator,
               },
-              robotId: data.robotId,
+              robotId: parsed.robotId,
             },
-            metadata: this._buildCommandMetadata(client, data.robotId, robot.ownerId),
+            metadata: this._buildCommandMetadata(client, parsed.robotId, robot.ownerId),
             timestamp: now,
           },
         }),
@@ -1208,10 +1337,23 @@ export class BotGateway
   }
 
   private getRobotJwtSecret() {
-    return (
-      this.configService.get<string>('ROBOT_JWT_SECRET') ??
-      createHash('sha256').update(this.configService.getOrThrow<string>('JWT_SECRET')).digest('hex')
-    );
+    return this.configService.getOrThrow<string>('ROBOT_JWT_SECRET');
+  }
+
+  private parseWsPayload<TSchema extends ZodTypeAny>(
+    client: WsClient,
+    payload: unknown,
+    schema: TSchema,
+    errorMessage: string,
+  ): z.infer<TSchema> | null {
+    const result = schema.safeParse(payload);
+    if (result.success) {
+      return result.data;
+    }
+
+    this.logger.debug(`${errorMessage}: ${result.error.issues.map((issue) => issue.message).join('; ')}`);
+    client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: errorMessage } }));
+    return null;
   }
 
   private canUseConfiguredButton(input: {

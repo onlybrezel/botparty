@@ -6,6 +6,7 @@ import { readdir, stat } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { PrismaService } from '../prisma/prisma.service';
 import { LivekitService } from '../livekit/livekit.service';
+import { isStaffRole } from '../common/robot-access';
 
 @Injectable()
 export class RecordingAdminService {
@@ -117,7 +118,7 @@ export class RecordingAdminService {
       where: { id: userId },
       select: { role: true },
     });
-    if (!user || user.role !== 'ADMIN') {
+    if (!user || !isStaffRole(user.role)) {
       throw new ForbiddenException('Access denied');
     }
   }

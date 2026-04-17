@@ -140,7 +140,7 @@ export class UsersService {
 
     if (dto.avatarUrl !== undefined) {
       const cleaned = dto.avatarUrl.trim();
-      updates.avatarUrl = cleaned.length > 0 ? cleaned : null;
+      updates.avatarUrl = cleaned.length > 0 ? this.normalizeAvatarUrl(cleaned) : null;
     }
 
     return this.prisma.user.update({
@@ -189,6 +189,21 @@ export class UsersService {
         createdAt: true,
       },
     });
+  }
+
+  private normalizeAvatarUrl(value: string): string {
+    let parsed: URL;
+    try {
+      parsed = new URL(value);
+    } catch {
+      throw new BadRequestException('Invalid avatar URL');
+    }
+
+    if (parsed.protocol !== 'https:') {
+      throw new BadRequestException('Avatar URL must use https');
+    }
+
+    return parsed.toString();
   }
 
   async updateUserByStaff(
@@ -397,7 +412,8 @@ export class UsersService {
     });
   }
 
-  private async ensureAnotherActiveAdminExists(tx: Prisma.TransactionClient, excludedUserId: string) {    const otherAdminCount = await tx.user.count({
+  private async ensureAnotherActiveAdminExists(tx: Prisma.TransactionClient, excludedUserId: string) {
+    const otherAdminCount = await tx.user.count({
       where: {
         role: 'ADMIN',
         isActive: true,

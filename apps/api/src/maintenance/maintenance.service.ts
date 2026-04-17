@@ -1,10 +1,13 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import type { Prisma } from '@botparty/prisma';
 
 // AnalyticsEvent rows older than this are deleted during maintenance sweeps.
 const ANALYTICS_RETENTION_DAYS = Number(process.env.ANALYTICS_RETENTION_DAYS ?? 90);
 // How often the cleanup job runs (default: every 6 hours).
 const CLEANUP_INTERVAL_MS = Number(process.env.CLEANUP_INTERVAL_MS ?? 6 * 60 * 60 * 1000);
+const ROBOT_STREAM_KEY_MAX_AGE_DAYS = Number(process.env.ROBOT_STREAM_KEY_MAX_AGE_DAYS ?? 90);
 
 @Injectable()
 export class MaintenanceService implements OnModuleInit, OnModuleDestroy {
@@ -42,6 +45,12 @@ export class MaintenanceService implements OnModuleInit, OnModuleDestroy {
     } catch (err) {
       this.logger.warn('Analytics event cleanup failed', err);
     }
+
+    try {
+      await this._rotateExpiredRobotStreamKeys();
+    } catch (err) {
+      this.logger.warn('Robot stream key rotation sweep failed', err);
+    }
   }
 
   private async _purgeExpiredQueueEntries() {
@@ -67,5 +76,68 @@ export class MaintenanceService implements OnModuleInit, OnModuleDestroy {
         `Purged ${result.count} analytics event(s) older than ${ANALYTICS_RETENTION_DAYS} days`,
       );
     }
+  }
+
+  private async _rotateExpiredRobotStreamKeys() {
+    if (!Number.isFinite(ROBOT_STREAM_KEY_MAX_AGE_DAYS) || ROBOT_STREAM_KEY_MAX_AGE_DAYS <= 0) {
+      return;
+    }
+
+    const maxAgeMs = ROBOT_STREAM_KEY_MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
+    const robots = await this.prisma.robot.findMany({
+      select: {
+        id: true,
+        createdAt: true,
+        metadata: true,
+      },
+    });
+
+    let rotated = 0;
+    for (const robot of robots) {
+      const issuedAt = this._readIssuedAt(robot.metadata, 'streamKeyIssuedAt') ?? robot.createdAt;
+      if (Date.now() - issuedAt.getTime() <= maxAgeMs) {
+        continue;
+      }
+
+      const nextMetadata = this._withIssuedAt(robot.metadata, 'streamKeyIssuedAt');
+      await this.prisma.robot.update({
+        where: { id: robot.id },
+        data: {
+          streamKey: randomBytes(32).toString('hex'),
+          metadata: nextMetadata as Prisma.InputJsonValue,
+        },
+      });
+      rotated += 1;
+    }
+
+    if (rotated > 0) {
+      this.logger.log(`Rotated ${rotated} robot stream key(s) older than ${ROBOT_STREAM_KEY_MAX_AGE_DAYS} days`);
+    }
+  }
+
+  private _withIssuedAt(metadata: unknown, field: 'streamKeyIssuedAt'): Record<string, unknown> {
+    const base = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+      ? { ...(metadata as Record<string, unknown>) }
+      : {};
+    base[field] = new Date().toISOString();
+    return base;
+  }
+
+  private _readIssuedAt(metadata: unknown, field: 'streamKeyIssuedAt'): Date | null {
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+      return null;
+    }
+
+    const raw = (metadata as Record<string, unknown>)[field];
+    if (typeof raw !== 'string' || raw.trim().length === 0) {
+      return null;
+    }
+
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) {
+      return null;
+    }
+
+    return parsed;
   }
 }

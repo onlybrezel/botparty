@@ -7,6 +7,7 @@ import {
   Logger,
   OnModuleDestroy,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { createRobotSchema, updateRobotSchema, LIMITS } from '@botparty/shared';
@@ -136,6 +137,13 @@ const DEFAULT_STREAM_POLICY: RobotStreamPolicy = {
   targetBitrateKbps: null,
 };
 
+const DEFAULT_ROBOT_CONTROLS = [
+  { label: 'Forward', command: 'forward', hotKey: 'w', icon: '▲', position: 0 },
+  { label: 'Left', command: 'left', hotKey: 'a', icon: '◀', position: 1 },
+  { label: 'Back', command: 'backward', hotKey: 's', icon: '▼', position: 2 },
+  { label: 'Right', command: 'right', hotKey: 'd', icon: '▶', position: 3 },
+] as const;
+
 const ROBOT_TEXT_PROFANITY_TERMS = Array.from(new Set(SLUG_PROFANITY_TERMS));
 
 @Injectable()
@@ -149,6 +157,7 @@ export class RobotsService implements OnModuleDestroy {
     private readonly thumbnail: RobotThumbnailService,
     private readonly access: RobotAccessService,
     private readonly webhooks: RobotWebhookService,
+    private readonly configService: ConfigService,
   ) {}
 
   onModuleDestroy() {
@@ -158,7 +167,9 @@ export class RobotsService implements OnModuleDestroy {
   async create(ownerId: string, input: z.infer<typeof createRobotSchema>) {
     const data = createRobotSchema.parse(input);
     this.assertRobotTextAllowed(data);
-    const metadata = this.mergeMetadata(null, data.acl, data.stream);
+    const metadata = this.withStreamKeyIssuedAt(
+      this.withClaimTokenIssuedAt(this.mergeMetadata(null, data.acl, data.stream)),
+    );
     const accessPassword = data.accessPassword;
     const baseData = this.stripRobotWriteFields(data);
 
@@ -203,52 +214,13 @@ export class RobotsService implements OnModuleDestroy {
     });
 
     await this.prisma.controlButton.createMany({
-      data: [
-        {
-          robotId: robot.id,
-          label: 'Forward',
-          command: 'forward',
-          hotKey: 'w',
-          icon: '▲',
-          cooldownMs: LIMITS.DEFAULT_CONTROL_COOLDOWN_MS,
-          access: 'QUEUE_TURN',
-          position: 0,
-          isEnabled: true,
-        },
-        {
-          robotId: robot.id,
-          label: 'Left',
-          command: 'left',
-          hotKey: 'a',
-          icon: '◀',
-          cooldownMs: LIMITS.DEFAULT_CONTROL_COOLDOWN_MS,
-          access: 'QUEUE_TURN',
-          position: 1,
-          isEnabled: true,
-        },
-        {
-          robotId: robot.id,
-          label: 'Back',
-          command: 'backward',
-          hotKey: 's',
-          icon: '▼',
-          cooldownMs: LIMITS.DEFAULT_CONTROL_COOLDOWN_MS,
-          access: 'QUEUE_TURN',
-          position: 2,
-          isEnabled: true,
-        },
-        {
-          robotId: robot.id,
-          label: 'Right',
-          command: 'right',
-          hotKey: 'd',
-          icon: '▶',
-          cooldownMs: LIMITS.DEFAULT_CONTROL_COOLDOWN_MS,
-          access: 'QUEUE_TURN',
-          position: 3,
-          isEnabled: true,
-        },
-      ],
+      data: DEFAULT_ROBOT_CONTROLS.map((button) => ({
+        ...button,
+        robotId: robot.id,
+        cooldownMs: LIMITS.DEFAULT_CONTROL_COOLDOWN_MS,
+        access: 'QUEUE_TURN',
+        isEnabled: true,
+      })),
     });
 
     this.logger.log(`Robot created: ${robot.name} (${robot.slug}) by ${ownerId}`);
@@ -312,11 +284,13 @@ export class RobotsService implements OnModuleDestroy {
     return this.toPublicRobot(robot);
   }
 
-  async findByUsernameAndSlug(_username: string, slug: string) {
+  async findByUsernameAndSlug(username: string, slug: string) {
     const robot = await this.findRobotBySlugAny(slug);
     if (!robot) throw new NotFoundException('Robot not found');
     if (robot.visibility === 'PRIVATE') throw new NotFoundException('Robot not found');
-    // Keep lenient lookup for backward compatibility; web canonicalizes URL to owner username.
+    if (robot.owner.username.toLowerCase() !== username.trim().toLowerCase()) {
+      throw new NotFoundException('Robot not found');
+    }
     return this.toPublicRobot(robot);
   }
 
@@ -594,7 +568,7 @@ export class RobotsService implements OnModuleDestroy {
       where: { id },
       data: {
         claimToken,
-        metadata: this.clearBoundDeviceMetadata(robot.metadata) as Prisma.InputJsonValue,
+        metadata: this.withClaimTokenIssuedAt(this.clearBoundDeviceMetadata(robot.metadata)) as Prisma.InputJsonValue,
       },
       select: { id: true, claimToken: true },
     });
@@ -672,8 +646,28 @@ export class RobotsService implements OnModuleDestroy {
     return this.toPublicRobot(robot);
   }
 
-  async findPrivateByUsernameAndSlugForUser(_username: string, slug: string, requesterId: string) {
-    return this.findPrivateBySlugForUser(slug, requesterId);
+  async findPrivateByUsernameAndSlugForUser(username: string, slug: string, requesterId: string) {
+    const robot = await this.findRobotBySlugAny(slug);
+    if (!robot) throw new NotFoundException('Robot not found');
+    if (robot.owner.username.toLowerCase() !== username.trim().toLowerCase()) {
+      throw new NotFoundException('Robot not found');
+    }
+
+    const requester = await this.prisma.user.findUnique({
+      where: { id: requesterId },
+      select: { role: true },
+    });
+    const isStaff = requester?.role === 'ADMIN' || requester?.role === 'MOD';
+
+    if (robot.visibility !== 'PRIVATE' && !isStaff && robot.ownerId !== requesterId) {
+      throw new ForbiddenException('Robot is public');
+    }
+
+    if (robot.ownerId !== requesterId && !isStaff) {
+      throw new ForbiddenException('Not allowed to access this robot');
+    }
+
+    return this.toPublicRobot(robot);
   }
 
   async getAllowedUsers(robotId: string, ownerId: string): Promise<AllowedUserSummary[]> {
@@ -753,7 +747,24 @@ export class RobotsService implements OnModuleDestroy {
   }
 
   async findByClaimToken(claimToken: string) {
-    return this.prisma.robot.findUnique({ where: { claimToken } });
+    const robot = await this.prisma.robot.findUnique({ where: { claimToken } });
+    if (!robot) {
+      return null;
+    }
+
+    const maxAgeDays = Number(this.configService.get<string>('ROBOT_CLAIM_TOKEN_MAX_AGE_DAYS', '90'));
+    if (!Number.isFinite(maxAgeDays) || maxAgeDays <= 0) {
+      return robot;
+    }
+
+    const tokenIssuedAt = this.readClaimTokenIssuedAt(robot.metadata) ?? robot.createdAt;
+    const maxAgeMs = maxAgeDays * 24 * 60 * 60 * 1000;
+    if (Date.now() - tokenIssuedAt.getTime() > maxAgeMs) {
+      this.logger.warn(`Rejected expired claim token for robot ${robot.id}`);
+      return null;
+    }
+
+    return robot;
   }
 
   async enqueueAction(robotId: string, ownerId: string, payload: RobotActionPayload) {
@@ -1019,6 +1030,10 @@ export class RobotsService implements OnModuleDestroy {
     return this.access.validateRoomAccess(input);
   }
 
+  async resolveRoomAccessActorId(robotId: string, roomAccessToken?: string): Promise<string | null> {
+    return this.access.resolveRoomAccessActorId(robotId, roomAccessToken);
+  }
+
   resolveGuestActorId(guestSessionId?: string): string | null {
     return this.access.resolveGuestActorId(guestSessionId);
   }
@@ -1083,14 +1098,53 @@ export class RobotsService implements OnModuleDestroy {
   private stripRobotWriteFields<T extends { acl?: unknown; stream?: unknown; accessPassword?: unknown; slug?: unknown }>(
     data: T,
   ): Omit<T, 'acl' | 'stream' | 'accessPassword' | 'slug'> {
-    const { acl: _acl, stream: _stream, accessPassword: _pw, slug: _slug, ...rest } = data as T & {
-      acl?: unknown;
-      stream?: unknown;
-      accessPassword?: unknown;
-      slug?: unknown;
+    const rest = {
+      ...(data as T & {
+        acl?: unknown;
+        stream?: unknown;
+        accessPassword?: unknown;
+        slug?: unknown;
+      }),
     };
-    void _acl; void _stream; void _pw; void _slug;
+    delete rest.acl;
+    delete rest.stream;
+    delete rest.accessPassword;
+    delete rest.slug;
     return rest as Omit<T, 'acl' | 'stream' | 'accessPassword' | 'slug'>;
+  }
+
+  private withClaimTokenIssuedAt(metadata: unknown): Record<string, unknown> {
+    const base = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+      ? { ...(metadata as Record<string, unknown>) }
+      : {};
+    base.claimTokenIssuedAt = new Date().toISOString();
+    return base;
+  }
+
+  private withStreamKeyIssuedAt(metadata: unknown): Record<string, unknown> {
+    const base = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+      ? { ...(metadata as Record<string, unknown>) }
+      : {};
+    base.streamKeyIssuedAt = new Date().toISOString();
+    return base;
+  }
+
+  private readClaimTokenIssuedAt(metadata: unknown): Date | null {
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+      return null;
+    }
+
+    const raw = (metadata as Record<string, unknown>).claimTokenIssuedAt;
+    if (typeof raw !== 'string' || raw.trim().length === 0) {
+      return null;
+    }
+
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) {
+      return null;
+    }
+
+    return parsed;
   }
 
   private validateAndNormalizeSlugInput(rawSlug: string): string {

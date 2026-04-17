@@ -71,13 +71,14 @@ export class ControlsApi {
   }
 
   async deleteControl(buttonId: string) {
-    return this.req<void>(`/controls/${buttonId}`, { method: 'DELETE' });
+    return this.req(`/controls/${buttonId}`, { method: 'DELETE', expectNoContent: true });
   }
 
   async reorderControls(robotId: string, order: Array<{ id: string; position: number }>) {
-    return this.req<void>(`/controls/robot/${robotId}/reorder`, {
+    return this.req(`/controls/robot/${robotId}/reorder`, {
       method: 'PUT',
       body: JSON.stringify({ order }),
+      expectNoContent: true,
     });
   }
 }

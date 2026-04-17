@@ -121,22 +121,7 @@ export const WASD: Record<string, string> = {
 };
 
 export function getOrCreateGuestSessionId(): string {
-  if (typeof window === 'undefined') return crypto.randomUUID();
-
-  try {
-    const key = 'botparty.guestSessionId.v1';
-    const stored = window.localStorage.getItem(key);
-    const normalized = (stored ?? '').trim().toLowerCase();
-    if (/^[a-z0-9_-]{6,64}$/.test(normalized)) {
-      return normalized;
-    }
-
-    const id = crypto.randomUUID();
-    window.localStorage.setItem(key, id);
-    return id;
-  } catch {
-    return crypto.randomUUID();
-  }
+  return crypto.randomUUID();
 }
 
 export function normalizeQueueEntries(rows: QueueEntryWire[] | undefined): QueueEntry[] {

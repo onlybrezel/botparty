@@ -79,7 +79,8 @@ export class MailService {
 
   async sendPasswordResetEmail(email: string, token: string) {
     const resetUrl = new URL('/reset-password', this.appUrl);
-    resetUrl.searchParams.set('token', token);
+    // Keep sensitive token out of URL query and Referer logs.
+    resetUrl.hash = `token=${encodeURIComponent(token)}`;
 
     if (!this.transport) {
       this.logger.warn(`SMTP is not configured; password reset link for ${email}: ${resetUrl.toString()}`);
@@ -106,6 +107,37 @@ export class MailService {
         `Open this link to set a new password: ${resetUrl.toString()}`,
         '',
         'If you did not request this, you can ignore this email.',
+      ].join('\n'),
+      html,
+    });
+  }
+
+  async sendAccountLockoutNoticeEmail(email: string, lockoutMinutes: number) {
+    if (!this.transport) {
+      this.logger.warn(`SMTP is not configured; account lockout notification for ${email} not sent`);
+      return;
+    }
+
+    const loginUrl = new URL('/login', this.appUrl).toString();
+    const html = htmlWrapper('BotParty login temporarily locked', `
+      <h1>Login temporarily locked</h1>
+      <p>We detected too many failed login attempts for your account.</p>
+      <p>Your login is temporarily blocked for about <strong>${lockoutMinutes} minutes</strong>.</p>
+      <a href="${loginUrl}" class="btn">Open BotParty login</a>
+      <hr class="divider">
+      <p>If this was not you, reset your password immediately after the lockout ends.</p>
+    `);
+
+    await this.transport.sendMail({
+      from: this.fromAddress,
+      to: email,
+      subject: 'BotParty security notice: temporary login lockout',
+      text: [
+        'We detected too many failed login attempts for your BotParty account.',
+        '',
+        `Your login is temporarily blocked for about ${lockoutMinutes} minutes.`,
+        '',
+        'If this was not you, reset your password when the lockout ends.',
       ].join('\n'),
       html,
     });

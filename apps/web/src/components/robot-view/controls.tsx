@@ -307,13 +307,36 @@ export function ControlKey({
   onRelease?: () => void;
 }) {
   const isMotionKey = ['forward', 'backward', 'left', 'right'].includes(command);
+  const handleKeyboardPress = () => {
+    if (!disabled) {
+      onPress();
+    }
+  };
+  const handleKeyboardRelease = () => {
+    if (!disabled && isMotionKey) {
+      onRelease?.();
+    }
+  };
 
   return (
     <button
+      type="button"
       onPointerDown={disabled ? undefined : onPress}
       onPointerUp={disabled || !isMotionKey ? undefined : onRelease}
       onPointerCancel={disabled || !isMotionKey ? undefined : onRelease}
       onPointerLeave={disabled || !isMotionKey ? undefined : onRelease}
+      onKeyDown={(event) => {
+        if ((event.key === 'Enter' || event.key === ' ') && !event.repeat) {
+          event.preventDefault();
+          handleKeyboardPress();
+        }
+      }}
+      onKeyUp={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          handleKeyboardRelease();
+        }
+      }}
       title={hotKey.toUpperCase()}
       disabled={disabled}
       className={`flex h-16 w-16 touch-none items-center justify-center rounded-2xl border text-base font-bold transition select-none sm:h-14 sm:w-14 sm:rounded-xl sm:text-sm lg:h-11 lg:w-11 lg:rounded-lg lg:text-sm ${

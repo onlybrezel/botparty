@@ -16,8 +16,14 @@ type WebhookPayload = Record<string, unknown>;
 @Injectable()
 export class RobotWebhookService {
   private readonly logger = new Logger(RobotWebhookService.name);
+  private readonly webhookSecretKey: string;
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {
+    this.webhookSecretKey =
+      process.env.WEBHOOK_SECRET_ENCRYPTION_KEY?.trim() ||
+      process.env.JWT_SECRET?.trim() ||
+      'botparty-webhook-secret-fallback';
+  }
 
   async listForOwner(robotId: string, ownerId: string) {
     await this.assertOwner(robotId, ownerId);
@@ -34,7 +40,7 @@ export class RobotWebhookService {
       lastTriggeredAt: hook.lastTriggeredAt?.toISOString() ?? null,
       lastStatusCode: hook.lastStatusCode,
       createdAt: hook.createdAt.toISOString(),
-      secretPreview: `${hook.secret.slice(0, 8)}...`,
+      secretPreview: `${this.decryptWebhookSecret(hook.id, hook.secret).slice(0, 8)}...`,
     }));
   }
 
@@ -44,13 +50,16 @@ export class RobotWebhookService {
     input: { url: string; events: RobotWebhookEvent[]; isActive?: boolean },
   ) {
     await this.assertOwner(robotId, ownerId);
+    const id = randomUUID();
+    const plainSecret = randomBytes(32).toString('hex');
     const hook = await this.prisma.robotWebhook.create({
       data: {
+        id,
         robotId,
         url: input.url.trim(),
         events: Array.from(new Set(input.events)),
         isActive: input.isActive ?? true,
-        secret: randomBytes(32).toString('hex'),
+        secret: this.encryptWebhookSecret(id, plainSecret),
       },
     });
 
@@ -59,7 +68,7 @@ export class RobotWebhookService {
       url: hook.url,
       events: hook.events,
       isActive: hook.isActive,
-      secret: hook.secret,
+      secret: plainSecret,
       createdAt: hook.createdAt.toISOString(),
     };
   }
@@ -153,7 +162,8 @@ export class RobotWebhookService {
           occurredAt,
           ...payload,
         });
-        const signature = createHmac('sha256', hook.secret).update(body).digest('hex');
+        const signingSecret = this.decryptWebhookSecret(hook.id, hook.secret);
+        const signature = createHmac('sha256', signingSecret).update(body).digest('hex');
 
         try {
           const response = await fetch(hook.url, {
@@ -201,5 +211,35 @@ export class RobotWebhookService {
     if (robot.ownerId !== ownerId) {
       throw new ForbiddenException('Not your robot');
     }
+  }
+
+  private encryptWebhookSecret(webhookId: string, plainSecretHex: string): string {
+    const plain = Buffer.from(plainSecretHex, 'hex');
+    const keyStream = createHmac('sha256', this.webhookSecretKey).update(webhookId).digest();
+    const encrypted = Buffer.alloc(plain.length);
+    for (let index = 0; index < plain.length; index += 1) {
+      const plainByte = plain[index] ?? 0;
+      const keyByte = keyStream[index % keyStream.length] ?? 0;
+      encrypted[index] = plainByte ^ keyByte;
+    }
+    return encrypted.toString('base64url');
+  }
+
+  private decryptWebhookSecret(webhookId: string, storedSecret: string): string {
+    // Backward compatibility: plaintext legacy secrets are 64-char hex strings.
+    if (/^[a-f0-9]{64}$/i.test(storedSecret)) {
+      return storedSecret;
+    }
+
+    const encrypted = Buffer.from(storedSecret, 'base64url');
+    const keyStream = createHmac('sha256', this.webhookSecretKey).update(webhookId).digest();
+    const decrypted = Buffer.alloc(encrypted.length);
+    for (let index = 0; index < encrypted.length; index += 1) {
+      const encryptedByte = encrypted[index] ?? 0;
+      const keyByte = keyStream[index % keyStream.length] ?? 0;
+      decrypted[index] = encryptedByte ^ keyByte;
+    }
+
+    return decrypted.toString('hex');
   }
 }

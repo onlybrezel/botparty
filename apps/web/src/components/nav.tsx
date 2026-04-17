@@ -5,14 +5,14 @@ import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { Menu, X } from 'lucide-react';
-import { useAuth } from '@/lib/store';
+import { AUTH_SYNC_STORAGE_KEY, useAuth } from '@/lib/store';
 import { api } from '@/lib/api';
 import { Badge } from '@/components/ui/badge';
 import { usePreferences } from '@/lib/preferences';
 
 export default function Nav() {
   const pathname = usePathname();
-  const { accessToken, username, logout, role } = useAuth();
+  const { accessToken, username, logout, role, syncLogout } = useAuth();
   const [mounted, setMounted] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -52,25 +52,34 @@ export default function Nav() {
 
   useEffect(() => {
     if (!mounted || accessToken) return;
-    try {
-      const key = 'botparty.guestSessionId.v1';
-      const stored = (window.localStorage.getItem(key) ?? '').trim().toLowerCase();
-      const sessionId = /^[a-z0-9_-]{6,64}$/.test(stored)
-        ? stored
-        : crypto.randomUUID().replace(/-/g, '').slice(0, 12);
-      if (sessionId !== stored) {
-        window.localStorage.setItem(key, sessionId);
-      }
-      setGuestLabel(`Guest-${sessionId.slice(0, 6)}`);
-    } catch {
-      setGuestLabel('Guest');
-    }
+    setGuestLabel('Guest');
   }, [accessToken, mounted]);
 
   useEffect(() => {
     setMenuOpen(false);
     setDropdownOpen(false);
   }, [pathname]);
+
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== AUTH_SYNC_STORAGE_KEY || !event.newValue) {
+        return;
+      }
+
+      try {
+        const payload = JSON.parse(event.newValue) as { type?: string };
+        if (payload.type === 'logout') {
+          api.setToken(null);
+          syncLogout();
+        }
+      } catch {
+        // Ignore malformed cross-tab auth sync payloads.
+      }
+    };
+
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [syncLogout]);
 
   useEffect(() => {
     if (!menuOpen) return;

@@ -82,18 +82,9 @@ export class SessionsService {
   }
 
   async findByRobot(robotId: string, limit = 50) {
-    await this.assertCanViewRobotSessions(robotId, null);
+    throw new ForbiddenException('Use requester-scoped session access');
 
-    return this.prisma.session.findMany({
-      where: { robotId },
-      orderBy: { startedAt: 'desc' },
-      take: Math.min(limit, 200),
-      include: {
-        user: {
-          select: { id: true, username: true, displayName: true, avatarUrl: true },
-        },
-      },
-    });
+    return this.findByRobotUnsafe(robotId, limit);
   }
 
   async findByUser(userId: string, limit = 50) {
@@ -110,16 +101,9 @@ export class SessionsService {
   }
 
   async getActiveSession(robotId: string) {
-    await this.assertCanViewRobotSessions(robotId, null);
+    throw new ForbiddenException('Use requester-scoped session access');
 
-    return this.prisma.session.findFirst({
-      where: { robotId, status: 'ACTIVE' },
-      include: {
-        user: {
-          select: { id: true, username: true, displayName: true },
-        },
-      },
-    });
+    return this.getActiveSessionUnsafe(robotId);
   }
 
   async findByRobotForRequester(
@@ -209,6 +193,9 @@ export class SessionsService {
       requesterId ??
       this.robotsService.resolveGuestActorId(guestSessionId) ??
       'guest:anonymous';
+    if (!requesterId) {
+      throw new ForbiddenException('Authentication is required to view session history');
+    }
     const allowed = await this.robotsService.validateRoomAccess({
       robotId,
       actorId,

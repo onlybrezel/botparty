@@ -69,7 +69,8 @@ export class LivekitController {
     }
 
     if (robot.accessMode === 'LINK_ONLY') {
-      const actorId = this.robotsService.resolveGuestActorId(guestSessionId);
+      void guestSessionId;
+      const actorId = await this.robotsService.resolveRoomAccessActorId(robotId, roomAccessToken);
       if (!actorId) {
         throw new ForbiddenException('Invite verification required');
       }

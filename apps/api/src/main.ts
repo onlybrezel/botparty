@@ -10,19 +10,72 @@ import { AppModule } from './app.module';
 import { loadFileBackedEnv } from './common/env-file';
 import { AllExceptionsFilter } from './filters/all-exceptions.filter';
 
+function readOrigin(raw: string | undefined): string | null {
+  const value = raw?.trim();
+  if (!value) return null;
+
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+}
+
+function collectConnectSrcOrigins(env: NodeJS.ProcessEnv): string[] {
+  const origins = new Set<string>();
+  for (const key of ['APP_URL', 'CORS_ORIGIN', 'LIVEKIT_PUBLIC_URL', 'LIVEKIT_URL']) {
+    const raw = env[key];
+    if (!raw) continue;
+    for (const entry of raw.split(',')) {
+      const origin = readOrigin(entry);
+      if (origin) {
+        origins.add(origin);
+      }
+    }
+  }
+  return [...origins];
+}
+
+function assertRequiredSecret(env: NodeJS.ProcessEnv, name: string, options?: { minLength?: number; bannedValues?: string[] }) {
+  const value = env[name]?.trim();
+  if (!value) {
+    throw new Error(`${name} must be set`);
+  }
+  if (options?.minLength && value.length < options.minLength) {
+    throw new Error(`${name} must be at least ${options.minLength} characters long`);
+  }
+  if (options?.bannedValues?.includes(value)) {
+    throw new Error(`${name} must not use an example or placeholder value`);
+  }
+}
+
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
   loadFileBackedEnv(process.env, logger);
 
   // ─── Security sanity checks ───────────────────────
-  const insecureJwtDefaults = ['CHANGE_ME_IN_PRODUCTION_min_32_chars_long!!', 'CHANGE_ME_REFRESH_SECRET_min_32_chars!!'];
-  if (insecureJwtDefaults.includes(process.env.JWT_SECRET ?? '') || insecureJwtDefaults.includes(process.env.JWT_REFRESH_SECRET ?? '')) {
+  try {
+    assertRequiredSecret(process.env, 'JWT_SECRET', {
+      minLength: 32,
+      bannedValues: ['CHANGE_ME_IN_PRODUCTION_min_32_chars_long!!', 'change_me_in_production_min_32_chars_long!!'],
+    });
+    assertRequiredSecret(process.env, 'JWT_REFRESH_SECRET', {
+      minLength: 32,
+      bannedValues: ['CHANGE_ME_REFRESH_SECRET_min_32_chars!!', 'change_me_refresh_secret_min_32_chars!!'],
+    });
+    assertRequiredSecret(process.env, 'ROBOT_JWT_SECRET', { minLength: 32 });
+    assertRequiredSecret(process.env, 'LIVEKIT_API_SECRET', {
+      minLength: 32,
+      bannedValues: ['secret_that_is_at_least_32_characters_long'],
+    });
+  } catch (error) {
     if (process.env.NODE_ENV === 'production') {
-      throw new Error('JWT_SECRET / JWT_REFRESH_SECRET must be changed from example defaults before running in production');
-    } else {
-      logger.warn('⚠️  JWT secrets are using example defaults — change them before deploying to production');
+      throw error;
     }
+    logger.warn(`Security configuration warning: ${(error as Error).message}`);
   }
+
+  const connectSrc = ["'self'", ...collectConnectSrcOrigins(process.env)];
 
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
@@ -59,7 +112,7 @@ async function bootstrap() {
           scriptSrc: ["'self'"],
           styleSrc: ["'self'", "'unsafe-inline'"],
           imgSrc: ["'self'", 'data:', 'blob:'],
-          connectSrc: ["'self'"],
+          connectSrc,
           mediaSrc: ["'self'", 'blob:'],
           fontSrc: ["'self'"],
           objectSrc: ["'none'"],

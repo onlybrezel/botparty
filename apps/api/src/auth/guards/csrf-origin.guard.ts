@@ -1,5 +1,7 @@
 import { Injectable, CanActivate, ExecutionContext, ForbiddenException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type { FastifyRequest } from 'fastify';
+import { getCsrfCookieName, parseCookie } from '../auth.cookies';
 
 /**
  * Defense-in-depth CSRF origin guard for cookie-based mutation endpoints.
@@ -12,12 +14,15 @@ import type { FastifyRequest } from 'fastify';
  */
 @Injectable()
 export class CsrfOriginGuard implements CanActivate {
+  constructor(private readonly configService: ConfigService) {}
+
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest<FastifyRequest>();
     const origin = request.headers['origin'] as string | undefined;
+    const referer = request.headers['referer'] as string | undefined;
+    const method = (request.method ?? 'GET').toUpperCase();
 
-    if (!origin) {
-      // No Origin header — not a browser cross-site request; allow.
+    if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
       return true;
     }
 
@@ -27,11 +32,32 @@ export class CsrfOriginGuard implements CanActivate {
       return true;
     }
 
-    if (origin === allowed) {
-      return true;
+    if (origin) {
+      if (origin !== allowed) {
+        throw new ForbiddenException('CSRF origin mismatch');
+      }
+    } else if (referer) {
+      try {
+        if (new URL(referer).origin !== allowed) {
+          throw new ForbiddenException('CSRF referer mismatch');
+        }
+      } catch {
+        throw new ForbiddenException('CSRF referer mismatch');
+      }
+    } else {
+      throw new ForbiddenException('CSRF origin or referer required');
     }
 
-    throw new ForbiddenException('CSRF origin mismatch');
+    const csrfCookieName = getCsrfCookieName(this.configService);
+    const cookieHeader = request.headers['cookie'] as string | undefined;
+    const cookieToken = parseCookie(cookieHeader, csrfCookieName);
+    const headerToken = (request.headers['x-csrf-token'] as string | undefined)?.trim();
+
+    if (!cookieToken || !headerToken || cookieToken !== headerToken) {
+      throw new ForbiddenException('CSRF token mismatch');
+    }
+
+    return true;
   }
 
   private _allowedOrigin(): string | null {

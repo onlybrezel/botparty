@@ -51,6 +51,7 @@ export function RobotChatPanel({
 
       <div
         ref={chatScrollRef}
+        aria-live="polite"
         onScroll={(event) => {
           const container = event.currentTarget;
           const distanceFromBottom =
@@ -60,9 +61,9 @@ export function RobotChatPanel({
         className="mb-2 h-64 overflow-y-auto rounded-lg bg-[var(--background)] px-2 py-1.5 text-sm sm:h-52 lg:h-44"
       >
         <div className="flex min-h-full flex-col justify-end gap-1.5">
-          {messages.map((msg, i) => (
+          {messages.map((msg) => (
             <div
-              key={i}
+              key={`${msg.userId}-${msg.timestamp}-${msg.content.slice(0, 24)}`}
               className={`animate-fade-in rounded-md border px-2.5 py-1.5 ${
                 msg.isSystem
                   ? 'border-[var(--border)] bg-[var(--muted)]/30'

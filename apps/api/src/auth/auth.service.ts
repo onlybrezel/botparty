@@ -139,6 +139,9 @@ export class AuthService {
         await this.redis.set(lockoutKey, '1', 'EX', LOGIN_LOCKOUT_SEC);
         await this.redis.del(attemptsKey);
         this.logger.warn(`Account locked after ${MAX_LOGIN_ATTEMPTS} failed attempts: ${data.email}`);
+        this.mail.sendAccountLockoutNoticeEmail(data.email, Math.ceil(LOGIN_LOCKOUT_SEC / 60)).catch((error: unknown) => {
+          this.logger.warn(`Failed to send account lockout email to ${data.email}: ${(error as Error).message}`);
+        });
       }
       throw new UnauthorizedException('Invalid credentials');
     }

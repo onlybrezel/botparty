@@ -69,11 +69,11 @@ export class RobotsApi {
   }
 
   async deleteRobot(id: string) {
-    return this.req<void>(`/robots/${id}`, { method: 'DELETE' });
+    return this.req(`/robots/${id}`, { method: 'DELETE', expectNoContent: true });
   }
 
   async deleteRobotAsStaff(id: string) {
-    return this.req<void>(`/robots/admin/${id}`, { method: 'DELETE' });
+    return this.req(`/robots/admin/${id}`, { method: 'DELETE', expectNoContent: true });
   }
 
   async regenerateRobotToken(id: string) {
@@ -106,8 +106,9 @@ export class RobotsApi {
   }
 
   async removeAllowedUser(robotId: string, userId: string) {
-    return this.req<void>(`/robots/${robotId}/allowed-users/${userId}`, {
+    return this.req(`/robots/${robotId}/allowed-users/${userId}`, {
       method: 'DELETE',
+      expectNoContent: true,
     });
   }
 
@@ -126,8 +127,9 @@ export class RobotsApi {
   }
 
   async deleteRobotIngressCamera(robotId: string, ingressId: string) {
-    return this.req<void>(`/robots/${robotId}/ingress-cameras/${encodeURIComponent(ingressId)}`, {
+    return this.req(`/robots/${robotId}/ingress-cameras/${encodeURIComponent(ingressId)}`, {
       method: 'DELETE',
+      expectNoContent: true,
     });
   }
 

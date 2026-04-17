@@ -19,6 +19,7 @@ export interface WsClient extends WebSocket {
   /** Per-client generic event rate limiting */
   wsEventCount?: number;
   wsEventWindowStart?: number;
+  wsEventTypeCounts?: Record<string, number>;
 }
 
 /** Lightweight presence record broadcast to the room */

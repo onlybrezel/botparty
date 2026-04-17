@@ -1,15 +1,19 @@
 import { Controller, Post, Get, Query, Body, HttpCode, HttpStatus, Headers, Res, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
+import { Throttle } from '@nestjs/throttler';
+import { randomBytes } from 'crypto';
 import { AuthService } from './auth.service';
 import type { FastifyReply } from 'fastify';
 import {
+  buildClientCookie,
   buildClearedCookie,
   buildHttpOnlyCookie,
   extractBearerToken,
   getAccessCookieName,
   getAccessCookieTtlMs,
   getAuthCookieSameSite,
+  getCsrfCookieName,
   getRefreshCookieName,
   getRefreshCookieTtlMs,
   parseCookie,
@@ -35,6 +39,28 @@ export class AuthController {
     const tokens = await this.authService.register(body);
     this.applyAuthCookies(reply, tokens.accessToken, tokens.refreshToken);
     return { accessToken: tokens.accessToken, user: tokens.user };
+  }
+
+  @Get('csrf')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Issue CSRF token for double-submit protection' })
+  getCsrfToken(@Res({ passthrough: true }) reply: FastifyReply) {
+    const csrfToken = randomBytes(32).toString('base64url');
+    const secure = shouldUseSecureAuthCookies(this.configService);
+    const sameSite = getAuthCookieSameSite(this.configService);
+    const csrfCookieName = getCsrfCookieName(this.configService);
+
+    reply.header(
+      'set-cookie',
+      buildClientCookie(csrfCookieName, csrfToken, {
+        path: '/api/v1/auth',
+        maxAgeMs: getRefreshCookieTtlMs(this.configService),
+        secure,
+        sameSite,
+      }),
+    );
+
+    return { csrfToken };
   }
 
   @Post('login')
@@ -113,6 +139,7 @@ export class AuthController {
 
   @Get('verify-email')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @ApiOperation({ summary: 'Verify email address with one-time token' })
   async verifyEmail(@Query('token') token: string) {
     return this.authService.verifyEmail(token);
@@ -147,6 +174,11 @@ export class AuthController {
         sameSite,
       }),
       buildClearedCookie(getRefreshCookieName(this.configService), {
+        path: '/api/v1/auth',
+        secure,
+        sameSite,
+      }),
+      buildClearedCookie(getCsrfCookieName(this.configService), {
         path: '/api/v1/auth',
         secure,
         sameSite,

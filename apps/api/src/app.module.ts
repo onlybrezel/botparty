@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { PrismaModule } from './prisma/prisma.module';
@@ -26,12 +26,15 @@ import { MaintenanceModule } from './maintenance/maintenance.module';
     }),
 
     // ─── Rate Limiting ─────────────────────────────
-    ThrottlerModule.forRoot([
-      {
-        ttl: Number(process.env.THROTTLE_TTL) || 60000,
-        limit: Number(process.env.THROTTLE_LIMIT) || 100,
-      },
-    ]),
+    ThrottlerModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => [
+        {
+          ttl: Number(config.get<string>('THROTTLE_TTL') ?? '60000'),
+          limit: Number(config.get<string>('THROTTLE_LIMIT') ?? '100'),
+        },
+      ],
+    }),
 
     // ─── Core ──────────────────────────────────────
     PrismaModule,

@@ -84,9 +84,10 @@ textarea {
 
 button,
 [role='button'],
-input,
-select,
-textarea {
+.touch-target,
+input.touch-target,
+select.touch-target,
+textarea.touch-target {
   min-height: 44px;
 }
 

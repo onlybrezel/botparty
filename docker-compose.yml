@@ -23,11 +23,11 @@ services:
     environment:
       POSTGRES_DB: botparty
       POSTGRES_USER: botparty
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-botparty_secret}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
     ports:
       # Exposed on 5433 (not 5432) to avoid clashing with a local Postgres install.
       # The API container connects on the default 5432 via the internal Docker network.
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -45,7 +45,7 @@ services:
     image: redis:7-alpine
     container_name: botparty-redis
     restart: on-failure:10
-    command: redis-server --requirepass ${REDIS_PASSWORD:-botparty_redis_secret} --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: redis-server --requirepass ${REDIS_PASSWORD:?Set REDIS_PASSWORD} --maxmemory 256mb --maxmemory-policy allkeys-lru
     ports:
       - "127.0.0.1:6379:6379"
     volumes:
@@ -53,7 +53,7 @@ services:
     networks:
       - internal
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-botparty_redis_secret}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?Set REDIS_PASSWORD}", "ping"]
       interval: 2s
       timeout: 2s
       retries: 15
@@ -67,8 +67,8 @@ services:
     restart: on-failure:10
     command: --config /etc/livekit.yaml
     environment:
-      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:-devkey}: ${LIVEKIT_API_SECRET:-secret_that_is_at_least_32_characters_long}"
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-botparty_redis_secret}
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:-devkey}: ${LIVEKIT_API_SECRET:?Set LIVEKIT_API_SECRET}"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
     ports:
       - "7880:7880"
       - "7881:7881/tcp"
@@ -98,11 +98,11 @@ services:
     environment:
       INGRESS_CONFIG_BODY: |
         api_key: ${LIVEKIT_API_KEY:-devkey}
-        api_secret: ${LIVEKIT_API_SECRET:-secret_that_is_at_least_32_characters_long}
+        api_secret: ${LIVEKIT_API_SECRET:?Set LIVEKIT_API_SECRET}
         ws_url: ws://livekit:7880
         redis:
           address: redis:6379
-          password: ${REDIS_PASSWORD:-botparty_redis_secret}
+          password: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
         log_level: info
         health_port: 9091
         whip_port: 8080
@@ -131,11 +131,11 @@ services:
     environment:
       EGRESS_CONFIG_BODY: |
         api_key: ${LIVEKIT_API_KEY:-devkey}
-        api_secret: ${LIVEKIT_API_SECRET:-secret_that_is_at_least_32_characters_long}
+        api_secret: ${LIVEKIT_API_SECRET:?Set LIVEKIT_API_SECRET}
         ws_url: ws://livekit:7880
         redis:
           address: redis:6379
-          password: ${REDIS_PASSWORD:-botparty_redis_secret}
+          password: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
         log_level: warn
         health_port: 9090
     depends_on:
@@ -193,16 +193,18 @@ services:
     environment:
       NODE_ENV: production
       PORT: 4000
-      DATABASE_URL: postgresql://botparty:${DB_PASSWORD:-botparty_secret}@postgres:5432/botparty?schema=public&sslmode=disable
+      DATABASE_URL: postgresql://botparty:${DB_PASSWORD:?Set DB_PASSWORD}@postgres:5432/botparty?schema=public&sslmode=disable
       DATABASE_URL_FILE: ${DATABASE_URL_FILE:-/run/secrets/api_database_url}
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-botparty_redis_secret}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
       REDIS_PASSWORD_FILE: ${REDIS_PASSWORD_FILE:-/run/secrets/redis_password}
-      JWT_SECRET: ${JWT_SECRET:-change_me_in_production_min_32_chars_long!!}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET}
       JWT_SECRET_FILE: ${JWT_SECRET_FILE:-/run/secrets/jwt_secret}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change_me_refresh_secret_min_32_chars!!}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?Set JWT_REFRESH_SECRET}
       JWT_REFRESH_SECRET_FILE: ${JWT_REFRESH_SECRET_FILE:-/run/secrets/jwt_refresh_secret}
+      ROBOT_JWT_SECRET: ${ROBOT_JWT_SECRET:?Set ROBOT_JWT_SECRET}
+      ROBOT_JWT_SECRET_FILE: ${ROBOT_JWT_SECRET_FILE:-/run/secrets/robot_jwt_secret}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
       JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-7d}
       PASSWORD_RESET_TTL_SEC: ${PASSWORD_RESET_TTL_SEC:-3600}
@@ -215,7 +217,7 @@ services:
       SMTP_PASSWORD_FILE: ${SMTP_PASSWORD_FILE:-/run/secrets/smtp_password}
       SMTP_FROM: ${SMTP_FROM:-BotParty <no-reply@botparty.live>}
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
-      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-secret_that_is_at_least_32_characters_long}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?Set LIVEKIT_API_SECRET}
       LIVEKIT_API_SECRET_FILE: ${LIVEKIT_API_SECRET_FILE:-/run/secrets/livekit_api_secret}
       LIVEKIT_URL: ${LIVEKIT_URL:-ws://livekit:7880}
       LIVEKIT_PUBLIC_URL: ${LIVEKIT_PUBLIC_URL:-wss://botparty.live/rtc}

@@ -153,7 +153,7 @@ export class RobotAccessService implements OnModuleDestroy {
 
     if (!robot) throw new NotFoundException('Robot not found');
 
-    const actorId = input.requesterUserId ?? this._buildGuestActorId(input.guestSessionId);
+    const actorId = input.requesterUserId ?? `guest:${randomBytes(16).toString('hex')}`;
     const isOwner = input.requesterUserId === robot.ownerId;
     const isStaff = robot.requesterRole === 'ADMIN' || robot.requesterRole === 'MOD';
     const isAllowedUser =
@@ -227,16 +227,37 @@ export class RobotAccessService implements OnModuleDestroy {
       robot.accessMode === 'LINK_ONLY';
 
     if (!requiresGrant) return true;
-    if (!input.roomAccessToken) return false;
+    const grant = await this.resolveRoomAccessActorId(input.robotId, input.roomAccessToken);
+    if (!grant) return false;
 
-    const raw = await this.redis.get(this._roomAccessKey(input.roomAccessToken));
-    if (!raw) return false;
+    if (grant === input.actorId) {
+      return true;
+    }
+
+    // For guests, treat a valid room access grant as authoritative identity.
+    const requesterIsGuest = input.actorId.startsWith('guest:');
+    const grantIsGuest = grant.startsWith('guest:');
+    return requesterIsGuest && grantIsGuest;
+  }
+
+  async resolveRoomAccessActorId(robotId: string, roomAccessToken?: string): Promise<string | null> {
+    if (!roomAccessToken) {
+      return null;
+    }
+
+    const raw = await this.redis.get(this._roomAccessKey(roomAccessToken));
+    if (!raw) {
+      return null;
+    }
 
     try {
       const parsed = JSON.parse(raw) as { robotId?: string; actorId?: string };
-      return parsed.robotId === input.robotId && parsed.actorId === input.actorId;
+      if (parsed.robotId !== robotId || typeof parsed.actorId !== 'string' || !parsed.actorId.trim()) {
+        return null;
+      }
+      return parsed.actorId;
     } catch {
-      return false;
+      return null;
     }
   }
 
@@ -346,12 +367,6 @@ export class RobotAccessService implements OnModuleDestroy {
   private _readAccessValue(value: unknown): GuestAccess {
     if (value === 'ALL' || value === 'AUTHENTICATED' || value === 'DISABLED') return value;
     return 'AUTHENTICATED';
-  }
-
-  private _buildGuestActorId(guestSessionId?: string): string {
-    const actorId = this.resolveGuestActorId(guestSessionId);
-    if (actorId) return actorId;
-    throw new ForbiddenException('Valid guest session required');
   }
 
   private async _verifyStoredPassword(robotId: string, password: string, stored: string): Promise<boolean> {

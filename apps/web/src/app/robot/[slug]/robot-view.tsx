@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import type { RobotPublic } from '@botparty/shared';
 import { AlertTriangle, Bot, Radio, Video, Gamepad2 } from 'lucide-react';
-import { api, type AdminRobotRecordingStatus } from '@/lib/api';
+import { api, createApiClient, type AdminRobotRecordingStatus } from '@/lib/api';
 import { useAuth } from '@/lib/store';
 import { LiveKitPlayer } from '@/components/livekit-player';
 import { pushToast } from '@/lib/toast';
@@ -42,6 +42,7 @@ interface Props {
 }
 
 export default function RobotView({ robot }: Props) {
+  const publicApiRef = useRef(createApiClient());
   const searchParams = useSearchParams();
   const { accessToken, userId, username, role, hasHydrated } = useAuth();
   const tabSwitchOnlyWhenEmpty = usePreferences((state) => state.keyboardTabSwitchOnlyWhenEmpty);
@@ -88,6 +89,7 @@ export default function RobotView({ robot }: Props) {
   const [recordingLoading, setRecordingLoading] = useState(false);
   const [recordingAction, setRecordingAction] = useState<'start' | 'stop' | null>(null);
   const [recordingError, setRecordingError] = useState<string | null>(null);
+  const [queueAction, setQueueAction] = useState<'join' | 'leave' | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
@@ -262,7 +264,7 @@ export default function RobotView({ robot }: Props) {
     setAccessLoading(true);
     allowListAccessAttemptedRef.current = true;
     api.setToken(accessToken);
-    api.verifyRobotAccess(robot.id, { guestSessionId })
+    api.verifyRobotAccess(robot.id)
       .then((grant) => {
         if (!active) return;
         setRoomAccessToken(grant.token);
@@ -282,7 +284,7 @@ export default function RobotView({ robot }: Props) {
     return () => {
       active = false;
     };
-  }, [accessLoading, accessToken, guestSessionId, robot.accessMode, robot.id, roomAccessToken]);
+  }, [accessLoading, accessToken, robot.accessMode, robot.id, roomAccessToken]);
 
   useEffect(() => {
     if (robot.accessMode !== 'LINK_ONLY' || roomAccessToken || linkOnlyAccessAttemptedRef.current) {
@@ -300,7 +302,6 @@ export default function RobotView({ robot }: Props) {
     setAccessError(null);
     api.setToken(accessToken);
     api.verifyRobotAccess(robot.id, {
-      guestSessionId,
       inviteCode: inviteCodeFromUrl,
     })
       .then((grant) => {
@@ -322,7 +323,7 @@ export default function RobotView({ robot }: Props) {
     return () => {
       active = false;
     };
-  }, [accessToken, guestSessionId, inviteCodeFromUrl, robot.accessMode, robot.id, roomAccessToken]);
+  }, [accessToken, inviteCodeFromUrl, robot.accessMode, robot.id, roomAccessToken]);
 
   // ─── Fetch LiveKit token (auth required) ──────────────────────────────────
 
@@ -364,8 +365,7 @@ export default function RobotView({ robot }: Props) {
         }
       }
 
-      api.setToken(null);
-      const { token, livekitUrl } = await api.getPublicViewerToken(robot.id);
+      const { token, livekitUrl } = await publicApiRef.current.getPublicViewerToken(robot.id);
       setLivekitCreds({ token, url: publicUrl ?? livekitUrl });
       setVideoState('ready');
       livekitRefreshAttemptRef.current = 0;
@@ -508,7 +508,6 @@ export default function RobotView({ robot }: Props) {
             event: 'room:join',
             data: {
               robotId: robot.id,
-              guestSessionId: userId ? undefined : guestSessionId || undefined,
               roomAccessToken: roomAccessToken ?? undefined,
             },
           }),
@@ -558,7 +557,7 @@ export default function RobotView({ robot }: Props) {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       wsRef.current?.close();
     };
-  }, [accessToken, guestSessionId, robot.accessMode, robot.id, roomAccessToken, userId]);
+  }, [accessToken, robot.accessMode, robot.id, roomAccessToken, userId]);
 
   useEffect(() => {
     if (!connected) {
@@ -789,6 +788,13 @@ export default function RobotView({ robot }: Props) {
             action === 'BAN'
               ? 'You are banned from this room. Your turn ended immediately and you were removed from the control queue.'
               : `You are temporarily restricted in this room. Your turn ended immediately and you were removed from the control queue.${until}`,
+          );
+          pushToast(
+            action === 'BAN'
+              ? 'You were banned from this room.'
+              : `You were timed out in this room.${until}`,
+            'error',
+            2600,
           );
         }
         break;
@@ -1171,7 +1177,7 @@ export default function RobotView({ robot }: Props) {
       ...prev.slice(-200),
       {
         userId: currentViewerId,
-        username: userId ? (username ?? 'You') : `Guest-${guestSessionId.slice(0, 6)}`,
+        username: userId ? (username ?? 'You') : 'Guest',
         content: text,
         timestamp: Date.now(),
         clientMessageId,
@@ -1182,7 +1188,7 @@ export default function RobotView({ robot }: Props) {
       data: { robotId: robot.id, content: text, clientMessageId },
     }));
     setChatInput('');
-  }, [chatInput, currentViewerId, guestSessionId, robot.id, userId, username]);
+  }, [chatInput, currentViewerId, robot.id, userId, username]);
 
   const requestRoomAccess = useCallback(async () => {
     setAccessLoading(true);
@@ -1191,7 +1197,6 @@ export default function RobotView({ robot }: Props) {
       api.setToken(accessToken);
       const grant = await api.verifyRobotAccess(robot.id, {
         password: accessPasswordInput.trim() || undefined,
-        guestSessionId,
         inviteCode: inviteCodeFromUrl || undefined,
       });
       setRoomAccessToken(grant.token);
@@ -1202,7 +1207,7 @@ export default function RobotView({ robot }: Props) {
     } finally {
       setAccessLoading(false);
     }
-  }, [accessPasswordInput, accessToken, guestSessionId, inviteCodeFromUrl, robot.id]);
+  }, [accessPasswordInput, accessToken, inviteCodeFromUrl, robot.id]);
 
   const moderateChatUser = useCallback(
     async (targetUserId: string, action: 'TIMEOUT' | 'BAN' | 'UNBAN', _preferredName?: string | null) => {
@@ -1238,8 +1243,10 @@ export default function RobotView({ robot }: Props) {
   // ─── Queue ─────────────────────────────────────────────────────────────────
 
   const toggleQueue = useCallback(async () => {
-    if (!accessToken) return;
+    if (!accessToken || queueAction) return;
     api.setToken(accessToken);
+    const nextAction = inQueue ? 'leave' : 'join';
+    setQueueAction(nextAction);
     try {
       if (inQueue) {
         releaseLocalControls(true);
@@ -1255,8 +1262,10 @@ export default function RobotView({ robot }: Props) {
       setQueue(updated);
     } catch (err) {
       pushToast(err instanceof Error ? err.message : 'Queue update failed.', 'error', 2200);
+    } finally {
+      setQueueAction(null);
     }
-  }, [accessToken, inQueue, releaseLocalControls, robot.id, roomAccessToken]);
+  }, [accessToken, inQueue, queueAction, releaseLocalControls, robot.id, roomAccessToken]);
 
   const voteForQueueUser = useCallback(async (targetUserId: string) => {
     if (!accessToken) {
@@ -1470,6 +1479,19 @@ export default function RobotView({ robot }: Props) {
         queueSummary={queueSummary}
       />
 
+      {!connected && (
+        <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+          <p className="font-medium text-amber-200">
+            {reconnectNotice?.message ?? 'Realtime connection lost. Controls and chat are temporarily unavailable.'}
+          </p>
+          <p className="mt-1 text-xs text-amber-200/80">
+            {reconnectSeconds !== null
+              ? `Reconnecting in about ${reconnectSeconds}s.`
+              : 'BotParty will reconnect automatically as soon as the room is reachable again.'}
+          </p>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         {/* ─── Left column: video + controls ─── */}
         <div className="space-y-4 lg:col-span-2">
@@ -1596,6 +1618,7 @@ export default function RobotView({ robot }: Props) {
               type="button"
               onClick={activateControlsPanel}
               aria-label="Focus controls panel"
+              title="Focus controls panel"
               className={`rounded-lg px-3 py-2 text-xs font-semibold transition-all ${
                 focusMode === 'controls'
                   ? 'bg-[var(--primary)] text-white'
@@ -1611,6 +1634,7 @@ export default function RobotView({ robot }: Props) {
               type="button"
               onClick={activateChatPanel}
               aria-label="Focus chat panel"
+              title="Focus chat panel"
               className={`rounded-lg px-3 py-2 text-xs font-semibold transition-all ${
                 focusMode === 'chat'
                   ? 'bg-[var(--primary)] text-white'
@@ -1727,9 +1751,11 @@ export default function RobotView({ robot }: Props) {
                   <button
                     key={btn.id}
                     type="button"
+                    onClick={() => sendCommand(btn.command, { cooldownMs: btn.cooldownMs, access: btn.access })}
                     onPointerDown={() => sendCommand(btn.command, { cooldownMs: btn.cooldownMs, access: btn.access })}
                     disabled={!canUseButton(btn)}
                     aria-label={`Send ${btn.label} command`}
+                    title={btn.hotKey ? `${btn.label} [${btn.hotKey}]` : btn.label}
                     style={btn.color ? { borderColor: btn.color, color: btn.color } : undefined}
                     className={`flex min-h-12 min-w-[3.25rem] items-center justify-center gap-1 rounded-lg border px-3 py-2 text-sm font-bold transition select-none lg:min-h-11 lg:min-w-[2.75rem] ${
                       isCrowdActive(btn.command)
@@ -1792,8 +1818,10 @@ export default function RobotView({ robot }: Props) {
               {canUseEStop && (
                 <button
                   type="button"
+                  onClick={triggerEStop}
                   onPointerDown={triggerEStop}
                   aria-label="Emergency stop"
+                  title="Emergency stop"
                   className="flex h-14 w-full max-w-[12rem] flex-col items-center justify-center rounded-xl bg-[var(--destructive)] text-xs font-black text-white shadow-lg shadow-red-500/20 transition hover:brightness-110 active:scale-95 select-none sm:w-28 lg:max-w-[10rem] lg:rounded-xl lg:shadow-lg"
                 >
                     <AlertTriangle className="h-4 w-4" />
@@ -1960,6 +1988,7 @@ export default function RobotView({ robot }: Props) {
             accessToken={accessToken}
             userId={userId}
             inQueue={inQueue}
+            queueAction={queueAction}
             activeSession={activeSession}
             votingForUserId={votingForUserId}
             robot={robot}
@@ -2034,6 +2063,7 @@ export default function RobotView({ robot }: Props) {
         {canUseEStop && (
           <button
             type="button"
+            onClick={triggerEStop}
             onPointerDown={triggerEStop}
             aria-label="Emergency stop"
             className="rounded-xl bg-[var(--destructive)] px-3 py-2 text-xs font-black text-white"

@@ -2,6 +2,7 @@ import { ConfigService } from '@nestjs/config';
 
 const DEFAULT_ACCESS_COOKIE_NAME = 'bp_access';
 const DEFAULT_REFRESH_COOKIE_NAME = 'bp_refresh';
+const DEFAULT_CSRF_COOKIE_NAME = 'bp_csrf';
 const DEFAULT_ACCESS_COOKIE_TTL_MS = 15 * 60 * 1000;
 const DEFAULT_REFRESH_COOKIE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -18,6 +19,10 @@ export function getAccessCookieName(config: Pick<ConfigService, 'get'>): string 
 
 export function getRefreshCookieName(config: Pick<ConfigService, 'get'>): string {
   return readEnvLike(config, 'AUTH_REFRESH_COOKIE_NAME') ?? DEFAULT_REFRESH_COOKIE_NAME;
+}
+
+export function getCsrfCookieName(config: Pick<ConfigService, 'get'>): string {
+  return readEnvLike(config, 'AUTH_CSRF_COOKIE_NAME') ?? DEFAULT_CSRF_COOKIE_NAME;
 }
 
 export function shouldUseSecureAuthCookies(config: Pick<ConfigService, 'get'>): boolean {
@@ -160,6 +165,21 @@ export function buildClearedCookie(
     `Path=${options.path}`,
     'Max-Age=0',
     'Expires=Thu, 01 Jan 1970 00:00:00 GMT',
+    `SameSite=${options.sameSite}`,
+  ];
+
+  if (options.secure) {
+    parts.push('Secure');
+  }
+
+  return parts.join('; ');
+}
+
+export function buildClientCookie(name: string, value: string, options: CookieOptions): string {
+  const parts = [
+    `${name}=${encodeURIComponent(value)}`,
+    `Path=${options.path}`,
+    `Max-Age=${Math.max(0, Math.floor(options.maxAgeMs / 1000))}`,
     `SameSite=${options.sameSite}`,
   ];
 

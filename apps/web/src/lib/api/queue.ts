@@ -46,7 +46,7 @@ export class QueueApi {
   }
 
   async leaveQueue(robotId: string) {
-    return this.req(`/queue/${robotId}/leave`, { method: 'DELETE' });
+    return this.req(`/queue/${robotId}/leave`, { method: 'DELETE', expectNoContent: true });
   }
 
   async voteQueue(robotId: string, targetUserId: string, roomAccessToken?: string | null) {

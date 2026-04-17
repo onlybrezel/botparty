@@ -31,7 +31,7 @@ export class UsersApi {
   }
 
   async deleteMe() {
-    return this.req<void>('/users/me', { method: 'DELETE' });
+    return this.req('/users/me', { method: 'DELETE', expectNoContent: true });
   }
 
   async getAdminUsers(params?: { q?: string; limit?: number }) {
@@ -79,8 +79,9 @@ export class UsersApi {
   }
 
   async deleteAdminUser(id: string) {
-    return this.req<void>(`/users/admin/${id}`, {
+    return this.req(`/users/admin/${id}`, {
       method: 'DELETE',
+      expectNoContent: true,
     });
   }
 

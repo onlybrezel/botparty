@@ -29,7 +29,6 @@ import { Role } from '@botparty/shared';
 import type { JwtPayload, CreateRobotInput, UpdateRobotInput } from '@botparty/shared';
 import { JwtService, type JwtSignOptions } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { createHash } from 'crypto';
 import { extractBearerToken, getAccessCookieName, parseCookie } from '../auth/auth.cookies';
 import type { FastifyReply } from 'fastify';
 import {
@@ -40,6 +39,8 @@ import {
   ClaimRobotDto,
   IngestRobotLogsDto,
   CreateRobotWebhookDto,
+  EnqueueActionDto,
+  PushTelemetryDto,
 } from './robots.dto';
 
 @ApiTags('robots')
@@ -431,20 +432,12 @@ export class RobotsController {
   async enqueueAction(
     @Param('id') id: string,
     @CurrentUser() user: JwtPayload,
-    @Body()
-    body: {
-      type?: 'restart_video' | 'restart_control' | 'restart_chat' | 'update_client' | 'set_log_stream';
-      durationSec?: number;
-    },
+    @Body() body: EnqueueActionDto,
   ) {
-    if (!body.type) {
-      throw new BadRequestException('type is required');
+    if (body.type !== 'set_log_stream' && body.durationSec !== undefined) {
+      throw new BadRequestException('durationSec is only supported for set_log_stream');
     }
-    if (
-      body.type === 'set_log_stream' &&
-      body.durationSec !== undefined &&
-      (body.durationSec < 10 || body.durationSec > 900)
-    ) {
+    if (body.type === 'set_log_stream' && body.durationSec !== undefined && (body.durationSec < 10 || body.durationSec > 900)) {
       throw new BadRequestException('durationSec must be between 10 and 900');
     }
 
@@ -481,24 +474,7 @@ export class RobotsController {
   @ApiOperation({ summary: 'Robot uploads temporary runtime telemetry using robot bearer auth' })
   async pushTelemetry(
     @Headers('authorization') authorization: string | undefined,
-    @Body()
-    body: {
-      clientVersion?: string;
-      gitBranch?: string;
-      gitCommit?: string;
-      gitDirty?: boolean;
-      botpartyStreamerVersion?: string;
-      streamerVersion?: string;
-      pythonVersion?: string;
-      cpuPercent?: number;
-      memoryPercent?: number;
-      temperatureC?: number;
-      uptimeSec?: number;
-      controlConnected?: boolean;
-      livekitConnected?: boolean;
-      commandsReceived?: number;
-      cameraFrames?: number;
-    },
+    @Body() body: PushTelemetryDto,
   ) {
     return this.robotsService.ingestRobotTelemetryByRobotId(this.requireRobotAuth(authorization), body);
   }
@@ -567,10 +543,7 @@ export class RobotsController {
   }
 
   private getRobotJwtSecret() {
-    return (
-      this.configService.get<string>('ROBOT_JWT_SECRET') ??
-      createHash('sha256').update(this.configService.getOrThrow<string>('JWT_SECRET')).digest('hex')
-    );
+    return this.configService.getOrThrow<string>('ROBOT_JWT_SECRET');
   }
 
   private async requireRobotOwner(robotId: string, userId: string) {
@@ -580,4 +553,5 @@ export class RobotsController {
     }
     return robot;
   }
+
 }

@@ -52,6 +52,7 @@ describe('RobotQueuePanel', () => {
         accessToken="token"
         userId="viewer-1"
         inQueue={false}
+        queueAction={null}
         activeSession={null}
         votingForUserId={null}
         robot={robot}

@@ -8,6 +8,7 @@ interface Props {
   accessToken: string | null | undefined;
   userId: string | null | undefined;
   inQueue: boolean;
+  queueAction: 'join' | 'leave' | null;
   activeSession: ActiveSessionState | null;
   votingForUserId: string | null;
   robot: RobotPublic;
@@ -21,6 +22,7 @@ export function RobotQueuePanel({
   accessToken,
   userId,
   inQueue,
+  queueAction,
   votingForUserId,
   robot,
   onToggleQueue,
@@ -37,13 +39,14 @@ export function RobotQueuePanel({
       {accessToken ? (
         <button
           onClick={onToggleQueue}
+          disabled={queueAction !== null}
           className={`w-full rounded-lg py-2 text-sm font-semibold transition ${
             inQueue
               ? 'border border-[var(--border)] text-[var(--muted-foreground)] hover:border-red-500 hover:text-red-400'
               : 'bg-[var(--primary)] text-white hover:bg-[var(--primary-hover)]'
-          }`}
+          } disabled:cursor-wait disabled:opacity-60`}
         >
-          {inQueue ? 'Leave queue' : 'Join queue'}
+          {queueAction === 'join' ? 'Joining...' : queueAction === 'leave' ? 'Leaving...' : inQueue ? 'Leave queue' : 'Join queue'}
         </button>
       ) : (
         <Link

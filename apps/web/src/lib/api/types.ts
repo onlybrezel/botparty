@@ -5,4 +5,11 @@ export type AuthSessionResponse = {
   user: UserPublic;
 };
 
-export type RequestFn = <T>(path: string, options?: RequestInit) => Promise<T>;
+export type ApiRequestOptions = RequestInit & {
+  expectNoContent?: boolean;
+};
+
+export type RequestFn = {
+  <T>(path: string, options?: ApiRequestOptions): Promise<T>;
+  (path: string, options: ApiRequestOptions & { expectNoContent: true }): Promise<void>;
+};

@@ -4,6 +4,7 @@ import { Inter } from 'next/font/google';
 import './globals.css';
 import { CookieBanner } from '@/components/cookie-banner';
 import Nav from '@/components/nav';
+import { ServiceWorkerRegistration } from '@/components/service-worker-registration';
 import { ThemeController } from '@/components/theme-controller';
 import { ToastStack } from '@/components/ui/toast-stack';
 
@@ -50,13 +51,20 @@ export const metadata: Metadata = {
     description: 'Watch, queue, and drive real internet-connected robots from your browser.',
     images: ['/brand/og-default.png'],
   },
+  manifest: '/manifest.webmanifest',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className="dark">
       <body className={`${inter.variable} flex min-h-screen flex-col bg-[var(--background)] text-[var(--foreground)] antialiased`}>
+        <noscript>
+          <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+            BotParty needs JavaScript for live video, chat, and robot controls.
+          </div>
+        </noscript>
         <ThemeController />
+        <ServiceWorkerRegistration />
         <Nav />
         <ToastStack />
         <CookieBanner />
@@ -76,14 +84,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/cookies" className="transition hover:text-[var(--foreground)]">
                 Cookie Notice
               </Link>
-              <a
-                href="https://github.com/onlybrezel/botparty-client/blob/main/docs/index.md"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="transition hover:text-[var(--foreground)]"
-              >
+              <Link href="/docs/robot-setup" className="transition hover:text-[var(--foreground)]">
                 Robot Setup
-              </a>
+              </Link>
             </div>
           </div>
         </footer>
