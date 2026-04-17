@@ -5,6 +5,7 @@ import './globals.css';
 import { CookieBanner } from '@/components/cookie-banner';
 import Nav from '@/components/nav';
 import { ServiceWorkerRegistration } from '@/components/service-worker-registration';
+import { SentryBrowser } from '@/components/sentry-browser';
 import { ThemeController } from '@/components/theme-controller';
 import { ToastStack } from '@/components/ui/toast-stack';
 
@@ -64,6 +65,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </div>
         </noscript>
         <ThemeController />
+        <SentryBrowser />
         <ServiceWorkerRegistration />
         <Nav />
         <ToastStack />

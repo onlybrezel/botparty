@@ -28,6 +28,7 @@ const mockRedis = {
 const mockMail = {
   sendEmailVerification: jest.fn().mockResolvedValue(undefined),
   sendPasswordReset: jest.fn().mockResolvedValue(undefined),
+  sendAccountLockoutNoticeEmail: jest.fn().mockResolvedValue(undefined),
 };
 
 const mockConfig = {

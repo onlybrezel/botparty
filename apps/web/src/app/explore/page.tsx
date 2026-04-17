@@ -5,6 +5,7 @@ import RobotCard from '@/components/robot-card';
 import { Bot } from 'lucide-react';
 import { ExploreFilters } from './explore-filters';
 import { ExploreAutoRefresh } from './explore-refresh';
+import { getServerApiUrl } from '@/lib/server-api-url';
 
 export const metadata: Metadata = {
   title: 'Explore Robots',
@@ -24,7 +25,7 @@ export const metadata: Metadata = {
 export const revalidate = 30;
 
 async function getRobots(params: { status?: string; tag?: string; q?: string; sort?: string }): Promise<RobotPublic[]> {
-  const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
+  const apiUrl = getServerApiUrl();
   const qs = new URLSearchParams();
   if (params.status) qs.set('status', params.status);
   if (params.tag) qs.set('tag', params.tag);
@@ -43,7 +44,7 @@ async function getRobots(params: { status?: string; tag?: string; q?: string; so
 }
 
 async function getOverview(): Promise<PublicRobotOverview | null> {
-  const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
+  const apiUrl = getServerApiUrl();
   try {
     const res = await fetch(`${apiUrl}/api/v1/robots/overview`, {
       next: { revalidate: 30 },

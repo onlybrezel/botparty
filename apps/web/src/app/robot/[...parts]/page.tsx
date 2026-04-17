@@ -3,6 +3,7 @@ import { notFound, permanentRedirect } from 'next/navigation';
 import type { RobotPublic } from '@botparty/shared';
 import RobotView from '../[slug]/robot-view';
 import PrivateRobotClient from './private-robot-client';
+import { getServerApiUrl } from '@/lib/server-api-url';
 
 function buildRobotDescription(robot: RobotPublic): string {
   const fallback = `Watch and control ${robot.name} live on BotParty.`;
@@ -25,7 +26,7 @@ function canonicalRobotPath(robot: RobotPublic): string {
 }
 
 async function getRobot(username: string | null, slug: string): Promise<RobotPublic | null> {
-  const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
+  const apiUrl = getServerApiUrl();
   const endpoint = username
     ? `${apiUrl}/api/v1/robots/${encodeURIComponent(username)}/${encodeURIComponent(slug)}`
     : `${apiUrl}/api/v1/robots/${encodeURIComponent(slug)}`;

@@ -6,6 +6,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Public } from '../auth/decorators/public.decorator';
 import { RobotsService, type GuestAccess } from '../robots/robots.service';
 import { QueueService } from '../queue/queue.service';
+import { isStaffRole } from '../common/robot-access';
 import type { JwtPayload } from '@botparty/shared';
 import { randomUUID } from 'crypto';
 
@@ -119,7 +120,7 @@ export class LivekitController {
       return false;
     }
 
-    if (robot.ownerId === user.sub || user.role === 'ADMIN' || user.role === 'MOD') {
+    if (robot.ownerId === user.sub || isStaffRole(user.role)) {
       return true;
     }
 

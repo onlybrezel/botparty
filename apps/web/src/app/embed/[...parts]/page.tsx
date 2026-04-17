@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import type { RobotPublic } from '@botparty/shared';
 import { EmbedRobotView } from '@/components/embed-robot-view';
+import { getServerApiUrl } from '@/lib/server-api-url';
 
 function parseParts(parts: string[]): { username: string | null; slug: string } | null {
   if (parts.length === 1) {
@@ -14,7 +15,7 @@ function parseParts(parts: string[]): { username: string | null; slug: string } 
 }
 
 async function getRobot(username: string | null, slug: string): Promise<RobotPublic | null> {
-  const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
+  const apiUrl = getServerApiUrl();
   const endpoint = username
     ? `${apiUrl}/api/v1/robots/${encodeURIComponent(username)}/${encodeURIComponent(slug)}`
     : `${apiUrl}/api/v1/robots/${encodeURIComponent(slug)}`;

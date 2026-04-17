@@ -155,7 +155,7 @@ export class RobotAccessService implements OnModuleDestroy {
 
     const actorId = input.requesterUserId ?? `guest:${randomBytes(16).toString('hex')}`;
     const isOwner = input.requesterUserId === robot.ownerId;
-    const isStaff = robot.requesterRole === 'ADMIN' || robot.requesterRole === 'MOD';
+    const isStaff = isStaffRole(robot.requesterRole);
     const isAllowedUser =
       Boolean(input.requesterUserId) &&
       (isOwner || isStaff || robot.allowedUsers.some((entry) => entry.userId === input.requesterUserId));
@@ -211,7 +211,7 @@ export class RobotAccessService implements OnModuleDestroy {
     if (!robot) return false;
 
     const isOwner = requesterUserId === robot.ownerId;
-    const isStaff = robot.requesterRole === 'ADMIN' || robot.requesterRole === 'MOD';
+    const isStaff = isStaffRole(robot.requesterRole);
     const isAllowedUser =
       Boolean(requesterUserId) &&
       (isOwner || isStaff || robot.allowedUsers.some((entry) => entry.userId === requesterUserId));

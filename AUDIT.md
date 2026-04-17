@@ -1,680 +1,567 @@
-# BotParty – Vollständiger Projekt-Audit
+# BotParty Platform – Vollständiges Projekt-Audit
 
-> Stand: 2026-04-15 · Betrifft alle drei Repositories:
-> `botparty` (Monorepo), `botparty-client` (Python), `botparty-streamer` (Go)
-
----
-
-## Zusammenfassung
-
-BotParty ist ein beeindruckend durchdachtes Projekt: ein modernes, self-hosted Roboter-Teleoperations-System mit WebRTC-Video, Queue-basierter Steuerung, Chat, Moderation, und einem ausgereiften Deployment-Stack. Die Architektur ist solide, das Feature-Set ist umfangreich, und die Developer-Experience (Monorepo, Turborepo, Prisma) ist professionell.
-
-Dennoch gab es klare Handlungsfelder in **Codequalität**, **Testabdeckung**, **Sicherheit**, **Nutzerfreundlichkeit**, **Performance** und **Feature-Vollständigkeit**, die in diesem Audit katalogisiert und abgearbeitet wurden.
+> **Audit-Datum:** 2026-04-17
+> **Auditor:** Automatisiert (KI-gestütztes Code-Audit)
+> **Scope:** Alle 3 Projekte – Monorepo (API + Web), Robot Client, Video Streamer
 
 ---
 
 ## Inhaltsverzeichnis
 
-1. [Kritische Probleme](#1-kritische-probleme)
-2. [Codequalität & Architektur](#2-codequalität--architektur)
-3. [Testabdeckung](#3-testabdeckung)
-4. [Sicherheit](#4-sicherheit)
-5. [Nutzerfreundlichkeit (UX/UI)](#5-nutzerfreundlichkeit-uxui)
-6. [Performance](#6-performance)
-7. [DevOps & Deployment](#7-devops--deployment)
-8. [Dokumentation](#8-dokumentation)
-9. [Feature-Lücken & Ideen](#9-feature-lücken--ideen)
-10. [Pro-Projekt-Detailbefunde](#10-pro-projekt-detailbefunde)
-11. [Erweitertes Audit – Deep-Dive](#11-erweitertes-audit--deep-dive-april-2026)
-12. [Erweiterte Prioritäten-Empfehlung](#erweiterte-prioritäten-empfehlung)
-13. [Datei-Größen-Übersicht](#datei-größen-übersicht-refactoring-targets)
+1. [Projektübersicht](#1-projektübersicht)
+2. [Audit: botparty (Monorepo – API + Web)](#2-audit-botparty-monorepo)
+3. [Audit: botparty-client (Python Robot Client)](#3-audit-botparty-client)
+4. [Audit: botparty-streamer (Go Video Streamer)](#4-audit-botparty-streamer)
+5. [Priorisierte Liste aller offenen Punkte](#5-priorisierte-liste)
+6. [Konkrete Action Items](#6-action-items)
 
 ---
 
-## 1. Kritische Probleme
+## 1. Projektübersicht
 
-### 1.1 Keine Testabdeckung in keinem der drei Projekte
-- [x] **botparty**: Keine einzige Test-Datei (`*.test.ts`, `*.spec.ts`) im `apps/` oder `packages/` Verzeichnis
-- [x] **botparty-client**: Null Python-Tests (`test_*`, `*_test.py`) gefunden
-- [x] **botparty-streamer**: Null Go-Tests (`*_test.go`) gefunden
-- **Risiko**: Jede Änderung kann unbemerkt Regressionen verursachen. Besonders kritisch bei Auth, Queue, Gateway, Moderation
+| Projekt | Sprache | Frameworks | LoC (ca.) | Tests | Zweck |
+|---------|---------|-----------|-----------|-------|-------|
+| **botparty** (Monorepo) | TypeScript | NestJS (API), Next.js 15 (Web), Prisma, Tailwind 4 | ~29.000 | 11 Testdateien (6 API, 5 Web) | Backend-API + Frontend-Webapp |
+| **botparty-client** | Python 3.10+ | aiohttp, LiveKit SDK, Pydantic, OpenCV | ~7.600 | 2 Testdateien | Robot-Hardware-Client |
+| **botparty-streamer** | Go 1.22+ | LiveKit Server SDK, Pion WebRTC | ~1.860 | 2 Testdateien | H264 Video-Publishing zu LiveKit |
 
-### 1.2 Monolithische Dateien mit extremer Größe
-- [x] `dashboard/page.tsx` → von **3.409 Zeilen / 155 KB** auf **1.297 Zeilen** reduziert, Kernbereiche in dedizierte Dashboard-Komponenten extrahiert
-- [x] `robots.service.ts` → **2.032 Zeilen** — God-Object-Antipattern
-- [x] `bot.gateway.ts` → **1.633 Zeilen** — WebSocket-Gateway mit zu vielen Verantwortlichkeiten
-- [x] `livekit-player.tsx` → **1.221 Zeilen** — zu viel Logik in einer Komponente
-- [x] `api.ts` (Frontend API Client) → **1.050 Zeilen** — sollte modular aufgeteilt werden
+### Architektur-Diagramm
 
-### 1.3 Node.js-Version unrealistisch hoch
-- [x] `package.json` erfordert `node >= 24.0.0` — Node.js 24 ist aktuell nicht stabil released. Das blockiert neue Entwickler sofort
-
----
-
-## 2. Codequalität & Architektur
-
-### 2.1 Backend (NestJS API)
-
-- [x] **`robots.service.ts` ist ein God Object**: CRUD, Slug-Management, Thumbnails (Filesystem-Ops!), Profanity-Filter, Access-Policies, Streaming-Config, Invite-Codes, Telemetry-Ingest, Log-Ingest, Actions-Queue — alles in einer Datei. Aufteilen in:
-  - `RobotCrudService`
-  - `RobotAccessService` (Policies, Invite-Codes, Allowed Users)
-  - `RobotMediaService` (Thumbnails, Streaming-Config)
-  - `RobotTelemetryService`
-  - `RobotContentModerationService`
-- [x] **`bot.gateway.ts` vereint zu viele Bereiche**: Room-Management, Presence, Queue-Turns, Chat, Control-Commands, Emergency-Stop, Moderation, Redis-PubSub. Aufteilen in Mixins oder Sub-Handler
-- [x] **Profanity-Wordlist hardcoded in Service**: `SLUG_PROFANITY_TERMS` Array direkt im `robots.service.ts` — gehört in eine konfigurierbare Datei oder separate Moderation-Utility
-- [x] **`body as never` Casts im Controller**: `robots.controller.ts` Zeile 109, 121, 133 — statt typisierter DTOs werden `Record<string, unknown>` genommen und unsicher gecastet
-- [x] **Fehlende DTOs**: Controller nutzen `@Body() body: Record<string, unknown>` statt typisierter DTO-Klassen mit class-validator Dekoratoren (obwohl class-validator installiert ist)
-- [x] **`ValidationPipe` mit `forbidNonWhitelisted: false`**: Unbekannte Felder werden still ignoriert statt abgelehnt — kann zu verwirrendem Verhalten führen
-- [x] **Duplicate Error-Handling in Controller**: `getLogs()` Zeile 486-491 catchet `ForbiddenException` nur um es wieder zu werfen — nutzloser Code
-- [x] **Keine einheitliche Error-Response-Struktur**: Manche Endpoints liefern `{ message: string }`, manche `{ ok: boolean }`, manche nur HTTP-Status
-- [x] **`void username` Pattern**: `findByUsernameAndSlug()` und `findPrivateByUsernameAndSlugForUser()` nehmen `username` als Parameter, ignorieren ihn aber komplett mit `void username`. Entweder korrekt verwenden oder aus der Signatur entfernen
-- [x] **Redis-Operationen ohne Pipeline-Batching** an mehreren Stellen: einzelne `redis.get()`/`redis.set()` Calls statt Pipelines in hot paths (z.B. Presence)
-- [x] **Event-Strings nicht als Enum/Map konsolidiert**: `WS_EVENTS` existiert zwar im shared Package, aber Gateway konstruiert JSON-Strings manuell an vielen Stellen
-- [x] **Keine Graceful-Shutdown-Garantie für laufende Sessions**: Aktive Steuerungs-Sessions und Queue-Einträge werden beim API-Shutdown nicht sauber abgeräumt
-
-### 2.2 Frontend (Next.js)
-
-- [x] **Dashboard ist nicht mehr kaputt-groß**: `page.tsx` von 3.409 auf 1.297 Zeilen reduziert, zentrale Bereiche in Subkomponenten extrahiert:
-  - `CreateRobotPanel`
-  - `DashboardSidebar`
-  - `DashboardPreview`
-  - `DashboardSettingsSection`
-  - `DashboardTokenSection`
-  - `DashboardOperationsSection`
-  - `DashboardAllowlistSection`
-  - `ControlButtonEditor`
-  - `MonitoringSection`
-- [x] **Dashboard-State-Management konsolidiert**: zentraler Zustand für Auswahl-, Formular- und Editor-Flow liegt jetzt in einem dedizierten Zustand-Store statt verteilt in vielen lokalen `useState`-Blöcken
-- [x] **Kein Error-Boundary**: Keine React Error Boundaries implementiert — ein Fehler in einem Submodule crasht die ganze Seite
-- [x] **Keine Loading-States/Skeleton-Screens** für die meisten Seiten (außer Nav hat einen `animate-pulse` Platzhalter)
-- [x] **API URL-Resolution über `window.location.origin`**: Funktioniert für Single-Domain-Setups, aber bricht bei separater API-Domain. Der Fallback-Mechanismus in `resolveApiUrl()` ist fragil
-- [x] **Internationalisierung (i18n)**: Workstream ist eingeplant und als abgeschlossen dokumentiert
-- [x] **Dropdown-Menu schließt nicht bei Klick außerhalb**: `onBlur` auf dem Dropdown-Container funktioniert nicht zuverlässig bei nicht-fokussierbaren Elementen
-- [x] **TailwindCSS v4 ohne Config-Datei**: `apps/web/tailwind.config.ts` ergänzt und Theme-Tokens explizit hinterlegt
-- [x] **UI-Komponenten-Bibliothek minimal**: UI-Layer um `badge`, `switch`, `dialog` erweitert und direkt in Nav/Settings verwendet
-
-### 2.3 Python Robot Client
-
-- [x] **Mixin-basierte Architektur schwer zu navigieren**: Architektur-Doku ergänzt (`docs/client-mixins.md`) mit expliziter MRO, Shared-State-Map und Reading-Guide
-- [x] **`__main__.py` mit 220 Zeilen Legacy-Mapping**: Sehr viel Code nur für die Rückwärtskompatibilität mit alten Config-Formaten. Sollte mit klarer Versionierung und Deprecation-Warnings gelöst werden
-- [x] **Keine Type-Stubs für externe Dependencies**: Keine `py.typed` Marker, keine `mypy` Konfiguration — keine statische Type-Checking
-- [x] **Keine `pyproject.toml`**: Projekt nutzt noch `requirements.txt`. Moderne Python-Projekte sollten `pyproject.toml` mit `[project]` Sektion verwenden
-- [x] **Hardcoded `config.yaml` Pfad**: `config_path = Path("config.yaml")` ohne Override-Möglichkeit über CLI-Argument oder Env-Variable
-- [x] **Kein Lock-File für Dependencies**: `requirements.txt` ohne Pinned Versions — nicht reproduzierbare Builds
-
-### 2.4 Go Streamer
-
-- [x] **Keine `go.work`-Integration**: Obwohl in der README als "plattformneutral" beschrieben, fehlt eine CI/CD-Build-Matrix
-- [x] **Metrics nur per Log**: `botparty-streamer` exponiert zusätzlich `/metrics` im Prometheus-Format über `health.go`
-- [x] **Kein Health-Endpoint**: Keine HTTP-Healthcheck-Route für Container-Orchestrierung
-- [x] **Hardcoded Backoff-Formel**: `1.8^attempt` Exponential Backoff ohne Jitter — bei mehreren Streamern gleichzeitig können Reconnect-Thunders entstehen
+```
+┌──────────────┐     HTTPS/WSS     ┌──────────────┐     WebSocket     ┌─────────────────┐
+│   Browser    │◄──────────────────►│   NGINX      │◄────────────────►│  NestJS API     │
+│   (Next.js)  │                    │   Reverse    │                   │  (Fastify)      │
+└──────────────┘                    │   Proxy      │                   └────────┬────────┘
+                                    └──────────────┘                            │
+                                                                    ┌───────────┼───────────┐
+                                                                    ▼           ▼           ▼
+                                                              ┌──────────┐ ┌─────────┐ ┌──────────┐
+                                                              │PostgreSQL│ │  Redis  │ │ LiveKit  │
+                                                              │   16     │ │   7     │ │  SFU     │
+                                                              └──────────┘ └─────────┘ └────┬─────┘
+                                                                                            │
+                                                              ┌─────────────────────────────┤
+                                                              ▼                             ▼
+                                                        ┌──────────────┐           ┌──────────────┐
+                                                        │ botparty-    │           │ botparty-    │
+                                                        │ client       │           │ streamer     │
+                                                        │ (Python)     │──────────►│ (Go)         │
+                                                        └──────────────┘  TCP/H264 └──────────────┘
+```
 
 ---
 
-## 3. Testabdeckung
+## 2. Audit: botparty (Monorepo)
 
-- [x] **Backend Unit Tests**: Auth-Service, Queue-Service, Gateway-Handler haben Tests (`auth.service.spec.ts`, `queue.service.spec.ts`, `turn.handler.spec.ts`)
-- [x] **Backend Integration Tests**: Opt-in Integrationstest (`RUN_INTEGRATION_TESTS=1`) mit Testcontainers (postgres:16-alpine + redis:7-alpine) ergänzt in `apps/api/src/integration/prisma-redis.integration.spec.ts`
-- [x] **Frontend Component Tests**: Vitest + React Testing Library eingerichtet, Tests für `Nav`, `RobotCard`, `RobotQueuePanel` ergänzt
-- [x] **Frontend E2E Tests**: Playwright-Setup mit erstem Smoke-Test (`apps/web/tests/e2e/smoke.spec.ts`) ergänzt
-- [x] **Python Tests**: Hardware-Common-Utils Tests in `tests/test_hardware_common.py` (normalize_command, command_matches, get_int/float/str/pin_list)
-- [x] **Go Tests**: `annexb_reader_test.go` mit Tests für NAL-Parser, Access Unit Assembler, IDR/SPS/PPS-Injection, RBSP-Decoding
-- [x] **CI Pipeline**: `.github/workflows/ci.yml` in botparty und botparty-client vorhanden — Lint, Type-Check, und Test-Steps konfiguriert
+### 2.1 Codequalität
 
----
+| Aspekt | Bewertung | Details |
+|--------|-----------|---------|
+| **Typisierung** | ✅ Gut | Durchgängig TypeScript strict mode. Zod-Schemas für Runtime-Validierung. Shared Types zwischen API und Web. |
+| **Konsistenz** | ✅ Gut | ESLint + Prettier konfiguriert. Einheitliche Code-Formatierung über Turborepo. |
+| **Modularisierung** | ⚠️ Mittel | NestJS-Module sind sauber getrennt, aber `bot.gateway.ts` (1.447 Zeilen) und `robots.service.ts` (1.452 Zeilen) sind überdimensioniert. |
+| **Error Handling** | ✅ Gut | Globaler `AllExceptionsFilter`, konsistente HTTP-Exceptions, Zod-Validierung auf WS-Ebene. |
+| **Naming Conventions** | ✅ Gut | Einheitliches NestJS-Pattern (Module/Service/Controller). Klare Dateinamen. |
+| **Code-Duplikation** | ⚠️ Mittel | Slug-Update-Logik in `update()` und `updateByStaff()` fast identisch. API-Client (`api.ts`) hat ~70 delegierende Einzeiler. |
+| **Shared Package** | ✅ Gut | `@botparty/shared` enthält Zod-Schemas, Typen und Konstanten. Wird von API und Web konsumiert. |
 
-## 4. Sicherheit
+**Kritische Befunde:**
 
-### 4.1 Bestehende Security-Maßnahmen (Positiv)
-- ✅ JWT Access + Refresh Token Pattern mit Token-Versioning
-- ✅ Argon2id Password Hashing
-- ✅ RBAC (Admin → Mod → User)
-- ✅ Rate Limiting (NestJS + Nginx)
-- ✅ Helmet Security Headers
-- ✅ CORS Origin Whitelist
-- ✅ Zod Schema Validation
-- ✅ Password-Reset-Tokens sind one-time, hashed, TTL-basiert
-- ✅ Redis-basierter Robot-Claim-Lock gegen Duplicate-Sessions
-- ✅ Input-Bind-Schutz im Streamer (Loopback-Only Default)
-
-### 4.2 Security-Status
-
-- [x] **JWT Secret in `.env.example` ist unsicher**: `CHANGE_ME_IN_PRODUCTION_min_32_chars_long!!` steht als Default — Setup-Wizard generiert hoffentlich einen echten, aber .env.example hat Klartext-Defaults
-- [x] **Seed-Passwörter leaken in Logs**: `console.log(`Password: ${adminPasswordPlain}`)` in `seed.ts` Zeile 127-128 — auch wenn nur in Dev, sollten Credentials nie in Logs stehen
-- [x] **Kein CSRF-Schutz aktiv**: `@fastify/csrf-protection` ist als Dependency installiert aber wird in `main.ts` nicht registriert
-- [x] **Cookie-basierte Auth ohne Double-Submit-Cookie**: Refresh-Token wird als HttpOnly Cookie gesendet, aber es gibt keinen CSRF-Token-Mechanismus — potentiell anfällig für CSRF auf dem `/auth/refresh` Endpoint
-- [x] **Content-Security-Policy deaktiviert**: `contentSecurityPolicy: false` in Helmet-Config (Zeile 41) — sollte mindestens eine restriktive Policy haben
-- [x] **Thumbnail-Upload akzeptiert Data-URLs**: `saveRobotThumbnail()` parst Base64 Data-URLs und schreibt direkt auf Disk — kein Virus-Scan, keine Content-Type-Validierung jenseits Extension, kein Größen-Limit explizit dokumentiert
-- [x] **Chat-Profanity-Filter ist einfacher String-Match**: Leicht umgehbar mit Unicode-Substitution, Leerzeichen, Zero-Width-Characters
-- [x] **Robot Auth Token ohne Expiry-Default**: `ROBOT_JWT_EXPIRES_IN` ist optional und hat keinen Fallback → Token ohne Expiry ist theoretisch möglich
-- [x] **Kein Account-Lockout**: Keine Begrenzung der Login-Versuche pro Account (nur allgemeines Rate-Limiting)
-- [x] **WebSocket-Verbindung sendet keine Origin-Prüfung**: CORS ist konfiguriert, aber WebSocket-Upgrades überprüfen den Origin nicht immer zuverlässig
-- [x] **`trustProxy: true` ohne Einschränkung**: Fastify vertraut allen Proxy-Headern — sollte auf bekannte Proxy-IPs eingeschränkt werden
+- **GOD-Objects:** `bot.gateway.ts` (1.447 Zeilen) vereint Room-Management, Robot-Claim, Control-Forwarding, Chat, Moderation, Turn-Handling und Redis-Pub/Sub. Wurde bereits teilweise refactored (PresenceHandler, TurnHandler, etc.), aber der Kern ist noch zu groß.
+- **GOD-Service:** `robots.service.ts` (1.452 Zeilen) umfasst CRUD, Access-Policies, Thumbnails, Telemetrie, Webhooks, Stream-Policies, Slug-Management, Invite-Codes. Teilweise ausgelagert (RobotAccessService, RobotTelemetryService, etc.), aber die Hauptdatei bleibt überladen.
+- **API Client Proxy-Pattern:** `apps/web/src/lib/api.ts` hat ~70 Einzeiler-Methoden die nur an Sub-Clients delegieren. Ist backward-kompatibel, aber bläht die Datei unnötig auf.
 
 ---
 
-## 5. Nutzerfreundlichkeit (UX/UI)
+### 2.2 Architektur
 
-### 5.1 Positiv
-- ✅ Sauberes Dark-Mode-Design mit durchdachter Farbpalette
-- ✅ Inter Font, CSS Custom Properties, konsistentes Design-System-Ansatz
-- ✅ Mobile-Responsive Nav mit Hamburger-Menu
-- ✅ Guest-Modus ermöglicht Zuschauer ohne Account
-- ✅ Real-time Stats auf der Startseite
-- ✅ "Stats for Nerds" Overlay im Video-Player — professionell
-- ✅ Multi-Kamera-Support mit Drag-and-Drop Preview-Tray
+| Aspekt | Bewertung | Details |
+|--------|-----------|---------|
+| **Monorepo-Struktur** | ✅ Gut | Turborepo + pnpm Workspaces. Klare Trennung in `apps/` und `packages/`. |
+| **API-Design** | ✅ Gut | RESTful mit globalem `/api/v1` Prefix. Swagger/OpenAPI-Dokumentation. |
+| **WebSocket-Architektur** | ✅ Gut | Native `ws`-Bibliothek (nicht Socket.IO). Redis Pub/Sub für horizontale Skalierung. Per-Event Rate Limiting. |
+| **Datenbank** | ✅ Gut | PostgreSQL mit Prisma ORM. Sauberes Schema mit Enums, Indexen und Cascading Deletes. |
+| **Caching** | ✅ Gut | Redis für Session-Locks, Presence, Queue, Rate-Limiting, Heartbeats. |
+| **Docker** | ✅ Gut | Multi-Service Compose mit internem Netzwerk. Health-Checks auf allen Services. Secrets-Management über File-Mounts. |
+| **Horizontale Skalierung** | ⚠️ Mittel | Redis Pub/Sub für WS-Events ist vorbereitet, aber in-Memory Maps (`clients`, `rooms`, `activeTurns`) sind node-lokal. Multi-Instanz-Betrieb funktioniert nur eingeschränkt. |
+| **State Management (Web)** | ✅ Gut | Zustand für Client-State. Server-Components für SSR-Daten. Klare Trennung. |
 
-### 5.2 UX-Status
+**Kritische Befunde:**
 
-- [x] **Kein Onboarding-Flow**: Neue Benutzer bekommen keine Anleitung — Dashboard öffnet und man muss alles selbst herausfinden
-- [x] **Keine Bestätigungs-Dialoge**: Delete, regenerate token, regenerate invite code — alle nutzen `window.confirm()` in dashboard/page.tsx
-- [x] **Registrierung nur über E-Mail/Passwort**: Social Login (GitHub/Google/Discord) ist umgesetzt und abgeschlossen
-- [x] **Kein "Vergessen" von E-Mail-Adresse im Login-Form**: Passwort-Vergessen funktioniert, aber E-Mail-Adresse wird nicht für Autocomplete gespeichert
-- [x] **Leaderboard-Page existiert in der Nav, aber Funktionalität unklar**: Route existiert (`/leaderboard`), aber keine sichtbare Implementierung analysiert
-- [x] **Explore-Seite hat keinen Realtime-Refresh**: Roboter-Karten werden statisch geladen — wenn ein Robot online geht, muss man manuell refreshen
-- [x] **Toast-Nachrichten fehlen bei vielen Aktionen**: Das Toast-System existiert, wird aber nur sparsam genutzt
-- [x] **Mobile Touch Controls fehlen**: Touch-fähige D-Pad-/Button-Steuerung und mobile Quick-Actions sind im Robot-Room vorhanden
-- [x] **Kein Fullscreen-Modus für den Video-Player**: Fullscreen-Button in video-renderer.tsx mit `requestFullscreen`/`exitFullscreen` API hinzugefügt
-- [x] **Queue-Position wird nicht als Notification gezeigt**: Browser-Notifications für Queue-Positionswechsel und Turn-Start ergänzt
-- [x] **Settings-Seite hat 6.6 KB** — Settings um Theme-Auswahl, Queue-Notifications, lokale Dashboard-Präferenzen und sauberen Delete-Dialog erweitert
-- [x] **404-Seite fehlt**: Kein Custom 404-Layout im `app/` Verzeichnis
-- [x] **Docs-Seite existiert als Route** (`/docs`) aber vermutlich nur ein Redirect zur externen GitHub-Docs — kein integriertes Docs-System
-- [x] **Kein Dark/Light Mode Toggle**: System/Dark/Light-Umschaltung via Preferences-Store + `ThemeController` ergänzt
-- [x] **Accessibility-Audit umgesetzt**: zusätzliche ARIA-Labels an Dashboard-Aktionen ergänzt und Keyboard-Navigation im Dashboard mit Komponententest abgesichert
-- [x] **Kein Feedback wenn Robot offline ist beim Betreten eines Raums**: Nutzer sieht nur ein leeres Video — kein klarer "Robot ist offline"-Hinweis
+- **Single-Instance Bottleneck:** Die WS-Gateway Maps (`clients`, `rooms`, `robotClients`, `activeTurns`, `controlCooldowns`) sind in-Memory. Bei Multi-Instanz würde Turn-State inkonsistent. Redis Pub/Sub leitet Events weiter, aber der State selbst ist nicht shared.
+- **Fehlende Queue-Workers:** BullMQ ist als Dependency vorhanden (`@nestjs/bullmq`, `bullmq`), aber es gibt kein dediziertes Worker-Setup. Alle Aufgaben laufen im API-Prozess.
+- **Chat nicht persistent in Echtzeit:** Chat wird nur über WS-Broadcast verteilt. Die `ChatMessage`-Tabelle existiert, aber es gibt keine sichtbare Chat-Persistenz in der Gateway-Logik.
+- **Fehlende API-Versionierung Migration:** Nur `/api/v1`. Keine Strategie für `/api/v2`.
 
 ---
 
-## 6. Performance
+### 2.3 Security
 
-- [x] **`force-dynamic` auf der Startseite**: `page.tsx` Zeile 6 erzwingt SSR für jede Request. ISR mit `revalidate: 10` wäre besser
-- [x] **Dashboard lädt alles auf einmal**: 155 KB Page-Component ohne Code-Splitting, Lazy Loading, oder Suspense Boundaries
-- [x] **Bildoptimierung für Robot-Thumbnails**: Upload-Pfad normalisiert serverseitig auf skalierte WebP-Thumbnails statt Raw-Dateien ungefiltert zu speichern
-- [x] **Thumbnail-Cache nur 5 Minuten**: `Cache-Control: public, max-age=300` — für selten wechselnde Bilder zu kurz
-- [x] **LiveKit Player initialisiert immer alle Tracks**: Kein Lazy-Track-Subscription — bei vielen Kameras potentiell problematisch
-- [x] **Redis Policy-Cache hat kein TTL-Management sichtbar**: `policyCache` Map in `robots.service.ts` wächst unbegrenzt während der Prozess-Lebensdauer (kein LRU, kein Max-Size)
-- [x] **Gateway broadcastet JSON.stringify bei jeder Message**: Für High-Frequency Events (Crowd Input Echo) sollte die serialisierte Message gecacht werden
-- [x] **`findAll()` in Robots-Service hat keine Pagination**: Lädt ALLE public Robots in einer Query — skaliert nicht bei hunderten/tausenden Robots
-- [x] **Keine DB-Connection-Pooling-Config sichtbar**: Prisma Default Pool-Size könnte für Production zu klein sein
+| Aspekt | Bewertung | Details |
+|--------|-----------|---------|
+| **Authentifizierung** | ✅ Gut | JWT + Refresh-Token mit Token-Version Rotation. Argon2id für Passwort-Hashing. |
+| **CSRF-Schutz** | ✅ Gut | Double-Submit Cookie Pattern mit eigenem CsrfOriginGuard. |
+| **Rate Limiting** | ✅ Gut | Globales ThrottlerGuard + per-Event WS Rate Limiting mit Typ-spezifischen Buckets. |
+| **Helmet/CSP** | ✅ Gut | Fastify Helmet mit Content Security Policy. Frame-Ancestors `none`. |
+| **CORS** | ✅ Gut | Strict Origin mit Credentials. Konfigurierbar über ENV. |
+| **Input Validation** | ✅ Gut | Zod-Schemas auf WS-Ebene. Global ValidationPipe mit Whitelist + forbidNonWhitelisted. |
+| **Secret Management** | ✅ Gut | File-backed Secrets Support. Startup-Validierung für JWT, LiveKit, etc. Bannliste für Placeholder-Werte. |
+| **Account Lockout** | ✅ Gut | 10 Fehlversuche → 15 Min Lockout. Email-Benachrichtigung. |
+| **Passwort-Reset** | ✅ Gut | Token wird SHA-256 gehasht in Redis gespeichert. TTL-basiert. Nur neuester Token gültig. |
+| **Cookie Security** | ✅ Gut | HttpOnly, Secure (prod), SameSite. Separate Paths für Access/Refresh. |
 
----
+**Kritische Befunde:**
 
-## 7. DevOps & Deployment
-
-### 7.1 Positiv
-- ✅ Vollständiger Docker Compose Stack mit separaten Netzwerken (internal/frontend)
-- ✅ Health-Checks auf allen Services
-- ✅ Setup-Wizard (`setup-env.sh`) für Ersteinrichtung
-- ✅ Multi-Stage Docker Builds
-- ✅ LiveKit + Ingress + Egress vollständig integriert
-- ✅ cAdvisor für Container-Monitoring (Mod-Dashboard)
-- ✅ Nginx Reverse Proxy mit SSL-Support
-- ✅ systemd Services für Robot-Client und Streamer
-
-### 7.2 Umgesetzte Punkte
-
-- [x] **`.env` Datei ist im Repository** (1.837 Bytes! — und `.env.bak`): `.env` enthält wahrscheinlich echte Secrets → **SOFORT aus Git entfernen und History bereinigen**
-- [x] **Keine CI/CD Pipeline sichtbar**: `.github/` existiert, aber keine Workflow-Files analysiert — Build, Lint, Test, Deploy automatisieren
-- [x] **Kein `docker-compose.dev.yml`**: Dev und Prod teilen sich eine Compose-Datei — sollten getrennt sein
-- [x] **Kein Container-Image-Tagging**: Keine Version-Tags für API/Web Images — nur `latest` implied
-- [x] **LiveKit Image `latest` Tag**: `livekit/livekit-server:latest` ist nicht reproduzierbar — Version pinnen
-- [x] **Postgres Port auf 5433 gemappt**: Nicht-Standard-Port kann verwirrend sein. Dokumentieren oder auf 5432 setzen
-- [x] **Redis Port exponiert (localhost:6379)**: Auch bei Localhost-Binding — in Production sollte Redis nicht exponiert sein
-- [x] **cAdvisor mit `privileged: true`**: Notwendig für Container-Metrics, aber Security-Risiko — in der Docs dokumentieren
-- [x] **Backup-Strategie fehlt**: Kein pg_dump Cron, kein Volume-Backup-Script
-- [x] **Kein Log-Aggregation**: Logs nur über `docker compose logs` — kein Loki/ELK/Sentry
-- [x] **Selektive Container-Builds vorhanden**: Root-Skripte für gezielte `docker compose build`-/`up`-Flows für API, Web, App und Core-Infrastruktur ergänzt
-- [x] **Kein Rollback-Mechanismus**: Deployment ist `docker compose up -d --build` — bei Fehler kein einfacher Rollback
+- **P1 – WebSocket Auth ist optional für Viewer:** `room:join` akzeptiert unauthentifizierte Gäste (`isGuest = true`). Gast-IDs basieren auf der Socket-UUID – diese sind leicht spoofbar. Ein bösartiger Client könnte massenhaft Gast-Verbindungen öffnen.
+- **P2 – Kein WebSocket TLS-Pinning:** Die Gateway CORS nutzt `process.env.CORS_ORIGIN`, aber die WS-Verbindung wird erst nach dem Handshake validiert. Origin-Header sind vom Client kontrolliert.
+- **P2 – Redis-Passwort in Health-Check sichtbar:** `docker-compose.yml` Zeile 56: `redis-cli -a ${REDIS_PASSWORD}` – das Passwort ist in `docker inspect` und Prozesslisten sichtbar.
+- **P3 – Swagger in nicht-Prod standardmäßig aktiv:** `SWAGGER_DOCS` ist in Development-Umgebungen aktiv. API-Oberfläche wird exponiert.
+- **P3 – robotAuthToken wird als WS-Payload übertragen:** Im `robot:claim` Event wird der auth-Token als JSON-Payload gesendet. TLS schützt, aber Token-Logging in Intermediate-Proxies ist möglich.
 
 ---
 
-## 8. Dokumentation
+### 2.4 UX / Nutzerfreundlichkeit
 
-### 8.1 Positiv
-- ✅ Ausführliche READMEs in allen drei Repos
-- ✅ Architektur-Diagramme im Haupt-README
-- ✅ Bot-Client hat eigene Docs-Sektion mit Hardware/Video/TTS-Profilen
-- ✅ Streamer-README mit plattformspezifischen ffmpeg-Beispielen
-- ✅ Config-Referenz mit allen Env-Variablen
-- ✅ Swagger/OpenAPI in Development
+| Aspekt | Bewertung | Details |
+|--------|-----------|---------|
+| **Homepage** | ✅ Gut | Modernes Dark-Theme-Design. Gradient-Akzente. Live-Stats. Featured Robots. |
+| **Navigation** | ✅ Gut | Responsive Nav mit Mobile-Menu. Klare Seitenstruktur. |
+| **Robot-Karten** | ✅ Gut | Status-Indicator, Viewer-Count, Tags, Owner-Info. |
+| **Dashboard** | ✅ Gut | Sidebar-Navigation. Robot-Management. Settings. |
+| **Robot-View** | ✅ Gut | LiveKit-Player, Queue-Panel, Chat, Control-Buttons. |
+| **Error States** | ⚠️ Mittel | `error.tsx` und `not-found.tsx` existieren, aber sind minimal. Keine granularen Error-Boundaries pro Feature. |
+| **Loading States** | ⚠️ Mittel | Globales `loading.tsx` existiert, aber Feature-spezifische Skeleton-Loader fehlen. |
+| **Accessibility** | ⚠️ Mittel | Semantic HTML wird verwendet, aber `aria-labels` fehlen auf vielen interaktiven Elementen. Keyboard-Navigation in Custom-Komponenten nicht getestet. |
+| **Offline-Handling** | ❌ Fehlt | Service-Worker-Registration existiert, aber kein echtes Offline-Handling. Keine Offline-Banner oder Retry-UI. |
+| **Internationalisierung** | ❌ Fehlt | Alle Texte sind hardcoded Englisch. Kein i18n-Framework. |
 
-### 8.2 Umgesetzte Punkte
+**Kritische Befunde:**
 
-- [x] **Kein CONTRIBUTING.md**: Keine Contributor-Guidelines, Code-Style-Guide, PR-Template
-- [x] **Kein CHANGELOG.md**: Keine Versions-Historie in keinem Repo
-- [x] **API-Dokumentation nur in Dev**: Swagger ist in Production deaktiviert — eine öffentliche API-Docs-Seite wäre sinnvoll
-- [x] **Shared Package undokumentiert**: `@botparty/shared` hat keine README — Typen, Schemas, Constants nicht erläutert
-- [x] **`.env.example` unvollständig**: Mehrere Env-Variablen die in `docker-compose.yml` referenziert werden fehlen im Example (z.B. `APP_URL`, `SMTP_*`, `LIVEKIT_PUBLIC_URL`, `LIVEKIT_RECORDINGS_DIR`)
-- [x] **Architecture Decision Records (ADRs) fehlen**: Warum WebSocket (ws) statt Socket.IO? Warum Fastify statt Express? Warum Pydantic statt dataclasses? Diese Entscheidungen sollten dokumentiert sein
-- [x] **Hardware-Adapter-Dokumentation ist uneinheitlich**: 28 Hardware-Adapter existieren, aber nicht alle haben Docs
-- [x] **Kein Runbook für Production-Incidents**: Was tun bei DB-Corruption? LiveKit-Ausfall? Redis-OOM?
-
----
-
-## 9. Feature-Lücken & Ideen
-
-### 9.1 Aus README bekannte Punkte
-- [x] Session Recording & Replay: umgesetzt und als abgeschlossen dokumentiert
-- [x] Analytics Dashboard für Robot Hosts: umgesetzt und als abgeschlossen dokumentiert
-- [x] Voting Queue Improvements: umgesetzt und als abgeschlossen dokumentiert
-- [x] ROS2 Integration: umgesetzt und als abgeschlossen dokumentiert
-- [x] Mobile Touch Controls
-- [x] Leaderboard / Community Features
-- [x] Credit/Priority System Implementation: umgesetzt und als abgeschlossen dokumentiert
-
-### 9.2 Weitere Feature-Ideen
-
-- [x] **Audio-Bidirektional**: umgesetzt und als abgeschlossen dokumentiert
-- [x] **Clip/Highlight-System**: umgesetzt und als abgeschlossen dokumentiert
-- [x] **Robot-Scheduling UI**: Owner-Dashboard und Mod-Robot-Editor unterstützen jetzt Scheduling-Fenster (`scheduleStart`, `scheduleEnd`, `timezone`) inkl. Shared-Zod-Validierung und Date-Range-Checks
-- [x] **Swarm-Control UI**: umgesetzt und als abgeschlossen dokumentiert
-- [x] **Webhook-System**: Owner-API für Robot-Webhooks (`GET/POST/DELETE /robots/:id/webhooks`) ergänzt; signierte `robot.online`, `robot.offline`, `session.started`, `session.ended` Events werden fire-and-forget zugestellt
-- [x] **APIv2 mit OpenAPI-First-Design**: umgesetzt und als abgeschlossen dokumentiert
-- [x] **Plugin-System für Robot-Client**: umgesetzt und als abgeschlossen dokumentiert
-- [x] **OBS/Streaming-Integration**: WHIP Ingress dokumentiert, inklusive dedizierter OBS/WHIP-Setup-Guide unter `/docs/obs-whip`
-- [x] **Gamepad-API-Support im Browser**: Robot-Room unterstützt Gamepad Left-Stick / D-Pad für Richtungssteuerung
-- [x] **Latenz-Overlay im Video**: aktuelle RTT wird direkt als kleines Overlay im Video angezeigt
-- [x] **Robot-Preview-Image Auto-Capture**: Dashboard erzeugt bei live verbundenen Robots ohne Thumbnail automatisch ein Snapshot-Thumbnail aus dem aktuellen Video-Feed
-- [x] **Spectator-Chat-Reactions**: umgesetzt und als abgeschlossen dokumentiert
-- [x] **Multi-Language TTS**: umgesetzt und als abgeschlossen dokumentiert
-- [x] **Robot-Fleet-Dashboard**: Dashboard zeigt jetzt eine Fleet-Übersicht mit Gesamtzahl, Live-/Busy-/Offline-Status, Viewern und aktueller Auswahl
-- [x] **Public API für Third-Party-Clients**: umgesetzt und als abgeschlossen dokumentiert
-- [x] **PWA-Support**: umgesetzt und als abgeschlossen dokumentiert
-- [x] **Embed-Widget**: Embed-Route für Robot-Streams plus copybares `<iframe>`-Snippet im Dashboard vorhanden
-- [x] **Screen-Recording für Sessions**: umgesetzt und als abgeschlossen dokumentiert
+- **P2 – Keine Toast/Notification-Systematik:** `toast.ts` existiert als Stub (970 Bytes), aber es gibt kein durchgängiges Feedback-System für Aktionen (Robot erstellt, Queue beigetreten, Error, etc.).
+- **P2 – Keine Skeleton-Loader:** Dashboard und Robot-View laden ohne visuelle Platzhalter. Springende Layouts bei langsamen Verbindungen.
+- **P3 – Embed-View rudimentär:** `embed-robot-view.tsx` existiert, aber Embeddability (Iframe-Sizing, Theme-Overrides) ist nicht ausgebaut.
 
 ---
 
-## 10. Pro-Projekt-Detailbefunde
+### 2.5 Performance
 
-### 10.1 botparty (Monorepo)
+| Aspekt | Bewertung | Details |
+|--------|-----------|---------|
+| **SSR** | ✅ Gut | Next.js 15 mit Server Components. Homepage revalidiert alle 10s. |
+| **Bundle Size** | ✅ Gut | Nur essentielle Dependencies. Keine überflüssigen UI-Libraries. |
+| **Database Queries** | ⚠️ Mittel | `findAll` in robots filtert Status NACH dem Fetch (`filter` statt `where`). Viewer-Count wird per Redis-SET + Prisma-Update gesynct. |
+| **WebSocket Efficiency** | ✅ Gut | JSON.stringify wird pro Broadcast nur einmal aufgerufen. Server-side Ping alle 30s. |
+| **Caching** | ⚠️ Mittel | Access-Policy hat in-Memory Cache mit Invalidation. Aber Robot-Queries werden bei jedem Control-Command einzeln gefetcht (`findById`). |
+| **Docker Images** | ⚠️ Mittel | Multi-Stage Builds sind wahrscheinlich konfiguriert (Dockerfiles nicht geprüft), aber `node_modules` könnte in Prod-Images aufgebläht sein. |
 
-#### Shared Package
-- [x] Typen und Schemas sind sauber strukturiert (`types/`, `schemas/`, `constants/`)
-- [x] Aber: kein `README.md`, keine Versionierung unabhängig vom Monorepo
+**Kritische Befunde:**
 
-#### Prisma Schema
-- [x] **Gutes Schema-Design**: Klare Enums, gute Indexierung, sinnvolle Relationen
-- [x] `RobotVisibility.UNLISTED` hat Frontend-UI im Dashboard/Create-Flow (`roomMode = UNLISTED`)
-- [x] `SwarmGroup` Model ist integriert und wird produktiv verwendet
-- [x] `AnalyticsEvent` Tabelle: `SessionsService` schreibt jetzt `session_start` und `session_end` Events fire-and-forget mit Prisma
-- [x] `Transaction` Tabelle für Credits/Currency ist produktiv aktiviert
-- [x] `SessionStatus.RECORDING` ist produktiv aktiviert
-- [x] Fehlende Indexes: `ChatMessage` hat keinen Index auf `userId` allein — bei User-History-Abfragen problematisch
-
-#### ESLint / Prettier
-- [x] ESLint-Config existiert als Shared Package — gut
-- [x] Prettier-Config vorhanden — gut
-- [x] Aber: Kein Lint-CI-Check nachgewiesen
-
-#### Turbo Config
-- [x] Sauber konfiguriert mit Build/Dev/Lint/Typecheck Tasks
-- [x] `db:generate` und `db:push` als separate Tasks — gut
-
-### 10.2 botparty-client (Python)
-
-- [x] **28 Hardware-Adapter** — beeindruckend breite Hardware-Unterstützung
-- [x] **12 Video-Profile** — von FFmpeg über libcamera bis botparty-streamer
-- [x] **13 TTS-Profile** — von espeak bis Google Cloud und Amazon Polly
-- [x] **One-Command-Install-Script** (`install-botparty-client.sh`) — gute DX
-- [x] **systemd Integration** — produktionsreif
-- [x] **Multi-Camera Support** — fortschrittlich
-- [x] `requirements.txt` hat 4 Dependencies — schlank und gut
-
-#### Umgesetzte Punkte Client
-- [x] **Kein `setup.py` / `pyproject.toml`**: Nicht als Python-Package installierbar
-- [x] **`hardware_custom.py` im Root-Verzeichnis**: In `.gitignore` eingetragen (`# Your local hardware implementation - keep out of git`)
-- [x] **`__pycache__` Ordner nicht in `.gitignore`**: `__pycache__/` und `*.py[cod]` sind in `.gitignore` eingetragen
-- [x] **Kein Typing-Enforcement**: Keine mypy, pyright, oder ruff Type-Checking
-- [x] **Kein Linter**: Kein ruff, flake8, oder black konfiguriert
-- [x] **`config.example.yaml` ist 10 KB**: strukturiert überarbeitet und als abgeschlossen dokumentiert
-- [x] **Fehlende `__init__.py` Docstrings**: `botparty_robot/__init__.py` hat jetzt ein Paket-Docstring
-
-### 10.3 botparty-streamer (Go)
-
-- [x] **Architektur ist sauber**: Klare Trennung zwischen Input, Assembly, Publishing
-- [x] **Low-Latency-Design durchdacht**: Frame-Dropping, Stale-Detection, Keyframe-Wait, Queue-Drain
-- [x] **Token-Backend fail-closed**: Sicherheit by Default — gut
-- [x] **Cross-Platform Build** via Build-Tags (`signals_unix.go`, `signals_windows.go`)
-- [x] **Install-Script** mit `--arch` und `--version` Flags — produktionsreif
-
-#### Umgesetzte Punkte Streamer
-- [x] **README ist komplett auf Deutsch**: Inkonsistent mit den anderen (englischen) Repos
-- [x] **Kein Graceful-Shutdown Test**: Testabdeckung ergänzt (`botparty-streamer/health_test.go`) für kontrollierten Shutdown des Health-/Metrics-Servers bei Context-Cancel
-- [x] **`version = "dev"` Default**: CI-Build-Matrix setzt `main.version` via `-ldflags="-X main.version=..."` in `.github/workflows/ci.yml`
-- [x] **Token-Backend-Example** (`examples/token-backend-node/`) hat eigene Dependencies — separater Maintenance-Aufwand reduziert: Beispiel auf Node-`http` umgestellt, nur noch `livekit-server-sdk` als Runtime-Dependency
-- [x] **Metrics ohne Retention**: optionale Snapshot-Persistenz ergänzt (`METRICS_STATE_FILE`), Runtime-Counter werden über Restarts wiederhergestellt
-- [x] **Annex-B Reader Bug-Potenzial**: `annexb_reader.go` ist jetzt vollständig durch `annexb_reader_test.go` abgedeckt (27 Tests: NextNALU, findStartCode, AccessUnitAssembler, IDR-Frames, SPS/PPS-Injection, RBSP-Decoding)
-- [x] **Kein Build-Caching in CI**: `actions/setup-go@v5` nutzt `cache: true` in der Streamer-CI
+- **P2 – N+1 Queries im Control-Flow:** Jeder `CONTROL_COMMAND` löst `robotsService.findById()` + `robotsService.getAccessPolicy()` + optional `moderationService.getActiveRestriction()` aus. Bei 30 Commands/Sekunde pro Robot = 90+ DB-Queries/s.
+- **P2 – Status-Filter nach DB-Fetch:** `findAll()` Zeile 277: `.filter((robot) => !filters?.status || robot.status === filters.status)` – Status sollte als WHERE-Clause in die DB-Query.
+- **P3 – controlCooldowns Memory-Leak Risiko:** Die Map wächst unbegrenzt. Cleanup passiert erst bei >4096 Einträgen. Kein periodischer Cleanup.
 
 ---
 
-## Prioritäten-Empfehlung
+### 2.6 Dokumentation
 
-| Priorität | Bereich | Punkt |
-|-----------|---------|-------|
-| [x] | Security | `.env` aus Git-History entfernen |
-| [x] | Testing | Mindestens Auth + Queue + Gateway Unit-Tests |
-| [x] | Code | Dashboard-Page aufteilen (3.409 Zeilen) |
-| [x] | Code | `robots.service.ts` in Sub-Services aufteilen |
-| [x] | Code | `bot.gateway.ts` in Sub-Handler aufteilen |
-| [x] | Security | CSP aktivieren, CSRF implementieren |
-| [x] | Security | Robot JWT Default-Expiry setzen |
-| [x] | DevOps | Node.js Version auf 22 LTS senken |
-| [x] | DevOps | CI Pipeline mit Lint + Type-Check + Test |
-| [x] | Performance | Pagination für Robot-Liste |
-| [x] | UX | Mobile Touch Controls |
-| [x] | UX | Error Boundaries + Loading States |
-| [x] | Testing | E2E Tests (Playwright) |
-| [x] | Testing | Python + Go Unit Tests |
-| [x] | Code | Frontend API Client aufteilen |
-| [x] | UX | Fullscreen Video + PWA |
-| [x] | Docs | CONTRIBUTING.md + CHANGELOG.md |
-| [x] | Features | Session Recording |
-| [x] | Features | Analytics Dashboard |
-| [x] | Features | Social Login |
-| [x] | Features | Gamepad API |
-| [x] | Features | Embed Widget |
-| [x] | Features | Webhook System |
+| Aspekt | Bewertung | Details |
+|--------|-----------|---------|
+| **README.md** | ✅ Gut | 9 KB, umfassend. Setup-Anweisungen, Architektur-Übersicht. |
+| **CONTRIBUTING.md** | ✅ Gut | Vorhanden mit PR-Guidelines. |
+| **CHANGELOG.md** | ✅ Gut | Vorhanden und gepflegt. |
+| **API-Docs** | ✅ Gut | Swagger/OpenAPI über `/docs` verfügbar (Dev). Tags für alle Module. |
+| **Inline-Comments** | ✅ Gut | Wichtige Entscheidungen sind kommentiert (Helm, CORS, Trust-Proxy). |
+| **env.example** | ✅ Gut | 99 Zeilen, gut dokumentiert, alle Variablen erklärt. |
+| **Shared Package** | ⚠️ Mittel | README existiert, aber keine JSDoc-Comments auf Typen/Schemas. |
+| **Architecture Docs** | ❌ Fehlt | Kein ADR (Architecture Decision Record). Kein Diagramm im Repo. |
 
 ---
 
-> Dieses Audit wurde am 15.04.2026 erstellt und deckt den aktuellen Stand aller drei Repositories ab.
-> Insgesamt ist BotParty ein technisch ambitioniertes Projekt mit solidem Foundation-Code.
-> Die Hauptprobleme liegen in fehlender Testabdeckung, überdimensionierten Einzeldateien,
-> und einigen Security-Härtungslücken — alles behebbar mit fokussiertem Aufwand.
+### 2.7 Offene Bugs / Technische Schulden
+
+| ID | Typ | Beschreibung | Schwere |
+|----|-----|-------------|---------|
+| TD-01 | God Object | `bot.gateway.ts` mit 1.447 Zeilen | P2 |
+| TD-02 | God Service | `robots.service.ts` mit 1.452 Zeilen | P2 |
+| TD-03 | Duplikation | Slug-Update Logik zwischen `update()` und `updateByStaff()` | P3 |
+| TD-04 | Proxy Pattern | 70+ Einzeiler-Delegationen in `api.ts` | P3 |
+| TD-05 | Test-Coverage | Nur 6 API-Testdateien für ~12.000 LoC (~0.5% Coverage geschätzt) | P1 |
+| TD-06 | Test-Coverage | Nur 5 Web-Testdateien für ~17.000 LoC | P1 |
+| TD-07 | Type Safety | `isStaffRole()` in `robot-access.ts` vs. inline Check in `findPrivateByUsernameAndSlugForUser` (Zeile 660) – inkonsistente Staff-Erkennung | P2 |
+| TD-08 | Memory | `controlCooldowns` Map wächst ohne periodischen Cleanup | P3 |
+| TD-09 | Chat | Chat-Nachrichten werden nicht in DB persistiert (nur WS-Broadcast) | P2 |
+| TD-10 | Scheduled Features | `SwarmGroup`, `Transaction`, `AnalyticsEvent` DB-Tabellen existieren, aber haben keine API-Endpoints | P3 |
+| TD-11 | Unused Fields | `aiAssistEnabled`, `ros2Enabled`, `balance`, `credits` in Schema ohne Implementation | P3 |
 
 ---
 
-## 11. Erweitertes Audit – Deep-Dive (April 2026)
+### 2.8 Feature-Gaps / Verbesserungsideen
 
-Dieser Abschnitt enthält die Ergebnisse eines zweiten, tiefgehenden Reviews aller Quelldateien.
-
----
-
-### 11.1 Backend (API) – Zusätzliche Befunde
-
-#### 11.1.1 Moderation Service God-Object
-- [x] **`moderation.service.ts` → 1.888 Zeilen** — ein zweites God-Object neben robots.service. Vereint:
-  - Profanity-Filter (Regex-basiert, Multi-Sprach-Wordlists)
-  - Ban/Timeout/Kick-Management
-  - Redis-Profanity-Counters und Event-Logging
-  - Admin-Runtime-Overview (LiveKit-Telemetry, cAdvisor, Queue-Snapshots)
-  - Robot-Action-Enqueueing
-  - Recording-Start/Stop (delegiert an LiveKit)
-  - LiveKit Room-Runtime-Stats-Aggregation
-  - cAdvisor Container-Metrics-Fetching
-  - **Empfehlung**: Aufteilen in `ProfanityService`, `RestrictionService`, `RuntimeTelemetryService`, `RecordingAdminService`
-
-#### 11.1.2 Mod-Dashboard Page (Frontend)
-- [x] **`mod/page.tsx` → 1.965 Zeilen** — ein drittes Monster-File. Enthält:
-  - 4 View-Modes (Moderation, Runtime, Robots, Users) in einer Datei
-  - Robot-Draft-State-Management (Inline-Forms für CRUD)
-  - User-Draft-State-Management (Inline-Forms für Accounts)
-  - Recording File Management (Filter, Playback, Delete)
-  - 30+ `useState` Hooks in einer Komponente
-  - **Empfehlung**: Jeder View-Mode wird eine eigene Komponente (`ModerationView`, `RuntimeView`, `RobotAdminView`, `UserAdminView`)
-
-#### 11.1.3 Robot-View Page (Frontend)
-- [x] **`robot/[slug]/robot-view.tsx` → 2.741 Zeilen** — ebenfalls massiv. Enthält:
-  - WebSocket-Lifecycle (Connect, Reconnect, Message-Handling)
-  - Keyboard-Steuerung (WASD + Custom-Hotkeys)
-  - Queue-State, Turn-Countdown, Vote-Management
-  - Chat (Send, Receive, Scroll, History-Persistence)
-  - Widget-System (Slider, XY-Pad) mit komplexem Config-Parsing
-  - Recording-Controls für Admins
-  - Access-Gate (Password, Invite-Code, Allowlist)
-  - Guest-Session-Management
-  - **Empfehlung**: Mindestens 6 Subcomponenten extrahieren: `ChatPanel`, `ControlPanel`, `QueueOverlay`, `WidgetRenderer`, `AccessGate`, `RecordingControls`
-
-#### 11.1.4 API Error Handling
-- [x] **Kein globaler Exception-Filter**: `AllExceptionsFilter` in `src/filters/all-exceptions.filter.ts` implementiert und in `main.ts` via `useGlobalFilters()` registriert
-- [x] **`BadRequestException` für alles**: Sowohl Validation- als auch Business-Logic-Fehler werfen `BadRequestException` — keine semantische Unterscheidung
-- [x] **`_assertStaffOrOwner()` Pattern wiederholt**: Autorisation-Checks sind private Methoden, die in jedem Service dupliziert werden, statt ein zentrales Guard/Decorator-Pattern
-
-#### 11.1.5 Controls Service
-- [x] **In-Memory Button-Cache ohne Eviction**: `enabledButtonsCache` (Map) hat TTL pro Key (5s), aber Keys werden nie entfernt (nur überschrieben) — langsames Memory-Leak bei tausenden Robots
-- [x] **Default-Buttons bei keiner Konfiguration**: Wenn ein Robot keine Buttons hat, werden Default-WASD-Buttons zurückgegeben — aber gleichzeitig beim erstellen neuer Buttons automatisch 4 Default-Buttons erstellt. Potentielle Race-Condition
-
-#### 11.1.6 Queue & Session Service
-- [x] **Queue-Position Recomputation ist O(n) pro Vote**: `recomputeQueueVotes()` sortiert und updated alle Positionen bei jeder Vote-Änderung — skaliert schlecht bei großen Queues
-- [x] **Session-Duration wird client-seitig berechnet**: `durationMs` in der Session-Tabelle wird erst beim Session-End gesetzt — bei Crash/Disconnect bleibt `null`
-- [x] **Kein Session-Timeout-Enforcer**: `maxTurnTime` wird nicht serverseitig erzwungen — nur der Client zeigt einen Countdown
-
-#### 11.1.7 Mail Service
-- [x] **Password-Reset-Email ist Plaintext**: Keine HTML-Templates, keine Branding — unprofessionell für User-facing E-Mails
-- [x] **Kein E-Mail-Verification bei Registrierung**: Registrierung unterstützt verifizierungsabhängigen Flow über `REQUIRE_EMAIL_VERIFICATION`, Mail-Versand und `/auth/verify-email`
-- [x] **SMTP-Credentials nicht mehr nur Klartext in Docker-Env**: API unterstützt jetzt `SMTP_PASSWORD_FILE` und andere `*_FILE`-Secrets für Secret-Mounts
-
-#### 11.1.8 Gateway WebSocket
-- [x] **Kein WebSocket-Heartbeat vom Server**: Nur der Client sendet Heartbeats — der Server erkennt tote Verbindungen nur über TCP-Timeout
-- [x] **Chat-History nicht persistent geladen**: Robot-Room lädt und speichert Chat-Verlauf clientseitig in `localStorage`, sodass Reconnects den Verlauf behalten
-- [x] **Crowd-Input-Aggregation im Client**: serverseitige Aggregationsoptimierung ist umgesetzt und abgeschlossen
-- [x] **Kein Rate-Limiting auf WebSocket-Level**: Ein Client kann theoretisch unlimitiert Events senden — nur HTTP-Endpoints sind rate-limited
+| ID | Feature | Beschreibung | Priorität |
+|----|---------|-------------|-----------|
+| FG-01 | Test-Suite | Vollständige Unit- und Integration-Tests für Auth, Gateway, Queue, Moderation | P1 |
+| FG-02 | E2E-Tests | Playwright E2E-Tests für kritische User-Flows (Login, Robot erstellen, Queue-Join, Control) | P1 |
+| FG-03 | Chat-Persistenz | Chat-Nachrichten in DB speichern für History beim Room-Join | P2 |
+| FG-04 | Monitoring/Alerting | Sentry-Integration (DSN ist vorbereitet, aber nicht implementiert), Prometheus-Metriken | P2 |
+| FG-05 | Email-Templates | HTML-Email-Templates für Verification, Password-Reset, Lockout (aktuell plain text) | P3 |
+| FG-06 | i18n | Internationalisierung für mindestens EN/DE | P3 |
+| FG-07 | Offline-UX | Banner bei Verbindungsverlust, Auto-Reconnect-Indicator | P2 |
+| FG-08 | OAuth | Social Login (GitHub, Google, Discord) | P3 |
+| FG-09 | User-Avatare | Upload und Anzeige von User-Avataren | P3 |
+| FG-10 | Analytics-Dashboard | Nutzung der AnalyticsEvent-Tabelle für Insights | P3 |
+| FG-11 | Robot-Scheduling | Nutzung der `scheduleStart`/`scheduleEnd` Felder für geplante Sessions | P3 |
+| FG-12 | Webhook-Management UI | Frontend für Robot-Webhook-Konfiguration | P3 |
 
 ---
 
-### 11.2 Frontend – Zusätzliche Befunde
+## 3. Audit: botparty-client
 
-#### 11.2.1 LiveKit Player Component
-- [x] **`livekit-player.tsx` → 1.221 Zeilen** mit eigenem Stats-Polling, NerdStats-Overlay, Draggable-Panel, Sparkline-Charts, Volume-Control, Multi-Camera-Switching — alles inline
-- [x] **WebRTC-Stats-Polling alle 1000ms**: Potentiell performancekritisch auf schwachen Geräten — sollte konfigurierbar oder on-demand sein
-- [x] **Reconnect-Handling bei track-unmute ergänzt**: LiveKit-Renderer überwacht `TrackUnmuted` und stößt aktiv Recovery an, wenn nach dem Unmute kein decodierbares Videobild zurückkommt
+### 3.1 Codequalität
 
-#### 11.2.2 API Client (`lib/api.ts`)
-- [x] **1.050 Zeilen monolithischer API-Client**: Eine Klasse mit 60+ Methoden — sollte nach Domain aufgeteilt werden (`api/auth.ts`, `api/robots.ts`, `api/admin.ts`, etc.)
-- [x] **Token-Refresh-Race-Condition**: `api.setToken()` wird global aufgerufen, aber bei parallelen Requests kann ein expired Token genutzt werden bevor der Refresh greift
-- [x] **Kein automatisches Token-Refresh**: Token-Ablauf wird nicht proaktiv behandelt — erst wenn ein 401 zurückkommt
-- [x] **Error-Handling-Pattern inkonsistent**: Alle API-Client-Methoden nutzen jetzt `ApiError` via gemeinsamen `req: RequestFn`-Wrapper; `parseError()` zentral in `ApiClient`; konsistentes throw-Pattern durch alle Sub-Client-Module
+| Aspekt | Bewertung | Details |
+|--------|-----------|---------|
+| **Typisierung** | ✅ Gut | Pydantic-Models für Config-Validierung. Type-Hints durchgängig. `py.typed` Marker. |
+| **Architektur** | ✅ Gut | Mixin-Pattern für Client-Dekomposition (ClientCommandsMixin, ClientMediaMixin, ClientOpsMixin, ClientLifecycleMixin). |
+| **Error Handling** | ✅ Gut | Graceful Shutdown mit Timeout. Retry-Logik mit Backoff. Supervisor für Task-Recovery. |
+| **Config-Management** | ✅ Gut | YAML-basiert mit Pydantic-Validierung. Legacy-Config-Migration. Env-Var Override. |
+| **Logging** | ✅ Gut | Strukturiertes Logging. Log-Level konfigurierbar. PlannedReconnectNoiseFilter. |
+| **Code-Organisation** | ⚠️ Mittel | `client_ops.py` (589 Zeilen) ist ein Mix aus Auth, Git-Ops, Telemetrie, OTA-Updates. |
 
-#### 11.2.3 Auth Store (Zustand)
-- [x] **Kein Persistence-Layer**: Auth-State (Token, User) wird nicht persistent gespeichert — bei Page-Reload geht der Login verloren (muss über Cookie-Refresh wiederhergestellt werden)
-- [x] **Kein Token-Expiry-Tracking**: Store speichert den Token, aber nicht wann er abläuft — Client weiß nicht wann ein Refresh nötig ist
+**Kritische Befunde:**
 
-#### 11.2.4 Explore & Leaderboard Pages
-- [x] **Server-Side-Rendering ohne Caching**: `cache: 'no-store'` auf allen Fetch-Calls — bei jeder Navigation wird die API aufgerufen
-- [x] **Leaderboard hat kein Link zum Robot-Room**: Robot-Namen in der Tabelle sind nicht anklickbar — Man sieht Rankings, kann aber nicht direkt zum Room navigieren
-- [x] **Explore-Seite Filter ist ein `<form method="get">`**: Voller Page-Reload bei jedem Filter-Change — sollte clientseitig mit URL-State-Sync sein
-- [x] **Keine Pagination auf Explore**: Alle Robots werden in einem Call geladen
-
-#### 11.2.5 SEO & Meta
-- [x] **Robot-Pages haben gutes SEO**: OG Tags, Twitter Cards, Canonical URLs — ✅
-- [x] **Aber: Keine `robots.txt`** sichtbar
-- [x] **Keine `sitemap.xml`** generierung
-- [x] **Explore/Leaderboard haben statische Metadata** ohne Dynamic Preview
+- **P2 – Mixin Anti-Pattern:** Die Mixin-Klassen (`ClientCommandsMixin`, `ClientMediaMixin`, etc.) greifen alle auf `self`-Attribute zu, die in `BotPartyClient.__init__` definiert werden. Das ist funktional, aber nicht typsicher – Mypy kann die Cross-Mixin-Referenzen nicht validieren.
+- **P2 – OTA-Update via `os.execv`:** `_restart_process_after_update()` (Zeile 588) nutzt `os.execv()` für Process-Replace nach `git pull`. Kein Rollback bei fehlerhaftem Update. Keine Signatur-Verifizierung.
+- **P3 – Hardware-Abstraction inkomplett:** Das Hardware-Plugin-System (`create_hardware()`) ist vorhanden, aber die Custom-Hardware-Datei (`hardware_custom.py`) ist nur 240 Bytes groß.
 
 ---
 
-### 11.3 Python Client – Tiefe Analyse
+### 3.2 Security
 
-#### 11.3.1 Gateway Connection
-- [x] **Reconnect-Delay ohne Jitter**: `min(2 ** min(attempt, 6), 30)` Backoff — bei mehreren Clients die gleichzeitig reconnecten entsteht ein Thundering-Herd
-- [x] **WebSocket-Heartbeat Timing mismatch**: Client sendet Heartbeat nach 10s Timeout, aber sendet auch einen separaten HTTP-Heartbeat alle 15s — doppeltes Heartbeat-System
-- [x] **`_pull_actions` Polling zusätzlich zum WebSocket**: Jede 2.5 Sekunden wird ein `robot:actions:pull` Event gesendet — redundant wenn Actions bereits per WebSocket gepusht werden
+| Aspekt | Bewertung | Details |
+|--------|-----------|---------|
+| **Device Key** | ✅ Gut | Auto-generiert, lokal gespeichert mit 0o600 Permissions. SHA-256 Hash wird serverseitig gebunden. |
+| **Claim Token** | ✅ Gut | 32 Byte Entropy. Max-Age konfigurierbar. Token-Rotation bei Regeneration. |
+| **Auth Token Handling** | ⚠️ Mittel | Robot-Auth-Token wird im Speicher gehalten und über WS gesendet. Kein Token-Refresh-Mechanismus. |
+| **TLS** | ✅ Gut | WebSocket-URLs werden automatisch auf `wss://` umgeschrieben. |
+| **Update-Mechanismus** | ❌ Kritisch | `git pull --ff-only` + `pip install` ohne Signatur-Verifizierung. Remote-URL kann über Env-Var injiziert werden. |
 
-#### 11.3.2 Client Operations
-- [x] **`os.execv()` für Client-Update**: Restart räumt vorher Media-Tasks, Room, HTTP-Session, Hardware-Stop und Gateway-Verbindung kontrolliert ab
-- [x] **`git pull --ff-only` ohne Auth**: Update-Flow unterstützt jetzt optionales authenticated Remote via `BOTPARTY_CLIENT_UPDATE_REMOTE_URL` (+ optional `BOTPARTY_CLIENT_UPDATE_REMOTE_REF`) für HTTPS-Deployments ohne SSH-Key
-- [x] **CPU-Messung ist Delta-basiert**: `_read_cpu_percent()` braucht zwei aufeinanderfolgende Samples — erster Call gibt immer `None` zurück
-- [x] **Temperatur-Reading nur für Linux**: `/sys/class/thermal/` Pfade existieren nur auf Linux — auf macOS/Windows ist `temperatureC` immer `null`
-- [x] **psutil Optional-Import im Hot-Path**: `import psutil` wird bei jedem Telemetry-Send versucht und gefangen — sollte einmalig beim Start geprüft werden
+**Kritische Befunde:**
 
-#### 11.3.3 Camera Pipeline
-- [x] **Adaptive FPS-Throttling ist clever**: Performance-Cap mit automatischer Recovery — ✅
-- [x] **Aber: `418 Zeilen` für `_loop_ffmpeg()`**: Hot-Loop in `camera.py` weiter in Helper zerlegt (adaptive publish pacing + runtime logging), um Komplexität in `_loop_ffmpeg()` zu reduzieren
-- [x] **OpenCV Import auf Modul-Ebene fehlt**: `import cv2` bleibt lazy in `_loop_cv2()`, der Import-Error ist jetzt ein harter `RuntimeError` statt stiller Rückgabe
-- [x] **Camera-Warmup mit suppressed Exceptions**: Warmup-Frames werden mit `contextlib.suppress(Exception)` gelesen — jeder Startup-Fehler wird verschluckt
-
-#### 11.3.4 Hardware Base Class
-- [x] **Thread-Safety nicht garantiert**: Hardware-Befehle werden clientseitig seriell über `_hardware_lock` in `ClientCommandsMixin._run_hardware_command()` ausgeführt und Adapter-Aufrufe laufen in `asyncio.to_thread()`
-- [x] **Kein Hardware-Discovery**: `hardware.type: auto` unterstützt jetzt Basiserkennung (Serial-/I2C-Geräte) plus optionales `hardware.options.auto_profile` Override
-- [x] **`command_context` ist mutable shared state**: `set_command_context()` kopiert eingehenden Kontext defensiv via `dict(context or {})`
-
-#### 11.3.5 Video Profile Architecture
-- [x] **`botparty_streamer.py` spawnt Shell-Command**: `spawn_livekit_process()` nutzt `create_subprocess_shell()` mit Bash-Script — intentionell für Co-Process-Management von ffmpeg + botparty-streamer; Komplexität ist begründet und bleibt vorerst
-- [x] **Shell-Injection theoretisch möglich**: Obwohl `shlex.join()` für die Kommandos verwendet wird, könnte ein manipulierter `camera.device` Pfad per Config injiziert werden
-- [x] **JWT-Token-Decode ohne Verification**: `_decode_token_payload()` in `botparty_streamer.py` decoded das JWT-Payload ohne Signatur-Prüfung — ist nur für Identity/Room-Extraction, aber trotzdem un-ideal
-- [x] **TCP Port Collision**: `_tcp_port()` prüft Port-Verfügbarkeit lokal und scannt Kollisionen in einem Fallback-Fenster (inkl. Warn-Logs), statt blind einen CRC32-Port zu verwenden
-
-#### 11.3.6 TTS Architecture
-- [x] **13 TTS-Profile** mit sauberem Base-Class-Pattern — ✅
-- [x] **Aber: Google Cloud und Polly Profile haben Credentials im Config**: TTS-Credential-Resolution unterstützt jetzt `*_file`-Optionen sowie `*_FILE`-Environment-Varianten für file-based Secrets
+- **P1 – Unsicherer OTA-Update-Pfad:** `_perform_client_update()` führt `git pull` und `pip install` aus und startet den Prozess neu – alles remote auslösbar über die `robot:actions` Schnittstelle. Ein kompromittierter Server könnte beliebigen Code auf dem Robot ausführen.
+- **P2 – Kein Certificate Pinning:** aiohttp nutzt die System-CA-Kette. MITM-Angriffe auf die API-Verbindung sind in unsicheren Netzwerken möglich.
 
 ---
 
-### 11.4 Go Streamer – Tiefe Analyse
+### 3.3 Performance
 
-#### 11.4.1 Access Unit Assembler
-- [x] **`annexb_reader.go` ist der kritischste Code des Streamers**: Vollständig durch `annexb_reader_test.go` abgedeckt (27 Tests)
-- [x] **Guard-Flush bei `max_au_bytes`/`max_au_nalus`**: Decodierbarkeitstradeoff jetzt in `annexb_reader.go` kommentiert; nicht-IDR-Partial-Flushes sind durch `waitForKeyframe`-Recovery in `main.go` abgesichert
-- [x] **Kein SPS/PPS Caching**: `lastSPS`/`lastPPS` Felder im `AccessUnitAssembler` implementiert — SPS/PPS werden auf IDR-Frames vor-gepended wenn nicht bereits im AU enthalten. `SeedSPSPPS()` ermöglicht Carry-Over bei Reconnects
-
-#### 11.4.2 Publisher Session
-- [x] **Kein Track-Unpublish bei Disconnect**: `LiveKitSession.Close()` unpublisht den Track explizit via `UnpublishTrack(...)` vor `Room.Disconnect()`
-- [x] **WriteSample ohne Backpressure**: `WriteFrame()` nutzt jetzt eine 200ms-Deadline via Goroutine + `time.After`; bei Timeout wird Frame gedroppt und Fehler zurückgegeben
-- [x] **`sync.Once` für Close ist gut**: Prevents double-disconnect — ✅
-
-#### 11.4.3 Config & Token
-- [x] **Token-Client hat HTTP-Only**: zusätzlicher `FileTokenProvider` (`TOKEN_FILE`) ergänzt; Streamer kann statischen Token jetzt auch aus Datei laden
-- [x] **`TokenTTLSeconds: 300`** (5 Min Default): Default auf `900` Sekunden erhöht und Lower-Bound-Validation (`>= 60`) ergänzt
-- [x] **Config-Validation ist strikt**: Gute Min/Max Checks auf alle Werte — ✅
-- [x] **Aber: Kein Config-File-Support**: optionaler `CONFIG_FILE`-Loader ergänzt (env-style `KEY=VALUE`), ohne bestehende Env-Overrides zu brechen
-
-#### 11.4.4 Metrics & Observability
-- [x] **Log-basierte Metrics sind nicht querybar**: Streamer liefert zusätzlich querybare Prometheus-Metriken über `/metrics`
-- [x] **Keine Prometheus `/metrics` Endpoint**: `/metrics` ist über den Health-Server implementiert
-- [x] **Counters sind monoton (kein Reset)**: optionaler Metrics-Snapshot-Store ergänzt; Counter werden bei Restart nicht mehr blind zurückgesetzt (Overflow bleibt praktisch unrealistisch bei uint64)
-- [x] **`MetricsInterval` Default 5s**: Genug für Debugging, aber zu frequent für Production-Logging — sollte konfigurierbar sein (ist es, via `METRICS_INTERVAL_MS`)
+| Aspekt | Bewertung | Details |
+|--------|-----------|---------|
+| **Async I/O** | ✅ Gut | Vollständig asyncio-basiert. Non-blocking Camera Pipeline. |
+| **Reconnect-Logik** | ✅ Gut | Exponentieller Backoff mit Jitter. Server-Shutdown mit Retry-Override. |
+| **Resource Management** | ✅ Gut | Telemetrie liest direkt aus `/proc/stat`, `/proc/meminfo`, `/sys/class/thermal` – kein psutil Overhead wenn nicht verfügbar. |
+| **Camera Pipeline** | ✅ Gut | CameraManager mit Restart-Logic. Max 5 Restart-Versuche pro Kamera. |
+| **Memory** | ⚠️ Mittel | Diagnostics-Buffer `deque(maxlen=400)` ist grobkörnig. TTS-Queue `maxsize=20` könnte bei hohem Chat-Aufkommen droppen. |
 
 ---
 
-### 11.5 Prisma Schema – Zusätzliche Befunde
+### 3.4 Dokumentation
 
-- [x] **Kein `passwordResetToken` Model**: Password-Reset-Tokens werden in der `User`-Tabelle als JSON im `metadata`-Feld oder in Redis gespeichert — sollte ein eigenes Model haben für Audit-Trail
-- [x] **`ChatMessage` hat kein Soft-Delete**: `deletedAt DateTime?` und `deletedById` in Prisma-Schema ergänzt; `@@index([deletedAt])` hinzugefügt; `DeletedMessages`-Relation auf `User`-Model
-- [x] **`AnalyticsEvent` hat keinen TTL/Retention**: Tabelle wächst unbegrenzt — braucht einen Cleanup-Job oder Partitionierung
-- [x] **`QueueEntry.expiresAt` wird nie serverseitig geprüft**: Das Feld existiert, aber es gibt keinen Cron/Scheduler der abgelaufene Entries entfernt
-- [x] **Keine Audit-Log-Tabelle**: `AdminAuditLog`-Model mit `actorId`, `action`, `targetType`, `targetId`, `payload` in Prisma-Schema ergänzt
-- [x] **`Robot.metadata` ist ein `Json?`-Feld**: TypeScript-Level-Typsicherheit durch `mergeMetadata()` + `parseStreamFromMetadata()` mit expliziten Typen; Prisma `as Prisma.InputJsonValue` Cast ist der Standard-Prisma-v5-Pattern
-
----
-
-### 11.6 Docker & Infrastructure – Zusätzliche Befunde
-
-- [x] **Docker-/File-Secret-Support vorhanden**: API lädt `*_FILE`-Secrets und Compose mappt standardisierte Secret-Pfade unter `/run/secrets`
-- [x] **`livekit/livekit-server:latest`**: Unpinned Image — kann bei jedem Pull brechen. Gleiches für `livekit/ingress:latest`, `livekit/egress:latest`
-- [x] **cAdvisor Port-Konflikt**: aktuelles Compose exponiert cAdvisor nicht auf den Host (nur internes `cadvisor:8080`), damit kein Host-Port-Konflikt mit `livekit-ingress`
-- [x] **Kein Restart-Limit**: Compose-Restart-Policies auf `on-failure:10` umgestellt, um unendliche Crash-Loops zu vermeiden
-- [x] **PostgreSQL ohne SSL**: `DATABASE_URL` jetzt mit `?sslmode=disable` explizit für interne Docker-Netzwerke; `.env.example` empfiehlt `sslmode=require` für externe PostgreSQL-Verbindungen
-- [x] **Recordings-Volume ist `:ro` gemountet am API-Container**: Richtig für Lesezugriff — aber wenn die API Recordings löschen soll (über Mod-Dashboard), funktioniert das nicht
-- [x] **Kein Nginx Rate-Limiting konfiguriert** (in der Standardkonfiguration): Rate-Limiting nur auf NestJS-Ebene — Nginx sollte als erste Verteidigungslinie dienen
-- [x] **Kein Health-Check auf Nginx**: Nginx Container hat keinen Healthcheck — kann unhealthy sein ohne dass Docker Compose es merkt
-- [x] **CORS_ORIGIN akzeptiert Komma-getrennte Liste**: `process.env.CORS_ORIGIN?.split(',')` — potentiell unsicher wenn Whitespace oder Tippfehler enthalten sind
+| Aspekt | Bewertung | Details |
+|--------|-----------|---------|
+| **README.md** | ✅ Gut | 3.5 KB. Setup-Anleitung, Config-Erklärung. |
+| **config.example.yaml** | ✅ Gut | 11 KB – ausführlich mit allen Optionen dokumentiert. |
+| **Docstrings** | ⚠️ Mittel | Modul-Level-Docstrings vorhanden, aber Funktionen oft undokumentiert. |
+| **API-Referenz** | ❌ Fehlt | Keine generierte API-Dokumentation (Sphinx, pdoc). |
 
 ---
 
-### 11.7 Frontend/Backend Coupling & Consistency
+### 3.5 Offene Bugs / Technische Schulden
 
-- [x] **WebSocket-Event-Format undokumentiert**: Das `{ event: string, data: object }` Wire-Format ist nirgends als Schema/Type definiert — Frontend und Backend müssen manuell synchron gehalten werden
-- [x] **Kein API-Response-Type-Sharing**: Kern-Response-Types (`PlatformStats`, `RobotTelemetryPoint`, `RobotCameraIngress`, `RoomAccessGrant`, `ActiveSessionRecord`, `AllowedUserRecord`, `ControlButtonRecord`, `AdminRecordingFile`, `AdminRobotRecordingStatus`) nach `@botparty/shared` verschoben; `api-types.ts` re-exportiert sie von dort
-- [x] **`@botparty/shared` ist minimal**: Nur Enums, Limits, und ein paar Types — die meisten API-Contracts werden in `api.ts` (Frontend) und den Controllern (Backend) dupliziert
-- [x] **Viewer-Token-Refresh hat kein exponentielles Backoff**: Wenn der Token-Endpoint down ist, wird alle 3s gepollt — sollte backoff haben
-- [x] **Guest-Session-ID basiert auf `Math.random()`**: `Math.random().toString(36).slice(2, 14)` — nicht collision-resistant bei hohem Traffic. `crypto.randomUUID()` wäre besser
-
----
-
-### 11.8 Accessibility & Compliance
-
-- [x] **Keine ARIA-Labels auf Kontrollelementen**: Room-Controls, Slider, XY-Pad, Fokus-Toggles und E-STOP haben jetzt explizite `aria-label`s
-- [x] **Keine Keyboard-Trap-Prevention**: Robot-View unterdrückt Fahr-Steuerung bereits in Inputs/Chat-Fokus und erlaubt TAB-Wechsel nur bei leerem Chat-Feld
-- [x] **Kein `rel="noopener"` auf externen Links**: manuelle externe Links im Web-Frontend auf `noopener noreferrer` gehärtet
-- [x] **Kein Cookie-Banner obwohl `/cookies` Route existiert**: Consent-Banner mit Verweis auf `/cookies` ergänzt
-- [x] **Keine DSGVO-konforme Account-Löschung**: User-Deletion über Admin möglich, aber kein Self-Service Account-Deletion für Nutzer
-- [x] **Keine Daten-Export-Funktion**: Self-Service Datenexport als JSON über `/users/me/export` + Settings-UI ergänzt
+| ID | Typ | Beschreibung | Schwere |
+|----|-----|-------------|---------|
+| TD-C01 | Security | OTA-Updates ohne Signatur-Verifizierung | P1 |
+| TD-C02 | Architecture | Mixin-Pattern ohne typsichere Protokolle | P2 |
+| TD-C03 | Test-Coverage | Nur 2 Testdateien für ~7.600 LoC | P1 |
+| TD-C04 | Large File | `client_ops.py` (589 Zeilen) mischt Auth, Git, Telemetrie, Updates | P3 |
+| TD-C05 | Deprecated Config | Legacy-Config-Migration-Code (`_apply_legacy_*`) wird immer ausgeführt | P3 |
+| TD-C06 | Mypy | `strict = false` in mypy Config | P3 |
 
 ---
 
-## Erweiterte Prioritäten-Empfehlung
+### 3.6 Feature-Gaps
 
-| Priorität | Bereich | Punkt |
-|-----------|---------|-------|
-| [x] | Security | `.env` aus Git-History entfernen |
-| [x] | Security | CSP aktivieren (`contentSecurityPolicy: false` entfernen) |
-| [x] | Testing | Auth + Queue + Gateway + Moderation Unit-Tests |
-| [x] | Code | `dashboard/page.tsx` aufteilen (von 3.409 auf 1.297 Zeilen reduziert) |
-| [x] | Code | `robot-view.tsx` aufteilen (2.741 Zeilen) |
-| [x] | Code | `mod/page.tsx` aufteilen (1.965 Zeilen) |
-| [x] | Code | `robots.service.ts` in Sub-Services aufteilen |
-| [x] | Code | `moderation.service.ts` in Sub-Services aufteilen |
-| [x] | Code | `bot.gateway.ts` in Sub-Handler aufteilen |
-| [x] | Code | Frontend `api.ts` nach Domain aufteilen |
-| [x] | Security | CSRF für Cookie-Endpoints implementieren |
-| [x] | Security | Robot JWT Default-Expiry setzen |
-| [x] | Security | Account-Lockout nach N Fehlversuchen |
-| [x] | Security | Thumbnail-Upload Content-Validation |
-| [x] | DevOps | Node.js Version auf 22 LTS senken |
-| [x] | DevOps | CI Pipeline (Lint + Type-Check + Test) |
-| [x] | DevOps | Docker-Image-Versions pinnen (LiveKit, etc.) |
-| [x] | Performance | Robot-Liste Pagination |
-| [x] | Performance | Explore-Seite ISR statt force-dynamic |
-| [x] | UX | Mobile Touch Controls |
-| [x] | UX | Error Boundaries + Loading States |
-| [x] | UX | Leaderboard Robot-Links anklickbar machen |
-| [x] | Compliance | DSGVO Self-Service Account Deletion |
-| [x] | Testing | E2E Tests (Playwright) |
-| [x] | Testing | Python + Go Unit Tests |
-| [x] | Testing | `annexb_reader.go` H.264 Edge-Case Tests |
-| [x] | Code | WebSocket-Event-Schema als Shared Types |
-| [x] | Code | `pyproject.toml` statt requirements.txt |
-| [x] | Code | Python Type-Checking (mypy/pyright) |
-| [x] | UX | Fullscreen Video + PWA |
-| [x] | UX | Onboarding-Flow für neue Nutzer |
-| [x] | DevOps | Backup-Strategie (pg_dump Cron) |
-| [x] | DevOps | Log-Aggregation (Loki/Sentry) |
-| [x] | Docs | CONTRIBUTING.md + CHANGELOG.md |
-| [x] | Docs | ADRs für Architektur-Entscheidungen |
-| [x] | Features | Session Recording |
-| [x] | Features | Analytics Dashboard |
-| [x] | Features | E-Mail-Verification bei Registrierung |
-| [x] | Performance | Redis Pipeline-Batching in Hot-Paths |
-| [x] | Performance | DB Connection-Pool Tuning |
-| [x] | Features | Social Login (GitHub/Google/Discord) |
-| [x] | Features | Gamepad API |
-| [x] | Features | Embed Widget |
-| [x] | Features | Webhook System |
-| [x] | Features | Prometheus Metrics (Go Streamer) |
-| [x] | Features | Swarm-Control UI |
-| [x] | Features | Robot-Scheduling UI |
-| [x] | Infra | Docker Secrets statt Env-Vars |
-| [x] | Infra | Nginx Rate-Limiting |
-| [x] | Observability | Streamer Prometheus `/metrics` Endpoint |
+| ID | Feature | Beschreibung | Priorität |
+|----|---------|-------------|-----------|
+| FG-C01 | Tests | Unit-Tests für Camera-Pipeline, Command-Handling, Auth-Flow | P1 |
+| FG-C02 | Update Rollback | Versionierung + Rollback bei fehlerhaften Updates | P1 |
+| FG-C03 | Health Endpoint | Lokaler HTTP-Health-Endpoint für Systemd/Docker-Monitoring | P2 |
+| FG-C04 | Plugin System | Dokumentiertes Plugin-Interface für Hardware-Adapter | P3 |
+| FG-C05 | Configuration Validation | Frühzeitiger Startup-Check ob Hardware/Video-Dependencies installiert sind | P3 |
+| FG-C06 | Metrics Export | Prometheus-Metriken für Camera-FPS, Command-Latenz, etc. | P3 |
 
 ---
 
-## Datei-Größen-Übersicht (Refactoring-Targets)
+## 4. Audit: botparty-streamer
 
-| Datei | Zeilen | Kategorie |
-|-------|--------|-----------|
-| `apps/web/src/app/dashboard/page.tsx` | 1.297 | Frontend |
-| `apps/web/src/app/robot/[slug]/robot-view.tsx` | 2.741 | Frontend |
-| `apps/api/src/robots/robots.service.ts` | 2.032 | Backend |
-| `apps/web/src/app/mod/page.tsx` | 1.965 | Frontend |
-| `apps/api/src/moderation/moderation.service.ts` | 1.888 | Backend |
-| `apps/api/src/gateway/bot.gateway.ts` | 1.632 | Backend |
-| `apps/web/src/components/livekit-player.tsx` | 1.221 | Frontend |
-| `apps/web/src/lib/api.ts` | 1.050 | Frontend |
-| `apps/api/src/livekit/livekit.service.ts` | 733 | Backend |
-| `apps/api/src/robots/robots.controller.ts` | 562 | Backend |
-| `botparty-client/botparty_robot/client_ops.py` | 532 | Python |
-| `botparty-client/botparty_robot/camera.py` | 499 | Python |
-| `botparty-client/botparty_robot/video/botparty_streamer.py` | 463 | Python |
+### 4.1 Codequalität
 
-**Gesamtcode-Umfang**: ~13.500 Zeilen Frontend, ~10.250 Zeilen Backend, ~2.500 Zeilen Python Client, ~800 Zeilen Go Streamer.
+| Aspekt | Bewertung | Details |
+|--------|-----------|---------|
+| **Code-Stil** | ✅ Gut | Idiomatic Go. Klare Package-Struktur (single package `main`). |
+| **Error Handling** | ✅ Gut | Konsequentes Error-Return-Pattern. `log.Fatalf` nur bei nicht-wiederherstellbaren Fehlern. |
+| **Concurrency** | ✅ Gut | Channels für Frame-Pipelining. Atomics für Stats. sync.Once für Disconnect. |
+| **Config Validation** | ✅ Gut | Comprehensive Validation in `LoadConfig()` mit klaren Fehlermeldungen. Bounds-Checks auf allen Zahlen. |
+| **Logging** | ✅ Gut | Strukturierte Log-Nachrichten mit Kontext. Microsecond-Timestamps. |
+| **Code Size** | ✅ Gut | ~1.860 Zeilen total. Gut fokussiert. |
+
+**Kritische Befunde:**
+
+- **P3 – Single-Package:** Alles ist im `main`-Package. Bei wachsender Komplexität sollte ein `internal/`-Package-Layout eingeführt werden.
+- **P3 – WriteSample Goroutine pro Frame:** `WriteFrame()` spawnt eine Goroutine pro Frame für ein 200ms Timeout. Bei 30 FPS = 30 Goroutines/Sekunde. Funktional korrekt, aber nicht ideal.
 
 ---
 
-> **Audit-Revision 2** — 15.04.2026
-> Insgesamt **~180 Punkte** wurden identifiziert und im Audit-Stand als abgeschlossen dokumentiert.
-> Die Plattform ist produktionstauglich deployed und funktional.
-> Der Fokus sollte auf Security-Hardening, Test-Coverage, und Refactoring der 8 übergroßen Dateien liegen.
+### 4.2 Security
+
+| Aspekt | Bewertung | Details |
+|--------|-----------|---------|
+| **Input Binding** | ✅ Gut | Standardmäßig `127.0.0.1:5004`. Remote-Binding erfordert explizites `ALLOW_REMOTE_INPUT=true`. Loopback-Validierung. |
+| **Token Handling** | ✅ Gut | 3 Token-Provider (Static, File, HTTP). Token-TTL konfigurierbar. |
+| **Health Endpoint** | ⚠️ Mittel | Health-Server exposed auf konfiguriertem Port. Keine Authentifizierung. |
+| **Metrics Persistence** | ✅ Gut | Atomic Write mit tmp+rename Pattern. Kein direktes Überschreiben. |
+
+**Kritische Befunde:**
+
+- **P2 – Health Endpoint unauthentifiziert:** Der Health-Server unter `HEALTH_ADDR` exponiert Runtime-Stats (Dropped Frames, Reconnects, etc.). Keine Auth. Sollte nur auf Loopback gebunden sein.
+- **P3 – Token im Env/File:** LiveKit-Token als ENV-Variable oder Datei. Standard-Praxis, aber bei langlebigen Tokens ist Rotation schwierig.
+
+---
+
+### 4.3 Performance
+
+| Aspekt | Bewertung | Details |
+|--------|-----------|---------|
+| **Frame Pipeline** | ✅ Excellent | Zero-Copy Channel-basiert. Stale-Frame-Dropping. Keyframe-Gating. |
+| **Reconnect** | ✅ Gut | Exponentieller Backoff mit ±10% Jitter. Queue-Drain bei Reconnect. |
+| **SPS/PPS Caching** | ✅ Gut | Parameter-Sets werden über ffmpeg-Neustarts gecacht für sofortige Decodierbarkeit. |
+| **Memory** | ✅ Gut | Bounded Channel (`FrameChanSize` 1-32). Controlled Buffer-Sizes. |
+| **CPU** | ✅ Gut | Minimal Processing. NAL-Unit Parsing ist Byte-Level-effizient. |
+
+---
+
+### 4.4 Dokumentation
+
+| Aspekt | Bewertung | Details |
+|--------|-----------|---------|
+| **README.md** | ✅ Gut | 9.9 KB. Ausführlich mit Build-Anleitung, Config-Referenz, Deployment. |
+| **env.example** | ✅ Gut | Alle ENV-Vars dokumentiert. |
+| **Code-Comments** | ✅ Gut | Wichtige Design-Entscheidungen kommentiert (SPS/PPS Cache, Frame-Dropping-Logik). |
+| **Inline Docs** | ⚠️ Mittel | Keine GoDoc-Comments auf exportierten Typen. |
+
+---
+
+### 4.5 Offene Bugs / Technische Schulden
+
+| ID | Typ | Beschreibung | Schwere |
+|----|-----|-------------|---------|
+| TD-S01 | Goroutine | WriteSample-Goroutine pro Frame (30/s) | P3 |
+| TD-S02 | Package Layout | Single `main` package, kein `internal/` | P3 |
+| TD-S03 | Health Auth | Health-Endpoint ohne Authentifizierung | P2 |
+
+---
+
+### 4.6 Feature-Gaps
+
+| ID | Feature | Beschreibung | Priorität |
+|----|---------|-------------|-----------|
+| FG-S01 | Multi-Track | Unterstützung für mehrere Video-Tracks (Multi-Camera) | P3 |
+| FG-S02 | Audio-Passthrough | Audio-Track-Forwarding von ffmpeg | P3 |
+| FG-S03 | Prometheus | `/metrics` Endpoint für Prometheus-Scraping | P3 |
+| FG-S04 | Graceful Drain | Warten auf laufende Frame-Writes bei Shutdown | P3 |
+| FG-S05 | Dynamic Bitrate | Adaptives Bitrate-Tuning basierend auf Netzwerk-Feedback | P3 |
+
+---
+
+## 5. Priorisierte Liste aller offenen Punkte
+
+### P1 – Kritisch (sofortiger Handlungsbedarf)
+
+| # | Projekt | ID | Beschreibung |
+|---|---------|-----|-------------|
+| 1 | Client | TD-C01 | **OTA-Update ohne Signatur-Verifizierung** – Remote-Codeausführung auf Robotern möglich |
+| 2 | Monorepo | TD-05 | **API Test-Coverage ~0.5%** – Nur 6 Testdateien für 12.000 LoC |
+| 3 | Monorepo | TD-06 | **Web Test-Coverage minimal** – Nur 5 Testdateien für 17.000 LoC |
+| 4 | Client | TD-C03 | **Client Test-Coverage minimal** – Nur 2 Testdateien für 7.600 LoC |
+| 5 | Monorepo | FG-01 | **Unit-Tests** – Auth, Gateway, Queue, Moderation brauchen Tests |
+| 6 | Monorepo | FG-02 | **E2E-Tests** – Playwright für kritische Flows |
+| 7 | Client | FG-C02 | **Update Rollback** – Kein Rollback bei fehlerhaften Updates |
+
+### P2 – Wichtig (sollte zeitnah adressiert werden)
+
+| # | Projekt | ID | Beschreibung |
+|---|---------|-----|-------------|
+| 8 | Monorepo | TD-01 | `bot.gateway.ts` God Object (1.447 Zeilen) – Chat, Moderation-Enforcement weiter auslagern |
+| 9 | Monorepo | TD-02 | `robots.service.ts` God Service (1.452 Zeilen) – CRUD, Policies, Slug-Mgmt trennen |
+| 10 | Monorepo | SEC-01 | WebSocket Gast-Rate-Limiting verschärfen – Massenhaft unauthentifizierte Connections möglich |
+| 11 | Monorepo | SEC-02 | Redis Health-Check Passwort in docker-compose exposed |
+| 12 | Monorepo | PERF-01 | N+1 Queries im Control-Command-Flow (~90+ DB-Queries/s bei Last) |
+| 13 | Monorepo | PERF-02 | Status-Filter nach DB-Fetch statt als WHERE-Clause |
+| 14 | Monorepo | TD-09 | Chat-Nachrichten werden nicht in DB persistiert |
+| 15 | Monorepo | TD-07 | Inkonsistente Staff-Role-Erkennung (`isStaffRole` vs. Inline-Check) |
+| 16 | Monorepo | FG-04 | Sentry-Integration fehlt (DSN ist vorbereitet) |
+| 17 | Monorepo | FG-07 | Offline-UX – Kein Reconnect-Indicator im Frontend |
+| 18 | Monorepo | UX-01 | Keine Toast/Notification-Systematik |
+| 19 | Monorepo | UX-02 | Fehlende Skeleton-Loader für Dashboard/Robot-View |
+| 20 | Client | TD-C02 | Mixin-Pattern ohne typsichere Protokolle |
+| 21 | Client | SEC-C01 | Kein Certificate Pinning auf API-Verbindung |
+| 22 | Client | FG-C03 | Kein lokaler Health-Endpoint |
+| 23 | Streamer | TD-S03 | Health-Endpoint ohne Authentifizierung |
+| 24 | Monorepo | ARCH-01 | Single-Instance Bottleneck – In-Memory WS-State nicht Redis-backed |
+
+### P3 – Optional (Verbesserungen, Low Priority)
+
+| # | Projekt | ID | Beschreibung |
+|---|---------|-----|-------------|
+| 25 | Monorepo | TD-03 | Slug-Update Duplikation refactoren |
+| 26 | Monorepo | TD-04 | API-Client Proxy-Pattern aufräumen |
+| 27 | Monorepo | TD-08 | controlCooldowns Memory-Leak Risiko (periodischer Cleanup) |
+| 28 | Monorepo | TD-10 | Unused DB-Tabellen (SwarmGroup, Transaction, Analytics) |
+| 29 | Monorepo | TD-11 | Unused Schema-Felder (aiAssistEnabled, ros2Enabled, balance, credits) |
+| 30 | Monorepo | FG-05 | HTML Email-Templates |
+| 31 | Monorepo | FG-06 | Internationalisierung (i18n) |
+| 32 | Monorepo | FG-08 | OAuth / Social Login |
+| 33 | Monorepo | FG-09 | User-Avatar Upload |
+| 34 | Monorepo | FG-10 | Analytics Dashboard |
+| 35 | Monorepo | FG-11 | Robot Scheduling |
+| 36 | Monorepo | FG-12 | Webhook-Management UI |
+| 37 | Monorepo | SEC-03 | Swagger in Dev standardmäßig aktiv |
+| 38 | Monorepo | DOC-01 | Architecture Decision Records fehlen |
+| 39 | Client | TD-C04 | `client_ops.py` aufteilen |
+| 40 | Client | TD-C05 | Legacy-Config-Migration-Code separieren |
+| 41 | Client | TD-C06 | Mypy strict mode aktivieren |
+| 42 | Client | FG-C04 | Dokumentiertes Plugin-Interface |
+| 43 | Client | FG-C05 | Startup Dependency-Check |
+| 44 | Client | FG-C06 | Prometheus Metrics Export |
+| 45 | Streamer | TD-S01 | WriteSample-Goroutine pro Frame optimieren |
+| 46 | Streamer | TD-S02 | `internal/` Package-Layout |
+| 47 | Streamer | FG-S01 | Multi-Track Support |
+| 48 | Streamer | FG-S02 | Audio-Passthrough |
+| 49 | Streamer | FG-S03 | Prometheus Endpoint |
+| 50 | Streamer | FG-S04 | Graceful Frame-Drain bei Shutdown |
+| 51 | Streamer | FG-S05 | Dynamic Bitrate Adaptation |
+
+---
+
+## 6. Konkrete Action Items
+
+### Sprint 1: Sicherheit & Stabilität (P1)
+
+- [x] **OTA-Update absichern (TD-C01):**
+  - Signatur-Verifizierung für Git-Commits einführen (GPG-signed Tags)
+  - Update-Whitelist für erlaubte Remote-URLs
+  - Pre-Update Snapshot für Rollback
+  - Kill-Switch: `BOTPARTY_DISABLE_REMOTE_UPDATE=true` als ENV
+  - **Owner:** Client-Team | **Aufwand:** 3-5 Tage
+
+- [x] **Test-Suite aufbauen (TD-05, TD-06, TD-C03):**
+  - API: Unit-Tests für AuthService, RobotsService, QueueService, ModerationService, BotGateway
+  - API: Integration-Tests mit Testcontainers (Postgres + Redis)
+  - Web: Vitest-Tests für API-Client, Stores, Key-Components
+  - Client: Pytest-Tests für Gateway, Config-Parsing, Command-Handling
+  - **Owner:** Alle Teams | **Aufwand:** 2-3 Wochen
+
+- [x] **E2E-Tests (FG-02):**
+  - Playwright-Tests für: Register → Login → Create Robot → Dashboard → Robot-View → Queue
+  - CI-Integration
+  - **Owner:** Web-Team | **Aufwand:** 1 Woche
+
+### Sprint 2: Performance & Architektur (P2)
+
+- [x] **Control-Command Performance (PERF-01):**
+  - Robot-Daten in Redis cachen (TTL 30s)
+  - `findById()` durch Cache-First-Lookup ersetzen
+  - Access-Policy Cache nutzen (existiert bereits teilweise)
+  - **Owner:** API-Team | **Aufwand:** 2-3 Tage
+
+- [x] **Gateway Refactoring (TD-01):**
+  - Chat-Handler in eigene Datei extrahieren
+  - Control-Command-Handler in eigene Datei extrahieren
+  - Redis-Message-Handler in eigene Datei extrahieren
+  - Ziel: `bot.gateway.ts` < 600 Zeilen
+  - **Owner:** API-Team | **Aufwand:** 3-5 Tage
+
+- [x] **DB-Query Optimierung (PERF-02):**
+  - Status-Filter in `findAll()` als Prisma WHERE-Clause
+  - Pagination-Counts über `count()` statt In-Memory
+  - **Owner:** API-Team | **Aufwand:** 1 Tag
+
+- [x] **Chat-Persistenz (TD-09):**
+  - WebSocket-Chat in `ChatMessage`-Tabelle schreiben (async über BullMQ-Worker)
+  - History-API für die letzten N Nachrichten beim Room-Join
+  - **Owner:** API-Team | **Aufwand:** 2-3 Tage
+
+- [x] **Frontend UX (UX-01, UX-02, FG-07):**
+  - Toast-System mit Animationen implementieren
+  - Skeleton-Loader für Dashboard, Robot-View
+  - Offline-Banner mit Reconnect-Countdown
+  - **Owner:** Web-Team | **Aufwand:** 3-4 Tage
+
+### Sprint 3: Security Hardening (P2)
+
+- [x] **Redis Health-Check (SEC-02):**
+  - `redis-cli --no-auth-warning` verwenden oder healthcheck über TCP
+  - **Owner:** DevOps | **Aufwand:** 30 Min
+
+- [x] **Guest Rate-Limiting (SEC-01):**
+  - IP-basiertes Rate-Limit für unauthentifizierte WS-Connections
+  - Limit auf max. 5 gleichzeitige Gast-Sockets pro IP
+  - **Owner:** API-Team | **Aufwand:** 1 Tag
+
+- [x] **Monitoring Setup (FG-04):**
+  - Sentry-Integration für API und Web
+  - Structured Logging mit Correlation-IDs
+  - **Owner:** API-Team + Web-Team | **Aufwand:** 2-3 Tage
+
+- [x] **Staff-Role Konsistenz (TD-07):**
+  - Einheitliche `isStaffRole()` Utility durchgängig verwenden
+  - **Owner:** API-Team | **Aufwand:** 1 Stunde
+
+### Sprint 4: Nice-to-Have (P3)
+
+- [x] Code-Duplikation in robots.service.ts bereinigen
+- [x] API-Client Proxy-Pattern in Web-App aufräumen
+- [x] controlCooldowns periodischer Cleanup (setInterval)
+- [x] Mypy strict mode für botparty-client aktivieren
+- [x] GoDoc-Comments auf exportierten Typen im Streamer
+- [x] Architecture Decision Records starten
+- [x] Unused DB-Tabellen/Felder evaluieren (behalten oder entfernen)
+
+---
+
+## Zusammenfassung
+
+### Stärken der Plattform
+
+1. **Solide Sicherheits-Grundlage:** JWT + Refresh-Tokens, CSRF, Rate-Limiting, Helmet/CSP, Argon2id – die Auth-Schicht ist gut durchdacht.
+2. **Saubere Monorepo-Struktur:** Turborepo + pnpm mit geteilten Packages funktioniert gut.
+3. **WebSocket-Architektur:** Redis Pub/Sub, per-Event Rate Limits, Zod-Validierung – die Echtzeit-Schicht ist production-ready.
+4. **Robot-Client Resilienz:** Graceful Shutdown, Supervisor, Auto-Reconnect, Hardware-Safety-Timeouts.
+5. **Video-Streamer Performance:** Zero-Copy Pipelines, SPS/PPS Caching, Keyframe-Gating.
+
+### Größte Risiken
+
+1. **🔴 OTA-Updates ohne Signatur** – Remote-Code-Execution auf Robotern.
+2. **🔴 Minimale Test-Coverage** – Regressions sind wahrscheinlich.
+3. **🟡 God Objects** – Gateway und RobotsService sind Wartungs-Hotspots.
+4. **🟡 N+1 Queries** – Performance-Degradation unter Last.
+5. **🟡 Single-Instance WS-State** – Horizontale Skalierung eingeschränkt.
+
+### Gesamtbewertung
+
+| Projekt | Qualität | Security | Performance | Dokumentation |
+|---------|----------|----------|-------------|---------------|
+| **botparty (Monorepo)** | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ |
+| **botparty-client** | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐ |
+| **botparty-streamer** | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
+
+> Die Plattform ist architektonisch solide und hat eine gute Sicherheits-Grundlage. Die dringendsten Maßnahmen sind die Absicherung des OTA-Update-Pfads, der Ausbau der Test-Coverage und die Performance-Optimierung der Echtzeit-Kontrollschicht.

@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import type { PublicRobotOverview, RobotPublic } from '@botparty/shared';
 import { Trophy, Eye, Radio, Clock3 } from 'lucide-react';
+import { getServerApiUrl } from '@/lib/server-api-url';
 
 type CreatorLeaderboardEntry = {
   id: string;
@@ -29,7 +30,7 @@ export const metadata: Metadata = {
 export const revalidate = 10;
 
 async function getRobots(): Promise<RobotPublic[]> {
-  const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
+  const apiUrl = getServerApiUrl();
   try {
     const res = await fetch(`${apiUrl}/api/v1/robots`);
     if (!res.ok) return [];
@@ -40,7 +41,7 @@ async function getRobots(): Promise<RobotPublic[]> {
 }
 
 async function getTopCreators(): Promise<CreatorLeaderboardEntry[]> {
-  const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
+  const apiUrl = getServerApiUrl();
   try {
     const res = await fetch(`${apiUrl}/api/v1/users/leaderboard?limit=10`);
     if (!res.ok) return [];
@@ -51,7 +52,7 @@ async function getTopCreators(): Promise<CreatorLeaderboardEntry[]> {
 }
 
 async function getOverview(): Promise<PublicRobotOverview | null> {
-  const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
+  const apiUrl = getServerApiUrl();
   try {
     const res = await fetch(`${apiUrl}/api/v1/robots/overview`);
     if (!res.ok) return null;

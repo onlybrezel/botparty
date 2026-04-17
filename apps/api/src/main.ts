@@ -6,8 +6,11 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import helmet, { type FastifyHelmetOptions } from '@fastify/helmet';
 import type { FastifyPluginAsync } from 'fastify';
+import type { IncomingMessage } from 'http';
+import { randomUUID } from 'crypto';
 import { AppModule } from './app.module';
 import { loadFileBackedEnv } from './common/env-file';
+import { initSentry } from './common/sentry';
 import { AllExceptionsFilter } from './filters/all-exceptions.filter';
 
 function readOrigin(raw: string | undefined): string | null {
@@ -52,6 +55,7 @@ function assertRequiredSecret(env: NodeJS.ProcessEnv, name: string, options?: { 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
   loadFileBackedEnv(process.env, logger);
+  await initSentry(logger);
 
   // ─── Security sanity checks ───────────────────────
   try {
@@ -81,6 +85,14 @@ async function bootstrap() {
     AppModule,
     new FastifyAdapter({
       bodyLimit: Number(process.env.FASTIFY_BODY_LIMIT ?? 5 * 1024 * 1024),
+      genReqId: (req: IncomingMessage) => {
+        const fromHeader = req.headers['x-correlation-id'];
+        if (typeof fromHeader === 'string' && fromHeader.trim()) {
+          return fromHeader.trim();
+        }
+        return randomUUID();
+      },
+      requestIdHeader: 'x-correlation-id',
       logger: {
         level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
         transport:
@@ -97,6 +109,12 @@ async function bootstrap() {
   // ─── WebSocket adapter (ws, not socket.io) ────────
   app.useWebSocketAdapter(new WsAdapter(app));
   app.enableShutdownHooks();
+
+  app.getHttpAdapter().getInstance().addHook('onResponse', (request, reply, done) => {
+    const correlationId = typeof request.id === 'string' ? request.id : randomUUID();
+    reply.header('x-correlation-id', correlationId);
+    done();
+  });
 
   const helmetRegistration = (async (instance: Parameters<FastifyPluginAsync<FastifyHelmetOptions>>[0]) => {
     const registerHelmet = helmet as unknown as (
@@ -142,7 +160,7 @@ async function bootstrap() {
     origin: process.env.CORS_ORIGIN?.split(',').map((o) => o.trim()).filter(Boolean) ?? ['http://localhost:3000'],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token', 'X-Correlation-Id'],
   });
 
   // ─── Global prefix ────────────────────────────────

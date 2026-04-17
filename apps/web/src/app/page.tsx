@@ -2,6 +2,7 @@ import Link from 'next/link';
 import type { PublicRobotOverview, RobotPublic } from '@botparty/shared';
 import RobotCard from '@/components/robot-card';
 import { ArrowRight, Bot, Gamepad2, Shield, Sparkles, TimerReset, Users } from 'lucide-react';
+import { getServerApiUrl } from '@/lib/server-api-url';
 
 export const revalidate = 10;
 
@@ -15,29 +16,29 @@ interface PlatformStats {
 }
 
 async function getPublicRobots(): Promise<RobotPublic[]> {
-  const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
+  const apiUrl = getServerApiUrl();
   try {
     const res = await fetch(`${apiUrl}/api/v1/robots`);
-      if (!res.ok) return [];
-      return res.json() as Promise<RobotPublic[]>;
+    if (!res.ok) return [];
+    return res.json() as Promise<RobotPublic[]>;
   } catch {
     return [];
   }
 }
 
 async function getPlatformStats(): Promise<PlatformStats | null> {
-  const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
+  const apiUrl = getServerApiUrl();
   try {
     const res = await fetch(`${apiUrl}/api/v1/health/stats`);
-      if (!res.ok) return null;
-      return res.json() as Promise<PlatformStats>;
+    if (!res.ok) return null;
+    return res.json() as Promise<PlatformStats>;
   } catch {
     return null;
   }
 }
 
 async function getRobotsOverview(): Promise<PublicRobotOverview | null> {
-  const apiUrl = process.env.API_URL ?? 'http://localhost:4000';
+  const apiUrl = getServerApiUrl();
   try {
     const res = await fetch(`${apiUrl}/api/v1/robots/overview`, {
       next: { revalidate: 10 },

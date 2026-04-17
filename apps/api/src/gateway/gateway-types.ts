@@ -14,6 +14,7 @@ export interface WsClient extends WebSocket {
   lastChatAt?: number;
   /** User role (for rate-limit tier) */
   role?: string;
+  remoteIp?: string;
   cookieHeader?: string;
   presenceJoinedAt?: number;
   /** Per-client generic event rate limiting */

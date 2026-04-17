@@ -24,6 +24,7 @@ import { RobotThumbnailService } from './robot-thumbnail.service';
 import { RobotAccessService } from './robot-access.service';
 import { RobotWebhookService } from './robot-webhook.service';
 import { SLUG_PROFANITY_TERMS } from './profanity-terms';
+import { ChatPersistenceService } from './chat-persistence.service';
 
 export type GuestAccess = 'ALL' | 'AUTHENTICATED' | 'DISABLED';
 
@@ -145,6 +146,7 @@ const DEFAULT_ROBOT_CONTROLS = [
 ] as const;
 
 const ROBOT_TEXT_PROFANITY_TERMS = Array.from(new Set(SLUG_PROFANITY_TERMS));
+const REALTIME_ROBOT_CACHE_TTL_SEC = 30;
 
 @Injectable()
 export class RobotsService implements OnModuleDestroy {
@@ -157,6 +159,7 @@ export class RobotsService implements OnModuleDestroy {
     private readonly thumbnail: RobotThumbnailService,
     private readonly access: RobotAccessService,
     private readonly webhooks: RobotWebhookService,
+    private readonly chatPersistence: ChatPersistenceService,
     private readonly configService: ConfigService,
   ) {}
 
@@ -230,6 +233,14 @@ export class RobotsService implements OnModuleDestroy {
   async findAll(filters?: { visibility?: string; status?: string; tag?: string; q?: string; sort?: string; limit?: string; offset?: string }) {
     const query = filters?.q?.trim();
     const sort = filters?.sort?.trim().toLowerCase();
+    const normalizedStatus = filters?.status?.trim().toUpperCase();
+    const statusFilter =
+      normalizedStatus === 'ONLINE' ||
+      normalizedStatus === 'OFFLINE' ||
+      normalizedStatus === 'BUSY' ||
+      normalizedStatus === 'MAINTENANCE'
+        ? normalizedStatus
+        : undefined;
     const take = Math.min(Math.max(Number(filters?.limit) || 50, 1), 200);
     const skip = Math.max(Number(filters?.offset) || 0, 0);
 
@@ -245,6 +256,7 @@ export class RobotsService implements OnModuleDestroy {
     const robots = await this.prisma.robot.findMany({
       where: {
         visibility: 'PUBLIC',
+        ...(statusFilter && { status: statusFilter }),
         ...(filters?.tag && { tags: { has: filters.tag } }),
         ...(query && {
           OR: [
@@ -272,9 +284,7 @@ export class RobotsService implements OnModuleDestroy {
       },
     });
 
-    return robots
-      .map((robot) => this.toPublicRobot(robot))
-      .filter((robot) => !filters?.status || robot.status === filters.status);
+    return robots.map((robot) => this.toPublicRobot(robot));
   }
 
   async findBySlug(slug: string) {
@@ -334,20 +344,7 @@ export class RobotsService implements OnModuleDestroy {
     const baseData = this.stripRobotWriteFields(data);
     this.access.invalidateCache(id);
 
-    let slugUpdate: { slug: string; slugAliases: { set: string[] } } | undefined;
-    if (data.slug && data.slug !== robot.slug) {
-      const nextSlug = this.validateAndNormalizeSlugInput(data.slug);
-      const conflict = await this.prisma.robot.findFirst({ where: { slug: nextSlug, NOT: { id } }, select: { id: true } });
-      if (conflict) throw new ConflictException('This slug is already taken');
-      await this.reclaimSlugAlias(nextSlug, id);
-      const currentAliases = Array.isArray((robot as { slugAliases?: string[] }).slugAliases)
-        ? ((robot as { slugAliases?: string[] }).slugAliases ?? [])
-        : [];
-      slugUpdate = {
-        slug: nextSlug,
-        slugAliases: { set: Array.from(new Set([...currentAliases, robot.slug])) },
-      };
-    }
+    const slugUpdate = await this.buildSlugUpdate(id, robot.slug, (robot as { slugAliases?: string[] }).slugAliases, data.slug);
 
     const nextAccessMode = data.accessMode ?? robot.accessMode;
     const nextAccessPassword =
@@ -411,20 +408,12 @@ export class RobotsService implements OnModuleDestroy {
       nextAccessMode,
     });
 
-    let slugUpdate: { slug: string; slugAliases: { set: string[] } } | undefined;
-    if (data.slug && data.slug !== existing.slug) {
-      const nextSlug = this.validateAndNormalizeSlugInput(data.slug);
-      const conflict = await this.prisma.robot.findFirst({ where: { slug: nextSlug, NOT: { id } }, select: { id: true } });
-      if (conflict) throw new ConflictException('This slug is already taken');
-      await this.reclaimSlugAlias(nextSlug, id);
-      const currentAliases = Array.isArray((existing as { slugAliases?: string[] }).slugAliases)
-        ? ((existing as { slugAliases?: string[] }).slugAliases ?? [])
-        : [];
-      slugUpdate = {
-        slug: nextSlug,
-        slugAliases: { set: Array.from(new Set([...currentAliases, existing.slug])) },
-      };
-    }
+    const slugUpdate = await this.buildSlugUpdate(
+      id,
+      existing.slug,
+      (existing as { slugAliases?: string[] }).slugAliases,
+      data.slug,
+    );
 
     const updated = await this.prisma.robot.update({
       where: { id },
@@ -629,19 +618,7 @@ export class RobotsService implements OnModuleDestroy {
       throw new NotFoundException('Robot not found');
     }
 
-    const requester = await this.prisma.user.findUnique({
-      where: { id: requesterId },
-      select: { role: true },
-    });
-
-    const isStaff = isStaffRole(requester?.role);
-    if (robot.visibility !== 'PRIVATE' && !isStaff && robot.ownerId !== requesterId) {
-      throw new ForbiddenException('Robot is public');
-    }
-
-    if (robot.ownerId !== requesterId && !isStaff) {
-      throw new ForbiddenException('Not allowed to access this robot');
-    }
+    await this.assertPrivateAccessForRequester(robot, requesterId);
 
     return this.toPublicRobot(robot);
   }
@@ -653,19 +630,7 @@ export class RobotsService implements OnModuleDestroy {
       throw new NotFoundException('Robot not found');
     }
 
-    const requester = await this.prisma.user.findUnique({
-      where: { id: requesterId },
-      select: { role: true },
-    });
-    const isStaff = requester?.role === 'ADMIN' || requester?.role === 'MOD';
-
-    if (robot.visibility !== 'PRIVATE' && !isStaff && robot.ownerId !== requesterId) {
-      throw new ForbiddenException('Robot is public');
-    }
-
-    if (robot.ownerId !== requesterId && !isStaff) {
-      throw new ForbiddenException('Not allowed to access this robot');
-    }
+    await this.assertPrivateAccessForRequester(robot, requesterId);
 
     return this.toPublicRobot(robot);
   }
@@ -911,6 +876,66 @@ export class RobotsService implements OnModuleDestroy {
   async getStreamPolicy(robotId: string): Promise<RobotStreamPolicy> {
     return this.access.getStreamPolicy(robotId);
   }
+
+  async findByIdCached(id: string): Promise<Awaited<ReturnType<RobotsService['findById']>>> {
+    const cacheKey = this.realtimeRobotCacheKey(id);
+    const cached = await this.redis.get(cacheKey);
+    if (cached) {
+      try {
+        return JSON.parse(cached) as Awaited<ReturnType<RobotsService['findById']>>;
+      } catch {
+        await this.redis.del(cacheKey);
+      }
+    }
+
+    const robot = await this.findById(id);
+    await this.redis.set(cacheKey, JSON.stringify(robot), 'EX', REALTIME_ROBOT_CACHE_TTL_SEC);
+    return robot;
+  }
+
+  async appendChatMessage(robotId: string, userId: string | null | undefined, content: string, timestampMs: number) {
+    if (!userId || userId.startsWith('guest:')) {
+      return;
+    }
+
+    await this.chatPersistence.enqueue({
+      robotId,
+      userId,
+      content,
+      timestampMs,
+    });
+  }
+
+  async getRecentChatMessages(robotId: string, limit = LIMITS.CHAT_HISTORY_ON_JOIN) {
+    const clampedLimit = Math.min(Math.max(limit, 1), 200);
+    const rows = await this.prisma.chatMessage.findMany({
+      where: {
+        robotId,
+        deletedAt: null,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: clampedLimit,
+      select: {
+        userId: true,
+        content: true,
+        createdAt: true,
+        user: {
+          select: {
+            username: true,
+          },
+        },
+      },
+    });
+
+    return rows.reverse().map((row) => ({
+      userId: row.userId,
+      username: row.user.username,
+      content: row.content,
+      timestamp: row.createdAt.getTime(),
+    }));
+  }
   async getFeatured() {
     const robots = await this.prisma.robot.findMany({
       where: { isFeatured: true, visibility: 'PUBLIC' },
@@ -1092,6 +1117,61 @@ export class RobotsService implements OnModuleDestroy {
     }
 
     return existing;
+  }
+
+  private realtimeRobotCacheKey(robotId: string): string {
+    return `robot:realtime:${robotId}`;
+  }
+
+  private async isRequesterStaff(requesterId: string): Promise<boolean> {
+    const requester = await this.prisma.user.findUnique({
+      where: { id: requesterId },
+      select: { role: true },
+    });
+    return isStaffRole(requester?.role);
+  }
+
+  private async assertPrivateAccessForRequester(
+    robot: { visibility: string; ownerId: string },
+    requesterId: string,
+  ): Promise<void> {
+    const isStaff = await this.isRequesterStaff(requesterId);
+
+    if (robot.visibility !== 'PRIVATE' && !isStaff && robot.ownerId !== requesterId) {
+      throw new ForbiddenException('Robot is public');
+    }
+
+    if (robot.ownerId !== requesterId && !isStaff) {
+      throw new ForbiddenException('Not allowed to access this robot');
+    }
+  }
+
+  private async buildSlugUpdate(
+    robotId: string,
+    currentSlug: string,
+    currentSlugAliases: string[] | undefined,
+    nextSlugInput?: string,
+  ): Promise<{ slug: string; slugAliases: { set: string[] } } | undefined> {
+    if (!nextSlugInput || nextSlugInput === currentSlug) {
+      return undefined;
+    }
+
+    const nextSlug = this.validateAndNormalizeSlugInput(nextSlugInput);
+    const conflict = await this.prisma.robot.findFirst({
+      where: { slug: nextSlug, NOT: { id: robotId } },
+      select: { id: true },
+    });
+    if (conflict) {
+      throw new ConflictException('This slug is already taken');
+    }
+
+    await this.reclaimSlugAlias(nextSlug, robotId);
+    const aliases = Array.isArray(currentSlugAliases) ? currentSlugAliases : [];
+
+    return {
+      slug: nextSlug,
+      slugAliases: { set: Array.from(new Set([...aliases, currentSlug])) },
+    };
   }
 
 

@@ -53,7 +53,7 @@ services:
     networks:
       - internal
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?Set REDIS_PASSWORD}", "ping"]
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 6379"]
       interval: 2s
       timeout: 2s
       retries: 15

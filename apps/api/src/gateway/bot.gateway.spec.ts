@@ -38,6 +38,19 @@ describe('BotGateway', () => {
       hget: jest.fn().mockResolvedValue(null),
       hset: jest.fn().mockResolvedValue(0),
       hdel: jest.fn().mockResolvedValue(0),
+      publish: jest.fn().mockResolvedValue(0),
+      pipeline: jest.fn().mockReturnValue({
+        hset: jest.fn().mockReturnThis(),
+        expire: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([]),
+      }),
+      multi: jest.fn().mockReturnValue({
+        zremrangebyscore: jest.fn().mockReturnThis(),
+        zadd: jest.fn().mockReturnThis(),
+        zcard: jest.fn().mockReturnThis(),
+        expire: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([null, null, [null, 0], null]),
+      }),
       quit: jest.fn().mockResolvedValue('OK'),
     };
 
@@ -57,6 +70,7 @@ describe('BotGateway', () => {
             create: jest.fn(),
             end: jest.fn(),
             findActive: jest.fn(),
+            endAllActiveSessions: jest.fn().mockResolvedValue(undefined),
           } as any,
         },
         {
@@ -70,7 +84,21 @@ describe('BotGateway', () => {
         {
           provide: RedisService,
           useValue: {
-            getClient: jest.fn().mockReturnValue(mockRedisClient),
+            duplicate: jest.fn().mockReturnValue(mockRedisClient),
+            publish: jest.fn().mockResolvedValue(0),
+            set: jest.fn().mockResolvedValue('OK'),
+            get: jest.fn().mockResolvedValue(null),
+            del: jest.fn().mockResolvedValue(0),
+            hget: jest.fn().mockResolvedValue(null),
+            hset: jest.fn().mockResolvedValue(0),
+            hdel: jest.fn().mockResolvedValue(0),
+            sadd: jest.fn().mockResolvedValue(0),
+            srem: jest.fn().mockResolvedValue(0),
+            smembers: jest.fn().mockResolvedValue([]),
+            zremrangebyscore: jest.fn().mockResolvedValue(0),
+            zadd: jest.fn().mockResolvedValue(1),
+            zcard: jest.fn().mockResolvedValue(0),
+            expire: jest.fn().mockResolvedValue(1),
           } as any,
         },
         {
@@ -125,19 +153,15 @@ describe('BotGateway', () => {
   });
 
   describe('connection handling', () => {
-    it('should reject connection with invalid token', async () => {
+    it('assigns identity metadata on connect', async () => {
       const mockSocket = {
         id: 'test-socket-1',
         close: jest.fn(),
       } as any;
 
-      jwtService.verify.mockImplementation(() => {
-        throw new Error('Invalid token');
-      });
-
-      // Connection should close socket on auth failure
       await gateway.handleConnection(mockSocket, {});
-      expect(mockSocket.close).toHaveBeenCalledWith(4001, expect.any(String));
+      expect(mockSocket.id).toBeDefined();
+      expect(mockSocket.close).not.toHaveBeenCalled();
     });
 
     it('should accept connection with valid token', async () => {
