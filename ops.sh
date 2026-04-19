@@ -13,11 +13,14 @@ IMAGE_SERVICES=(postgres redis livekit cadvisor nginx)
 
 ANNOUNCE_CHANNEL="ws:system:shutdown"
 DEFAULT_RETRY_AFTER_MS="${WS_SHUTDOWN_RETRY_AFTER_MS:-12000}"
+DEFAULT_UPDATE_RETRY_AFTER_MS="${WS_SHUTDOWN_RETRY_AFTER_UPDATE_MS:-25000}"
 DEFAULT_DRAIN_SEC="${OPS_DRAIN_SEC:-6}"
 MAINTENANCE_RETRY_AFTER_MS="${OPS_MAINTENANCE_RETRY_AFTER_MS:-30000}"
 MAINTENANCE_DRAIN_SEC="${OPS_MAINTENANCE_DRAIN_SEC:-8}"
 DEFAULT_API_HEALTHCHECK_URL="${OPS_API_HEALTHCHECK_URL:-}"
 DEFAULT_HEALTHCHECK_TIMEOUT_SEC="${OPS_HEALTHCHECK_TIMEOUT_SEC:-90}"
+DEFAULT_POST_API_STABILIZE_SEC="${OPS_POST_API_STABILIZE_SEC:-4}"
+DEFAULT_POST_WEB_STABILIZE_SEC="${OPS_POST_WEB_STABILIZE_SEC:-2}"
 
 info() { printf '  -> %s\n' "$*"; }
 warn() { printf '  ! %s\n' "$*"; }
@@ -102,6 +105,16 @@ wait_for_drain() {
     return 0
   fi
   info "Waiting ${seconds}s for clients to drain"
+  sleep "$seconds"
+}
+
+wait_for_stabilization() {
+  local label="$1"
+  local seconds="$2"
+  if [[ "$seconds" -le 0 ]]; then
+    return 0
+  fi
+  info "Stabilizing after ${label}: waiting ${seconds}s"
   sleep "$seconds"
 }
 
@@ -323,7 +336,7 @@ run_zero_downtime_update() {
   docker compose build api web nginx
 
   info "Build/preflight successful; announcing update window"
-  publish_shutdown_notice update "$DEFAULT_RETRY_AFTER_MS" "$(message_for_reason update)" app
+  publish_shutdown_notice update "$DEFAULT_UPDATE_RETRY_AFTER_MS" "$(message_for_reason update)" app
   wait_for_drain "$DEFAULT_DRAIN_SEC"
 
   previous_api_image_id="$(get_running_service_image_id api)"
@@ -342,9 +355,11 @@ run_zero_downtime_update() {
     fi
     die "API update failed health gate and rollback failed. Manual intervention required."
   fi
+  wait_for_stabilization api "$DEFAULT_POST_API_STABILIZE_SEC"
 
   info "Rolling update: web"
   docker compose up -d --no-deps web
+  wait_for_stabilization web "$DEFAULT_POST_WEB_STABILIZE_SEC"
 
   info "Rolling update: nginx"
   docker compose up -d --no-deps nginx

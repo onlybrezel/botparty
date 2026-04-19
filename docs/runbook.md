@@ -109,9 +109,10 @@ Use sequential service rollout to avoid full platform interruption.
 2. What it does automatically:
    - Runs `git pull --ff-only`
    - Runs `docker compose pull api web nginx` and `docker compose build api web nginx`
-   - Announces update over websocket and waits for drain
+   - Announces update over websocket with a longer update retry window (`WS_SHUTDOWN_RETRY_AFTER_UPDATE_MS`, default 25s) and waits for drain
    - Rolls services in order: api -> web -> nginx
    - Waits for API health gate via Docker container health before continuing
+   - Waits short stabilization windows after API and Web rollout (`OPS_POST_API_STABILIZE_SEC`, `OPS_POST_WEB_STABILIZE_SEC`)
    - If API health fails, automatically rolls back API to the previously running image and aborts before web/nginx update
 
 Optional override:
