@@ -111,7 +111,15 @@ Use sequential service rollout to avoid full platform interruption.
    - Runs `git pull --ff-only`
    - Runs `docker compose pull api web nginx` and `docker compose build api web nginx`
    - Rolls services in order: api -> web -> nginx
-   - Waits for API health gate (`/api/v1/health/live`) before continuing
+   - Waits for API health gate via Docker container health before continuing
+
+Optional override:
+
+```bash
+OPS_API_HEALTHCHECK_URL=http://127.0.0.1:4000/api/v1/health/live APP_VERSION=<new-tag> ./ops.sh update-zero
+```
+
+Use this only when the API port is actually published to the host.
 3. Manual fallback (if scripted rollout cannot be used):
    ```bash
    APP_VERSION=<new-tag> docker compose pull api web nginx

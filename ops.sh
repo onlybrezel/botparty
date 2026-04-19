@@ -16,7 +16,7 @@ DEFAULT_RETRY_AFTER_MS="${WS_SHUTDOWN_RETRY_AFTER_MS:-12000}"
 DEFAULT_DRAIN_SEC="${OPS_DRAIN_SEC:-6}"
 MAINTENANCE_RETRY_AFTER_MS="${OPS_MAINTENANCE_RETRY_AFTER_MS:-30000}"
 MAINTENANCE_DRAIN_SEC="${OPS_MAINTENANCE_DRAIN_SEC:-8}"
-DEFAULT_API_HEALTHCHECK_URL="${OPS_API_HEALTHCHECK_URL:-http://127.0.0.1:4000/api/v1/health/live}"
+DEFAULT_API_HEALTHCHECK_URL="${OPS_API_HEALTHCHECK_URL:-}"
 DEFAULT_HEALTHCHECK_TIMEOUT_SEC="${OPS_HEALTHCHECK_TIMEOUT_SEC:-90}"
 
 info() { printf '  -> %s\n' "$*"; }
@@ -125,6 +125,53 @@ wait_for_http() {
   done
 }
 
+wait_for_service_healthy() {
+  local service="$1"
+  local timeout_sec="$2"
+  local started_at
+  local container_id
+  local status
+
+  started_at="$(date +%s)"
+  info "Waiting for docker health: ${service} (timeout ${timeout_sec}s)"
+
+  while true; do
+    container_id="$(docker compose ps -q "$service" 2>/dev/null || true)"
+    if [[ -z "$container_id" ]]; then
+      if (( "$(date +%s)" - started_at >= timeout_sec )); then
+        die "Timed out waiting for container id: ${service}"
+      fi
+      sleep 1
+      continue
+    fi
+
+    status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container_id" 2>/dev/null || echo unknown)"
+    case "$status" in
+      healthy|running)
+        return 0
+        ;;
+      unhealthy|exited|dead)
+        die "Service '${service}' reported unhealthy state: ${status}"
+        ;;
+    esac
+
+    if (( "$(date +%s)" - started_at >= timeout_sec )); then
+      die "Timed out waiting for service '${service}' to become healthy (last state: ${status})"
+    fi
+
+    sleep 2
+  done
+}
+
+wait_for_api_ready() {
+  local timeout_sec="$1"
+  if [[ -n "$DEFAULT_API_HEALTHCHECK_URL" ]]; then
+    wait_for_http "$DEFAULT_API_HEALTHCHECK_URL" "$timeout_sec"
+  else
+    wait_for_service_healthy api "$timeout_sec"
+  fi
+}
+
 compose_up_scope() {
   local scope="$1"
   mapfile -t services < <(service_list_for_scope "$scope")
@@ -163,9 +210,24 @@ compose_pull_scope_images() {
   done < <(service_list_for_scope "$scope")
 
   if [[ "${#pulled[@]}" -gt 0 ]]; then
-    info "Pulling image-based services: ${pulled[*]}"
-    docker compose pull "${pulled[@]}"
+    pull_services_best_effort "${pulled[@]}"
   fi
+}
+
+pull_services_best_effort() {
+  local services=("$@")
+  local service
+
+  if [[ "${#services[@]}" -eq 0 ]]; then
+    return 0
+  fi
+
+  info "Pulling images (best effort): ${services[*]}"
+  for service in "${services[@]}"; do
+    if ! docker compose pull "$service"; then
+      warn "Image pull failed for service '${service}'; continuing with local image/build"
+    fi
+  done
 }
 
 run_restart() {
@@ -210,14 +272,12 @@ run_zero_downtime_update() {
   fi
 
   info "Refreshing update artifacts (pull + build)"
-  if ! docker compose pull api web nginx; then
-    warn "docker compose pull failed for one or more app services; continuing with local build artifacts"
-  fi
+  pull_services_best_effort api web nginx
   docker compose build api web nginx
 
   info "Rolling update: api"
   docker compose up -d --no-deps api
-  wait_for_http "$DEFAULT_API_HEALTHCHECK_URL" "$DEFAULT_HEALTHCHECK_TIMEOUT_SEC"
+  wait_for_api_ready "$DEFAULT_HEALTHCHECK_TIMEOUT_SEC"
 
   info "Rolling update: web"
   docker compose up -d --no-deps web
