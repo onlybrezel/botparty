@@ -118,7 +118,8 @@ wait_for_http() {
     fi
 
     if (( "$(date +%s)" - started_at >= timeout_sec )); then
-      die "Health check timed out: ${url}"
+      warn "Health check timed out: ${url}"
+      return 1
     fi
 
     sleep 2
@@ -139,7 +140,8 @@ wait_for_service_healthy() {
     container_id="$(docker compose ps -q "$service" 2>/dev/null || true)"
     if [[ -z "$container_id" ]]; then
       if (( "$(date +%s)" - started_at >= timeout_sec )); then
-        die "Timed out waiting for container id: ${service}"
+        warn "Timed out waiting for container id: ${service}"
+        return 1
       fi
       sleep 1
       continue
@@ -151,12 +153,14 @@ wait_for_service_healthy() {
         return 0
         ;;
       unhealthy|exited|dead)
-        die "Service '${service}' reported unhealthy state: ${status}"
+        warn "Service '${service}' reported unhealthy state: ${status}"
+        return 1
         ;;
     esac
 
     if (( "$(date +%s)" - started_at >= timeout_sec )); then
-      die "Timed out waiting for service '${service}' to become healthy (last state: ${status})"
+      warn "Timed out waiting for service '${service}' to become healthy (last state: ${status})"
+      return 1
     fi
 
     sleep 2
@@ -170,6 +174,50 @@ wait_for_api_ready() {
   else
     wait_for_service_healthy api "$timeout_sec"
   fi
+}
+
+get_running_service_image_id() {
+  local service="$1"
+  local container_id
+  container_id="$(docker compose ps -q "$service" 2>/dev/null || true)"
+  if [[ -z "$container_id" ]]; then
+    return 0
+  fi
+
+  docker inspect --format '{{.Image}}' "$container_id" 2>/dev/null || true
+}
+
+get_compose_service_image_name() {
+  local service="$1"
+  docker compose config --images "$service" 2>/dev/null | head -n1 || true
+}
+
+rollback_api_update() {
+  local previous_image_id="$1"
+  local compose_image_name="$2"
+  local timeout_sec="$3"
+
+  if [[ -z "$previous_image_id" || -z "$compose_image_name" ]]; then
+    warn "Rollback snapshot is incomplete (image id or compose image name missing)"
+    return 1
+  fi
+
+  if ! docker image inspect "$previous_image_id" >/dev/null 2>&1; then
+    warn "Rollback image no longer exists locally: ${previous_image_id}"
+    return 1
+  fi
+
+  warn "API health gate failed; rolling back to previous image"
+  docker image tag "$previous_image_id" "$compose_image_name"
+  docker compose up -d --no-deps api
+
+  if ! wait_for_service_healthy api "$timeout_sec"; then
+    warn "Rollback API container failed health gate"
+    return 1
+  fi
+
+  info "Rollback completed: api restored to previous image"
+  return 0
 }
 
 compose_up_scope() {
@@ -262,9 +310,8 @@ run_restart() {
 
 run_zero_downtime_update() {
   local pull_git="$1"
-
-  publish_shutdown_notice update "$DEFAULT_RETRY_AFTER_MS" "$(message_for_reason update)" app
-  wait_for_drain "$DEFAULT_DRAIN_SEC"
+  local previous_api_image_id
+  local compose_api_image_name
 
   if [[ "$pull_git" == "yes" ]]; then
     info "Pulling latest changes"
@@ -275,9 +322,26 @@ run_zero_downtime_update() {
   pull_services_best_effort api web nginx
   docker compose build api web nginx
 
+  info "Build/preflight successful; announcing update window"
+  publish_shutdown_notice update "$DEFAULT_RETRY_AFTER_MS" "$(message_for_reason update)" app
+  wait_for_drain "$DEFAULT_DRAIN_SEC"
+
+  previous_api_image_id="$(get_running_service_image_id api)"
+  compose_api_image_name="$(get_compose_service_image_name api)"
+  if [[ -n "$previous_api_image_id" && -n "$compose_api_image_name" ]]; then
+    info "Captured API rollback snapshot"
+  else
+    warn "Could not fully capture API rollback snapshot; rollback may be unavailable"
+  fi
+
   info "Rolling update: api"
   docker compose up -d --no-deps api
-  wait_for_api_ready "$DEFAULT_HEALTHCHECK_TIMEOUT_SEC"
+  if ! wait_for_api_ready "$DEFAULT_HEALTHCHECK_TIMEOUT_SEC"; then
+    if rollback_api_update "$previous_api_image_id" "$compose_api_image_name" "$DEFAULT_HEALTHCHECK_TIMEOUT_SEC"; then
+      die "API update failed health gate; rollback succeeded. Rollout aborted before web/nginx update."
+    fi
+    die "API update failed health gate and rollback failed. Manual intervention required."
+  fi
 
   info "Rolling update: web"
   docker compose up -d --no-deps web

@@ -107,11 +107,12 @@ Use sequential service rollout to avoid full platform interruption.
    APP_VERSION=<new-tag> ./ops.sh update-zero
    ```
 2. What it does automatically:
-   - Announces update over websocket and waits for drain
    - Runs `git pull --ff-only`
    - Runs `docker compose pull api web nginx` and `docker compose build api web nginx`
+   - Announces update over websocket and waits for drain
    - Rolls services in order: api -> web -> nginx
    - Waits for API health gate via Docker container health before continuing
+   - If API health fails, automatically rolls back API to the previously running image and aborts before web/nginx update
 
 Optional override:
 
