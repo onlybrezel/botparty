@@ -16,6 +16,8 @@ DEFAULT_RETRY_AFTER_MS="${WS_SHUTDOWN_RETRY_AFTER_MS:-12000}"
 DEFAULT_DRAIN_SEC="${OPS_DRAIN_SEC:-6}"
 MAINTENANCE_RETRY_AFTER_MS="${OPS_MAINTENANCE_RETRY_AFTER_MS:-30000}"
 MAINTENANCE_DRAIN_SEC="${OPS_MAINTENANCE_DRAIN_SEC:-8}"
+DEFAULT_API_HEALTHCHECK_URL="${OPS_API_HEALTHCHECK_URL:-http://127.0.0.1:4000/api/v1/health/live}"
+DEFAULT_HEALTHCHECK_TIMEOUT_SEC="${OPS_HEALTHCHECK_TIMEOUT_SEC:-90}"
 
 info() { printf '  -> %s\n' "$*"; }
 warn() { printf '  ! %s\n' "$*"; }
@@ -103,6 +105,26 @@ wait_for_drain() {
   sleep "$seconds"
 }
 
+wait_for_http() {
+  local url="$1"
+  local timeout_sec="$2"
+  local started_at
+  started_at="$(date +%s)"
+
+  info "Waiting for health check: ${url} (timeout ${timeout_sec}s)"
+  while true; do
+    if curl -fsS "$url" >/dev/null 2>&1; then
+      return 0
+    fi
+
+    if (( "$(date +%s)" - started_at >= timeout_sec )); then
+      die "Health check timed out: ${url}"
+    fi
+
+    sleep 2
+  done
+}
+
 compose_up_scope() {
   local scope="$1"
   mapfile -t services < <(service_list_for_scope "$scope")
@@ -176,6 +198,34 @@ run_restart() {
   fi
 }
 
+run_zero_downtime_update() {
+  local pull_git="$1"
+
+  publish_shutdown_notice update "$DEFAULT_RETRY_AFTER_MS" "$(message_for_reason update)" app
+  wait_for_drain "$DEFAULT_DRAIN_SEC"
+
+  if [[ "$pull_git" == "yes" ]]; then
+    info "Pulling latest changes"
+    git pull --ff-only
+  fi
+
+  info "Refreshing update artifacts (pull + build)"
+  if ! docker compose pull api web nginx; then
+    warn "docker compose pull failed for one or more app services; continuing with local build artifacts"
+  fi
+  docker compose build api web nginx
+
+  info "Rolling update: api"
+  docker compose up -d --no-deps api
+  wait_for_http "$DEFAULT_API_HEALTHCHECK_URL" "$DEFAULT_HEALTHCHECK_TIMEOUT_SEC"
+
+  info "Rolling update: web"
+  docker compose up -d --no-deps web
+
+  info "Rolling update: nginx"
+  docker compose up -d --no-deps nginx
+}
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -186,6 +236,7 @@ Usage:
   ./ops.sh restart
   ./ops.sh restart-full
   ./ops.sh update
+  ./ops.sh update-zero
   ./ops.sh update-full
   ./ops.sh maintenance-on
   ./ops.sh maintenance-on-full
@@ -201,7 +252,8 @@ Commands:
   full-stop          Stop the full stack.
   restart            Announce restart, wait briefly, recreate app services without git pull/build.
   restart-full       Same as restart, but include livekit/cadvisor/postgres/redis.
-  update             Announce update, git pull --ff-only, rebuild app services, then start them.
+  update             Near zero-downtime app rollout: pull/build, then api -> web -> nginx with API health gate.
+  update-zero        Alias for update.
   update-full        Update code, pull image services, then recreate the full stack.
   maintenance-on     Announce maintenance and stop app services, leaving data + livekit running.
   maintenance-on-full
@@ -235,8 +287,8 @@ case "$cmd" in
   restart-full)
     run_restart full restart "$DEFAULT_RETRY_AFTER_MS" "$DEFAULT_DRAIN_SEC" no-build no
     ;;
-  update)
-    run_restart app update "$DEFAULT_RETRY_AFTER_MS" "$DEFAULT_DRAIN_SEC" build yes
+  update|update-zero)
+    run_zero_downtime_update yes
     ;;
   update-full)
     run_restart full update "$DEFAULT_RETRY_AFTER_MS" "$DEFAULT_DRAIN_SEC" build yes

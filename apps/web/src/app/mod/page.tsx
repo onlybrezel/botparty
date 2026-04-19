@@ -152,7 +152,7 @@ const validateRobotDraftSchedule = (draft: RobotDraft) => {
 
 
 function createRobotDraft(
-  robot: NonNullable<Awaited<ReturnType<typeof api.getModerationOverview>>['robots']>[number],
+  robot: NonNullable<Awaited<ReturnType<typeof api.moderation.getModerationOverview>>['robots']>[number],
 ): RobotDraft {
   const access = robot.metadata?.access;
   const stream = robot.metadata?.stream;
@@ -190,12 +190,12 @@ export default function ModDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
   const [users, setUsers] = useState<StaffUser[]>([]);
-  const [overview, setOverview] = useState<Awaited<ReturnType<typeof api.getModerationOverview>> | null>(null);
-  const [runtimeOverview, setRuntimeOverview] = useState<Awaited<ReturnType<typeof api.getModRuntimeOverview>> | null>(null);
+  const [overview, setOverview] = useState<Awaited<ReturnType<typeof api.moderation.getModerationOverview>> | null>(null);
+  const [runtimeOverview, setRuntimeOverview] = useState<Awaited<ReturnType<typeof api.moderation.getModRuntimeOverview>> | null>(null);
   const [selectedRuntimeRobotId, setSelectedRuntimeRobotId] = useState<string>('');
   const [selectedRobotId, setSelectedRobotId] = useState<string>('ALL');
   const [activeView, setActiveView] = useState<ModView>('moderation');
-  const [profanity, setProfanity] = useState<Awaited<ReturnType<typeof api.getGlobalProfanityOverview>> | null>(null);
+  const [profanity, setProfanity] = useState<Awaited<ReturnType<typeof api.moderation.getGlobalProfanityOverview>> | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [userDraft, setUserDraft] = useState<UserDraft | null>(null);
@@ -203,7 +203,7 @@ export default function ModDashboardPage() {
   const [robotDraft, setRobotDraft] = useState<RobotDraft | null>(null);
   const [runtimeActionLoading, setRuntimeActionLoading] = useState<string | null>(null);
   const [recordingActionLoading, setRecordingActionLoading] = useState<string | null>(null);
-  const [recordingFiles, setRecordingFiles] = useState<Awaited<ReturnType<typeof api.listAdminRecordings>>>([]);
+  const [recordingFiles, setRecordingFiles] = useState<Awaited<ReturnType<typeof api.moderation.listAdminRecordings>>>([]);
   const [selectedRecordingFile, setSelectedRecordingFile] = useState<string | null>(null);
   const [recordingRobotFilter, setRecordingRobotFilter] = useState<string>('ALL');
   const [recordingCameraFilter, setRecordingCameraFilter] = useState<string>('ALL');
@@ -224,7 +224,7 @@ export default function ModDashboardPage() {
     const boot = async () => {
       try {
         api.setToken(accessToken);
-        const me = await api.getMe();
+        const me = await api.users.getMe();
         const role = String(me.role);
         const isStaff = ['ADMIN', 'MOD', 'MODERATOR', 'CREATOR'].includes(role);
         if (!isStaff) {
@@ -235,17 +235,17 @@ export default function ModDashboardPage() {
 
         setAllowed(true);
         const [staffUsers, modOverview, runtime, globalProfanity] = await Promise.all([
-          api.getAdminUsers({ limit: 120 }),
-          api.getModerationOverview(),
-          api.getModRuntimeOverview(),
-          api.getGlobalProfanityOverview(),
+          api.users.getAdminUsers({ limit: 120 }),
+          api.moderation.getModerationOverview(),
+          api.moderation.getModRuntimeOverview(),
+          api.moderation.getGlobalProfanityOverview(),
         ]);
         setUsers(staffUsers as StaffUser[]);
         setOverview(modOverview);
         setRuntimeOverview(runtime);
         setProfanity(globalProfanity);
         if (me.role === 'ADMIN') {
-          const recordings = await api.listAdminRecordings();
+          const recordings = await api.moderation.listAdminRecordings();
           setRecordingFiles(recordings);
         }
       } catch (err) {
@@ -283,7 +283,7 @@ export default function ModDashboardPage() {
     setRuntimeActionLoading(selectedRuntimeRobot.id);
     try {
       api.setToken(accessToken);
-      const result = await api.enqueueStaffRobotAction(selectedRuntimeRobot.id, { type: 'update_client' });
+      const result = await api.moderation.enqueueStaffRobotAction(selectedRuntimeRobot.id, { type: 'update_client' });
       if (result.alreadyQueued) {
         pushToast('Client update is already queued for this robot.', 'info', 2600);
         return;
@@ -306,7 +306,7 @@ export default function ModDashboardPage() {
     setRecordingActionLoading(robotId);
     try {
       api.setToken(accessToken);
-      await api.stopAdminRobotRecording(robotId);
+      await api.moderation.stopAdminRobotRecording(robotId);
       await refresh({ silent: true });
       pushToast('Recording stopped.', 'success', 1600);
     } catch (err) {
@@ -322,7 +322,7 @@ export default function ModDashboardPage() {
     setRecordingActionLoading('__all__');
     try {
       api.setToken(accessToken);
-      await Promise.all(activeRecordings.map((robot) => api.stopAdminRobotRecording(robot.id)));
+      await Promise.all(activeRecordings.map((robot) => api.moderation.stopAdminRobotRecording(robot.id)));
       await refresh({ silent: true });
       pushToast('All active recordings stopped.', 'success', 2200);
     } catch (err) {
@@ -466,17 +466,17 @@ export default function ModDashboardPage() {
     try {
       api.setToken(accessToken);
       const [staffUsers, modOverview, runtime, globalProfanity] = await Promise.all([
-        api.getAdminUsers({ q: query || undefined, limit: 120 }),
-        api.getModerationOverview(),
-        api.getModRuntimeOverview(),
-        api.getGlobalProfanityOverview(),
+        api.users.getAdminUsers({ q: query || undefined, limit: 120 }),
+        api.moderation.getModerationOverview(),
+        api.moderation.getModRuntimeOverview(),
+        api.moderation.getGlobalProfanityOverview(),
       ]);
       setUsers(staffUsers as StaffUser[]);
       setOverview(modOverview);
       setRuntimeOverview(runtime);
       setProfanity(globalProfanity);
       if (viewerIsAdmin) {
-        const recordings = await api.listAdminRecordings();
+        const recordings = await api.moderation.listAdminRecordings();
         setRecordingFiles(recordings);
       }
       if (!options?.silent) {
@@ -597,7 +597,7 @@ export default function ModDashboardPage() {
     if (!accessToken) return;
     try {
       api.setToken(accessToken);
-      await api.moderateRobotUser(robotId, {
+      await api.moderation.moderateRobotUser(robotId, {
         targetUserId: userId,
         action: 'UNBAN',
         reason: 'Removed by staff dashboard',
@@ -615,7 +615,7 @@ export default function ModDashboardPage() {
 
     try {
       api.setToken(accessToken);
-      await api.deleteRobotAsStaff(robotId);
+      await api.robots.deleteRobotAsStaff(robotId);
       await refresh();
       if (editingRobotId === robotId) {
         setEditingRobotId(null);
@@ -645,7 +645,7 @@ export default function ModDashboardPage() {
     if (!editingUserId || !userDraft || !accessToken) return;
     try {
       api.setToken(accessToken);
-      await api.updateAdminUser(editingUserId, {
+      await api.users.updateAdminUser(editingUserId, {
         username: userDraft.username.trim(),
         email: userDraft.email.trim(),
         displayName: userDraft.displayName.trim() || null,
@@ -677,7 +677,7 @@ export default function ModDashboardPage() {
 
     try {
       api.setToken(accessToken);
-      await api.deleteAdminUser(editingUserId);
+      await api.users.deleteAdminUser(editingUserId);
       const deletedOwnAccount = editingUserId === authUserId;
       setEditingUserId(null);
       setUserDraft(null);
@@ -693,7 +693,7 @@ export default function ModDashboardPage() {
     }
   };
 
-  const startRobotEdit = (robot: NonNullable<Awaited<ReturnType<typeof api.getModerationOverview>>['robots']>[number]) => {
+  const startRobotEdit = (robot: NonNullable<Awaited<ReturnType<typeof api.moderation.getModerationOverview>>['robots']>[number]) => {
     setEditingRobotId(robot.id);
     setRobotDraft(createRobotDraft(robot));
   };
@@ -716,7 +716,7 @@ export default function ModDashboardPage() {
       const maxControllers = Math.max(1, Math.round(Number(robotDraft.maxControllers) || 1));
       const scheduleStart = robotDraft.scheduleEnabled ? toIsoDateTime(robotDraft.scheduleStart) : null;
       const scheduleEnd = robotDraft.scheduleEnabled ? toIsoDateTime(robotDraft.scheduleEnd) : null;
-      await api.updateRobotAsStaff(editingRobotId, {
+      await api.robots.updateRobotAsStaff(editingRobotId, {
         name: robotDraft.name.trim(),
         slug: robotDraft.slug.trim() || undefined,
         description: robotDraft.description.trim() || undefined,

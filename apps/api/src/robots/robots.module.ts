@@ -1,16 +1,25 @@
 import { Module, forwardRef } from '@nestjs/common';
+import { BullModule } from '@nestjs/bullmq';
+import { JOBS_QUEUE_WEBHOOK } from '../jobs/jobs.constants';
 import { RobotsService } from './robots.service';
 import { RobotTelemetryService } from './robot-telemetry.service';
 import { RobotThumbnailService } from './robot-thumbnail.service';
 import { RobotAccessService } from './robot-access.service';
 import { RobotWebhookService } from './robot-webhook.service';
 import { ChatPersistenceService } from './chat-persistence.service';
+import { RobotDeviceService } from './robot-device.service';
+import { RobotSlugService } from './robot-slug.service';
+import { RobotInviteService } from './robot-invite.service';
 import { RobotsController } from './robots.controller';
 import { LivekitModule } from '../livekit/livekit.module';
 import { JwtModule } from '@nestjs/jwt';
 
 @Module({
-  imports: [forwardRef(() => LivekitModule), JwtModule],
+  imports: [
+    forwardRef(() => LivekitModule),
+    JwtModule,
+    BullModule.registerQueue({ name: JOBS_QUEUE_WEBHOOK }),
+  ],
   providers: [
     RobotsService,
     RobotTelemetryService,
@@ -18,6 +27,9 @@ import { JwtModule } from '@nestjs/jwt';
     RobotAccessService,
     RobotWebhookService,
     ChatPersistenceService,
+    RobotDeviceService,
+    RobotSlugService,
+    RobotInviteService,
   ],
   controllers: [RobotsController],
   exports: [
@@ -27,6 +39,9 @@ import { JwtModule } from '@nestjs/jwt';
     RobotAccessService,
     RobotWebhookService,
     ChatPersistenceService,
+    RobotDeviceService,
+    RobotSlugService,
+    RobotInviteService,
   ],
 })
 export class RobotsModule {}

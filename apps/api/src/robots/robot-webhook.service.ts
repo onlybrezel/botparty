@@ -1,6 +1,10 @@
 import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { ConfigService } from '@nestjs/config';
 import { createHmac, randomBytes, randomUUID } from 'crypto';
+import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
+import { JOBS_QUEUE_WEBHOOK, type WebhookJobData } from '../jobs/jobs.constants';
 
 export const ROBOT_WEBHOOK_EVENTS = [
   'robot.online',
@@ -18,10 +22,14 @@ export class RobotWebhookService {
   private readonly logger = new Logger(RobotWebhookService.name);
   private readonly webhookSecretKey: string;
 
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
+    @InjectQueue(JOBS_QUEUE_WEBHOOK) private readonly webhookQueue: Queue<WebhookJobData>,
+  ) {
     this.webhookSecretKey =
-      process.env.WEBHOOK_SECRET_ENCRYPTION_KEY?.trim() ||
-      process.env.JWT_SECRET?.trim() ||
+      this.config.get<string>('WEBHOOK_SECRET_ENCRYPTION_KEY')?.trim() ||
+      this.config.get<string>('JWT_SECRET')?.trim() ||
       'botparty-webhook-secret-fallback';
   }
 
@@ -136,67 +144,39 @@ export class RobotWebhookService {
 
   private dispatch(robotId: string, event: RobotWebhookEvent, payload: WebhookPayload) {
     queueMicrotask(() => {
-      void this.deliver(robotId, event, payload);
+      void this.enqueueWebhookJobs(robotId, event, payload);
     });
   }
 
-  private async deliver(robotId: string, event: RobotWebhookEvent, payload: WebhookPayload) {
+  private async enqueueWebhookJobs(robotId: string, event: RobotWebhookEvent, payload: WebhookPayload) {
     const hooks = await this.prisma.robotWebhook.findMany({
       where: {
         robotId,
         isActive: true,
         events: { has: event },
       },
+      select: { id: true },
     });
+
     if (hooks.length === 0) {
       return;
     }
 
-    await Promise.allSettled(
-      hooks.map(async (hook) => {
-        const occurredAt = new Date().toISOString();
-        const deliveryId = randomUUID();
-        const body = JSON.stringify({
-          id: deliveryId,
+    await this.webhookQueue.addBulk(
+      hooks.map((hook) => ({
+        name: 'deliver',
+        data: {
+          hookId: hook.id,
           event,
-          occurredAt,
-          ...payload,
-        });
-        const signingSecret = this.decryptWebhookSecret(hook.id, hook.secret);
-        const signature = createHmac('sha256', signingSecret).update(body).digest('hex');
-
-        try {
-          const response = await fetch(hook.url, {
-            method: 'POST',
-            headers: {
-              'content-type': 'application/json',
-              'user-agent': 'BotParty-Webhooks/1.0',
-              'x-botparty-event': event,
-              'x-botparty-delivery-id': deliveryId,
-              'x-botparty-signature': `sha256=${signature}`,
-            },
-            body,
-            signal: AbortSignal.timeout(5000),
-          });
-
-          await this.prisma.robotWebhook.update({
-            where: { id: hook.id },
-            data: {
-              lastTriggeredAt: new Date(),
-              lastStatusCode: response.status,
-            },
-          });
-        } catch (error) {
-          this.logger.warn(`Webhook delivery failed for ${hook.id}: ${(error as Error).message}`);
-          await this.prisma.robotWebhook.update({
-            where: { id: hook.id },
-            data: {
-              lastTriggeredAt: new Date(),
-              lastStatusCode: null,
-            },
-          });
-        }
-      }),
+          payload,
+        },
+        opts: {
+          attempts: 4,
+          backoff: { type: 'exponential', delay: 500 },
+          removeOnComplete: 1000,
+          removeOnFail: 1000,
+        },
+      })),
     );
   }
 

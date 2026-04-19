@@ -17,7 +17,7 @@ export default function ForgotPasswordPage() {
     setMessage(null);
 
     try {
-      const result = await api.forgotPassword(email.trim());
+      const result = await api.auth.forgotPassword(email.trim());
       setMessage(result.message);
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : 'Request failed');

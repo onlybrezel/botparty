@@ -34,7 +34,7 @@ export default function PrivateRobotClient({
 
     let active = true;
     api.setToken(accessToken);
-    api.getPrivateRobot(username, slug)
+    api.robots.getPrivateRobot(username, slug)
       .then((result) => {
         if (!active) return;
         setRobot(result);

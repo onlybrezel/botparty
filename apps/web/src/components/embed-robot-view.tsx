@@ -29,7 +29,7 @@ export function EmbedRobotView({ robot }: Props) {
     setVideoState('loading');
     try {
       const publicUrl = process.env.NEXT_PUBLIC_LIVEKIT_URL;
-      const { token, livekitUrl } = await publicApiRef.current.getPublicViewerToken(robot.id);
+      const { token, livekitUrl } = await publicApiRef.current.robots.getPublicViewerToken(robot.id);
       setLivekitCreds({ token, url: publicUrl ?? livekitUrl });
       setVideoState('ready');
       refreshAttemptsRef.current = 0;

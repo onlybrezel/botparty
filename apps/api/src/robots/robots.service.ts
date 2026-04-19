@@ -11,7 +11,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { createRobotSchema, updateRobotSchema, LIMITS } from '@botparty/shared';
-import { createHash, randomBytes } from 'crypto';
+import { randomBytes } from 'crypto';
 import { hash, verify } from 'argon2';
 import { access, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
@@ -24,7 +24,11 @@ import { RobotThumbnailService } from './robot-thumbnail.service';
 import { RobotAccessService } from './robot-access.service';
 import { RobotWebhookService } from './robot-webhook.service';
 import { SLUG_PROFANITY_TERMS } from './profanity-terms';
+import { RobotDeviceService } from './robot-device.service';
+import { RobotSlugService } from './robot-slug.service';
+import { RobotInviteService } from './robot-invite.service';
 import { ChatPersistenceService } from './chat-persistence.service';
+import { mergeRobotMetadata, normalizeRobotMetadata } from './robot-metadata.schema';
 
 export type GuestAccess = 'ALL' | 'AUTHENTICATED' | 'DISABLED';
 
@@ -50,12 +54,6 @@ type RobotStreamCameraDescriptor = {
 };
 
 type PublicRobotStatus = 'ONLINE' | 'OFFLINE' | 'BUSY' | 'MAINTENANCE';
-
-type RobotAuthMetadata = {
-  auth?: {
-    boundDeviceHash?: string;
-  };
-};
 
 export interface PublicRobotOverview {
   totals: {
@@ -161,6 +159,9 @@ export class RobotsService implements OnModuleDestroy {
     private readonly webhooks: RobotWebhookService,
     private readonly chatPersistence: ChatPersistenceService,
     private readonly configService: ConfigService,
+    private readonly deviceService: RobotDeviceService,
+    private readonly slugService: RobotSlugService,
+    private readonly inviteService: RobotInviteService,
   ) {}
 
   onModuleDestroy() {
@@ -171,19 +172,19 @@ export class RobotsService implements OnModuleDestroy {
     const data = createRobotSchema.parse(input);
     this.assertRobotTextAllowed(data);
     const metadata = this.withStreamKeyIssuedAt(
-      this.withClaimTokenIssuedAt(this.mergeMetadata(null, data.acl, data.stream)),
+      this.deviceService.withClaimTokenIssuedAt(this.mergeMetadata(null, data.acl, data.stream)),
     );
     const accessPassword = data.accessPassword;
     const baseData = this.stripRobotWriteFields(data);
 
-    let slug = this.generateSlug(data.name);
+    let slug = this.slugService.generateSlug(data.name);
     if (data.slug) {
-      const nextSlug = this.validateAndNormalizeSlugInput(data.slug);
+      const nextSlug = this.slugService.validateAndNormalizeSlugInput(data.slug);
       const conflict = await this.prisma.robot.findUnique({ where: { slug: nextSlug }, select: { id: true } });
       if (conflict) {
         throw new ConflictException('This slug is already taken');
       }
-      await this.reclaimSlugAlias(nextSlug);
+      await this.slugService.reclaimSlugAlias(nextSlug);
       slug = nextSlug;
     }
     const streamKey = randomBytes(32).toString('hex');
@@ -192,7 +193,7 @@ export class RobotsService implements OnModuleDestroy {
       data.accessMode === 'PASSWORD' && accessPassword
         ? await hash(accessPassword, { type: 2 })
         : null;
-    const inviteCode = await this.resolveInviteCode({
+    const inviteCode = await this.inviteService.resolveInviteCode({
       currentAccessMode: null,
       currentInviteCode: null,
       nextAccessMode: data.accessMode,
@@ -288,14 +289,14 @@ export class RobotsService implements OnModuleDestroy {
   }
 
   async findBySlug(slug: string) {
-    const robot = await this.findRobotBySlugAny(slug);
+    const robot = await this.slugService.findRobotBySlugAny(slug);
     if (!robot) throw new NotFoundException('Robot not found');
     if (robot.visibility === 'PRIVATE') throw new NotFoundException('Robot not found');
     return this.toPublicRobot(robot);
   }
 
   async findByUsernameAndSlug(username: string, slug: string) {
-    const robot = await this.findRobotBySlugAny(slug);
+    const robot = await this.slugService.findRobotBySlugAny(slug);
     if (!robot) throw new NotFoundException('Robot not found');
     if (robot.visibility === 'PRIVATE') throw new NotFoundException('Robot not found');
     if (robot.owner.username.toLowerCase() !== username.trim().toLowerCase()) {
@@ -327,7 +328,7 @@ export class RobotsService implements OnModuleDestroy {
         },
       },
     });
-    const normalizedRobots = await Promise.all(robots.map((robot) => this.ensureInviteCodeForManagedRobot(robot)));
+    const normalizedRobots = await Promise.all(robots.map((robot) => this.inviteService.ensureInviteCodeForManagedRobot(robot)));
     return normalizedRobots.map((robot) => this.sanitizeManagedRobot(robot));
   }
 
@@ -344,7 +345,7 @@ export class RobotsService implements OnModuleDestroy {
     const baseData = this.stripRobotWriteFields(data);
     this.access.invalidateCache(id);
 
-    const slugUpdate = await this.buildSlugUpdate(id, robot.slug, (robot as { slugAliases?: string[] }).slugAliases, data.slug);
+    const slugUpdate = await this.slugService.buildSlugUpdate(id, robot.slug, (robot as { slugAliases?: string[] }).slugAliases, data.slug);
 
     const nextAccessMode = data.accessMode ?? robot.accessMode;
     const nextAccessPassword =
@@ -353,7 +354,7 @@ export class RobotsService implements OnModuleDestroy {
           ? await hash(accessPassword, { type: 2 })
           : robot.accessPassword
         : null;
-    const nextInviteCode = await this.resolveInviteCode({
+    const nextInviteCode = await this.inviteService.resolveInviteCode({
       currentAccessMode: robot.accessMode,
       currentInviteCode: robot.inviteCode,
       nextAccessMode,
@@ -402,13 +403,13 @@ export class RobotsService implements OnModuleDestroy {
           ? await hash(accessPassword, { type: 2 })
           : currentRobot?.accessPassword ?? null
         : null;
-    const nextInviteCode = await this.resolveInviteCode({
+    const nextInviteCode = await this.inviteService.resolveInviteCode({
       currentAccessMode: currentRobot?.accessMode ?? null,
       currentInviteCode: currentRobot?.inviteCode ?? null,
       nextAccessMode,
     });
 
-    const slugUpdate = await this.buildSlugUpdate(
+    const slugUpdate = await this.slugService.buildSlugUpdate(
       id,
       existing.slug,
       (existing as { slugAliases?: string[] }).slugAliases,
@@ -557,7 +558,7 @@ export class RobotsService implements OnModuleDestroy {
       where: { id },
       data: {
         claimToken,
-        metadata: this.withClaimTokenIssuedAt(this.clearBoundDeviceMetadata(robot.metadata)) as Prisma.InputJsonValue,
+        metadata: this.deviceService.withClaimTokenIssuedAt(this.deviceService.clearBoundDeviceMetadata(robot.metadata)) as Prisma.InputJsonValue,
       },
       select: { id: true, claimToken: true },
     });
@@ -573,7 +574,7 @@ export class RobotsService implements OnModuleDestroy {
       throw new BadRequestException('Invite links are only used in link-only mode');
     }
 
-    const inviteCode = await this.generateUniqueInviteCode();
+    const inviteCode = await this.inviteService.generateUniqueInviteCode();
     return this.prisma.robot.update({
       where: { id },
       data: { inviteCode },
@@ -591,7 +592,7 @@ export class RobotsService implements OnModuleDestroy {
       return { id: robot.id, inviteCode: robot.inviteCode };
     }
 
-    const inviteCode = await this.generateUniqueInviteCode();
+    const inviteCode = await this.inviteService.generateUniqueInviteCode();
     const updated = await this.prisma.robot.update({
       where: { id },
       data: { inviteCode },
@@ -612,7 +613,7 @@ export class RobotsService implements OnModuleDestroy {
     return this.thumbnail.read(id);
   }
   async findPrivateBySlugForUser(slug: string, requesterId: string) {
-    const robot = await this.findRobotBySlugAny(slug);
+    const robot = await this.slugService.findRobotBySlugAny(slug);
 
     if (!robot) {
       throw new NotFoundException('Robot not found');
@@ -624,7 +625,7 @@ export class RobotsService implements OnModuleDestroy {
   }
 
   async findPrivateByUsernameAndSlugForUser(username: string, slug: string, requesterId: string) {
-    const robot = await this.findRobotBySlugAny(slug);
+    const robot = await this.slugService.findRobotBySlugAny(slug);
     if (!robot) throw new NotFoundException('Robot not found');
     if (robot.owner.username.toLowerCase() !== username.trim().toLowerCase()) {
       throw new NotFoundException('Robot not found');
@@ -661,6 +662,7 @@ export class RobotsService implements OnModuleDestroy {
     });
     if (previous?.status !== updated.status) {
       this.webhooks.emitRobotStatus(updated);
+      await this.redis.del(this.publicOverviewCacheKey());
     }
     return updated;
   }
@@ -680,56 +682,11 @@ export class RobotsService implements OnModuleDestroy {
   }
 
   async validateOrBindRobotDevice(robotId: string, deviceKey?: string | null) {
-    const normalizedDeviceKey = deviceKey?.trim() ?? '';
-    if (normalizedDeviceKey.length < 32) {
-      throw new ForbiddenException('Valid robot device key required');
-    }
-
-    const robot = await this.prisma.robot.findUnique({
-      where: { id: robotId },
-      select: { id: true, metadata: true },
-    });
-    if (!robot) {
-      throw new NotFoundException('Robot not found');
-    }
-
-    const deviceHash = this.hashDeviceKey(normalizedDeviceKey);
-    const currentHash = this.readBoundDeviceHash(robot.metadata);
-    if (currentHash && currentHash !== deviceHash) {
-      throw new ForbiddenException('Claim token is bound to a different robot device');
-    }
-
-    if (!currentHash) {
-      await this.prisma.robot.update({
-        where: { id: robotId },
-        data: {
-          metadata: this.setBoundDeviceMetadata(robot.metadata, deviceHash) as Prisma.InputJsonValue,
-        },
-      });
-    }
-
-    return { robotId, deviceHash };
+    return this.deviceService.validateOrBindRobotDevice(robotId, deviceKey);
   }
 
   async findByClaimToken(claimToken: string) {
-    const robot = await this.prisma.robot.findUnique({ where: { claimToken } });
-    if (!robot) {
-      return null;
-    }
-
-    const maxAgeDays = Number(this.configService.get<string>('ROBOT_CLAIM_TOKEN_MAX_AGE_DAYS', '90'));
-    if (!Number.isFinite(maxAgeDays) || maxAgeDays <= 0) {
-      return robot;
-    }
-
-    const tokenIssuedAt = this.readClaimTokenIssuedAt(robot.metadata) ?? robot.createdAt;
-    const maxAgeMs = maxAgeDays * 24 * 60 * 60 * 1000;
-    if (Date.now() - tokenIssuedAt.getTime() > maxAgeMs) {
-      this.logger.warn(`Rejected expired claim token for robot ${robot.id}`);
-      return null;
-    }
-
-    return robot;
+    return this.deviceService.findByClaimToken(claimToken);
   }
 
   async enqueueAction(robotId: string, ownerId: string, payload: RobotActionPayload) {
@@ -950,6 +907,16 @@ export class RobotsService implements OnModuleDestroy {
   }
 
   async getPublicOverview(): Promise<PublicRobotOverview> {
+    const cacheKey = this.publicOverviewCacheKey();
+    const cached = await this.redis.get(cacheKey);
+    if (cached) {
+      try {
+        return JSON.parse(cached) as PublicRobotOverview;
+      } catch {
+        await this.redis.del(cacheKey);
+      }
+    }
+
     const publicRobots = await this.prisma.robot.findMany({
       where: { visibility: 'PUBLIC' },
       select: {
@@ -997,7 +964,7 @@ export class RobotsService implements OnModuleDestroy {
       ? await this.prisma.queueEntry.count({ where: { robotId: { in: liveRobotIds } } })
       : 0;
 
-    return {
+    const overview: PublicRobotOverview = {
       totals: {
         publicRobots: normalizedRobots.length,
         liveRobots: liveRobots.length,
@@ -1035,6 +1002,9 @@ export class RobotsService implements OnModuleDestroy {
         .slice(0, 12)
         .map(([tag, count]) => ({ tag, count })),
     };
+
+      await this.redis.set(cacheKey, JSON.stringify(overview), 'EX', 30);
+      return overview;
   }
 
   async issueRoomAccessGrant(input: {
@@ -1073,19 +1043,6 @@ export class RobotsService implements OnModuleDestroy {
     });
   }
 
-  private generateSlug(name: string): string {
-    const base =
-      name
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-|-$/g, '')
-        .slice(0, 40) || 'robot'; // fallback for emoji-only or non-ASCII names
-    const compact = base.replace(/-/g, '');
-    const safeBase = SLUG_PROFANITY_TERMS.some((term) => compact.includes(term)) ? 'robot' : base;
-    const suffix = randomBytes(3).toString('hex');
-    return `${safeBase}-${suffix}`;
-  }
-
   private mergeMetadata(
     current: unknown,
     acl?: { video?: GuestAccess; control?: GuestAccess; chat?: GuestAccess; estop?: GuestAccess },
@@ -1095,32 +1052,28 @@ export class RobotsService implements OnModuleDestroy {
       cameras?: RobotStreamCameraDescriptor[];
     },
   ): Record<string, unknown> {
-    const existing =
-      current && typeof current === 'object' && !Array.isArray(current)
-        ? { ...(current as Record<string, unknown>) }
-        : {};
-
-    if (acl) {
-      existing.access = {
-        ...DEFAULT_ACCESS_POLICY,
-        ...((existing.access as Record<string, unknown>) ?? {}),
-        ...acl,
-      };
-    }
-
-    if (stream) {
-      existing.stream = {
-        ...DEFAULT_STREAM_POLICY,
-        ...((existing.stream as Record<string, unknown>) ?? {}),
-        ...stream,
-      };
-    }
-
-    return existing;
+    return mergeRobotMetadata(current, {
+      access: acl
+        ? {
+            ...DEFAULT_ACCESS_POLICY,
+            ...acl,
+          }
+        : undefined,
+      stream: stream
+        ? {
+            ...DEFAULT_STREAM_POLICY,
+            ...stream,
+          }
+        : undefined,
+    }) as Record<string, unknown>;
   }
 
   private realtimeRobotCacheKey(robotId: string): string {
     return `robot:realtime:${robotId}`;
+  }
+
+  private publicOverviewCacheKey(): string {
+    return 'robots:public-overview';
   }
 
   private async isRequesterStaff(requesterId: string): Promise<boolean> {
@@ -1146,34 +1099,6 @@ export class RobotsService implements OnModuleDestroy {
     }
   }
 
-  private async buildSlugUpdate(
-    robotId: string,
-    currentSlug: string,
-    currentSlugAliases: string[] | undefined,
-    nextSlugInput?: string,
-  ): Promise<{ slug: string; slugAliases: { set: string[] } } | undefined> {
-    if (!nextSlugInput || nextSlugInput === currentSlug) {
-      return undefined;
-    }
-
-    const nextSlug = this.validateAndNormalizeSlugInput(nextSlugInput);
-    const conflict = await this.prisma.robot.findFirst({
-      where: { slug: nextSlug, NOT: { id: robotId } },
-      select: { id: true },
-    });
-    if (conflict) {
-      throw new ConflictException('This slug is already taken');
-    }
-
-    await this.reclaimSlugAlias(nextSlug, robotId);
-    const aliases = Array.isArray(currentSlugAliases) ? currentSlugAliases : [];
-
-    return {
-      slug: nextSlug,
-      slugAliases: { set: Array.from(new Set([...aliases, currentSlug])) },
-    };
-  }
-
 
   private stripRobotWriteFields<T extends { acl?: unknown; stream?: unknown; accessPassword?: unknown; slug?: unknown }>(
     data: T,
@@ -1193,52 +1118,12 @@ export class RobotsService implements OnModuleDestroy {
     return rest as Omit<T, 'acl' | 'stream' | 'accessPassword' | 'slug'>;
   }
 
-  private withClaimTokenIssuedAt(metadata: unknown): Record<string, unknown> {
-    const base = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
-      ? { ...(metadata as Record<string, unknown>) }
-      : {};
-    base.claimTokenIssuedAt = new Date().toISOString();
-    return base;
-  }
-
   private withStreamKeyIssuedAt(metadata: unknown): Record<string, unknown> {
     const base = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
       ? { ...(metadata as Record<string, unknown>) }
       : {};
     base.streamKeyIssuedAt = new Date().toISOString();
     return base;
-  }
-
-  private readClaimTokenIssuedAt(metadata: unknown): Date | null {
-    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
-      return null;
-    }
-
-    const raw = (metadata as Record<string, unknown>).claimTokenIssuedAt;
-    if (typeof raw !== 'string' || raw.trim().length === 0) {
-      return null;
-    }
-
-    const parsed = new Date(raw);
-    if (Number.isNaN(parsed.getTime())) {
-      return null;
-    }
-
-    return parsed;
-  }
-
-  private validateAndNormalizeSlugInput(rawSlug: string): string {
-    const slug = rawSlug.trim().toLowerCase();
-    if (!/^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$/.test(slug)) {
-      throw new BadRequestException('Slug must be 3-50 lowercase alphanumeric characters and hyphens');
-    }
-
-    const compact = slug.replace(/-/g, '');
-    if (SLUG_PROFANITY_TERMS.some((term) => compact.includes(term))) {
-      throw new BadRequestException('Slug blocked by moderation policy');
-    }
-
-    return slug;
   }
 
   private assertRobotTextAllowed(input: {
@@ -1288,74 +1173,10 @@ export class RobotsService implements OnModuleDestroy {
       .trim();
   }
 
-  private async reclaimSlugAlias(slug: string, excludeRobotId?: string) {
-    const holders = await this.prisma.robot.findMany({
-      where: {
-        slugAliases: { has: slug },
-        ...(excludeRobotId ? { NOT: { id: excludeRobotId } } : {}),
-      },
-      select: { id: true, slugAliases: true },
-    });
-
-    if (holders.length === 0) return;
-
-    await this.prisma.$transaction(
-      holders.map((row) =>
-        this.prisma.robot.update({
-          where: { id: row.id },
-          data: {
-            slugAliases: { set: (row.slugAliases ?? []).filter((entry) => entry !== slug) },
-          },
-        }),
-      ),
-    );
-  }
-
-  private async findRobotBySlugAny(slug: string) {
-    const canonical = await this.prisma.robot.findUnique({
-      where: { slug },
-      include: {
-        owner: {
-          select: { id: true, username: true, displayName: true, avatarUrl: true, role: true },
-        },
-      },
-    });
-    if (canonical) return canonical;
-
-    return this.prisma.robot.findFirst({
-      where: { slugAliases: { has: slug } },
-      include: {
-        owner: {
-          select: { id: true, username: true, displayName: true, avatarUrl: true, role: true },
-        },
-      },
-      orderBy: { updatedAt: 'desc' },
-    });
-  }
-
   private sanitizeManagedRobot<T extends { accessPassword?: string | null }>(robot: T): T {
     return {
       ...robot,
       accessPassword: null,
-    };
-  }
-
-  private async ensureInviteCodeForManagedRobot<
-    T extends { id: string; accessMode: string; inviteCode?: string | null },
-  >(robot: T): Promise<T> {
-    if (robot.accessMode !== 'LINK_ONLY' || robot.inviteCode) {
-      return robot;
-    }
-
-    const inviteCode = await this.generateUniqueInviteCode();
-    await this.prisma.robot.update({
-      where: { id: robot.id },
-      data: { inviteCode },
-    });
-
-    return {
-      ...robot,
-      inviteCode,
     };
   }
 
@@ -1404,10 +1225,7 @@ export class RobotsService implements OnModuleDestroy {
       maxTurnTime: robot.maxTurnTime,
       maxViewers: robot.maxViewers,
       maxControllers: robot.maxControllers,
-      metadata:
-        robot.metadata && typeof robot.metadata === 'object' && !Array.isArray(robot.metadata)
-          ? robot.metadata
-          : null,
+      metadata: normalizeRobotMetadata(robot.metadata),
       tags: robot.tags,
       status: this.normalizeStatus(robot.status, 'lastOnlineAt' in robot ? (robot as { lastOnlineAt?: Date | null }).lastOnlineAt ?? null : null),
       viewerCount: this.normalizeViewerCount(
@@ -1432,38 +1250,6 @@ export class RobotsService implements OnModuleDestroy {
     } as const;
   }
 
-  private async resolveInviteCode(input: {
-    currentAccessMode: string | null;
-    currentInviteCode: string | null;
-    nextAccessMode: string;
-  }): Promise<string | null> {
-    if (input.nextAccessMode !== 'LINK_ONLY') {
-      return input.currentInviteCode ?? null;
-    }
-
-    if (input.currentAccessMode === 'LINK_ONLY' && input.currentInviteCode) {
-      return input.currentInviteCode;
-    }
-
-    return this.generateUniqueInviteCode();
-  }
-
-  private async generateUniqueInviteCode(): Promise<string> {
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      const inviteCode = randomBytes(12).toString('hex');
-      const existing = await this.prisma.robot.findUnique({
-        where: { inviteCode },
-        select: { id: true },
-      });
-
-      if (!existing) {
-        return inviteCode;
-      }
-    }
-
-    throw new Error('Failed to generate unique invite code');
-  }
-
   private staleRobotCutoff(): Date {
     return new Date(Date.now() - 45_000);
   }
@@ -1485,47 +1271,4 @@ export class RobotsService implements OnModuleDestroy {
     return this.normalizeStatus(status, lastOnlineAt) === 'OFFLINE' ? 0 : Math.max(0, viewerCount);
   }
 
-  private hashDeviceKey(deviceKey: string) {
-    return createHash('sha256').update(deviceKey).digest('hex');
-  }
-
-  private readBoundDeviceHash(metadata: unknown): string | null {
-    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
-      return null;
-    }
-
-    const auth = (metadata as RobotAuthMetadata).auth;
-    return typeof auth?.boundDeviceHash === 'string' && auth.boundDeviceHash.trim()
-      ? auth.boundDeviceHash.trim()
-      : null;
-  }
-
-  private setBoundDeviceMetadata(metadata: unknown, deviceHash: string): Record<string, unknown> {
-    const existing =
-      metadata && typeof metadata === 'object' && !Array.isArray(metadata)
-        ? { ...(metadata as Record<string, unknown>) }
-        : {};
-    const auth =
-      existing.auth && typeof existing.auth === 'object' && !Array.isArray(existing.auth)
-        ? { ...(existing.auth as Record<string, unknown>) }
-        : {};
-    auth.boundDeviceHash = deviceHash;
-    existing.auth = auth;
-    return existing;
-  }
-
-  private clearBoundDeviceMetadata(metadata: unknown): Record<string, unknown> {
-    const existing =
-      metadata && typeof metadata === 'object' && !Array.isArray(metadata)
-        ? { ...(metadata as Record<string, unknown>) }
-        : {};
-    if (!existing.auth || typeof existing.auth !== 'object' || Array.isArray(existing.auth)) {
-      return existing;
-    }
-
-    const auth = { ...(existing.auth as Record<string, unknown>) };
-    delete auth.boundDeviceHash;
-    existing.auth = auth;
-    return existing;
-  }
 }

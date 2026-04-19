@@ -53,7 +53,7 @@ export default function SettingsPage() {
 
     api.setToken(accessToken);
     api
-      .getMe()
+      .users.getMe()
       .then((me) => {
         setDisplayName(me.displayName ?? '');
         setAvatarUrl(me.avatarUrl ?? '');
@@ -84,7 +84,7 @@ export default function SettingsPage() {
     setSaving(true);
     try {
       api.setToken(accessToken);
-      const me = await api.updateMe({
+      const me = await api.users.updateMe({
         displayName,
         avatarUrl,
       });
@@ -120,7 +120,7 @@ export default function SettingsPage() {
     setDeletingAccount(true);
     try {
       api.setToken(accessToken);
-      await api.deleteMe();
+      await api.users.deleteMe();
       auth.logout();
       router.push('/');
     } catch (err) {
@@ -137,7 +137,7 @@ export default function SettingsPage() {
     setExportingData(true);
     try {
       api.setToken(accessToken);
-      const payload = await api.exportMe();
+      const payload = await api.users.exportMe();
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');

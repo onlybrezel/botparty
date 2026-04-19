@@ -1,6 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
 import { ConfigService } from '@nestjs/config';
+import { Queue } from 'bullmq';
 import nodemailer from 'nodemailer';
+import { JOBS_QUEUE_MAIL, type MailJobData } from '../jobs/jobs.constants';
 
 const EMAIL_STYLES = `
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a0a; color: #e5e5e5; margin: 0; padding: 0; }
@@ -33,7 +36,10 @@ export class MailService {
   private readonly fromAddress: string;
   private readonly appUrl: string;
 
-  constructor(private readonly config: ConfigService) {
+  constructor(
+    private readonly config: ConfigService,
+    @InjectQueue(JOBS_QUEUE_MAIL) private readonly mailQueue: Queue<MailJobData>,
+  ) {
     this.fromAddress = this.config.get<string>('SMTP_FROM', 'BotParty <no-reply@botparty.live>');
     this.appUrl = this.config.get<string>('APP_URL', 'https://botparty.live');
     this.transport = this.createTransport();
@@ -62,8 +68,7 @@ export class MailService {
       <p>This link expires in 24 hours. If you did not create a BotParty account, you can safely ignore this email.</p>
     `);
 
-    await this.transport.sendMail({
-      from: this.fromAddress,
+    await this.enqueueMailJob({
       to: email,
       subject: 'Verify your BotParty email address',
       text: [
@@ -97,8 +102,7 @@ export class MailService {
       <p>This link expires in 1 hour. If you did not request a password reset, you can safely ignore this email.</p>
     `);
 
-    await this.transport.sendMail({
-      from: this.fromAddress,
+    await this.enqueueMailJob({
       to: email,
       subject: 'Reset your BotParty password',
       text: [
@@ -128,8 +132,7 @@ export class MailService {
       <p>If this was not you, reset your password immediately after the lockout ends.</p>
     `);
 
-    await this.transport.sendMail({
-      from: this.fromAddress,
+    await this.enqueueMailJob({
       to: email,
       subject: 'BotParty security notice: temporary login lockout',
       text: [
@@ -140,6 +143,30 @@ export class MailService {
         'If this was not you, reset your password when the lockout ends.',
       ].join('\n'),
       html,
+    });
+  }
+
+  async sendRaw(to: string, subject: string, html: string, text: string, from?: string): Promise<void> {
+    if (!this.transport) {
+      this.logger.warn(`SMTP not configured; skipping email to ${to}: ${subject}`);
+      return;
+    }
+
+    await this.transport.sendMail({
+      from: from ?? this.fromAddress,
+      to,
+      subject,
+      html,
+      text,
+    });
+  }
+
+  private async enqueueMailJob(data: MailJobData): Promise<void> {
+    await this.mailQueue.add('send', data, {
+      attempts: 4,
+      backoff: { type: 'exponential', delay: 500 },
+      removeOnComplete: 1000,
+      removeOnFail: 1000,
     });
   }
 

@@ -1,7 +1,49 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Res } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import type { FastifyReply } from 'fastify';
+import { collectDefaultMetrics, Gauge, register } from 'prom-client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
+import { BotGateway } from '../gateway/bot.gateway';
+
+let defaultMetricsEnabled = false;
+
+function getOrCreateGauge(name: string, help: string): Gauge<string> {
+  const existing = register.getSingleMetric(name);
+  if (existing) {
+    return existing as Gauge<string>;
+  }
+  return new Gauge({ name, help });
+}
+
+const wsConnectedClientsGauge = getOrCreateGauge(
+  'botparty_ws_connected_clients',
+  'Total number of connected websocket clients',
+);
+const wsConnectedRobotsGauge = getOrCreateGauge(
+  'botparty_ws_connected_robot_clients',
+  'Total number of connected robot websocket clients',
+);
+const wsRoomsGauge = getOrCreateGauge(
+  'botparty_ws_active_rooms',
+  'Total number of active websocket rooms',
+);
+const wsRoomMembershipsGauge = getOrCreateGauge(
+  'botparty_ws_room_memberships',
+  'Total number of websocket room memberships',
+);
+const wsActiveTurnsGauge = getOrCreateGauge(
+  'botparty_ws_active_turns',
+  'Total number of active control turns',
+);
+const wsControlCooldownsGauge = getOrCreateGauge(
+  'botparty_ws_control_cooldowns',
+  'Total number of tracked control cooldown entries',
+);
+const queueDepthGauge = getOrCreateGauge(
+  'botparty_queue_depth',
+  'Total queue depth across all robots',
+);
 
 @ApiTags('health')
 @Controller('health')
@@ -9,7 +51,13 @@ export class HealthController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
-  ) {}
+    private readonly gateway: BotGateway,
+  ) {
+    if (!defaultMetricsEnabled) {
+      collectDefaultMetrics({ prefix: 'botparty_api_' });
+      defaultMetricsEnabled = true;
+    }
+  }
 
   @Get()
   @ApiOperation({ summary: 'Health check' })
@@ -68,5 +116,23 @@ export class HealthController {
       totalSessions,
       timestamp: new Date().toISOString(),
     };
+  }
+
+  @Get('metrics')
+  @ApiOperation({ summary: 'Prometheus metrics endpoint' })
+  async metrics(@Res() res: FastifyReply) {
+    const ws = this.gateway.getRuntimeMetricsSnapshot();
+    wsConnectedClientsGauge.set(ws.connectedClients);
+    wsConnectedRobotsGauge.set(ws.connectedRobotClients);
+    wsRoomsGauge.set(ws.activeRooms);
+    wsRoomMembershipsGauge.set(ws.roomMemberships);
+    wsActiveTurnsGauge.set(ws.activeTurns);
+    wsControlCooldownsGauge.set(ws.controlCooldowns);
+
+    const queueDepth = await this.prisma.queueEntry.count();
+    queueDepthGauge.set(queueDepth);
+
+    res.header('Content-Type', register.contentType);
+    return res.send(await register.metrics());
   }
 }

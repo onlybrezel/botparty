@@ -14,7 +14,7 @@ import {
 } from './utils';
 
 type AclLevel = 'ALL' | 'AUTHENTICATED' | 'DISABLED';
-type OverviewRobot = NonNullable<Awaited<ReturnType<typeof api.getModerationOverview>>['robots']>[number];
+type OverviewRobot = NonNullable<Awaited<ReturnType<typeof api.moderation.getModerationOverview>>['robots']>[number];
 
 type RobotDraft = {
   name: string;

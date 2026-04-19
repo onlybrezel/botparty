@@ -80,6 +80,53 @@ Quick reference for common production incident scenarios.
 
 ---
 
+## Backup Strategy
+
+Production backups are required for PostgreSQL and recommended for Redis snapshots.
+
+1. PostgreSQL logical backup every 6 hours using [scripts/backup-db.sh](scripts/backup-db.sh)
+2. Store backups under `data/backups/` with timestamped filenames
+3. Keep at least 30 days of backups
+4. Verify backup restore weekly on a staging database
+5. Keep one off-host copy (object storage or remote volume)
+
+Example cron entry:
+
+```bash
+0 */6 * * * cd /srv/botparty && ./scripts/backup-db.sh >> /var/log/botparty-backup.log 2>&1
+```
+
+---
+
+## Near Zero-Downtime Deployment
+
+Use sequential service rollout to avoid full platform interruption.
+
+1. Use the integrated rolling update command:
+   ```bash
+   APP_VERSION=<new-tag> ./ops.sh update-zero
+   ```
+2. What it does automatically:
+   - Announces update over websocket and waits for drain
+   - Runs `git pull --ff-only`
+   - Runs `docker compose pull api web nginx` and `docker compose build api web nginx`
+   - Rolls services in order: api -> web -> nginx
+   - Waits for API health gate (`/api/v1/health/live`) before continuing
+3. Manual fallback (if scripted rollout cannot be used):
+   ```bash
+   APP_VERSION=<new-tag> docker compose pull api web nginx
+   APP_VERSION=<new-tag> docker compose build api web nginx
+   APP_VERSION=<new-tag> docker compose up -d --no-deps api
+   curl -fsS http://127.0.0.1:4000/api/v1/health/live
+   APP_VERSION=<new-tag> docker compose up -d --no-deps web
+   APP_VERSION=<new-tag> docker compose up -d --no-deps nginx
+   ```
+4. Keep old images until rollback window closes.
+
+For schema changes, run `pnpm db:migrate:prod` before replacing API containers.
+
+---
+
 ## Rollback Procedure
 
 BotParty uses image tags via `APP_VERSION`. To roll back:

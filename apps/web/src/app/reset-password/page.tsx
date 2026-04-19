@@ -53,7 +53,7 @@ export default function ResetPasswordPage() {
     setMessage(null);
 
     try {
-      const result = await api.resetPassword(token, password);
+      const result = await api.auth.resetPassword(token, password);
       setMessage(result.message);
       window.setTimeout(() => router.push('/login?reset=success'), 1200);
     } catch (submitError) {

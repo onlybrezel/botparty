@@ -24,13 +24,23 @@ export const metadata: Metadata = {
 
 export const revalidate = 30;
 
-async function getRobots(params: { status?: string; tag?: string; q?: string; sort?: string }): Promise<RobotPublic[]> {
+function clampPositiveInt(value: string | undefined, fallback: number, max: number) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return Math.min(Math.floor(parsed), max);
+}
+
+async function getRobots(params: { status?: string; tag?: string; q?: string; sort?: string; limit?: string; offset?: string }): Promise<RobotPublic[]> {
   const apiUrl = getServerApiUrl();
   const qs = new URLSearchParams();
   if (params.status) qs.set('status', params.status);
   if (params.tag) qs.set('tag', params.tag);
   if (params.q) qs.set('q', params.q);
   if (params.sort) qs.set('sort', params.sort);
+  if (params.limit) qs.set('limit', params.limit);
+  if (params.offset) qs.set('offset', params.offset);
 
   try {
     const res = await fetch(`${apiUrl}/api/v1/robots?${qs.toString()}`, {
@@ -59,11 +69,22 @@ async function getOverview(): Promise<PublicRobotOverview | null> {
 export default async function ExplorePage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; tag?: string; q?: string; sort?: string }>;
+  searchParams: Promise<{ status?: string; tag?: string; q?: string; sort?: string; limit?: string; offset?: string }>;
 }) {
   const params = await searchParams;
+  const pageSize = clampPositiveInt(params.limit, 24, 80);
+  const offset = clampPositiveInt(params.offset, 0, 10_000);
+
   const [robots, overview] = await Promise.all([getRobots(params), getOverview()]);
   const liveCount = robots.filter((r) => r.status === 'ONLINE' || r.status === 'BUSY').length;
+  const hasMore = robots.length >= pageSize;
+  const nextParams = new URLSearchParams();
+  if (params.status) nextParams.set('status', params.status);
+  if (params.tag) nextParams.set('tag', params.tag);
+  if (params.q) nextParams.set('q', params.q);
+  if (params.sort) nextParams.set('sort', params.sort);
+  nextParams.set('limit', String(pageSize));
+  nextParams.set('offset', String(offset + pageSize));
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-6 sm:py-8">
@@ -126,11 +147,23 @@ export default async function ExplorePage({
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {robots.map((robot) => (
-            <RobotCard key={robot.id} robot={robot} />
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {robots.map((robot) => (
+              <RobotCard key={robot.id} robot={robot} />
+            ))}
+          </div>
+          {hasMore && (
+            <div className="mt-8 flex justify-center">
+              <a
+                href={`/explore?${nextParams.toString()}`}
+                className="rounded-full border border-[var(--border)] bg-[var(--card)] px-5 py-2.5 text-sm font-semibold text-[var(--foreground)] transition hover:border-[var(--primary)]"
+              >
+                Load more rooms
+              </a>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

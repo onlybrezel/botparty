@@ -1,9 +1,11 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { BullModule } from '@nestjs/bullmq';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
+import { JobsModule } from './jobs/jobs.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { RobotsModule } from './robots/robots.module';
@@ -40,6 +42,20 @@ import { MaintenanceModule } from './maintenance/maintenance.module';
     PrismaModule,
     RedisModule,
     MailModule,
+
+    // ─── Async Jobs (BullMQ) ───────────────────────
+    BullModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        connection: {
+          host: config.getOrThrow<string>('REDIS_HOST'),
+          port: Number(config.getOrThrow<string>('REDIS_PORT')),
+          password: config.get<string>('REDIS_PASSWORD') || undefined,
+          maxRetriesPerRequest: null,
+        },
+      }),
+    }),
+    JobsModule,
 
     // ─── Feature Modules ───────────────────────────
     AuthModule,

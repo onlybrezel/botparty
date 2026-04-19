@@ -144,7 +144,7 @@ export default function DashboardPage() {
 
       try {
         api.setToken(accessToken);
-        const data = await api.getMyRobots();
+        const data = await api.robots.getMyRobots();
         setRobots(data);
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to load robots';
@@ -182,7 +182,7 @@ export default function DashboardPage() {
       setControlsLoading(true);
       try {
         api.setToken(accessToken);
-        const buttons = await api.getAllControls(selectedRobot.id);
+        const buttons = await api.controls.getAllControls(selectedRobot.id);
         if (active) {
           setControlButtons(buttons.sort((a, b) => a.position - b.position));
         }
@@ -213,7 +213,7 @@ export default function DashboardPage() {
     setAllowlistLoading(true);
 
     api.setToken(accessToken);
-    api.getAllowedUsers(selectedRobot.id)
+    api.robots.getAllowedUsers(selectedRobot.id)
       .then((rows) => {
         if (active) {
           setAllowedUsers(rows);
@@ -245,7 +245,7 @@ export default function DashboardPage() {
     setIngressLoading(true);
 
     api.setToken(accessToken);
-    api.getRobotIngressCameras(selectedRobot.id)
+    api.robots.getRobotIngressCameras(selectedRobot.id)
       .then((rows) => {
         if (active) {
           setIngressCameras(rows);
@@ -316,7 +316,7 @@ export default function DashboardPage() {
     setPreview(null);
     try {
       api.setToken(accessToken);
-      const { token, livekitUrl } = await api.getViewerToken(selectedRobot.id, false);
+      const { token, livekitUrl } = await api.robots.getViewerToken(selectedRobot.id, false);
       setPreview({ token, url: process.env.NEXT_PUBLIC_LIVEKIT_URL ?? livekitUrl });
       if (forceRemount) {
         setPreviewVersion((value) => value + 1);
@@ -355,7 +355,7 @@ export default function DashboardPage() {
     const poll = async () => {
       try {
         api.setToken(accessToken);
-        const result = await api.getPendingRobotActions(selectedRobot.id);
+        const result = await api.robots.getPendingRobotActions(selectedRobot.id);
         if (active) {
           const nextTypes = Array.from(
             new Set(
@@ -399,7 +399,7 @@ export default function DashboardPage() {
     const poll = async () => {
       try {
         api.setToken(accessToken);
-        const result = await api.getRobotLogs(selectedRobot.id);
+        const result = await api.robots.getRobotLogs(selectedRobot.id);
         if (active) {
           setDiagLogs(result.logs.slice(-150));
         }
@@ -429,7 +429,7 @@ export default function DashboardPage() {
     const poll = async () => {
       try {
         api.setToken(accessToken);
-        const result = await api.getRobotTelemetry(selectedRobot.id);
+        const result = await api.robots.getRobotTelemetry(selectedRobot.id);
         if (active) {
           setTelemetry(result);
         }
@@ -466,7 +466,7 @@ export default function DashboardPage() {
 
     try {
       api.setToken(accessToken);
-      const created = await api.createRobot(toUpdatePayload(createForm));
+      const created = await api.robots.createRobot(toUpdatePayload(createForm));
       const next = [created, ...robots];
       setRobots(next);
       setSelectedId(created.id);
@@ -501,13 +501,13 @@ export default function DashboardPage() {
     try {
       api.setToken(accessToken);
       const previousBitrate = selectedRobot.metadata?.stream?.targetBitrateKbps ?? null;
-      const updated = await api.updateRobot(selectedRobot.id, toUpdatePayload(editForm));
+      const updated = await api.robots.updateRobot(selectedRobot.id, toUpdatePayload(editForm));
       setRobots((prev) => prev.map((robot) => (robot.id === updated.id ? updated : robot)));
       setStatus('Robot settings saved.');
 
       const nextBitrate = updated.metadata?.stream?.targetBitrateKbps ?? null;
       if (previousBitrate !== nextBitrate) {
-        await api.enqueueRobotAction(updated.id, { type: 'restart_video' });
+        await api.robots.enqueueRobotAction(updated.id, { type: 'restart_video' });
         pushToast('Bitrate updated. Video stream restarting.', 'info', 3600);
       } else {
         pushToast('Settings saved.', 'success', 2800);
@@ -532,7 +532,7 @@ export default function DashboardPage() {
 
     try {
       api.setToken(accessToken);
-      await api.deleteRobot(selectedRobot.id);
+      await api.robots.deleteRobot(selectedRobot.id);
       const remaining = robots.filter((robot) => robot.id !== selectedRobot.id);
       setRobots(remaining);
       setSelectedId(remaining[0]?.id ?? null);
@@ -558,7 +558,7 @@ export default function DashboardPage() {
 
     try {
       api.setToken(accessToken);
-      const nextToken = await api.regenerateRobotToken(selectedRobot.id);
+      const nextToken = await api.robots.regenerateRobotToken(selectedRobot.id);
       setRobots((prev) =>
         prev.map((robot) =>
           robot.id === selectedRobot.id ? { ...robot, claimToken: nextToken.claimToken } : robot,
@@ -631,7 +631,7 @@ export default function DashboardPage() {
 
     try {
       api.setToken(accessToken);
-      const updated = await api.uploadRobotThumbnail(selectedRobot.id, dataUrl);
+      const updated = await api.robots.uploadRobotThumbnail(selectedRobot.id, dataUrl);
       applyUpdatedRobot(updated);
       setStatus(mode === 'snapshot' ? 'Thumbnail captured from the live preview.' : 'Thumbnail uploaded.');
       pushToast(mode === 'snapshot' ? 'Thumbnail captured.' : 'Thumbnail uploaded.', 'success', 2600);
@@ -777,7 +777,7 @@ export default function DashboardPage() {
 
     let active = true;
     api.setToken(accessToken);
-    api.ensureRobotInviteCode(selectedRobot.id)
+    api.robots.ensureRobotInviteCode(selectedRobot.id)
       .then((next) => {
         if (!active) {
           return;
@@ -808,7 +808,7 @@ export default function DashboardPage() {
 
     try {
       api.setToken(accessToken);
-      const updated = await api.deleteRobotThumbnail(selectedRobot.id);
+      const updated = await api.robots.deleteRobotThumbnail(selectedRobot.id);
       applyUpdatedRobot(updated);
       setStatus('Thumbnail removed.');
       pushToast('Thumbnail removed.', 'success', 2400);
@@ -836,7 +836,7 @@ export default function DashboardPage() {
 
     try {
       api.setToken(accessToken);
-      const next = await api.regenerateRobotInviteCode(selectedRobot.id);
+      const next = await api.robots.regenerateRobotInviteCode(selectedRobot.id);
       setRobots((prev) =>
         prev.map((robot) =>
           robot.id === selectedRobot.id ? { ...robot, inviteCode: next.inviteCode } : robot,
@@ -901,7 +901,7 @@ export default function DashboardPage() {
     setIngressOp(`create:${cameraId}`);
     try {
       api.setToken(accessToken);
-      const created = await api.createRobotIngressCamera(selectedRobot.id, {
+      const created = await api.robots.createRobotIngressCamera(selectedRobot.id, {
         cameraId,
         label: newIngressLabel.trim() || undefined,
         compatibilityMode: newIngressCompatibilityMode,
@@ -928,7 +928,7 @@ export default function DashboardPage() {
     setIngressOp(`delete:${ingressId}`);
     try {
       api.setToken(accessToken);
-      await api.deleteRobotIngressCamera(selectedRobot.id, ingressId);
+      await api.robots.deleteRobotIngressCamera(selectedRobot.id, ingressId);
       setIngressCameras((prev) => prev.filter((entry) => entry.ingressId !== ingressId));
       pushToast('External camera ingress deleted.', 'success', 2600);
     } catch (err) {
@@ -963,7 +963,7 @@ export default function DashboardPage() {
     setError(null);
     try {
       api.setToken(accessToken);
-      const result = await api.enqueueRobotAction(selectedRobot.id, { type, durationSec });
+      const result = await api.robots.enqueueRobotAction(selectedRobot.id, { type, durationSec });
       if (result.alreadyQueued) {
         const message = 'Action is already queued, waiting for pickup.';
         setStatus(message);
@@ -995,7 +995,7 @@ export default function DashboardPage() {
     setLogsLoading(true);
     try {
       api.setToken(accessToken);
-      const result = await api.getRobotLogs(selectedRobot.id);
+      const result = await api.robots.getRobotLogs(selectedRobot.id);
       setDiagLogs(result.logs.slice(-150));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load logs');
@@ -1018,7 +1018,7 @@ export default function DashboardPage() {
     setError(null);
     try {
       api.setToken(accessToken);
-      const next = await api.createControl(selectedRobot.id, {
+      const next = await api.controls.createControl(selectedRobot.id, {
         label,
         command,
         hotKey: controlDraft.hotKey.trim() || undefined,
@@ -1048,7 +1048,7 @@ export default function DashboardPage() {
     setControlOp(button.id);
     try {
       api.setToken(accessToken);
-      const updated = await api.updateControl(button.id, { isEnabled: !button.isEnabled });
+      const updated = await api.controls.updateControl(button.id, { isEnabled: !button.isEnabled });
       setControlButtons((prev) =>
         prev.map((entry) => (entry.id === button.id ? updated : entry)),
       );
@@ -1095,7 +1095,7 @@ export default function DashboardPage() {
     setControlOp(editingControlId);
     try {
       api.setToken(accessToken);
-      const updated = await api.updateControl(editingControlId, {
+      const updated = await api.controls.updateControl(editingControlId, {
         label,
         command,
         hotKey: controlEditDraft.hotKey.trim() || undefined,
@@ -1122,12 +1122,12 @@ export default function DashboardPage() {
     setControlOp(button.id);
     try {
       api.setToken(accessToken);
-      await api.deleteControl(button.id);
+      await api.controls.deleteControl(button.id);
       const nextButtons = controlButtons
         .filter((entry) => entry.id !== button.id)
         .map((entry, index) => ({ ...entry, position: index }));
       setControlButtons(nextButtons);
-      await api.reorderControls(
+      await api.controls.reorderControls(
         selectedRobot.id,
         nextButtons.map((entry, index) => ({ id: entry.id, position: index })),
       );
@@ -1160,7 +1160,7 @@ export default function DashboardPage() {
     setControlOp(buttonId);
     try {
       api.setToken(accessToken);
-      await api.reorderControls(
+      await api.controls.reorderControls(
         selectedRobot.id,
         normalized.map((entry, index) => ({ id: entry.id, position: index })),
       );
@@ -1179,7 +1179,7 @@ export default function DashboardPage() {
     setAllowlistOp('add');
     try {
       api.setToken(accessToken);
-      const added = await api.addAllowedUser(selectedRobot.id, username);
+      const added = await api.robots.addAllowedUser(selectedRobot.id, username);
       setAllowedUsers((prev) => {
         if (prev.some((entry) => entry.id === added.id)) return prev;
         return [...prev, added];
@@ -1199,7 +1199,7 @@ export default function DashboardPage() {
     setAllowlistOp(user.id);
     try {
       api.setToken(accessToken);
-      await api.removeAllowedUser(selectedRobot.id, user.id);
+      await api.robots.removeAllowedUser(selectedRobot.id, user.id);
       setAllowedUsers((prev) => prev.filter((entry) => entry.id !== user.id));
       pushToast('User removed from allow list.', 'success', 2200);
     } catch (err) {

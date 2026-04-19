@@ -90,7 +90,9 @@ export const useAuth = create<AuthState & AuthActions>()(
       name: AUTH_STORE_STORAGE_KEY,
       storage: createJSONStorage(() => sessionStorage),
       partialize: (state) => ({
-        accessToken: state.accessToken,
+        // accessToken intentionally excluded — kept in memory only to reduce XSS exposure.
+        // Auth state (profile info) persists across page reloads via sessionStorage;
+        // the token is re-acquired via the HttpOnly-cookie refresh flow on hydration.
         username: state.username,
         userId: state.userId,
         displayName: state.displayName,

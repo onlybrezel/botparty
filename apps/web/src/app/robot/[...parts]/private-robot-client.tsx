@@ -40,8 +40,8 @@ export default function PrivateRobotClient({
     api.setToken(accessToken);
 
     const request = username
-      ? api.getPrivateRobot(username, slug)
-      : api.getPrivateRobotBySlug(slug);
+      ? api.robots.getPrivateRobot(username, slug)
+      : api.robots.getPrivateRobotBySlug(slug);
 
     request
       .then((result) => {

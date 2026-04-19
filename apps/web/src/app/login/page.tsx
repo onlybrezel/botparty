@@ -36,7 +36,7 @@ export default function LoginPage() {
 
     try {
       if (mode === 'login') {
-        const { accessToken, user } = await api.login({ email, password });
+        const { accessToken, user } = await api.auth.login({ email, password });
         api.setToken(accessToken);
         login({
           accessToken,
@@ -49,7 +49,7 @@ export default function LoginPage() {
         router.push('/explore');
       } else {
         const username = usernameRef.current!.value.trim();
-        const { accessToken, user } = await api.register({ username, email, password });
+        const { accessToken, user } = await api.auth.register({ username, email, password });
         api.setToken(accessToken);
         login({
           accessToken,

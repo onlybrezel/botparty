@@ -10,6 +10,11 @@ export default defineConfig({
     globals: true,
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
     exclude: ['tests/e2e/**', '**/node_modules/**'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'lcov', 'json-summary'],
+      reportsDirectory: './coverage',
+    },
   },
   resolve: {
     alias: {

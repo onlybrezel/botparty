@@ -17,6 +17,7 @@ import type {
   AllowedUserSummary,
   GuestAccess,
 } from './robots.service';
+import { normalizeRobotMetadata } from './robot-metadata.schema';
 
 type PolicyCacheEntry = {
   access: RobotAccessPolicy;
@@ -316,11 +317,8 @@ export class RobotAccessService implements OnModuleDestroy {
   }
 
   private _parseAccessFromMetadata(metadata: unknown): RobotAccessPolicy {
-    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return DEFAULT_ACCESS_POLICY;
-    const accessRaw = (metadata as Record<string, unknown>).access;
-    if (!accessRaw || typeof accessRaw !== 'object' || Array.isArray(accessRaw)) return DEFAULT_ACCESS_POLICY;
-
-    const access = accessRaw as Record<string, unknown>;
+    const access = normalizeRobotMetadata(metadata).access;
+    if (!access) return DEFAULT_ACCESS_POLICY;
     return {
       video: this._readAccessValue(access.video),
       control: this._readAccessValue(access.control),
@@ -330,25 +328,20 @@ export class RobotAccessService implements OnModuleDestroy {
   }
 
   private _parseStreamFromMetadata(metadata: unknown): RobotStreamPolicy {
-    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return DEFAULT_STREAM_POLICY;
-    const streamRaw = (metadata as Record<string, unknown>).stream;
-    if (!streamRaw || typeof streamRaw !== 'object' || Array.isArray(streamRaw)) return DEFAULT_STREAM_POLICY;
-
-    const stream = streamRaw as Record<string, unknown>;
+    const stream = normalizeRobotMetadata(metadata).stream;
+    if (!stream) return DEFAULT_STREAM_POLICY;
     const bitrate = stream.targetBitrateKbps;
     const activeCameraId = typeof stream.activeCameraId === 'string' ? stream.activeCameraId.trim() : '';
     const cameras: RobotStreamCameraDescriptor[] | undefined = Array.isArray(stream.cameras)
       ? stream.cameras.reduce<RobotStreamCameraDescriptor[]>((acc, entry) => {
-          if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return acc;
-          const camera = entry as Record<string, unknown>;
-          const id = typeof camera.id === 'string' ? camera.id.trim() : '';
+          const id = typeof entry.id === 'string' ? entry.id.trim() : '';
           if (!id) return acc;
           acc.push({
             id,
-            label: typeof camera.label === 'string' ? camera.label.trim() || undefined : undefined,
-            role: typeof camera.role === 'string' ? camera.role.trim() || undefined : undefined,
-            enabled: typeof camera.enabled === 'boolean' ? camera.enabled : undefined,
-            publishMode: typeof camera.publishMode === 'string' ? camera.publishMode.trim() || undefined : undefined,
+            label: typeof entry.label === 'string' ? entry.label.trim() || undefined : undefined,
+            role: typeof entry.role === 'string' ? entry.role.trim() || undefined : undefined,
+            enabled: typeof entry.enabled === 'boolean' ? entry.enabled : undefined,
+            publishMode: typeof entry.publishMode === 'string' ? entry.publishMode.trim() || undefined : undefined,
           });
           return acc;
         }, [])

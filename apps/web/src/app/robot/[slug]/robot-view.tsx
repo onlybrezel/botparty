@@ -183,7 +183,7 @@ export default function RobotView({ robot }: Props) {
       a.color === b.color;
 
     const syncControls = () => {
-      api.getControls(robot.id)
+      api.controls.getControls(robot.id)
         .then((next) => {
           if (!active) return;
           setControlButtons((prev) => {
@@ -264,7 +264,7 @@ export default function RobotView({ robot }: Props) {
     setAccessLoading(true);
     allowListAccessAttemptedRef.current = true;
     api.setToken(accessToken);
-    api.verifyRobotAccess(robot.id)
+    api.robots.verifyRobotAccess(robot.id)
       .then((grant) => {
         if (!active) return;
         setRoomAccessToken(grant.token);
@@ -301,7 +301,7 @@ export default function RobotView({ robot }: Props) {
     setAccessLoading(true);
     setAccessError(null);
     api.setToken(accessToken);
-    api.verifyRobotAccess(robot.id, {
+    api.robots.verifyRobotAccess(robot.id, {
       inviteCode: inviteCodeFromUrl,
     })
       .then((grant) => {
@@ -352,7 +352,7 @@ export default function RobotView({ robot }: Props) {
       api.setToken(accessToken);
       if (accessToken) {
         try {
-          const { token, livekitUrl } = await api.getViewerToken(robot.id, false);
+          const { token, livekitUrl } = await api.robots.getViewerToken(robot.id, false);
           setLivekitCreds({ token, url: publicUrl ?? livekitUrl });
           setVideoState('ready');
           livekitRefreshAttemptRef.current = 0;
@@ -365,7 +365,7 @@ export default function RobotView({ robot }: Props) {
         }
       }
 
-      const { token, livekitUrl } = await publicApiRef.current.getPublicViewerToken(robot.id);
+      const { token, livekitUrl } = await publicApiRef.current.robots.getPublicViewerToken(robot.id);
       setLivekitCreds({ token, url: publicUrl ?? livekitUrl });
       setVideoState('ready');
       livekitRefreshAttemptRef.current = 0;
@@ -417,12 +417,12 @@ export default function RobotView({ robot }: Props) {
 
   useEffect(() => {
     api.setToken(accessToken);
-    api.getQueue(robot.id).then((rows) => setQueue(normalizeQueueEntries(rows as QueueEntryWire[]))).catch(() => {});
+    api.queue.getQueue(robot.id).then((rows) => setQueue(normalizeQueueEntries(rows as QueueEntryWire[]))).catch(() => {});
   }, [accessToken, robot.id, roomAccessToken]);
 
   useEffect(() => {
     let active = true;
-    api.getActiveSession(robot.id)
+    api.moderation.getActiveSession(robot.id)
       .then((session) => {
         if (!active || !session) return;
         setActiveSession({
@@ -597,7 +597,7 @@ export default function RobotView({ robot }: Props) {
 
     api.setToken(accessToken);
     try {
-      const next = await api.getAdminRobotRecordingStatus(robot.id);
+      const next = await api.moderation.getAdminRobotRecordingStatus(robot.id);
       setRecordingState((prev) => {
         if (
           prev &&
@@ -649,8 +649,8 @@ export default function RobotView({ robot }: Props) {
 
     try {
       const actionPromise = shouldStart
-        ? api.startAdminRobotRecording(robot.id)
-        : api.stopAdminRobotRecording(robot.id);
+        ? api.moderation.startAdminRobotRecording(robot.id)
+        : api.moderation.stopAdminRobotRecording(robot.id);
       const timeoutPromise = new Promise<never>((_, reject) => {
         window.setTimeout(() => reject(new Error('Recording request timed out. Please try again.')), 15000);
       });
@@ -1195,7 +1195,7 @@ export default function RobotView({ robot }: Props) {
     setAccessError(null);
     try {
       api.setToken(accessToken);
-      const grant = await api.verifyRobotAccess(robot.id, {
+      const grant = await api.robots.verifyRobotAccess(robot.id, {
         password: accessPasswordInput.trim() || undefined,
         inviteCode: inviteCodeFromUrl || undefined,
       });
@@ -1216,7 +1216,7 @@ export default function RobotView({ robot }: Props) {
 
       try {
         api.setToken(accessToken);
-        await api.moderateRobotUser(robot.id, {
+        await api.moderation.moderateRobotUser(robot.id, {
           targetUserId,
           action,
           reason: 'Chat moderation',
@@ -1250,15 +1250,15 @@ export default function RobotView({ robot }: Props) {
     try {
       if (inQueue) {
         releaseLocalControls(true);
-        await api.leaveQueue(robot.id);
+        await api.queue.leaveQueue(robot.id);
         setInQueue(false);
         pushToast('Left the queue.', 'info');
       } else {
-        await api.joinQueue(robot.id, roomAccessToken);
+        await api.queue.joinQueue(robot.id, roomAccessToken);
         setInQueue(true);
         pushToast('Joined the queue.', 'success');
       }
-      const updated = await api.getQueue(robot.id);
+      const updated = await api.queue.getQueue(robot.id);
       setQueue(updated);
     } catch (err) {
       pushToast(err instanceof Error ? err.message : 'Queue update failed.', 'error', 2200);
@@ -1276,8 +1276,8 @@ export default function RobotView({ robot }: Props) {
     setVotingForUserId(targetUserId);
     try {
       api.setToken(accessToken);
-      await api.voteQueue(robot.id, targetUserId, roomAccessToken);
-      const updated = await api.getQueue(robot.id);
+      await api.queue.voteQueue(robot.id, targetUserId, roomAccessToken);
+      const updated = await api.queue.getQueue(robot.id);
       setQueue(updated);
       pushToast('Vote submitted.', 'success', 1400);
     } catch (err) {

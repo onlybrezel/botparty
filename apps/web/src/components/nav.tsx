@@ -225,7 +225,7 @@ export default function Nav() {
                   <div className="my-1 border-t border-[var(--border)]" />
                   <button
                     onClick={() => {
-                      void api.logout().catch(() => undefined).finally(() => {
+                      void api.auth.logout().catch(() => undefined).finally(() => {
                         api.setToken(null);
                         logout();
                         setDropdownOpen(false);
@@ -309,7 +309,7 @@ export default function Nav() {
                   <button
                     type="button"
                     onClick={() => {
-                      void api.logout().catch(() => undefined).finally(() => {
+                      void api.auth.logout().catch(() => undefined).finally(() => {
                         api.setToken(null);
                         logout();
                         setMenuOpen(false);

@@ -359,7 +359,7 @@ export function RuntimeView({
                       controls
                       preload="metadata"
                       className="h-auto w-full rounded border border-[var(--border)] bg-black"
-                      src={api.getAdminRecordingStreamUrl(selectedRecording.fileName)}
+                      src={api.moderation.getAdminRecordingStreamUrl(selectedRecording.fileName)}
                       onTimeUpdate={(event) => {
                         onPlayerCurrentSecChange(event.currentTarget.currentTime || 0);
                       }}
@@ -418,7 +418,7 @@ export function RuntimeView({
                     </div>
                     <div className="mt-2 flex items-center justify-end gap-2 text-xs">
                       <a
-                        href={api.getAdminRecordingStreamUrl(selectedRecording.fileName)}
+                        href={api.moderation.getAdminRecordingStreamUrl(selectedRecording.fileName)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="rounded border border-[var(--border)] px-2 py-1 text-[var(--foreground)]"

@@ -11,6 +11,7 @@ import { randomUUID } from 'crypto';
 import { AppModule } from './app.module';
 import { loadFileBackedEnv } from './common/env-file';
 import { initSentry } from './common/sentry';
+import { initTracing, shutdownTracing } from './common/tracing';
 import { AllExceptionsFilter } from './filters/all-exceptions.filter';
 
 function readOrigin(raw: string | undefined): string | null {
@@ -56,6 +57,7 @@ async function bootstrap() {
   const logger = new Logger('Bootstrap');
   loadFileBackedEnv(process.env, logger);
   await initSentry(logger);
+  await initTracing(logger);
 
   // ─── Security sanity checks ───────────────────────
   try {
@@ -189,6 +191,13 @@ async function bootstrap() {
 
   const port = process.env.PORT ?? 4000;
   await app.listen({ port: Number(port), host: '0.0.0.0' });
+
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    process.once(signal, () => {
+      void shutdownTracing(logger);
+    });
+  }
+
   logger.log(`🚀 BotParty API running on http://0.0.0.0:${port}`);
   logger.log(`🌍 Environment: ${process.env.NODE_ENV ?? 'development'}`);
 }

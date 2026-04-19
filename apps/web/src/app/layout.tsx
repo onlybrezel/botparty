@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import Script from 'next/script';
 import { Inter } from 'next/font/google';
 import './globals.css';
 import { CookieBanner } from '@/components/cookie-banner';
@@ -57,7 +58,28 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <Script id="theme-bootstrap" strategy="beforeInteractive">
+          {`(() => {
+            try {
+              const raw = window.localStorage.getItem('botparty.preferences.v2');
+              const parsed = raw ? JSON.parse(raw) : null;
+              const storedTheme = parsed?.state?.theme;
+              const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
+              const theme = storedTheme === 'dark' || storedTheme === 'light'
+                ? storedTheme
+                : (prefersLight ? 'light' : 'dark');
+              document.documentElement.classList.remove('dark', 'light');
+              document.documentElement.classList.add(theme);
+              document.documentElement.dataset.theme = theme;
+            } catch {
+              document.documentElement.classList.add('dark');
+              document.documentElement.dataset.theme = 'dark';
+            }
+          })();`}
+        </Script>
+      </head>
       <body className={`${inter.variable} flex min-h-screen flex-col bg-[var(--background)] text-[var(--foreground)] antialiased`}>
         <noscript>
           <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">

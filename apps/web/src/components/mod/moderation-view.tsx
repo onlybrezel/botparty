@@ -6,7 +6,7 @@ import type { api } from '@/lib/api';
 import type { ModRuntimeOverview } from '@/lib/api-types';
 import { successButtonClass } from './utils';
 
-type Overview = Awaited<ReturnType<typeof api.getModerationOverview>>;
+type Overview = Awaited<ReturnType<typeof api.moderation.getModerationOverview>>;
 type ProfanityOverview = {
   total: number;
   byUser: Array<{ userId: string; count: number }>;
