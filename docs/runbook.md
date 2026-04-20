@@ -77,7 +77,7 @@ Quick reference for common production incident scenarios.
 **Steps:**
 1. Check disk: `df -h /`
 2. Check recordings volume: `du -sh data/livekit-recordings/`
-3. If you still use local recording fallback storage, remove old recordings: `find data/livekit-recordings/ -mtime +7 -delete`
+3. After migrating any legacy recordings into object storage, you can remove old local leftovers: `find data/livekit-recordings/ -mtime +7 -delete`
 4. Remove old backups: `find data/backups/ -mtime +30 -delete`
 5. Prune Docker: `docker system prune -f`
 

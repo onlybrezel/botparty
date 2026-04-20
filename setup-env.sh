@@ -238,7 +238,6 @@ THROTTLE_TTL=60000
 THROTTLE_LIMIT=100
 
 # ─── Thumbnail Storage ────────────────────────────────
-THUMBNAIL_STORAGE_DIR=/app/data/robot-thumbnails
 THUMBNAIL_PUBLIC_BASE_URL=${APP_URL}/storage/botparty-thumbnails
 THUMBNAIL_S3_BUCKET=botparty-thumbnails
 THUMBNAIL_S3_REGION=us-east-1
@@ -248,8 +247,6 @@ THUMBNAIL_S3_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
 THUMBNAIL_S3_FORCE_PATH_STYLE=true
 
 # ─── Recording Storage ────────────────────────────────
-LIVEKIT_RECORDINGS_DIR=/recordings
-LIVEKIT_RECORDING_FILEPATH_TEMPLATE=/out/{room_name}-{time}.mp4
 LIVEKIT_RECORDING_OBJECT_KEY_TEMPLATE={room_name}-{time}.mp4
 LIVEKIT_RECORDINGS_S3_BUCKET=botparty-recordings
 LIVEKIT_RECORDINGS_S3_REGION=us-east-1

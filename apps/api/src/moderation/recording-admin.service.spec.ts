@@ -1,8 +1,5 @@
 import { GetObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { StreamableFile } from '@nestjs/common';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { RecordingAdminService } from './recording-admin.service';
 
@@ -14,10 +11,8 @@ describe('RecordingAdminService', () => {
     };
   };
   let configValues: Record<string, string | undefined>;
-  let storageDir: string | null;
 
   beforeEach(() => {
-    storageDir = null;
     prisma = {
       user: {
         findUnique: jest.fn().mockResolvedValue({ role: 'ADMIN' }),
@@ -36,28 +31,10 @@ describe('RecordingAdminService', () => {
 
   afterEach(async () => {
     jest.restoreAllMocks();
-    if (storageDir) {
-      await rm(storageDir, { recursive: true, force: true });
-    }
   });
 
-  it('lists local recordings when object storage is not configured', async () => {
-    storageDir = await mkdtemp(join(tmpdir(), 'botparty-recording-'));
-    configValues.LIVEKIT_RECORDINGS_DIR = storageDir;
-    await writeFile(
-      join(storageDir, 'robot-00000000-0000-0000-0000-000000000001-front-2026-04-20T120000.mp4'),
-      'video-data',
-    );
-
-    const files = await service.listAdminRecordings('staff-1');
-
-    expect(files).toEqual([
-      expect.objectContaining({
-        fileName: 'robot-00000000-0000-0000-0000-000000000001-front-2026-04-20T120000.mp4',
-        robotId: '00000000-0000-0000-0000-000000000001',
-        cameraId: 'front',
-      }),
-    ]);
+  it('rejects listing recordings when object storage is not configured', async () => {
+    await expect(service.listAdminRecordings('staff-1')).rejects.toThrow('Recording object storage is not configured');
   });
 
   it('lists recording objects from S3-compatible storage using basename metadata', async () => {

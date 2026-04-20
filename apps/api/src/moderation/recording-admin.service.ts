@@ -1,10 +1,15 @@
-import { Injectable, ForbiddenException, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  ForbiddenException,
+  NotFoundException,
+  BadRequestException,
+  Logger,
+  InternalServerErrorException,
+} from '@nestjs/common';
 import { StreamableFile } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GetObjectCommand, ListObjectsV2Command, S3Client } from '@aws-sdk/client-s3';
-import { createReadStream } from 'node:fs';
-import { readdir, stat } from 'node:fs/promises';
-import { basename, join, resolve } from 'node:path';
+import { basename } from 'node:path';
 import { Readable } from 'node:stream';
 import { PrismaService } from '../prisma/prisma.service';
 import { LivekitService } from '../livekit/livekit.service';
@@ -74,27 +79,7 @@ export class RecordingAdminService {
   async listAdminRecordings(requesterId: string) {
     await this._assertAdmin(requesterId);
 
-    const [objectStorageFiles, localFiles] = await Promise.all([
-      this._listObjectStorageRecordings(),
-      this._listLocalRecordings(),
-    ]);
-
-    const merged = new Map<string, RecordingFileSummary>();
-    for (const file of [...localFiles, ...objectStorageFiles]) {
-      const current = merged.get(file.fileName);
-      if (!current) {
-        merged.set(file.fileName, file);
-        continue;
-      }
-
-      const currentTs = Date.parse(current.modifiedAt);
-      const nextTs = Date.parse(file.modifiedAt);
-      if (Number.isNaN(currentTs) || nextTs >= currentTs) {
-        merged.set(file.fileName, file);
-      }
-    }
-
-    return Array.from(merged.values()).sort((a, b) => Date.parse(b.modifiedAt) - Date.parse(a.modifiedAt));
+    return await this._listObjectStorageRecordings();
   }
 
   async streamAdminRecording(fileName: string, requesterId: string): Promise<StreamableFile> {
@@ -110,45 +95,7 @@ export class RecordingAdminService {
       return objectFile;
     }
 
-    const fullPath = this._resolveRecordingPath(safeName);
-    try {
-      await stat(fullPath);
-    } catch {
-      throw new NotFoundException('Recording not found');
-    }
-
-    return new StreamableFile(createReadStream(fullPath), {
-      type: 'video/mp4',
-      disposition: `inline; filename="${safeName}"`,
-    });
-  }
-
-  private async _listLocalRecordings(): Promise<RecordingFileSummary[]> {
-    const dir = this._recordingsDir();
-    let entries: string[] = [];
-    try {
-      entries = await readdir(dir);
-    } catch {
-      return [];
-    }
-
-    return await Promise.all(
-      entries
-        .filter((name) => name.endsWith('.mp4'))
-        .map(async (fileName) => {
-          const fullPath = this._resolveRecordingPath(fileName);
-          const fileStat = await stat(fullPath);
-          const parsed = this._parseRecordingFileName(fileName);
-          return {
-            fileName,
-            sizeBytes: fileStat.size,
-            modifiedAt: fileStat.mtime.toISOString(),
-            robotId: parsed.robotId,
-            cameraId: parsed.cameraId,
-            recordedAt: parsed.recordedAt,
-          };
-        }),
-    );
+    throw new NotFoundException('Recording not found');
   }
 
   private async _assertAdmin(userId: string) {
@@ -161,12 +108,16 @@ export class RecordingAdminService {
     }
   }
 
-  private _recordingsDir(): string {
-    return this.config.get<string>('LIVEKIT_RECORDINGS_DIR')?.trim() || '/recordings';
-  }
-
   private _objectStorageConfig(): S3CompatibleStorageConfig | null {
     return resolveS3CompatibleStorageConfig(this.config, 'LIVEKIT_RECORDINGS_S3_');
+  }
+
+  private _requireObjectStorageConfig(): S3CompatibleStorageConfig {
+    const config = this._objectStorageConfig();
+    if (!config) {
+      throw new InternalServerErrorException('Recording object storage is not configured');
+    }
+    return config;
   }
 
   private _createObjectStorageClient(config: S3CompatibleStorageConfig): S3Client {
@@ -174,10 +125,7 @@ export class RecordingAdminService {
   }
 
   private async _listObjectStorageRecordings(): Promise<RecordingFileSummary[]> {
-    const config = this._objectStorageConfig();
-    if (!config) {
-      return [];
-    }
+    const config = this._requireObjectStorageConfig();
 
     const client = this._createObjectStorageClient(config);
     const files = new Map<string, RecordingFileSummary>();
@@ -226,10 +174,7 @@ export class RecordingAdminService {
   }
 
   private async _readObjectRecording(fileName: string): Promise<StreamableFile | null> {
-    const config = this._objectStorageConfig();
-    if (!config) {
-      return null;
-    }
+    const config = this._requireObjectStorageConfig();
 
     const client = this._createObjectStorageClient(config);
     const direct = await this._readObjectRecordingByKey(client, config, fileName);
@@ -334,16 +279,6 @@ export class RecordingAdminService {
 
     const name = 'name' in error && typeof error.name === 'string' ? error.name : null;
     return name === 'NoSuchKey' || name === 'NotFound';
-  }
-
-  private _resolveRecordingPath(fileName: string): string {
-    const dir = this._recordingsDir();
-    const resolvedDir = resolve(dir);
-    const resolvedFile = resolve(join(resolvedDir, fileName));
-    if (!resolvedFile.startsWith(`${resolvedDir}/`) && resolvedFile !== resolvedDir) {
-      throw new BadRequestException('Invalid recording file path');
-    }
-    return resolvedFile;
   }
 
   private _parseRecordingFileName(fileName: string): {

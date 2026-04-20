@@ -182,8 +182,6 @@ services:
         condition: service_started
       minio:
         condition: service_started
-    volumes:
-      - ./data/livekit-recordings:/out
     networks:
       - internal
       - frontend
@@ -260,9 +258,7 @@ services:
       LIVEKIT_API_SECRET_FILE: ${LIVEKIT_API_SECRET_FILE:-/run/secrets/livekit_api_secret}
       LIVEKIT_URL: ${LIVEKIT_URL:-ws://livekit:7880}
       LIVEKIT_PUBLIC_URL: ${LIVEKIT_PUBLIC_URL:-wss://botparty.live/rtc}
-      LIVEKIT_RECORDING_FILEPATH_TEMPLATE: ${LIVEKIT_RECORDING_FILEPATH_TEMPLATE:-/out/{room_name}-{time}.mp4}
       LIVEKIT_RECORDING_OBJECT_KEY_TEMPLATE: ${LIVEKIT_RECORDING_OBJECT_KEY_TEMPLATE:-{room_name}-{time}.mp4}
-      LIVEKIT_RECORDINGS_DIR: ${LIVEKIT_RECORDINGS_DIR:-/recordings}
       LIVEKIT_RECORDINGS_S3_BUCKET: ${LIVEKIT_RECORDINGS_S3_BUCKET:-botparty-recordings}
       LIVEKIT_RECORDINGS_S3_REGION: ${LIVEKIT_RECORDINGS_S3_REGION:-us-east-1}
       LIVEKIT_RECORDINGS_S3_ENDPOINT: ${LIVEKIT_RECORDINGS_S3_ENDPOINT:-http://minio:9000}
@@ -274,7 +270,6 @@ services:
       THROTTLE_TTL: ${THROTTLE_TTL:-60000}
       THROTTLE_LIMIT: ${THROTTLE_LIMIT:-100}
       FASTIFY_BODY_LIMIT: ${FASTIFY_BODY_LIMIT:-5242880}
-      THUMBNAIL_STORAGE_DIR: ${THUMBNAIL_STORAGE_DIR:-/app/data/robot-thumbnails}
       THUMBNAIL_PUBLIC_BASE_URL: ${THUMBNAIL_PUBLIC_BASE_URL:-https://botparty.live/storage/botparty-thumbnails}
       THUMBNAIL_S3_BUCKET: ${THUMBNAIL_S3_BUCKET:-botparty-thumbnails}
       THUMBNAIL_S3_REGION: ${THUMBNAIL_S3_REGION:-us-east-1}
@@ -303,8 +298,6 @@ services:
       - internal
       - frontend
     volumes:
-      - ./data/livekit-recordings:/recordings
-      - ./data/robot-thumbnails:/app/data/robot-thumbnails
       - ./docker/secrets:/run/secrets:ro
     healthcheck:
       test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:4000/api/v1/health/live 2>/dev/null && echo ok || exit 1"]

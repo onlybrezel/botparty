@@ -4,9 +4,7 @@ import {
   ListObjectsV2Command,
   PutObjectCommand,
 } from '@aws-sdk/client-s3';
-import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { rm } from 'node:fs/promises';
 import { RobotThumbnailService } from './robot-thumbnail.service';
 
 const VALID_PNG_DATA_URL =
@@ -21,11 +19,9 @@ describe('RobotThumbnailService', () => {
     };
   };
   let originalEnv: NodeJS.ProcessEnv;
-  let storageDir: string | null;
 
   beforeEach(() => {
     originalEnv = { ...process.env };
-    storageDir = null;
     prisma = {
       robot: {
         findUnique: jest.fn(),
@@ -43,35 +39,17 @@ describe('RobotThumbnailService', () => {
     }
     Object.assign(process.env, originalEnv);
     jest.restoreAllMocks();
-
-    if (storageDir) {
-      await rm(storageDir, { recursive: true, force: true });
-    }
   });
 
-  it('saves thumbnails to local storage when object storage is not configured', async () => {
-    storageDir = await mkdtemp(join(tmpdir(), 'botparty-thumbnail-'));
-    process.env.THUMBNAIL_STORAGE_DIR = storageDir;
-
+  it('rejects thumbnail writes when object storage is not configured', async () => {
     prisma.robot.findUnique.mockResolvedValue({
       id: 'robot-1',
       ownerId: 'owner-1',
       owner: { id: 'owner-1', username: 'owner', displayName: null, avatarUrl: null },
     });
-    prisma.robot.update.mockImplementation(async ({ data }) => ({
-      id: 'robot-1',
-      ownerId: 'owner-1',
-      owner: { id: 'owner-1', username: 'owner', displayName: null, avatarUrl: null },
-      thumbnailUrl: data.thumbnailUrl,
-    }));
-
-    const saved = await service.save('robot-1', 'owner-1', VALID_PNG_DATA_URL);
-
-    const files = await readdir(storageDir);
-    expect(files).toEqual(['robot-1.webp']);
-    const written = await readFile(join(storageDir, 'robot-1.webp'));
-    expect(written.length).toBeGreaterThan(0);
-    expect(saved.thumbnailUrl).toMatch(/^\/api\/v1\/robots\/robot-1\/thumbnail-image\?v=\d+$/);
+    await expect(service.save('robot-1', 'owner-1', VALID_PNG_DATA_URL)).rejects.toThrow(
+      'Thumbnail object storage is not configured',
+    );
   });
 
   it('uploads thumbnails to S3-compatible storage and returns the public CDN url', async () => {
@@ -168,41 +146,32 @@ describe('RobotThumbnailService', () => {
     });
   });
 
-  it('migrates legacy local thumbnails into object storage on first read', async () => {
-    storageDir = await mkdtemp(join(tmpdir(), 'botparty-thumbnail-'));
-    process.env.THUMBNAIL_STORAGE_DIR = storageDir;
+  it('reads the latest object for a robot when the stored thumbnail url is legacy', async () => {
     process.env.THUMBNAIL_S3_BUCKET = 'botparty-thumbnails';
     process.env.THUMBNAIL_S3_REGION = 'auto';
     process.env.THUMBNAIL_S3_ACCESS_KEY_ID = 'access-key';
     process.env.THUMBNAIL_S3_SECRET_ACCESS_KEY = 'secret-key';
     process.env.THUMBNAIL_PUBLIC_BASE_URL = 'https://cdn.example.com';
 
-    const legacyBuffer = Buffer.from(VALID_PNG_DATA_URL.split(',')[1] ?? '', 'base64');
-    await writeFile(join(storageDir, 'robot-1.png'), legacyBuffer);
-
     prisma.robot.findUnique.mockResolvedValue({ thumbnailUrl: '/api/v1/robots/robot-1/thumbnail-image?v=123' });
-    prisma.robot.update.mockResolvedValue({
-      id: 'robot-1',
-      thumbnailUrl: 'https://cdn.example.com/robot-thumbnails/robot-1/1700000000000.webp',
-    });
 
     const send = jest.fn()
-      .mockResolvedValueOnce({ Contents: [] })
-      .mockResolvedValueOnce({});
+      .mockResolvedValueOnce({
+        Contents: [{ Key: 'robot-thumbnails/robot-1/1700000000000.webp', LastModified: new Date('2026-04-20T12:00:00Z') }],
+      })
+      .mockResolvedValueOnce({
+        Body: { transformToByteArray: jest.fn().mockResolvedValue(Uint8Array.from([4, 5, 6])) },
+        ContentType: 'image/webp',
+      });
     jest.spyOn(service as any, '_createObjectStorageClient').mockReturnValue({ send } as never);
-    jest.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
 
     const file = await service.read('robot-1');
 
-    expect(file.contentType).toBe('image/png');
-    expect(send).toHaveBeenNthCalledWith(1, expect.any(ListObjectsV2Command));
-    expect(send).toHaveBeenNthCalledWith(2, expect.any(PutObjectCommand));
-    expect(prisma.robot.update).toHaveBeenCalledWith({
-      where: { id: 'robot-1' },
-      data: { thumbnailUrl: 'https://cdn.example.com/robot-thumbnails/robot-1/1700000000000.webp' },
+    expect(file).toEqual({
+      buffer: Buffer.from([4, 5, 6]),
+      contentType: 'image/webp',
     });
-
-    const files = await readdir(storageDir);
-    expect(files).toHaveLength(0);
+    expect(send).toHaveBeenNthCalledWith(1, expect.any(ListObjectsV2Command));
+    expect(send).toHaveBeenNthCalledWith(2, expect.any(GetObjectCommand));
   });
 });

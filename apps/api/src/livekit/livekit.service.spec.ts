@@ -87,14 +87,9 @@ describe('LivekitService', () => {
     jest.clearAllMocks();
   });
 
-  it('uses local file outputs when recording object storage is not configured', async () => {
-    values.LIVEKIT_RECORDING_FILEPATH_TEMPLATE = '/out/{room_name}-{time}.mp4';
-
-    await service.startRoomRecording(robotId);
-
-    const output = egressService.startTrackCompositeEgress.mock.calls[0]?.[1] as EncodedFileOutput;
-    expect(output.filepath).toBe(`/out/robot-${robotId}-front-{time}.mp4`);
-    expect((output.output as { case?: string }).case).toBeUndefined();
+  it('rejects recording start when object storage is not configured', async () => {
+    await expect(service.startRoomRecording(robotId)).rejects.toThrow('Recording object storage is not configured');
+    expect(egressService.startTrackCompositeEgress).not.toHaveBeenCalled();
   });
 
   it('uses S3-compatible outputs when recording object storage is configured', async () => {

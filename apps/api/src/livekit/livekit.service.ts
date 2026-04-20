@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AccessToken, EgressClient, IngressClient, IngressInput, RoomServiceClient } from 'livekit-server-sdk';
 import { EncodedFileOutput, EncodedFileType, S3Upload, TrackType } from '@livekit/protocol';
@@ -231,7 +231,7 @@ export class LivekitService {
       return this.toRecordingStatus(roomName, activeEgress, true, trackCameraLookup);
     }
 
-    const recordingObjectStorage = this._recordingObjectStorageConfig();
+    const recordingObjectStorage = this._requireRecordingObjectStorageConfig();
     const created: Awaited<ReturnType<EgressClient['startTrackCompositeEgress']>>[] = [];
     for (const target of pendingTargets) {
       const output = this.buildRecordingFileOutput(roomName, target.cameraId, recordingObjectStorage);
@@ -537,16 +537,8 @@ export class LivekitService {
   private buildRecordingFileOutput(
     roomName: string,
     cameraId: string | null,
-    objectStorage: S3CompatibleStorageConfig | null,
+    objectStorage: S3CompatibleStorageConfig,
   ): EncodedFileOutput {
-    if (!objectStorage) {
-      return new EncodedFileOutput({
-        fileType: EncodedFileType.MP4,
-        filepath: this.resolveRecordingFilepath(roomName, cameraId),
-        disableManifest: true,
-      });
-    }
-
     const objectKey = this.resolveRecordingObjectKey(roomName, cameraId);
     return new EncodedFileOutput({
       fileType: EncodedFileType.MP4,
@@ -566,13 +558,6 @@ export class LivekitService {
         }),
       },
     });
-  }
-
-  private resolveRecordingFilepath(roomName: string, cameraId: string | null): string {
-    const template = this.config
-      .get<string>('LIVEKIT_RECORDING_FILEPATH_TEMPLATE')
-      ?.trim() || '/out/{room_name}-{time}.mp4';
-    return this.resolveRecordingTemplate(template, roomName, cameraId);
   }
 
   private resolveRecordingObjectKey(roomName: string, cameraId: string | null): string {
@@ -609,6 +594,14 @@ export class LivekitService {
 
   private _recordingObjectStorageConfig(): S3CompatibleStorageConfig | null {
     return resolveS3CompatibleStorageConfig(this.config, 'LIVEKIT_RECORDINGS_S3_');
+  }
+
+  private _requireRecordingObjectStorageConfig(): S3CompatibleStorageConfig {
+    const config = this._recordingObjectStorageConfig();
+    if (!config) {
+      throw new InternalServerErrorException('Recording object storage is not configured');
+    }
+    return config;
   }
 
   private buildTrackCameraLookup(

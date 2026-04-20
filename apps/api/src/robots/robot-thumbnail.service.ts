@@ -4,10 +4,8 @@ import {
   BadRequestException,
   ForbiddenException,
   Logger,
+  InternalServerErrorException,
 } from '@nestjs/common';
-import { access, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { constants as fsConstants } from 'node:fs';
-import { join, resolve } from 'node:path';
 import {
   DeleteObjectsCommand,
   GetObjectCommand,
@@ -45,23 +43,13 @@ export class RobotThumbnailService {
 
     const parsed = this._parseDataUrl(dataUrl);
     const normalizedBuffer = await this._normalizeImage(parsed.buffer);
-    await this._removeExisting(robotId);
+    const objectStorage = this._requireObjectStorageConfig();
+    await this._removeExistingObject(objectStorage, robotId);
 
-    const objectStorage = this._objectStorageConfig();
-    let thumbnailUrl: string;
-
-    if (objectStorage) {
-      await this._removeExistingObject(objectStorage, robotId);
-      const objectKey = this._objectKey(robotId);
-      await this._putObject(objectStorage, objectKey, normalizedBuffer);
-      thumbnailUrl = this._buildObjectUrl(objectStorage, objectKey);
-      this.logger.debug(`Stored thumbnail for ${robotId} in object storage`);
-    } else {
-      await this._ensureStorageDir();
-      const filePath = this._filePath(robotId, 'webp');
-      await writeFile(filePath, normalizedBuffer);
-      thumbnailUrl = this._buildLocalUrl(robotId);
-    }
+    const objectKey = this._objectKey(robotId);
+    await this._putObject(objectStorage, objectKey, normalizedBuffer);
+    const thumbnailUrl = this._buildObjectUrl(objectStorage, objectKey);
+    this.logger.debug(`Stored thumbnail for ${robotId} in object storage`);
 
     return await this.prisma.robot.update({
       where: { id: robotId },
@@ -75,11 +63,8 @@ export class RobotThumbnailService {
     if (!robot) throw new NotFoundException('Robot not found');
     if (robot.ownerId !== ownerId) throw new ForbiddenException('Not your robot');
 
-    await this._removeExisting(robotId);
-    const objectStorage = this._objectStorageConfig();
-    if (objectStorage) {
-      await this._removeExistingObject(objectStorage, robotId);
-    }
+    const objectStorage = this._requireObjectStorageConfig();
+    await this._removeExistingObject(objectStorage, robotId);
 
     return await this.prisma.robot.update({
       where: { id: robotId },
@@ -89,41 +74,20 @@ export class RobotThumbnailService {
   }
 
   async read(robotId: string): Promise<{ buffer: Buffer; contentType: string }> {
-    const objectStorage = this._objectStorageConfig();
-    if (objectStorage) {
-      const robot = await this.prisma.robot.findUnique({
-        where: { id: robotId },
-        select: { thumbnailUrl: true },
-      });
+    const objectStorage = this._requireObjectStorageConfig();
+    const robot = await this.prisma.robot.findUnique({
+      where: { id: robotId },
+      select: { thumbnailUrl: true },
+    });
 
-      const objectKey = this._objectKeyFromUrl(objectStorage, robot?.thumbnailUrl ?? null);
-      if (objectKey) {
-        return this._readObject(objectStorage, objectKey);
-      }
+    const objectKey =
+      this._objectKeyFromUrl(objectStorage, robot?.thumbnailUrl ?? null)
+      ?? await this._findLatestObjectKey(objectStorage, robotId);
+    if (!objectKey) {
+      throw new NotFoundException('Thumbnail not found');
     }
 
-    const localFile = await this._readLocalFile(robotId);
-    if (localFile) {
-      if (objectStorage) {
-        await this._migrateLegacyLocalThumbnail(objectStorage, robotId, localFile.buffer);
-      }
-      return localFile;
-    }
-
-    throw new NotFoundException('Thumbnail not found');
-  }
-
-  private _storageDir() {
-    const configured = process.env.THUMBNAIL_STORAGE_DIR?.trim();
-    return configured ? resolve(configured) : resolve(process.cwd(), 'data', 'robot-thumbnails');
-  }
-
-  private _filePath(robotId: string, extension: string) {
-    return join(this._storageDir(), `${robotId}.${extension}`);
-  }
-
-  private _buildLocalUrl(robotId: string) {
-    return `/api/v1/robots/${robotId}/thumbnail-image?v=${Date.now()}`;
+    return this._readObject(objectStorage, objectKey);
   }
 
   private _objectKey(robotId: string) {
@@ -159,6 +123,14 @@ export class RobotThumbnailService {
       publicBaseUrl,
       forcePathStyle: this._envFlag('THUMBNAIL_S3_FORCE_PATH_STYLE'),
     };
+  }
+
+  private _requireObjectStorageConfig(): ThumbnailObjectStorageConfig {
+    const config = this._objectStorageConfig();
+    if (!config) {
+      throw new InternalServerErrorException('Thumbnail object storage is not configured');
+    }
+    return config;
   }
 
   private _envFlag(name: string): boolean {
@@ -234,6 +206,32 @@ export class RobotThumbnailService {
     );
   }
 
+  private async _findLatestObjectKey(config: ThumbnailObjectStorageConfig, robotId: string): Promise<string | null> {
+    const client = this._createObjectStorageClient(config);
+    const listed = await client.send(
+      new ListObjectsV2Command({
+        Bucket: config.bucket,
+        Prefix: this._objectPrefix(robotId),
+      }),
+    );
+
+    const latest = (listed.Contents ?? []).reduce<{ key: string; modifiedAt: number } | null>((current, entry) => {
+      const key = entry.Key?.trim();
+      if (!key) {
+        return current;
+      }
+
+      const modifiedAt = entry.LastModified?.getTime() ?? 0;
+      if (!current || modifiedAt >= current.modifiedAt) {
+        return { key, modifiedAt };
+      }
+
+      return current;
+    }, null);
+
+    return latest?.key ?? null;
+  }
+
   private async _readObject(
     config: ThumbnailObjectStorageConfig,
     objectKey: string,
@@ -255,62 +253,6 @@ export class RobotThumbnailService {
       buffer: Buffer.from(bytes),
       contentType: response.ContentType || 'image/webp',
     };
-  }
-
-  private async _readLocalFile(robotId: string): Promise<{ buffer: Buffer; contentType: string } | null> {
-    for (const extension of ['png', 'jpg', 'webp']) {
-      const filePath = this._filePath(robotId, extension);
-      try {
-        await access(filePath, fsConstants.R_OK);
-        return {
-          buffer: await readFile(filePath),
-          contentType: this._contentType(extension),
-        };
-      } catch {
-        // try next
-      }
-    }
-
-    return null;
-  }
-
-  private async _migrateLegacyLocalThumbnail(
-    config: ThumbnailObjectStorageConfig,
-    robotId: string,
-    buffer: Buffer,
-  ): Promise<void> {
-    try {
-      const normalizedBuffer = await this._normalizeImage(buffer);
-      await this._removeExistingObject(config, robotId);
-
-      const objectKey = this._objectKey(robotId);
-      await this._putObject(config, objectKey, normalizedBuffer);
-      await this.prisma.robot.update({
-        where: { id: robotId },
-        data: { thumbnailUrl: this._buildObjectUrl(config, objectKey) },
-      });
-      await this._removeExisting(robotId);
-      this.logger.log(`Migrated legacy local thumbnail for ${robotId} to object storage`);
-    } catch (err) {
-      this.logger.warn(`Failed to migrate legacy local thumbnail for ${robotId}: ${(err as Error).message}`);
-    }
-  }
-
-  private async _ensureStorageDir() {
-    await mkdir(this._storageDir(), { recursive: true });
-  }
-
-  private async _removeExisting(robotId: string) {
-    try {
-      const files = await readdir(this._storageDir());
-      await Promise.all(
-        files
-          .filter((f) => f.startsWith(`${robotId}.`))
-          .map((f) => rm(join(this._storageDir(), f), { force: true })),
-      );
-    } catch {
-      // storage dir may not exist yet or cleanup may run in object-storage mode.
-    }
   }
 
   private _parseDataUrl(dataUrl: string): { buffer: Buffer } {
@@ -354,9 +296,4 @@ export class RobotThumbnailService {
     }
   }
 
-  private _contentType(extension: string) {
-    if (extension === 'png') return 'image/png';
-    if (extension === 'webp') return 'image/webp';
-    return 'image/jpeg';
-  }
 }

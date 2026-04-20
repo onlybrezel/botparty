@@ -376,14 +376,14 @@ export class RobotsController {
     @Headers('cookie') cookieHeader?: string,
     @Query() query: GetChatHistoryDto = {},
   ) {
-    const parsedLimit = query.limit ? Number.parseInt(query.limit, 10) : undefined;
-    const parsedBefore = query.before ? Number.parseInt(query.before, 10) : undefined;
+    const parsedLimit = query.limit ? Number.parseInt(query.limit, 10) : null;
+    const parsedBefore = query.before ? Number.parseInt(query.before, 10) : null;
 
-    if (query.limit && (!Number.isFinite(parsedLimit) || parsedLimit < 1)) {
+    if (parsedLimit !== null && (!Number.isFinite(parsedLimit) || parsedLimit < 1)) {
       throw new BadRequestException('limit must be a positive integer');
     }
 
-    if (query.before && (!Number.isFinite(parsedBefore) || parsedBefore < 0)) {
+    if (parsedBefore !== null && (!Number.isFinite(parsedBefore) || parsedBefore < 0)) {
       throw new BadRequestException('before must be a unix timestamp in milliseconds');
     }
 
@@ -392,8 +392,8 @@ export class RobotsController {
       requesterUserId: this.resolveRequesterId(authorization, cookieHeader),
       guestSessionId: query.guestSessionId,
       roomAccessToken: query.roomAccessToken,
-      before: parsedBefore,
-      limit: parsedLimit,
+      before: parsedBefore ?? undefined,
+      limit: parsedLimit ?? undefined,
     });
   }
 

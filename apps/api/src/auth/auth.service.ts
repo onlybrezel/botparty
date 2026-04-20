@@ -350,6 +350,7 @@ export class AuthService {
       sub: user.id,
       username: user.username,
       role: user.role as JwtPayload['role'],
+      tokenVersion: user.tokenVersion,
     };
 
     const refreshPayload: RefreshTokenPayload = {

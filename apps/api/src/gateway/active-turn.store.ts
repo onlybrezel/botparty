@@ -107,24 +107,28 @@ export class ActiveTurnStore {
 
     try {
       const parsed = JSON.parse(raw) as Partial<ActiveTurnState>;
+      const { sessionId, userId, startedAt, expiresAt } = parsed;
+
       if (
-        typeof parsed.sessionId !== 'string' ||
-        typeof parsed.userId !== 'string' ||
-        !Number.isFinite(parsed.startedAt) ||
-        !Number.isFinite(parsed.expiresAt)
+        typeof sessionId !== 'string' ||
+        typeof userId !== 'string' ||
+        typeof startedAt !== 'number' ||
+        !Number.isFinite(startedAt) ||
+        typeof expiresAt !== 'number' ||
+        !Number.isFinite(expiresAt)
       ) {
         return null;
       }
 
-      if (parsed.expiresAt <= Date.now()) {
+      if (expiresAt <= Date.now()) {
         return null;
       }
 
       return {
-        sessionId: parsed.sessionId,
-        userId: parsed.userId,
-        startedAt: parsed.startedAt,
-        expiresAt: parsed.expiresAt,
+        sessionId,
+        userId,
+        startedAt,
+        expiresAt,
       };
     } catch {
       this.logger.warn(`Invalid active turn state for ${robotId}; ignoring cached payload`);

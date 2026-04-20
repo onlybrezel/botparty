@@ -11,8 +11,13 @@ function parsePythonWsEvents(source: string): Record<string, string> {
     throw new Error('Unable to locate WS_EVENTS in Python protocol file');
   }
 
+  const dictBody = dictMatch[1];
+  if (typeof dictBody !== 'string') {
+    throw new Error('Unable to parse WS_EVENTS body from Python protocol file');
+  }
+
   return Object.fromEntries(
-    Array.from(dictMatch[1].matchAll(/"([A-Z_]+)"\s*:\s*"([^"]+)"/g), (match) => [match[1], match[2]]),
+    Array.from(dictBody.matchAll(/"([A-Z_]+)"\s*:\s*"([^"]+)"/g), (match) => [match[1], match[2]]),
   );
 }
 
