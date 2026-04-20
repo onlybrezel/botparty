@@ -163,6 +163,8 @@ JWT_REFRESH_SECRET=$(gen_secret)
 ROBOT_JWT_SECRET=$(gen_secret)
 DB_PASSWORD=$(gen_secret | head -c 24)
 REDIS_PASSWORD=$(gen_secret | head -c 24)
+MINIO_ROOT_USER=botpartyminio
+MINIO_ROOT_PASSWORD=$(gen_secret | head -c 24)
 
 # LiveKit secrets — user can override with existing key/secret
 echo ""
@@ -194,7 +196,7 @@ PORT=4000
 # ─── Database ─────────────────────────────────────────
 # DB_PASSWORD is read directly by docker-compose for the postgres container.
 DB_PASSWORD=${DB_PASSWORD}
-DATABASE_URL=postgresql://botparty:${DB_PASSWORD}@postgres:5432/botparty?schema=public
+DATABASE_URL=postgresql://botparty:${DB_PASSWORD}@postgres:5432/botparty?schema=public&connection_limit=10&pool_timeout=30
 
 # ─── Redis ────────────────────────────────────────────
 REDIS_HOST=redis
@@ -234,6 +236,31 @@ CORS_ORIGIN=${CORS_ORIGIN}
 # ─── Rate Limiting ─────────────────────────────────────
 THROTTLE_TTL=60000
 THROTTLE_LIMIT=100
+
+# ─── Thumbnail Storage ────────────────────────────────
+THUMBNAIL_STORAGE_DIR=/app/data/robot-thumbnails
+THUMBNAIL_PUBLIC_BASE_URL=${APP_URL}/storage/botparty-thumbnails
+THUMBNAIL_S3_BUCKET=botparty-thumbnails
+THUMBNAIL_S3_REGION=us-east-1
+THUMBNAIL_S3_ENDPOINT=http://minio:9000
+THUMBNAIL_S3_ACCESS_KEY_ID=${MINIO_ROOT_USER}
+THUMBNAIL_S3_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
+THUMBNAIL_S3_FORCE_PATH_STYLE=true
+
+# ─── Recording Storage ────────────────────────────────
+LIVEKIT_RECORDINGS_DIR=/recordings
+LIVEKIT_RECORDING_FILEPATH_TEMPLATE=/out/{room_name}-{time}.mp4
+LIVEKIT_RECORDING_OBJECT_KEY_TEMPLATE={room_name}-{time}.mp4
+LIVEKIT_RECORDINGS_S3_BUCKET=botparty-recordings
+LIVEKIT_RECORDINGS_S3_REGION=us-east-1
+LIVEKIT_RECORDINGS_S3_ENDPOINT=http://minio:9000
+LIVEKIT_RECORDINGS_S3_ACCESS_KEY_ID=${MINIO_ROOT_USER}
+LIVEKIT_RECORDINGS_S3_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
+LIVEKIT_RECORDINGS_S3_FORCE_PATH_STYLE=true
+
+# ─── MinIO / Object Storage ──────────────────────────
+MINIO_ROOT_USER=${MINIO_ROOT_USER}
+MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
 
 # ─── Seeding ──────────────────────────────────────────
 SEED_ADMIN_PASSWORD=${SEED_ADMIN_PASSWORD}

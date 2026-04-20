@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import RobotView from '../[slug]/robot-view';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/store';
+import { RobotRoomSkeleton } from '@/components/robot-view/robot-room-skeleton';
 import type { RobotPublic } from '@botparty/shared';
 
 function canonicalRobotPath(robot: RobotPublic): string {
@@ -70,11 +71,7 @@ export default function PrivateRobotClient({
   }, [accessToken, hasHydrated, router, slug, username]);
 
   if (loading) {
-    return (
-      <div className="mx-auto max-w-5xl px-4 py-10 text-sm text-[var(--muted-foreground)]">
-        Loading private robot...
-      </div>
-    );
+    return <RobotRoomSkeleton />;
   }
 
   if (!robot) {

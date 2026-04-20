@@ -16,6 +16,7 @@ export type {
   ControlButtonRecord,
   ModRuntimeOverview,
   PlatformStats,
+  RobotChatHistoryPage,
   RobotCameraIngress,
   RobotManaged,
   RobotMutationInput,

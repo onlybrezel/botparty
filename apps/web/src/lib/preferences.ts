@@ -11,6 +11,7 @@ export type AppPreferences = {
   keyboardTabSwitchOnlyWhenEmpty: boolean;
   queuePositionNotifications: boolean;
   queueTurnNotifications: boolean;
+  robotRoomOnboardingSeen: boolean;
 };
 
 type PreferencesState = AppPreferences & {
@@ -26,6 +27,7 @@ export const DEFAULT_PREFERENCES: AppPreferences = {
   keyboardTabSwitchOnlyWhenEmpty: true,
   queuePositionNotifications: true,
   queueTurnNotifications: true,
+  robotRoomOnboardingSeen: false,
 };
 
 export const usePreferences = create<PreferencesState>()(
@@ -46,6 +48,7 @@ export const usePreferences = create<PreferencesState>()(
         keyboardTabSwitchOnlyWhenEmpty: state.keyboardTabSwitchOnlyWhenEmpty,
         queuePositionNotifications: state.queuePositionNotifications,
         queueTurnNotifications: state.queueTurnNotifications,
+        robotRoomOnboardingSeen: state.robotRoomOnboardingSeen,
       }),
       onRehydrateStorage: () => (state) => {
         state?.setHydrated(true);

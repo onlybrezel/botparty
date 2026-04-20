@@ -29,6 +29,8 @@ import { RobotSlugService } from './robot-slug.service';
 import { RobotInviteService } from './robot-invite.service';
 import { ChatPersistenceService } from './chat-persistence.service';
 import { mergeRobotMetadata, normalizeRobotMetadata } from './robot-metadata.schema';
+import { RobotCameraService } from './robot-camera.service';
+import { RobotActionQueueService } from './robot-action-queue.service';
 
 export type GuestAccess = 'ALL' | 'AUTHENTICATED' | 'DISABLED';
 
@@ -105,6 +107,19 @@ export interface RoomAccessGrant {
   expiresAt: string;
 }
 
+export interface ChatHistoryMessage {
+  userId: string;
+  username: string;
+  content: string;
+  timestamp: number;
+}
+
+export interface ChatHistoryPage {
+  messages: ChatHistoryMessage[];
+  nextCursor: number | null;
+  hasMore: boolean;
+}
+
 export interface AllowedUserSummary {
   id: string;
   username: string;
@@ -162,6 +177,8 @@ export class RobotsService implements OnModuleDestroy {
     private readonly deviceService: RobotDeviceService,
     private readonly slugService: RobotSlugService,
     private readonly inviteService: RobotInviteService,
+    private readonly cameraService: RobotCameraService,
+    private readonly actionQueueService: RobotActionQueueService,
   ) {}
 
   onModuleDestroy() {
@@ -338,100 +355,12 @@ export class RobotsService implements OnModuleDestroy {
       throw new ForbiddenException('Not your robot');
     }
 
-    const data = updateRobotSchema.parse(input);
-    this.assertRobotTextAllowed(data);
-    const metadata = this.mergeMetadata(robot.metadata, data.acl, data.stream);
-    const accessPassword = data.accessPassword;
-    const baseData = this.stripRobotWriteFields(data);
-    this.access.invalidateCache(id);
-
-    const slugUpdate = await this.slugService.buildSlugUpdate(id, robot.slug, (robot as { slugAliases?: string[] }).slugAliases, data.slug);
-
-    const nextAccessMode = data.accessMode ?? robot.accessMode;
-    const nextAccessPassword =
-      nextAccessMode === 'PASSWORD'
-        ? accessPassword
-          ? await hash(accessPassword, { type: 2 })
-          : robot.accessPassword
-        : null;
-    const nextInviteCode = await this.inviteService.resolveInviteCode({
-      currentAccessMode: robot.accessMode,
-      currentInviteCode: robot.inviteCode,
-      nextAccessMode,
-    });
-
-    const updated = await this.prisma.robot.update({
-      where: { id },
-      data: {
-        ...baseData,
-        accessPassword: nextAccessPassword,
-        inviteCode: nextInviteCode,
-        metadata: metadata as Prisma.InputJsonValue,
-        ...slugUpdate,
-      },
-      include: {
-        owner: {
-          select: { id: true, username: true, displayName: true, avatarUrl: true },
-        },
-      },
-    });
-    return this.sanitizeManagedRobot(updated);
+    return this.applyRobotUpdate(robot, input);
   }
 
   async updateByStaff(id: string, input: z.infer<typeof updateRobotSchema>) {
     const existing = await this.findById(id);
-    const data = updateRobotSchema.parse(input);
-    this.assertRobotTextAllowed(data);
-
-    const current = await this.prisma.robot.findUnique({
-      where: { id },
-      select: { metadata: true },
-    });
-
-    const metadata = this.mergeMetadata(current?.metadata, data.acl, data.stream);
-    const accessPassword = data.accessPassword;
-    const baseData = this.stripRobotWriteFields(data);
-    this.access.invalidateCache(id);
-    const currentRobot = await this.prisma.robot.findUnique({
-      where: { id },
-      select: { accessMode: true, accessPassword: true, inviteCode: true },
-    });
-    const nextAccessMode = data.accessMode ?? currentRobot?.accessMode ?? 'OPEN';
-    const nextAccessPassword =
-      nextAccessMode === 'PASSWORD'
-        ? accessPassword
-          ? await hash(accessPassword, { type: 2 })
-          : currentRobot?.accessPassword ?? null
-        : null;
-    const nextInviteCode = await this.inviteService.resolveInviteCode({
-      currentAccessMode: currentRobot?.accessMode ?? null,
-      currentInviteCode: currentRobot?.inviteCode ?? null,
-      nextAccessMode,
-    });
-
-    const slugUpdate = await this.slugService.buildSlugUpdate(
-      id,
-      existing.slug,
-      (existing as { slugAliases?: string[] }).slugAliases,
-      data.slug,
-    );
-
-    const updated = await this.prisma.robot.update({
-      where: { id },
-      data: {
-        ...baseData,
-        accessPassword: nextAccessPassword,
-        inviteCode: nextInviteCode,
-        metadata: metadata as Prisma.InputJsonValue,
-        ...slugUpdate,
-      },
-      include: {
-        owner: {
-          select: { id: true, username: true, displayName: true, avatarUrl: true },
-        },
-      },
-    });
-    return this.sanitizeManagedRobot(updated);
+    return this.applyRobotUpdate(existing, input);
   }
 
   async delete(id: string, ownerId: string) {
@@ -461,90 +390,11 @@ export class RobotsService implements OnModuleDestroy {
       publishMode?: string;
     },
   ) {
-    const robot = await this.findById(robotId);
-    if (robot.ownerId !== ownerId) {
-      throw new ForbiddenException('Not your robot');
-    }
-
-    const cameraId = camera.id.trim();
-    if (!cameraId) {
-      throw new BadRequestException('camera id is required');
-    }
-
-    const stream = this.access.parseStreamFromMetadata(robot.metadata);
-    const currentCameras = stream.cameras ?? [];
-    const withoutCamera = currentCameras.filter((entry) => entry.id !== cameraId);
-
-    const nextCamera: RobotStreamCameraDescriptor = {
-      id: cameraId,
-      label: camera.label?.trim() || undefined,
-      role: camera.role?.trim() || undefined,
-      enabled: camera.enabled ?? true,
-      publishMode: camera.publishMode?.trim() || 'always_on',
-    };
-
-    const existingIndex = currentCameras.findIndex((entry) => entry.id === cameraId);
-    const nextCameras = [...withoutCamera];
-    if (existingIndex >= 0) {
-      nextCameras.splice(Math.min(existingIndex, nextCameras.length), 0, nextCamera);
-    } else {
-      nextCameras.push(nextCamera);
-    }
-    const nextStream: RobotStreamPolicy = {
-      targetBitrateKbps: stream.targetBitrateKbps,
-      activeCameraId: stream.activeCameraId || nextCameras[0]?.id,
-      cameras: nextCameras,
-    };
-
-    const metadata = this.mergeMetadata(robot.metadata, undefined, {
-      targetBitrateKbps: nextStream.targetBitrateKbps ?? undefined,
-      activeCameraId: nextStream.activeCameraId,
-      cameras: nextStream.cameras,
-    });
-    this.access.invalidateCache(robotId);
-    return this.prisma.robot.update({
-      where: { id: robotId },
-      data: {
-        metadata: metadata as Prisma.InputJsonValue,
-      },
-    });
+    return this.cameraService.upsertExternalStreamCamera(robotId, ownerId, camera);
   }
 
   async removeExternalStreamCamera(robotId: string, ownerId: string, cameraId: string) {
-    const robot = await this.findById(robotId);
-    if (robot.ownerId !== ownerId) {
-      throw new ForbiddenException('Not your robot');
-    }
-
-    const normalizedCameraId = cameraId.trim();
-    if (!normalizedCameraId) {
-      return robot;
-    }
-
-    const stream = this.access.parseStreamFromMetadata(robot.metadata);
-    const currentCameras = stream.cameras ?? [];
-    const nextCameras = currentCameras.filter((entry) => entry.id !== normalizedCameraId);
-    const nextStream: RobotStreamPolicy = {
-      targetBitrateKbps: stream.targetBitrateKbps,
-      activeCameraId:
-        stream.activeCameraId && stream.activeCameraId !== normalizedCameraId
-          ? stream.activeCameraId
-          : nextCameras[0]?.id,
-      cameras: nextCameras.length ? nextCameras : undefined,
-    };
-
-    const metadata = this.mergeMetadata(robot.metadata, undefined, {
-      targetBitrateKbps: nextStream.targetBitrateKbps ?? undefined,
-      activeCameraId: nextStream.activeCameraId,
-      cameras: nextStream.cameras,
-    });
-    this.access.invalidateCache(robotId);
-    return this.prisma.robot.update({
-      where: { id: robotId },
-      data: {
-        metadata: metadata as Prisma.InputJsonValue,
-      },
-    });
+    return this.cameraService.removeExternalStreamCamera(robotId, ownerId, cameraId);
   }
 
   async regenerateClaimToken(id: string, ownerId: string) {
@@ -690,103 +540,19 @@ export class RobotsService implements OnModuleDestroy {
   }
 
   async enqueueAction(robotId: string, ownerId: string, payload: RobotActionPayload) {
-    const robot = await this.findById(robotId);
-    if (robot.ownerId !== ownerId) {
-      throw new ForbiddenException('Not your robot');
-    }
-
-    return this.enqueueActionForRobot(robotId, payload);
+    return this.actionQueueService.enqueueAction(robotId, ownerId, payload);
   }
 
   async enqueueActionForRobot(robotId: string, payload: RobotActionPayload) {
-    await this.findById(robotId);
-
-    const key = `robot:actions:${robotId}`;
-    const queued = await this.redis.lrange(key, 0, -1);
-    const existing = queued
-      .map((entry) => {
-        try {
-          return JSON.parse(entry) as Record<string, unknown>;
-        } catch {
-          return null;
-        }
-      })
-      .find((entry) => entry?.type === payload.type);
-
-    if (existing) {
-      return {
-        id: typeof existing.id === 'string' ? existing.id : randomBytes(8).toString('hex'),
-        type: String(existing.type),
-        createdAt: typeof existing.createdAt === 'number' ? existing.createdAt : Date.now(),
-        alreadyQueued: true,
-      };
-    }
-
-    const action = {
-      id: randomBytes(8).toString('hex'),
-      type: payload.type,
-      durationSec: payload.durationSec,
-      createdAt: Date.now(),
-      alreadyQueued: false,
-    };
-
-    if (payload.type === 'set_log_stream') {
-      await this.redis.del(`robot:logs:${robotId}`);
-    }
-    await this.redis.rpush(key, JSON.stringify(action));
-    await this.redis.ltrim(key, -50, -1);
-    await this.redis.expire(key, 900);
-    return action;
+    return this.actionQueueService.enqueueActionForRobot(robotId, payload);
   }
 
   async getPendingActions(robotId: string, ownerId: string) {
-    const robot = await this.findById(robotId);
-    if (robot.ownerId !== ownerId) {
-      throw new ForbiddenException('Not your robot');
-    }
-
-    const raw = await this.redis.lrange(`robot:actions:${robotId}`, 0, -1);
-    const actions = raw
-      .map((entry) => {
-        try {
-          return JSON.parse(entry) as Record<string, unknown>;
-        } catch {
-          return null;
-        }
-      })
-      .filter((entry): entry is Record<string, unknown> => entry !== null);
-
-    return { robotId, actions };
+    return this.actionQueueService.getPendingActions(robotId, ownerId);
   }
 
   async consumeActionsByRobotId(robotId: string) {
-    const robot = await this.findById(robotId);
-
-    const key = `robot:actions:${robot.id}`;
-    const raw = await this.redis.lrange(key, 0, -1);
-    const stream = await this.getStreamPolicy(robot.id);
-
-    if (raw.length === 0) {
-      return {
-        robotId: robot.id,
-        stream,
-        actions: [] as Array<Record<string, unknown>>,
-      };
-    }
-
-    await this.redis.del(key);
-    const actions = raw
-      .map((entry) => {
-        try {
-          const parsed = JSON.parse(entry) as Record<string, unknown>;
-          return parsed;
-        } catch {
-          return null;
-        }
-      })
-      .filter((entry): entry is Record<string, unknown> => entry !== null);
-
-    return { robotId: robot.id, stream, actions };
+    return this.actionQueueService.consumeActionsByRobotId(robotId);
   }
 
   async ingestRobotLogsByRobotId(robotId: string, lines: string[]) {
@@ -863,7 +629,7 @@ export class RobotsService implements OnModuleDestroy {
     });
   }
 
-  async getRecentChatMessages(robotId: string, limit = LIMITS.CHAT_HISTORY_ON_JOIN) {
+  async getRecentChatMessages(robotId: string, limit = LIMITS.CHAT_HISTORY_ON_JOIN): Promise<ChatHistoryMessage[]> {
     const clampedLimit = Math.min(Math.max(limit, 1), 200);
     const rows = await this.prisma.chatMessage.findMany({
       where: {
@@ -893,6 +659,89 @@ export class RobotsService implements OnModuleDestroy {
       timestamp: row.createdAt.getTime(),
     }));
   }
+
+  async getChatHistoryPage(input: {
+    robotId: string;
+    requesterUserId: string | null;
+    guestSessionId?: string;
+    roomAccessToken?: string;
+    before?: number;
+    limit?: number;
+  }): Promise<ChatHistoryPage> {
+    const robot = await this.prisma.robot.findUnique({
+      where: { id: input.robotId },
+      select: { id: true },
+    });
+    if (!robot) {
+      throw new NotFoundException('Robot not found');
+    }
+
+    const access = await this.access.getAccessPolicy(input.robotId);
+    if (access.chat === 'DISABLED') {
+      throw new ForbiddenException('Chat is disabled for this room');
+    }
+
+    const actorId = input.requesterUserId
+      ?? this.access.resolveGuestActorId(input.guestSessionId)
+      ?? 'guest:chat-history';
+
+    const canAccessRoom = await this.access.validateRoomAccess({
+      robotId: input.robotId,
+      actorId,
+      roomAccessToken: input.roomAccessToken,
+    });
+    if (!canAccessRoom) {
+      throw new ForbiddenException('Room access verification required');
+    }
+
+    if (access.chat === 'AUTHENTICATED' && !input.requesterUserId) {
+      throw new ForbiddenException('Sign in to read chat history');
+    }
+
+    const clampedLimit = Math.min(Math.max(input.limit ?? 50, 1), 100);
+    const beforeDate =
+      typeof input.before === 'number' && Number.isFinite(input.before)
+        ? new Date(input.before)
+        : null;
+
+    const rows = await this.prisma.chatMessage.findMany({
+      where: {
+        robotId: input.robotId,
+        deletedAt: null,
+        ...(beforeDate ? { createdAt: { lt: beforeDate } } : {}),
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: clampedLimit + 1,
+      select: {
+        userId: true,
+        content: true,
+        createdAt: true,
+        user: {
+          select: {
+            username: true,
+          },
+        },
+      },
+    });
+
+    const hasMore = rows.length > clampedLimit;
+    const pageRows = hasMore ? rows.slice(0, clampedLimit) : rows;
+    const messages = pageRows.reverse().map((row) => ({
+      userId: row.userId,
+      username: row.user.username,
+      content: row.content,
+      timestamp: row.createdAt.getTime(),
+    }));
+
+    return {
+      messages,
+      nextCursor: hasMore && messages.length > 0 ? messages[0]!.timestamp : null,
+      hasMore,
+    };
+  }
+
   async getFeatured() {
     const robots = await this.prisma.robot.findMany({
       where: { isFeatured: true, visibility: 'PUBLIC' },
@@ -917,94 +766,155 @@ export class RobotsService implements OnModuleDestroy {
       }
     }
 
-    const publicRobots = await this.prisma.robot.findMany({
-      where: { visibility: 'PUBLIC' },
-      select: {
-        id: true,
-        name: true,
-        slug: true,
-        status: true,
-        viewerCount: true,
-        lastOnlineAt: true,
-        queueMode: true,
-        isFeatured: true,
-        tags: true,
-        owner: {
-          select: {
-            username: true,
-            displayName: true,
+    const staleCutoff = this.staleRobotCutoff();
+
+    const [aggregateRows, queueEntries, topTagRows, featuredRows, liveRows] = await Promise.all([
+      this.prisma.$queryRaw<Array<{
+        publicRobots: number | bigint;
+        liveRobots: number | bigint;
+        featuredRobots: number | bigint;
+        totalViewers: number | bigint;
+        online: number | bigint;
+        busy: number | bigint;
+        offline: number | bigint;
+        maintenance: number | bigint;
+      }>>`
+        SELECT
+          COUNT(*)::int AS "publicRobots",
+          SUM(CASE WHEN "status" IN ('ONLINE', 'BUSY') AND "lastOnlineAt" >= ${staleCutoff} THEN 1 ELSE 0 END)::int AS "liveRobots",
+          SUM(CASE WHEN "isFeatured" THEN 1 ELSE 0 END)::int AS "featuredRobots",
+          SUM(
+            CASE
+              WHEN "status" = 'MAINTENANCE' THEN GREATEST("viewerCount", 0)
+              WHEN "status" IN ('ONLINE', 'BUSY') AND "lastOnlineAt" >= ${staleCutoff} THEN GREATEST("viewerCount", 0)
+              ELSE 0
+            END
+          )::int AS "totalViewers",
+          SUM(CASE WHEN "status" = 'ONLINE' AND "lastOnlineAt" >= ${staleCutoff} THEN 1 ELSE 0 END)::int AS "online",
+          SUM(CASE WHEN "status" = 'BUSY' AND "lastOnlineAt" >= ${staleCutoff} THEN 1 ELSE 0 END)::int AS "busy",
+          SUM(CASE WHEN "status" = 'OFFLINE' OR ("status" IN ('ONLINE', 'BUSY') AND ("lastOnlineAt" IS NULL OR "lastOnlineAt" < ${staleCutoff})) THEN 1 ELSE 0 END)::int AS "offline",
+          SUM(CASE WHEN "status" = 'MAINTENANCE' THEN 1 ELSE 0 END)::int AS "maintenance"
+        FROM "robots"
+        WHERE "visibility" = 'PUBLIC'
+      `,
+      this.prisma.queueEntry.count({
+        where: {
+          robot: {
+            visibility: 'PUBLIC',
+            status: { in: ['ONLINE', 'BUSY'] },
+            lastOnlineAt: { gte: staleCutoff },
           },
         },
-      },
-      orderBy: [{ isFeatured: 'desc' }, { viewerCount: 'desc' }, { createdAt: 'desc' }],
-    });
+      }),
+      this.prisma.$queryRaw<Array<{ tag: string; count: number | bigint }>>`
+        SELECT
+          BTRIM(tag) AS tag,
+          COUNT(*)::int AS count
+        FROM "robots"
+        CROSS JOIN LATERAL UNNEST("tags") AS tag_table(tag)
+        WHERE "visibility" = 'PUBLIC'
+          AND BTRIM(tag) <> ''
+        GROUP BY BTRIM(tag)
+        ORDER BY COUNT(*) DESC, BTRIM(tag) ASC
+        LIMIT 12
+      `,
+      this.prisma.robot.findMany({
+        where: { visibility: 'PUBLIC', isFeatured: true },
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          status: true,
+          viewerCount: true,
+          lastOnlineAt: true,
+          tags: true,
+          owner: {
+            select: {
+              username: true,
+              displayName: true,
+            },
+          },
+        },
+        orderBy: [{ viewerCount: 'desc' }, { createdAt: 'desc' }],
+        take: 6,
+      }),
+      this.prisma.robot.findMany({
+        where: {
+          visibility: 'PUBLIC',
+          status: { in: ['ONLINE', 'BUSY'] },
+          lastOnlineAt: { gte: staleCutoff },
+        },
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          status: true,
+          viewerCount: true,
+          lastOnlineAt: true,
+          queueMode: true,
+          tags: true,
+          isFeatured: true,
+          owner: {
+            select: {
+              username: true,
+              displayName: true,
+            },
+          },
+        },
+        orderBy: [{ isFeatured: 'desc' }, { viewerCount: 'desc' }, { createdAt: 'desc' }],
+        take: 8,
+      }),
+    ]);
 
-    const normalizedRobots = publicRobots.map((robot) => ({
-      ...robot,
-      status: this.normalizeStatus(robot.status, robot.lastOnlineAt),
-      viewerCount: this.normalizeViewerCount(robot.status, robot.lastOnlineAt, robot.viewerCount),
-    }));
-    const liveStatuses = new Set<string>(['ONLINE', 'BUSY']);
-    const liveRobots = normalizedRobots.filter((robot) => liveStatuses.has(robot.status as string));
-    const featuredRobots = normalizedRobots.filter((robot) => robot.isFeatured);
-    const topTags = new Map<string, number>();
-
-    for (const robot of normalizedRobots) {
-      for (const tag of robot.tags) {
-        const normalized = tag.trim();
-        if (!normalized) {
-          continue;
-        }
-        topTags.set(normalized, (topTags.get(normalized) ?? 0) + 1);
-      }
-    }
-
-    const liveRobotIds = liveRobots.map((robot) => robot.id);
-    const queueEntries = liveRobotIds.length
-      ? await this.prisma.queueEntry.count({ where: { robotId: { in: liveRobotIds } } })
-      : 0;
+    const aggregates = aggregateRows[0] ?? {
+      publicRobots: 0,
+      liveRobots: 0,
+      featuredRobots: 0,
+      totalViewers: 0,
+      online: 0,
+      busy: 0,
+      offline: 0,
+      maintenance: 0,
+    };
 
     const overview: PublicRobotOverview = {
       totals: {
-        publicRobots: normalizedRobots.length,
-        liveRobots: liveRobots.length,
-        featuredRobots: featuredRobots.length,
-        totalViewers: normalizedRobots.reduce((sum, robot) => sum + robot.viewerCount, 0),
+        publicRobots: this.toCount(aggregates.publicRobots),
+        liveRobots: this.toCount(aggregates.liveRobots),
+        featuredRobots: this.toCount(aggregates.featuredRobots),
+        totalViewers: this.toCount(aggregates.totalViewers),
         queueEntries,
       },
       statusBreakdown: {
-        online: normalizedRobots.filter((robot) => robot.status === 'ONLINE').length,
-        busy: normalizedRobots.filter((robot) => robot.status === 'BUSY').length,
-        offline: normalizedRobots.filter((robot) => robot.status === 'OFFLINE').length,
-        maintenance: normalizedRobots.filter((robot) => robot.status === 'MAINTENANCE').length,
+        online: this.toCount(aggregates.online),
+        busy: this.toCount(aggregates.busy),
+        offline: this.toCount(aggregates.offline),
+        maintenance: this.toCount(aggregates.maintenance),
       },
-      featured: featuredRobots.slice(0, 6).map((robot) => ({
+      featured: featuredRows.map((robot) => ({
         id: robot.id,
         name: robot.name,
         slug: robot.slug,
-        status: robot.status,
-        viewerCount: robot.viewerCount,
+        status: this.normalizeStatus(robot.status, robot.lastOnlineAt),
+        viewerCount: this.normalizeViewerCount(robot.status, robot.lastOnlineAt, robot.viewerCount),
         tags: robot.tags,
         owner: robot.owner,
       })),
-      liveNow: liveRobots.slice(0, 8).map((robot) => ({
+      liveNow: liveRows.map((robot) => ({
         id: robot.id,
         name: robot.name,
         slug: robot.slug,
-        status: robot.status,
-        viewerCount: robot.viewerCount,
+        status: this.normalizeStatus(robot.status, robot.lastOnlineAt),
+        viewerCount: this.normalizeViewerCount(robot.status, robot.lastOnlineAt, robot.viewerCount),
         queueMode: robot.queueMode,
         tags: robot.tags,
         owner: robot.owner,
       })),
-      topTags: [...topTags.entries()]
-        .sort((a, b) => (b[1] === a[1] ? a[0].localeCompare(b[0]) : b[1] - a[1]))
-        .slice(0, 12)
-        .map(([tag, count]) => ({ tag, count })),
+      topTags: topTagRows.map((row) => ({ tag: row.tag, count: this.toCount(row.count) })),
     };
 
-      await this.redis.set(cacheKey, JSON.stringify(overview), 'EX', 30);
-      return overview;
+    await this.redis.set(cacheKey, JSON.stringify(overview), 'EX', 30);
+    return overview;
   }
 
   async issueRoomAccessGrant(input: {
@@ -1067,6 +977,63 @@ export class RobotsService implements OnModuleDestroy {
         : undefined,
     }) as Record<string, unknown>;
   }
+
+    private async applyRobotUpdate(
+      robot: {
+        id: string;
+        slug: string;
+        metadata: unknown;
+        accessMode: string;
+        accessPassword: string | null;
+        inviteCode: string | null;
+        slugAliases?: string[];
+      },
+      input: z.infer<typeof updateRobotSchema>,
+    ) {
+      const data = updateRobotSchema.parse(input);
+      this.assertRobotTextAllowed(data);
+      const metadata = this.mergeMetadata(robot.metadata, data.acl, data.stream);
+      const accessPassword = data.accessPassword;
+      const baseData = this.stripRobotWriteFields(data);
+      this.access.invalidateCache(robot.id);
+
+      const slugUpdate = await this.slugService.buildSlugUpdate(
+        robot.id,
+        robot.slug,
+        robot.slugAliases,
+        data.slug,
+      );
+
+      const nextAccessMode = data.accessMode ?? robot.accessMode;
+      const nextAccessPassword =
+        nextAccessMode === 'PASSWORD'
+          ? accessPassword
+            ? await hash(accessPassword, { type: 2 })
+            : robot.accessPassword
+          : null;
+      const nextInviteCode = await this.inviteService.resolveInviteCode({
+        currentAccessMode: robot.accessMode,
+        currentInviteCode: robot.inviteCode,
+        nextAccessMode,
+      });
+
+      const updated = await this.prisma.robot.update({
+        where: { id: robot.id },
+        data: {
+          ...baseData,
+          accessPassword: nextAccessPassword,
+          inviteCode: nextInviteCode,
+          metadata: metadata as Prisma.InputJsonValue,
+          ...slugUpdate,
+        },
+        include: {
+          owner: {
+            select: { id: true, username: true, displayName: true, avatarUrl: true },
+          },
+        },
+      });
+      return this.sanitizeManagedRobot(updated);
+    }
 
   private realtimeRobotCacheKey(robotId: string): string {
     return `robot:realtime:${robotId}`;
@@ -1269,6 +1236,16 @@ export class RobotsService implements OnModuleDestroy {
 
   private normalizeViewerCount(status: string, lastOnlineAt: Date | null | undefined, viewerCount: number) {
     return this.normalizeStatus(status, lastOnlineAt) === 'OFFLINE' ? 0 : Math.max(0, viewerCount);
+  }
+
+  private toCount(value: number | bigint | null | undefined): number {
+    if (typeof value === 'bigint') {
+      return Number(value);
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+    return 0;
   }
 
 }

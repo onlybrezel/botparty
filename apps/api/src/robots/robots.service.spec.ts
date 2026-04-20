@@ -3,6 +3,8 @@ import { RobotsService } from './robots.service';
 import { RobotDeviceService } from './robot-device.service';
 import { RobotSlugService } from './robot-slug.service';
 import { RobotInviteService } from './robot-invite.service';
+import { RobotCameraService } from './robot-camera.service';
+import { RobotActionQueueService } from './robot-action-queue.service';
 
 // ──────────────────────────────────────────────────────────────
 // Shared mock factories
@@ -10,6 +12,7 @@ import { RobotInviteService } from './robot-invite.service';
 
 function buildMockPrisma(overrides: Record<string, unknown> = {}) {
   return {
+    $queryRaw: jest.fn().mockResolvedValue([]),
     robot: {
       findMany: jest.fn().mockResolvedValue([]),
       findUnique: jest.fn().mockResolvedValue(null),
@@ -25,6 +28,12 @@ function buildMockPrisma(overrides: Record<string, unknown> = {}) {
     slugAlias: {
       deleteMany: jest.fn().mockResolvedValue(undefined),
       findFirst: jest.fn().mockResolvedValue(null),
+    },
+    chatMessage: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
+    queueEntry: {
+      count: jest.fn().mockResolvedValue(0),
     },
     ...overrides,
   };
@@ -55,10 +64,26 @@ function buildService(prismaOverrides?: Record<string, unknown>, configValues?: 
   const mockRedis = buildMockRedis();
   const mockTelemetry = { record: jest.fn(), touch: jest.fn() };
   const mockThumbnail = { set: jest.fn() };
-  const mockAccess = { invalidateCache: jest.fn(), getAccessPolicy: jest.fn(), getStreamPolicy: jest.fn() };
+  const mockAccess = {
+    invalidateCache: jest.fn(),
+    getAccessPolicy: jest.fn(),
+    getStreamPolicy: jest.fn(),
+    validateRoomAccess: jest.fn(),
+    resolveGuestActorId: jest.fn(),
+  };
   const mockWebhooks = { deliver: jest.fn() };
   const mockChatPersistence = { enqueue: jest.fn() };
   const mockConfig = buildMockConfig(configValues ?? {});
+  const mockCamera = {
+    upsertExternalStreamCamera: jest.fn(),
+    removeExternalStreamCamera: jest.fn(),
+  };
+  const mockActionQueue = {
+    enqueueAction: jest.fn(),
+    enqueueActionForRobot: jest.fn(),
+    getPendingActions: jest.fn(),
+    consumeActionsByRobotId: jest.fn(),
+  };
 
   // Build real sub-services backed by the mock prisma/config
   const deviceService = new RobotDeviceService(mockPrisma as never, mockConfig as never);
@@ -77,9 +102,11 @@ function buildService(prismaOverrides?: Record<string, unknown>, configValues?: 
     deviceService,
     slugService,
     inviteService,
+    mockCamera as never,
+    mockActionQueue as never,
   );
 
-  return { service, mockPrisma, mockRedis, mockAccess, mockConfig };
+  return { service, mockPrisma, mockRedis, mockAccess, mockConfig, mockCamera, mockActionQueue };
 }
 
 // Minimal robot fixture matching the shape returned by prisma includes
@@ -284,6 +311,237 @@ describe('RobotsService.validateOrBindRobotDevice', () => {
       robot: { findUnique: jest.fn().mockResolvedValue(robot), update: jest.fn() },
     });
     await expect(service.validateOrBindRobotDevice('robot-1', differentKey)).rejects.toThrow(ForbiddenException);
+  });
+});
+
+describe('RobotsService.getChatHistoryPage', () => {
+  it('returns a paginated chat history page with a next cursor', async () => {
+    const before = Date.parse('2025-01-05T00:00:00.000Z');
+    const rows = [
+      {
+        userId: 'user-3',
+        content: 'third',
+        createdAt: new Date('2025-01-04T00:00:03.000Z'),
+        user: { username: 'gamma' },
+      },
+      {
+        userId: 'user-2',
+        content: 'second',
+        createdAt: new Date('2025-01-04T00:00:02.000Z'),
+        user: { username: 'beta' },
+      },
+      {
+        userId: 'user-1',
+        content: 'first',
+        createdAt: new Date('2025-01-04T00:00:01.000Z'),
+        user: { username: 'alpha' },
+      },
+    ];
+
+    const { service, mockPrisma, mockAccess } = buildService({
+      robot: { findUnique: jest.fn().mockResolvedValue({ id: 'robot-1' }) },
+      chatMessage: { findMany: jest.fn().mockResolvedValue(rows) },
+    });
+
+    mockAccess.getAccessPolicy.mockResolvedValue({
+      video: 'ALL',
+      control: 'ALL',
+      chat: 'ALL',
+      estop: 'ALL',
+    });
+    mockAccess.resolveGuestActorId.mockReturnValue('guest:viewer-1');
+    mockAccess.validateRoomAccess.mockResolvedValue(true);
+
+    const result = await service.getChatHistoryPage({
+      robotId: 'robot-1',
+      requesterUserId: null,
+      guestSessionId: 'viewer-1',
+      before,
+      limit: 2,
+    });
+
+    expect(mockPrisma.chatMessage.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        robotId: 'robot-1',
+        deletedAt: null,
+        createdAt: { lt: new Date(before) },
+      }),
+      take: 3,
+    }));
+    expect(result).toEqual({
+      messages: [
+        {
+          userId: 'user-2',
+          username: 'beta',
+          content: 'second',
+          timestamp: Date.parse('2025-01-04T00:00:02.000Z'),
+        },
+        {
+          userId: 'user-3',
+          username: 'gamma',
+          content: 'third',
+          timestamp: Date.parse('2025-01-04T00:00:03.000Z'),
+        },
+      ],
+      nextCursor: Date.parse('2025-01-04T00:00:02.000Z'),
+      hasMore: true,
+    });
+  });
+
+  it('rejects guest chat history requests when chat requires authentication', async () => {
+    const { service, mockAccess } = buildService({
+      robot: { findUnique: jest.fn().mockResolvedValue({ id: 'robot-1' }) },
+    });
+
+    mockAccess.getAccessPolicy.mockResolvedValue({
+      video: 'ALL',
+      control: 'ALL',
+      chat: 'AUTHENTICATED',
+      estop: 'ALL',
+    });
+    mockAccess.validateRoomAccess.mockResolvedValue(true);
+
+    await expect(service.getChatHistoryPage({
+      robotId: 'robot-1',
+      requesterUserId: null,
+    })).rejects.toThrow(ForbiddenException);
+  });
+});
+
+describe('RobotsService.getPublicOverview', () => {
+  it('returns cached overview data without hitting prisma', async () => {
+    const cached = {
+      totals: { publicRobots: 1, liveRobots: 1, featuredRobots: 1, totalViewers: 4, queueEntries: 2 },
+      statusBreakdown: { online: 1, busy: 0, offline: 0, maintenance: 0 },
+      featured: [],
+      liveNow: [],
+      topTags: [],
+    };
+    const { service, mockPrisma, mockRedis } = buildService();
+    mockRedis.get.mockResolvedValueOnce(JSON.stringify(cached));
+
+    await expect(service.getPublicOverview()).resolves.toEqual(cached);
+
+    expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
+    expect(mockPrisma.robot.findMany).not.toHaveBeenCalled();
+  });
+
+  it('builds the overview from database aggregates and caches the result', async () => {
+    const recent = new Date();
+    const featuredRows = [
+      {
+        id: 'featured-1',
+        name: 'Featured Bot',
+        slug: 'featured-bot',
+        status: 'ONLINE',
+        viewerCount: 5,
+        lastOnlineAt: recent,
+        tags: ['featured'],
+        owner: { username: 'owner-a', displayName: 'Owner A' },
+      },
+    ];
+    const liveRows = [
+      {
+        id: 'live-1',
+        name: 'Live Bot',
+        slug: 'live-bot',
+        status: 'BUSY',
+        viewerCount: 7,
+        lastOnlineAt: recent,
+        queueMode: 'VOTING',
+        tags: ['wheels'],
+        isFeatured: false,
+        owner: { username: 'owner-b', displayName: null },
+      },
+    ];
+
+    const { service, mockPrisma, mockRedis } = buildService({
+      robot: {
+        findMany: jest.fn().mockImplementation((query?: { where?: { isFeatured?: boolean } }) => {
+          if (query?.where?.isFeatured) {
+            return Promise.resolve(featuredRows);
+          }
+          return Promise.resolve(liveRows);
+        }),
+      },
+      queueEntry: {
+        count: jest.fn().mockResolvedValue(4),
+      },
+      $queryRaw: jest.fn()
+        .mockResolvedValueOnce([
+          {
+            publicRobots: 3,
+            liveRobots: 2,
+            featuredRobots: 1,
+            totalViewers: 12,
+            online: 1,
+            busy: 1,
+            offline: 1,
+            maintenance: 0,
+          },
+        ])
+        .mockResolvedValueOnce([
+          { tag: 'featured', count: 2 },
+          { tag: 'wheels', count: 1 },
+        ]),
+    });
+    mockRedis.get.mockResolvedValueOnce(null);
+
+    const result = await service.getPublicOverview();
+
+    expect(result).toEqual({
+      totals: {
+        publicRobots: 3,
+        liveRobots: 2,
+        featuredRobots: 1,
+        totalViewers: 12,
+        queueEntries: 4,
+      },
+      statusBreakdown: {
+        online: 1,
+        busy: 1,
+        offline: 1,
+        maintenance: 0,
+      },
+      featured: [
+        {
+          id: 'featured-1',
+          name: 'Featured Bot',
+          slug: 'featured-bot',
+          status: 'ONLINE',
+          viewerCount: 5,
+          tags: ['featured'],
+          owner: { username: 'owner-a', displayName: 'Owner A' },
+        },
+      ],
+      liveNow: [
+        {
+          id: 'live-1',
+          name: 'Live Bot',
+          slug: 'live-bot',
+          status: 'BUSY',
+          viewerCount: 7,
+          queueMode: 'VOTING',
+          tags: ['wheels'],
+          owner: { username: 'owner-b', displayName: null },
+        },
+      ],
+      topTags: [
+        { tag: 'featured', count: 2 },
+        { tag: 'wheels', count: 1 },
+      ],
+    });
+
+    expect(mockPrisma.queueEntry.count).toHaveBeenCalledWith({
+      where: {
+        robot: {
+          visibility: 'PUBLIC',
+          status: { in: ['ONLINE', 'BUSY'] },
+          lastOnlineAt: { gte: expect.any(Date) },
+        },
+      },
+    });
+    expect(mockRedis.set).toHaveBeenCalledWith('robots:public-overview', JSON.stringify(result), 'EX', 30);
   });
 });
 

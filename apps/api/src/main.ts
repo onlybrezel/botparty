@@ -7,7 +7,7 @@ import { Logger, ValidationPipe } from '@nestjs/common';
 import helmet, { type FastifyHelmetOptions } from '@fastify/helmet';
 import type { FastifyPluginAsync } from 'fastify';
 import type { IncomingMessage } from 'http';
-import { randomUUID } from 'crypto';
+import { timingSafeEqual, randomUUID } from 'crypto';
 import { AppModule } from './app.module';
 import { loadFileBackedEnv } from './common/env-file';
 import { initSentry } from './common/sentry';
@@ -50,6 +50,41 @@ function assertRequiredSecret(env: NodeJS.ProcessEnv, name: string, options?: { 
   }
   if (options?.bannedValues?.includes(value)) {
     throw new Error(`${name} must not use an example or placeholder value`);
+  }
+}
+
+function isProtectedSwaggerPath(url: string | undefined): boolean {
+  if (!url) {
+    return false;
+  }
+
+  return url === '/docs' || url.startsWith('/docs/') || url === '/docs-json';
+}
+
+function secureEquals(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function decodeBasicAuth(header: string | undefined): { username: string; password: string } | null {
+  if (!header?.startsWith('Basic ')) {
+    return null;
+  }
+
+  try {
+    const decoded = Buffer.from(header.slice('Basic '.length), 'base64').toString('utf8');
+    const separatorIndex = decoded.indexOf(':');
+    if (separatorIndex < 0) {
+      return null;
+    }
+
+    return {
+      username: decoded.slice(0, separatorIndex),
+      password: decoded.slice(separatorIndex + 1),
+    };
+  } catch {
+    return null;
   }
 }
 
@@ -171,10 +206,40 @@ async function bootstrap() {
   // ─── Swagger / OpenAPI ─────────────────────────────
   const enableSwagger = process.env.NODE_ENV !== 'production' || process.env.SWAGGER_DOCS === 'true';
   if (enableSwagger) {
+    if (process.env.NODE_ENV === 'production') {
+      const swaggerUser = process.env.SWAGGER_DOCS_USERNAME?.trim();
+      const swaggerPassword = process.env.SWAGGER_DOCS_PASSWORD?.trim();
+
+      if (!swaggerUser || !swaggerPassword) {
+        throw new Error(
+          'SWAGGER_DOCS_USERNAME and SWAGGER_DOCS_PASSWORD must be set when Swagger is enabled in production',
+        );
+      }
+
+      app.getHttpAdapter().getInstance().addHook('onRequest', async (request, reply) => {
+        if (!isProtectedSwaggerPath(request.raw.url)) {
+          return;
+        }
+
+        const credentials = decodeBasicAuth(request.headers.authorization);
+        const authorized =
+          credentials !== null
+          && secureEquals(credentials.username, swaggerUser)
+          && secureEquals(credentials.password, swaggerPassword);
+
+        if (authorized) {
+          return;
+        }
+
+        reply.header('www-authenticate', 'Basic realm="BotParty API Docs"');
+        reply.code(401).send({ message: 'Authentication required' });
+      });
+    }
+
     const config = new DocumentBuilder()
       .setTitle('BotParty API')
       .setDescription('Real-time robot teleoperation platform API')
-      .setVersion('0.1.0')
+      .setVersion('0.1.3')
       .addBearerAuth()
       .addTag('auth', 'Authentication & authorization')
       .addTag('users', 'User management')

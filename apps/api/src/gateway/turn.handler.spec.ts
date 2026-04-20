@@ -2,14 +2,48 @@ import { TurnHandler } from './turn.handler';
 import type { TurnHandlerContext } from './turn.handler';
 import type { ActiveTurnState, WsClient } from './gateway-types';
 
-const makeContext = (overrides: Partial<TurnHandlerContext> = {}): TurnHandlerContext => ({
-  activeTurns: new Map<string, ActiveTurnState>(),
-  turnTimeouts: new Map<string, ReturnType<typeof setTimeout>>(),
-  robotClients: new Map<string, WsClient>(),
-  broadcastToRoom: jest.fn(),
-  sendRobotStop: jest.fn(),
-  ...overrides,
-});
+const makeContext = (
+  overrides: Partial<TurnHandlerContext> = {},
+): TurnHandlerContext & {
+  activeTurns: Map<string, ActiveTurnState>;
+  turnTimeouts: Map<string, ReturnType<typeof setTimeout>>;
+} => {
+  const activeTurns = new Map<string, ActiveTurnState>();
+  const turnTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
+
+  return {
+    activeTurns,
+    turnTimeouts,
+    robotClients: new Map<string, WsClient>(),
+    getActiveTurn: jest.fn(async (robotId: string) => activeTurns.get(robotId) ?? null),
+    hasLocalActiveTurn: jest.fn((robotId: string) => activeTurns.has(robotId)),
+    rememberActiveTurn: jest.fn((robotId: string, state: ActiveTurnState) => {
+      activeTurns.set(robotId, state);
+    }),
+    setActiveTurn: jest.fn(async (robotId: string, state: ActiveTurnState) => {
+      activeTurns.set(robotId, state);
+    }),
+    clearActiveTurn: jest.fn(async (robotId: string) => {
+      const current = activeTurns.get(robotId) ?? null;
+      activeTurns.delete(robotId);
+      return current;
+    }),
+    getTurnTimeout: jest.fn((robotId: string) => turnTimeouts.get(robotId)),
+    setTurnTimeout: jest.fn((robotId: string, timer: ReturnType<typeof setTimeout>) => {
+      turnTimeouts.set(robotId, timer);
+    }),
+    clearTurnTimeout: jest.fn((robotId: string) => {
+      const timer = turnTimeouts.get(robotId);
+      if (timer) {
+        clearTimeout(timer);
+      }
+      turnTimeouts.delete(robotId);
+    }),
+    broadcastToRoom: jest.fn(),
+    sendRobotStop: jest.fn(),
+    ...overrides,
+  };
+};
 
 const mockRobotsService = {
   findById: jest.fn(),
@@ -131,6 +165,28 @@ describe('TurnHandler', () => {
       const handler = new TurnHandler(ctx, mockRobotsService as never, mockSessionsService as never, mockQueueService as never);
       await handler.syncTurnLifecycle('robot-1', [{ userId: 'user-1' }]);
 
+      expect(mockSessionsService.create).not.toHaveBeenCalled();
+      expect(ctx.rememberActiveTurn).not.toHaveBeenCalled();
+    });
+
+    it('rehydrates local turn state when the shared active turn already matches the queue head', async () => {
+      const sharedTurn: ActiveTurnState = {
+        sessionId: 's1',
+        userId: 'user-1',
+        startedAt: Date.now() - 2000,
+        expiresAt: Date.now() + 5000,
+      };
+      const ctx = makeContext({
+        getActiveTurn: jest.fn().mockResolvedValue(sharedTurn),
+        hasLocalActiveTurn: jest.fn().mockReturnValue(false),
+      });
+      ctx.robotClients.set('robot-1', {} as WsClient);
+      mockRobotsService.findById.mockResolvedValueOnce({ queueMode: 'STANDARD', status: 'ONLINE', maxTurnTime: 60000 });
+
+      const handler = new TurnHandler(ctx, mockRobotsService as never, mockSessionsService as never, mockQueueService as never);
+      await handler.syncTurnLifecycle('robot-1', [{ userId: 'user-1' }]);
+
+      expect(ctx.rememberActiveTurn).toHaveBeenCalledWith('robot-1', sharedTurn);
       expect(mockSessionsService.create).not.toHaveBeenCalled();
     });
   });

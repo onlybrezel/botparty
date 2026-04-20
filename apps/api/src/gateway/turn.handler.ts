@@ -6,9 +6,15 @@ import type { QueueService } from '../queue/queue.service';
 import type { ActiveTurnState, WsClient } from './gateway-types';
 
 export interface TurnHandlerContext {
-  readonly activeTurns: Map<string, ActiveTurnState>;
-  readonly turnTimeouts: Map<string, ReturnType<typeof setTimeout>>;
   readonly robotClients: Map<string, WsClient>;
+  getActiveTurn(robotId: string): Promise<ActiveTurnState | null>;
+  hasLocalActiveTurn(robotId: string): boolean;
+  rememberActiveTurn(robotId: string, state: ActiveTurnState): void;
+  setActiveTurn(robotId: string, state: ActiveTurnState): Promise<void>;
+  clearActiveTurn(robotId: string): Promise<ActiveTurnState | null>;
+  getTurnTimeout(robotId: string): ReturnType<typeof setTimeout> | undefined;
+  setTurnTimeout(robotId: string, timer: ReturnType<typeof setTimeout>): void;
+  clearTurnTimeout(robotId: string): void;
   broadcastToRoom(robotId: string, event: string, data: unknown, excludeClientId?: string): void;
   sendRobotStop(robotId: string, reason: string): void;
 }
@@ -27,7 +33,7 @@ export class TurnHandler {
     robotId: string,
     queue: Array<{ userId: string; user?: { username?: string; displayName?: string | null } }>,
   ) {
-    const current = this.ctx.activeTurns.get(robotId) ?? null;
+    const current = await this.ctx.getActiveTurn(robotId);
     const nextEntry = queue[0] ?? null;
     const robot = await this.robotsService.findById(robotId);
     const robotRealtimeOnline = this.ctx.robotClients.has(robotId);
@@ -56,6 +62,22 @@ export class TurnHandler {
     }
 
     if (current && current.userId === nextEntry.userId) {
+      if (!this.ctx.hasLocalActiveTurn(robotId)) {
+        this.ctx.rememberActiveTurn(robotId, current);
+      }
+
+      const remainingMs = current.expiresAt - Date.now();
+      if (remainingMs <= 0) {
+        await this.handleTurnTimeout(robotId, nextEntry.userId);
+        return;
+      }
+
+      if (!this.ctx.getTurnTimeout(robotId)) {
+        const timer = setTimeout(() => {
+          void this.handleTurnTimeout(robotId, nextEntry.userId);
+        }, remainingMs);
+        this.ctx.setTurnTimeout(robotId, timer);
+      }
       return;
     }
 
@@ -65,12 +87,14 @@ export class TurnHandler {
 
     const session = await this.sessionsService.create(robotId, nextEntry.userId);
     const expiresAt = Date.now() + robot.maxTurnTime;
-    this.ctx.activeTurns.set(robotId, {
+    const startedAt = Date.now();
+    const nextTurn: ActiveTurnState = {
       sessionId: session.id,
       userId: nextEntry.userId,
-      startedAt: Date.now(),
+      startedAt,
       expiresAt,
-    });
+    };
+    await this.ctx.setActiveTurn(robotId, nextTurn);
 
     await this.robotsService.updateStatus(robotId, 'BUSY').catch(() => {});
     this.ctx.broadcastToRoom(robotId, WS_EVENTS.ROBOT_STATUS, { status: 'BUSY' });
@@ -86,7 +110,7 @@ export class TurnHandler {
       durationMs: robot.maxTurnTime,
     });
 
-    const existingTimer = this.ctx.turnTimeouts.get(robotId);
+    const existingTimer = this.ctx.getTurnTimeout(robotId);
     if (existingTimer) {
       clearTimeout(existingTimer);
     }
@@ -94,7 +118,7 @@ export class TurnHandler {
     const timer = setTimeout(() => {
       void this.handleTurnTimeout(robotId, nextEntry.userId);
     }, robot.maxTurnTime);
-    this.ctx.turnTimeouts.set(robotId, timer);
+    this.ctx.setTurnTimeout(robotId, timer);
   }
 
   async handleTurnTimeout(robotId: string, userId: string) {
@@ -103,7 +127,7 @@ export class TurnHandler {
   }
 
   async clearTurnState(robotId: string, reason: 'handoff' | 'timeout' | 'clear' = 'handoff') {
-    const current = this.ctx.activeTurns.get(robotId);
+    const current = await this.ctx.clearActiveTurn(robotId);
     if (current) {
       this.ctx.sendRobotStop(robotId, `Turn ended: ${reason}`);
       await this.sessionsService.end(current.sessionId).catch(() => {});
@@ -115,13 +139,8 @@ export class TurnHandler {
         userId: current.userId,
         reason,
       });
-      this.ctx.activeTurns.delete(robotId);
     }
 
-    const timer = this.ctx.turnTimeouts.get(robotId);
-    if (timer) {
-      clearTimeout(timer);
-      this.ctx.turnTimeouts.delete(robotId);
-    }
+    this.ctx.clearTurnTimeout(robotId);
   }
 }

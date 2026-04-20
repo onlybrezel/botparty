@@ -61,7 +61,7 @@ describe('RobotQueuePanel', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Vote' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Vote for beta' }));
     expect(onVoteForUser).toHaveBeenCalledWith('u2');
     expect(screen.getByText('4 votes')).toBeInTheDocument();
   });

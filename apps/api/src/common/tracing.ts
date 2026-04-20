@@ -4,6 +4,7 @@ import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentation
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { resourceFromAttributes } from '@opentelemetry/resources';
 import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions';
+import { PrismaInstrumentation } from '@prisma/instrumentation';
 
 let tracingSdk: NodeSDK | null = null;
 let tracingStarted = false;
@@ -34,7 +35,7 @@ export async function initTracing(logger: Logger): Promise<void> {
       [SemanticResourceAttributes.SERVICE_VERSION]: process.env.npm_package_version?.trim() || '0.1.0',
     }),
     traceExporter: buildTraceExporter(),
-    instrumentations: [getNodeAutoInstrumentations()],
+    instrumentations: [new PrismaInstrumentation(), getNodeAutoInstrumentations()],
   });
 
   await tracingSdk.start();

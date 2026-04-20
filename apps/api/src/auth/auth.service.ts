@@ -21,6 +21,8 @@ const asJwtExpiresIn = (value: string): StringValue => value as StringValue;
 
 const MAX_LOGIN_ATTEMPTS = 10;
 const LOGIN_LOCKOUT_SEC = 15 * 60; // 15 minutes
+const MAX_PASSWORD_RESET_REQUESTS = 3;
+const PASSWORD_RESET_WINDOW_SEC = 15 * 60;
 
 @Injectable()
 export class AuthService {
@@ -191,6 +193,43 @@ export class AuthService {
     });
   }
 
+  async resolveValidAccessTokenPayload(accessToken?: string | null): Promise<JwtPayload | null> {
+    const token = accessToken?.trim();
+    if (!token) {
+      return null;
+    }
+
+    try {
+      const payload = this.jwt.verify<JwtPayload>(token, {
+        secret: this.config.getOrThrow<string>('JWT_SECRET'),
+      });
+
+      const user = await this.prisma.user.findUnique({
+        where: { id: payload.sub },
+        select: {
+          id: true,
+          username: true,
+          role: true,
+          isActive: true,
+          tokenVersion: true,
+        },
+      });
+
+      if (!user || !user.isActive || user.tokenVersion !== payload.tokenVersion) {
+        return null;
+      }
+
+      return {
+        ...payload,
+        username: user.username,
+        role: user.role as JwtPayload['role'],
+        tokenVersion: user.tokenVersion,
+      };
+    } catch {
+      return null;
+    }
+  }
+
   resolveAccessTokenSubject(accessToken?: string | null) {
     const token = accessToken?.trim();
     if (!token) {
@@ -228,6 +267,16 @@ export class AuthService {
       ...input,
       email: input.email.trim().toLowerCase(),
     });
+    const resetLimitKey = `auth:password-reset:limit:${data.email}`;
+    const resetAttempts = await this.redis.incr(resetLimitKey);
+    if (resetAttempts === 1) {
+      await this.redis.expire(resetLimitKey, PASSWORD_RESET_WINDOW_SEC);
+    }
+    if (resetAttempts > MAX_PASSWORD_RESET_REQUESTS) {
+      this.logger.warn(`Password reset rate limit exceeded for ${data.email}`);
+      return { message: 'If the account exists, a reset email has been sent.' };
+    }
+
     const user = await this.prisma.user.findUnique({
       where: { email: data.email },
       select: { id: true, email: true, username: true, isActive: true },

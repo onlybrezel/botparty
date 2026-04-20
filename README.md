@@ -141,6 +141,8 @@ pnpm dev
 - Frontend: http://localhost:3000
 - API: http://localhost:4000
 - Swagger: http://localhost:4000/docs (dev only)
+- Generated API client docs: `pnpm docs:api-client` -> `docs/api-client.md`
+- Generated TypeScript client: `pnpm generate:ts-api-client` -> `apps/web/src/lib/generated/openapi-client`
 - LiveKit: ws://localhost:7880
 
 ---

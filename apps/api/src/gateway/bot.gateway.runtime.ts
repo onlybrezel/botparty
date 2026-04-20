@@ -11,7 +11,15 @@ import { BeforeApplicationShutdown, Logger, OnModuleDestroy, OnModuleInit } from
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Server, WebSocket } from 'ws';
-import { WS_EVENTS, LIMITS, ControlButtonAccess, chatMessageSchema, controlCommandSchema } from '@botparty/shared';
+import {
+  WS_EVENTS,
+  WS_PROTOCOL_VERSION,
+  WS_MIN_SUPPORTED_PROTOCOL_VERSION,
+  LIMITS,
+  ControlButtonAccess,
+  chatMessageSchema,
+  controlCommandSchema,
+} from '@botparty/shared';
 import type { JwtPayload } from '@botparty/shared';
 import { RobotsService } from '../robots/robots.service';
 import { SessionsService } from '../sessions/sessions.service';
@@ -19,9 +27,9 @@ import { QueueService } from '../queue/queue.service';
 import { RedisService } from '../redis/redis.service';
 import { ModerationService } from '../moderation/moderation.service';
 import { ControlsService } from '../controls/controls.service';
+import { AuthService } from '../auth/auth.service';
 import { getAccessCookieName, parseCookie } from '../auth/auth.cookies';
 import { isStaffRole } from '../common/robot-access';
-import Redis from 'ioredis';
 import type { ActiveTurnState, CommandMetadata, SharedPresenceSnapshot, WsClient } from './gateway-types';
 import { PresenceHandler } from './presence.handler';
 import { RobotClaimLockHandler } from './robot-claim-lock.handler';
@@ -29,11 +37,15 @@ import { TurnHandler } from './turn.handler';
 import { ModerationEnforcerHandler } from './moderation-enforcer.handler';
 import { ChatHandler } from './chat.handler';
 import { ControlHandler } from './control.handler';
+import { GuestSocketHandler } from './guest-socket.handler';
+import { RedisPubSubHandler } from './redis-pubsub.handler';
+import { ActiveTurnStore } from './active-turn.store';
 import { z, type ZodTypeAny } from 'zod';
 
 const roomJoinSchema = z.object({
   robotId: z.string().uuid(),
   accessToken: z.string().min(1).optional(),
+  protocolVersion: z.number().int().min(WS_MIN_SUPPORTED_PROTOCOL_VERSION).max(1024).default(WS_MIN_SUPPORTED_PROTOCOL_VERSION),
   guestSessionId: z.string().regex(/^[a-zA-Z0-9_-]{6,64}$/).optional(),
   roomAccessToken: z.string().min(1).max(1024).optional(),
 }).strict();
@@ -44,6 +56,7 @@ const roomPingSchema = z.object({
 
 const robotClaimSchema = z.object({
   robotAuthToken: z.string().min(1),
+  protocolVersion: z.number().int().min(WS_MIN_SUPPORTED_PROTOCOL_VERSION).max(1024).default(WS_MIN_SUPPORTED_PROTOCOL_VERSION),
 }).strict();
 
 const robotTelemetrySchema = z.object({
@@ -77,12 +90,12 @@ const WS_EVENT_TYPE_LIMITS: Record<string, { normal: number; privileged: number 
   'robot:claim': { normal: 2, privileged: 4 },
   'robot:heartbeat': { normal: 6, privileged: 12 },
   'robot:telemetry': { normal: 4, privileged: 8 },
-  'robot:actions:pull': { normal: 4, privileged: 8 },
+  [WS_EVENTS.ROBOT_ACTIONS_PULL]: { normal: 4, privileged: 8 },
   control: { normal: 30, privileged: 45 },
   estop: { normal: 4, privileged: 8 },
   chat: { normal: 6, privileged: 12 },
 };
-const MAX_GUEST_SOCKETS_PER_IP = 5;
+const WS_AUTH_REVALIDATE_INTERVAL_MS = 120_000;
 
 @WebSocketGateway({
   path: '/ws',
@@ -97,7 +110,6 @@ export class BotGateway
   server!: Server;
 
   private readonly logger = new Logger(BotGateway.name);
-  private subscriber: Redis | null = null;
   private readonly instanceId = crypto.randomUUID();
   private isShuttingDown = false;
 
@@ -110,13 +122,15 @@ export class BotGateway
   /** robotId → Set of viewer/controller clientIds */
   private readonly rooms = new Map<string, Set<string>>();
 
-  private readonly activeTurns = new Map<string, ActiveTurnState>();
+  private readonly activeTurns: ActiveTurnStore;
   private readonly turnTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
-  private readonly controlCooldowns = new Map<string, number>();
-  private readonly guestSocketsByIp = new Map<string, Set<string>>();
+  private readonly controlCooldownFallbacks = new Map<string, number>();
   private readonly allowedWsOrigins: Set<string>;
   private _pingInterval: ReturnType<typeof setInterval> | null = null;
-  private _controlCooldownCleanupInterval: ReturnType<typeof setInterval> | null = null;
+  private _controlCooldownFallbackCleanupInterval: ReturnType<typeof setInterval> | null = null;
+  private _authRevalidationInterval: ReturnType<typeof setInterval> | null = null;
+  private _authRevalidationInFlight = false;
+  private _controlCooldownRedisFallbackActive = false;
 
   // Sub-handlers (initialized in constructor)
   private readonly presence: PresenceHandler;
@@ -125,6 +139,8 @@ export class BotGateway
   private readonly moderationEnforcer: ModerationEnforcerHandler;
   private readonly chatHandler: ChatHandler;
   private readonly controlHandler: ControlHandler;
+  private readonly guestSockets: GuestSocketHandler;
+  private readonly redisPubSub: RedisPubSubHandler;
 
   constructor(
     private readonly robotsService: RobotsService,
@@ -133,6 +149,7 @@ export class BotGateway
     private readonly redis: RedisService,
     private readonly moderationService: ModerationService,
     private readonly jwtService: JwtService,
+    private readonly authService: AuthService,
     private readonly controlsService: ControlsService,
     private readonly configService: ConfigService,
   ) {
@@ -146,11 +163,24 @@ export class BotGateway
     const instanceId = this.instanceId;
     this.presence = new PresenceHandler(redis, instanceId);
     this.claimLock = new RobotClaimLockHandler(redis);
+    this.activeTurns = new ActiveTurnStore(redis);
     this.turnHandler = new TurnHandler(
       {
-        activeTurns: this.activeTurns,
-        turnTimeouts: this.turnTimeouts,
         robotClients: this.robotClients,
+        getActiveTurn: (robotId) => this.activeTurns.get(robotId),
+        hasLocalActiveTurn: (robotId) => this.activeTurns.hasLocal(robotId),
+        rememberActiveTurn: (robotId, state) => this.activeTurns.remember(robotId, state),
+        setActiveTurn: (robotId, state) => this.activeTurns.set(robotId, state),
+        clearActiveTurn: (robotId) => this.activeTurns.clear(robotId),
+        getTurnTimeout: (robotId) => this.turnTimeouts.get(robotId),
+        setTurnTimeout: (robotId, timer) => this.turnTimeouts.set(robotId, timer),
+        clearTurnTimeout: (robotId) => {
+          const timer = this.turnTimeouts.get(robotId);
+          if (timer) {
+            clearTimeout(timer);
+            this.turnTimeouts.delete(robotId);
+          }
+        },
         broadcastToRoom: (robotId, event, data, excludeClientId) =>
           this._broadcastToRoom(robotId, event, data, excludeClientId),
         sendRobotStop: (robotId, reason) => this._sendRobotStop(robotId, reason),
@@ -161,8 +191,8 @@ export class BotGateway
     );
     this.moderationEnforcer = new ModerationEnforcerHandler(
       {
-        activeTurns: this.activeTurns,
         clients: this.clients,
+        getActiveTurn: (robotId) => this.activeTurns.get(robotId),
         clearTurnState: (robotId, reason) => this.clearTurnState(robotId, reason),
         leaveRoom: (client) => this._leaveRoom(client),
       },
@@ -174,13 +204,26 @@ export class BotGateway
       getOpenRobotClient: (robotId: string) => this._getOpenRobotClient(robotId),
       buildCommandMetadata: (client: WsClient, robotId: string, ownerId?: string | null) =>
         this._buildCommandMetadata(client, robotId, ownerId),
-      consumeControlCooldown: (client: WsClient, robotId: string, command: string, cooldownMs: number) =>
+      consumeControlCooldown: async (client: WsClient, robotId: string, command: string, cooldownMs: number) =>
         this.consumeControlCooldown(client, robotId, command, cooldownMs),
       isRoomModerator: (client: WsClient, ownerId?: string | null) =>
         this.isRoomModerator(client, ownerId),
     };
     this.chatHandler = new ChatHandler(handlerCtx, robotsService, moderationService);
     this.controlHandler = new ControlHandler(handlerCtx, robotsService, moderationService, queueService, controlsService);
+    this.guestSockets = new GuestSocketHandler();
+    this.redisPubSub = new RedisPubSubHandler(redis, queueService, {
+      instanceId,
+      hasOpenRobotClient: (robotId) => Boolean(this._getOpenRobotClient(robotId)),
+      hasLocalActiveTurn: (robotId) => this.activeTurns.hasLocal(robotId),
+      syncTurnLifecycle: (robotId, queue) => this.syncTurnLifecycle(robotId, queue),
+      clearTurnState: (robotId, reason) => this.clearTurnState(robotId, reason),
+      broadcastToRoomLocally: (robotId, event, data, excludeClientId) =>
+        this._broadcastToRoomLocally(robotId, event, data, excludeClientId),
+      enforceModerationEvent: (robotId, payload) => this.enforceModerationEvent(robotId, payload),
+      buildModerationSystemMessage: (event, data) => this.buildModerationSystemMessage(event, data),
+      broadcastSystemLocally: (event, data) => this._broadcastSystemLocally(event, data),
+    });
   }
 
   async onModuleInit() {
@@ -189,13 +232,7 @@ export class BotGateway
       this.logger.warn('Failed to reconcile orphaned sessions on startup', err);
     });
 
-    this.subscriber = this.redis.duplicate();
-
-    this.subscriber.on('pmessage', (_pattern, channel, message) => {
-      void this.handleRedisMessage(channel, message);
-    });
-
-    await this.subscriber.psubscribe('queue:*', 'ws:moderation:*', 'ws:room:*', 'ws:system:*');
+    await this.redisPubSub.start();
 
     // Server-side heartbeat: ping all open clients every 30 s to detect dead connections
     this._pingInterval = setInterval(() => {
@@ -206,14 +243,18 @@ export class BotGateway
       }
     }, 30_000);
 
-    this._controlCooldownCleanupInterval = setInterval(() => {
+    this._controlCooldownFallbackCleanupInterval = setInterval(() => {
       const now = Date.now();
-      for (const [key, expiresAt] of this.controlCooldowns.entries()) {
+      for (const [key, expiresAt] of this.controlCooldownFallbacks.entries()) {
         if (expiresAt <= now) {
-          this.controlCooldowns.delete(key);
+          this.controlCooldownFallbacks.delete(key);
         }
       }
     }, 60_000);
+
+    this._authRevalidationInterval = setInterval(() => {
+      void this._revalidateAuthenticatedSockets();
+    }, WS_AUTH_REVALIDATE_INTERVAL_MS);
   }
 
   async onModuleDestroy() {
@@ -221,14 +262,15 @@ export class BotGateway
       clearInterval(this._pingInterval);
       this._pingInterval = null;
     }
-    if (this._controlCooldownCleanupInterval) {
-      clearInterval(this._controlCooldownCleanupInterval);
-      this._controlCooldownCleanupInterval = null;
+    if (this._controlCooldownFallbackCleanupInterval) {
+      clearInterval(this._controlCooldownFallbackCleanupInterval);
+      this._controlCooldownFallbackCleanupInterval = null;
     }
-    if (this.subscriber) {
-      await this.subscriber.quit();
-      this.subscriber = null;
+    if (this._authRevalidationInterval) {
+      clearInterval(this._authRevalidationInterval);
+      this._authRevalidationInterval = null;
     }
+    await this.redisPubSub.stop();
   }
 
   async beforeApplicationShutdown(signal?: string) {
@@ -328,9 +370,54 @@ export class BotGateway
     this.logger.debug(`Client connected: ${client.id}`);
   }
 
+  private async _revalidateAuthenticatedSockets() {
+    if (this._authRevalidationInFlight || this.isShuttingDown) {
+      return;
+    }
+
+    this._authRevalidationInFlight = true;
+    try {
+      for (const client of this.clients.values()) {
+        if (
+          client.readyState !== WebSocket.OPEN ||
+          client.isRobot ||
+          client.isGuest ||
+          !client.userId
+        ) {
+          continue;
+        }
+
+        try {
+          const authPayload = await this.resolveSocketUser(client.authAccessToken, client.cookieHeader);
+          if (!authPayload || authPayload.sub !== client.userId) {
+            this.logger.debug(`Closing websocket client with expired or revoked auth: ${client.id}`);
+            try {
+              client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Invalid session token' } }));
+            } catch {
+              // Ignore send failures while disconnecting invalid sessions.
+            }
+            try {
+              client.close(1008, 'Invalid session token');
+            } catch {
+              // Ignore close failures while disconnecting invalid sessions.
+            }
+            continue;
+          }
+
+          client.username = authPayload.username;
+          client.role = authPayload.role;
+        } catch (err) {
+          this.logger.warn(`Failed to revalidate websocket auth for ${client.id}: ${(err as Error).message}`);
+        }
+      }
+    } finally {
+      this._authRevalidationInFlight = false;
+    }
+  }
+
   handleDisconnect(client: WsClient) {
     this.clients.delete(client.id);
-    this.unregisterGuestSocket(client);
+    this.guestSockets.unregister(client);
 
     // Leave the robot room
     if (client.watchingRobotId) {
@@ -375,30 +462,40 @@ export class BotGateway
     if (!parsed) {
       return;
     }
+    client.protocolVersion = parsed.protocolVersion;
 
     if (client.watchingRobotId) {
       await this._leaveRoom(client);
     }
 
     const providedAccessToken = parsed.accessToken?.trim();
-    const authPayload = this.resolveSocketUser(providedAccessToken, client.cookieHeader);
+    let authPayload: JwtPayload | null;
+    try {
+      authPayload = await this.resolveSocketUser(providedAccessToken, client.cookieHeader);
+    } catch (err) {
+      this.logger.warn(`Failed to validate websocket auth for ${client.id}: ${(err as Error).message}`);
+      client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Failed to validate session token' } }));
+      return;
+    }
+    client.authAccessToken = authPayload ? providedAccessToken : undefined;
 
-    this.unregisterGuestSocket(client);
+    this.guestSockets.unregister(client);
     client.watchingRobotId = parsed.robotId;
-    const isGuest = !authPayload;
+    const isGuest = authPayload === null;
     client.isGuest = isGuest;
 
-    if (isGuest && !this.canJoinAsGuest(client)) {
+    if (isGuest && !this.guestSockets.canJoin(client)) {
       client.watchingRobotId = undefined;
       client.userId = undefined;
       client.username = undefined;
+      client.authAccessToken = undefined;
       client.isGuest = undefined;
       client.role = undefined;
       client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Guest connection limit reached for this IP' } }));
       return;
     }
 
-    if (isGuest) {
+    if (authPayload === null) {
       const grantedActorId = await this.robotsService.resolveRoomAccessActorId(parsed.robotId, parsed.roomAccessToken);
       const derivedGuestId =
         grantedActorId && grantedActorId.startsWith('guest:')
@@ -422,6 +519,7 @@ export class BotGateway
       client.watchingRobotId = undefined;
       client.userId = undefined;
       client.username = undefined;
+      client.authAccessToken = undefined;
       client.isGuest = undefined;
       client.role = undefined;
       client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Room access verification required' } }));
@@ -429,7 +527,7 @@ export class BotGateway
     }
 
     if (isGuest) {
-      this.registerGuestSocket(client);
+      this.guestSockets.register(client);
     }
 
     let pendingRestriction:
@@ -451,6 +549,7 @@ export class BotGateway
           client.watchingRobotId = undefined;
           client.userId = undefined;
           client.username = undefined;
+          client.authAccessToken = undefined;
           client.isGuest = undefined;
           client.role = undefined;
           client.send(JSON.stringify({ event, data: restriction }));
@@ -490,7 +589,16 @@ export class BotGateway
       client.send(JSON.stringify({ event: pendingRestriction.event, data: pendingRestriction.data }));
     }
 
-    return { event: WS_EVENTS.ROOM_JOIN, data: { ok: true, viewerCount: presenceSnapshot.viewerCount } };
+    return {
+      event: WS_EVENTS.ROOM_JOIN,
+      data: {
+        ok: true,
+        viewerCount: presenceSnapshot.viewerCount,
+        protocolVersion: WS_PROTOCOL_VERSION,
+        minProtocolVersion: WS_MIN_SUPPORTED_PROTOCOL_VERSION,
+        clientProtocolVersion: parsed.protocolVersion,
+      },
+    };
   }
 
   @SubscribeMessage('room:ping')
@@ -527,6 +635,7 @@ export class BotGateway
     if (!parsed) {
       return;
     }
+    client.protocolVersion = parsed.protocolVersion;
 
     try {
       const robotId = this.resolveRobotSocketIdentity(parsed.robotAuthToken);
@@ -587,7 +696,16 @@ export class BotGateway
       this._broadcastToRoom(robot.id, WS_EVENTS.ROBOT_STATUS, { status: 'ONLINE' });
       this.logger.log(`Robot claimed: ${robot.name} (${robot.id})`);
 
-      return { event: WS_EVENTS.ROBOT_CLAIM, data: { success: true, robotId: robot.id } };
+      return {
+        event: WS_EVENTS.ROBOT_CLAIM,
+        data: {
+          success: true,
+          robotId: robot.id,
+          protocolVersion: WS_PROTOCOL_VERSION,
+          minProtocolVersion: WS_MIN_SUPPORTED_PROTOCOL_VERSION,
+          clientProtocolVersion: parsed.protocolVersion,
+        },
+      };
     } catch (err) {
       if (client.robotId) {
         await this.releaseRobotClaimLock(client.robotId, client.id);
@@ -637,9 +755,9 @@ export class BotGateway
     }
   }
 
-  @SubscribeMessage('robot:actions:pull')
+  @SubscribeMessage(WS_EVENTS.ROBOT_ACTIONS_PULL)
   async handleRobotActionsPull(@ConnectedSocket() client: WsClient, @MessageBody() data?: unknown) {
-    if (!this._checkEventRateLimit(client, 'robot:actions:pull')) {
+    if (!this._checkEventRateLimit(client, WS_EVENTS.ROBOT_ACTIONS_PULL)) {
       client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Too many requests' } }));
       return;
     }
@@ -786,7 +904,7 @@ export class BotGateway
 
     client.watchingRobotId = undefined;
     if (client.isGuest) {
-      this.unregisterGuestSocket(client);
+      this.guestSockets.unregister(client);
     }
     if (!client.userId) {
       return;
@@ -852,97 +970,6 @@ export class BotGateway
     return robotClient;
   }
 
-  private async handleRedisMessage(channel: string, message: string) {
-    if (channel.startsWith('queue:')) {
-      const robotId = channel.slice('queue:'.length);
-      if (!robotId) {
-        return;
-      }
-
-      try {
-        const queue = await this.queueService.getQueue(robotId);
-        if (this._getOpenRobotClient(robotId)) {
-          await this.syncTurnLifecycle(robotId, queue);
-        } else if (this.activeTurns.has(robotId)) {
-          await this.clearTurnState(robotId, 'clear');
-        }
-        this._broadcastToRoomLocally(robotId, WS_EVENTS.QUEUE_UPDATE, { queue });
-      } catch (err) {
-        this.logger.warn(`Failed to broadcast queue update for ${robotId}: ${(err as Error).message}`);
-      }
-      return;
-    }
-
-    if (channel.startsWith('ws:moderation:')) {
-      const robotId = channel.slice('ws:moderation:'.length);
-      if (!robotId) {
-        return;
-      }
-
-      try {
-        const payload = JSON.parse(message) as { event?: string; data?: unknown };
-        if (!payload.event) {
-          return;
-        }
-        await this.enforceModerationEvent(robotId, payload);
-        this._broadcastToRoomLocally(robotId, payload.event, payload.data ?? {});
-        const systemMessage = this.buildModerationSystemMessage(payload.event, payload.data);
-        if (systemMessage) {
-          this._broadcastToRoomLocally(robotId, WS_EVENTS.CHAT_SYSTEM, {
-            message: systemMessage,
-            timestamp: Date.now(),
-          });
-        }
-      } catch (err) {
-        this.logger.warn(`Failed to process moderation event for ${robotId}: ${(err as Error).message}`);
-      }
-      return;
-    }
-
-    if (channel.startsWith('ws:room:')) {
-      const robotId = channel.slice('ws:room:'.length);
-      if (!robotId) {
-        return;
-      }
-
-      try {
-        const payload = JSON.parse(message) as { originId?: string; event?: string; data?: unknown };
-        if (!payload.event) {
-          return;
-        }
-        if (payload.originId === this.instanceId) {
-          return;
-        }
-        this._broadcastToRoomLocally(robotId, payload.event, payload.data ?? {});
-      } catch (err) {
-        this.logger.warn(`Failed to relay room event for ${robotId}: ${(err as Error).message}`);
-      }
-    }
-
-    if (channel.startsWith('ws:system:')) {
-      try {
-        const payload = JSON.parse(message) as { event?: string; data?: unknown };
-        if (!payload.event) {
-          return;
-        }
-
-        const data =
-          payload.data && typeof payload.data === 'object' && !Array.isArray(payload.data)
-            ? payload.data
-            : {};
-        const systemMessage = JSON.stringify({ event: payload.event, data });
-
-        for (const client of this.clients.values()) {
-          if (client.readyState === WebSocket.OPEN) {
-            client.send(systemMessage);
-          }
-        }
-      } catch (err) {
-        this.logger.warn(`Failed to relay system event: ${(err as Error).message}`);
-      }
-    }
-  }
-
   private _broadcastToRoomLocally(
     robotId: string,
     event: string,
@@ -960,6 +987,15 @@ export class BotGateway
       const ws = this.clients.get(clientId);
       if (ws?.readyState === WebSocket.OPEN) {
         ws.send(message);
+      }
+    }
+  }
+
+  private _broadcastSystemLocally(event: string, data: unknown) {
+    const message = JSON.stringify({ event, data });
+    for (const client of this.clients.values()) {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(message);
       }
     }
   }
@@ -1003,7 +1039,7 @@ export class BotGateway
     return this.claimLock.release(robotId, clientId);
   }
 
-  private resolveSocketUser(accessToken?: string, cookieHeader?: string): JwtPayload | null {
+  private async resolveSocketUser(accessToken?: string, cookieHeader?: string): Promise<JwtPayload | null> {
     const token =
       accessToken?.trim() ||
       parseCookie(cookieHeader, getAccessCookieName(this.configService));
@@ -1011,11 +1047,7 @@ export class BotGateway
       return null;
     }
 
-    try {
-      return this.jwtService.verify<JwtPayload>(token);
-    } catch {
-      return null;
-    }
+    return this.authService.resolveValidAccessTokenPayload(token);
   }
 
   private resolveRobotSocketIdentity(robotAuthToken?: string): string | null {
@@ -1091,12 +1123,12 @@ export class BotGateway
     );
   }
 
-  private consumeControlCooldown(
+  private async consumeControlCooldown(
     client: WsClient,
     robotId: string,
     command: string,
     cooldownMs: number,
-  ): boolean {
+  ): Promise<boolean> {
     if (cooldownMs <= 0) {
       return true;
     }
@@ -1107,23 +1139,52 @@ export class BotGateway
       return true;
     }
 
-    const key = `${actorKey}:${robotId}:${normalizedCommand}`;
+    const key = this.buildControlCooldownKey(actorKey, robotId, normalizedCommand);
+
+    try {
+      const acquired = await this.redis.set(key, Date.now().toString(), 'PX', cooldownMs, 'NX');
+      this.markControlCooldownRedisHealthy();
+      return acquired === 'OK';
+    } catch (err) {
+      if (!this._controlCooldownRedisFallbackActive) {
+        this.logger.warn(`Redis control cooldown unavailable; falling back to local cache: ${(err as Error).message}`);
+        this._controlCooldownRedisFallbackActive = true;
+      }
+      return this.consumeLocalControlCooldown(key, cooldownMs);
+    }
+  }
+
+  private buildControlCooldownKey(actorKey: string, robotId: string, command: string): string {
+    return `ws:control-cooldown:${robotId}:${actorKey}:${command}`;
+  }
+
+  private consumeLocalControlCooldown(key: string, cooldownMs: number): boolean {
     const now = Date.now();
-    const nextAllowedAt = this.controlCooldowns.get(key) ?? 0;
+    const nextAllowedAt = this.controlCooldownFallbacks.get(key) ?? 0;
     if (nextAllowedAt > now) {
       return false;
     }
 
-    if (this.controlCooldowns.size > 4096) {
-      for (const [entryKey, expiresAt] of this.controlCooldowns.entries()) {
+    if (this.controlCooldownFallbacks.size > 4096) {
+      for (const [entryKey, expiresAt] of this.controlCooldownFallbacks.entries()) {
         if (expiresAt <= now) {
-          this.controlCooldowns.delete(entryKey);
+          this.controlCooldownFallbacks.delete(entryKey);
         }
       }
     }
 
-    this.controlCooldowns.set(key, now + cooldownMs);
+    this.controlCooldownFallbacks.set(key, now + cooldownMs);
     return true;
+  }
+
+  private markControlCooldownRedisHealthy(): void {
+    if (!this._controlCooldownRedisFallbackActive) {
+      return;
+    }
+
+    this._controlCooldownRedisFallbackActive = false;
+    this.controlCooldownFallbacks.clear();
+    this.logger.log('Redis control cooldown recovered; local fallback cache cleared');
   }
 
   private _buildCommandMetadata(client: WsClient, robotId: string, ownerId?: string | null): CommandMetadata {
@@ -1165,32 +1226,6 @@ export class BotGateway
     return 'unknown';
   }
 
-  private canJoinAsGuest(client: WsClient): boolean {
-    const ip = client.remoteIp ?? 'unknown';
-    const sockets = this.guestSocketsByIp.get(ip);
-    return (sockets?.size ?? 0) < MAX_GUEST_SOCKETS_PER_IP;
-  }
-
-  private registerGuestSocket(client: WsClient): void {
-    const ip = client.remoteIp ?? 'unknown';
-    const sockets = this.guestSocketsByIp.get(ip) ?? new Set<string>();
-    sockets.add(client.id);
-    this.guestSocketsByIp.set(ip, sockets);
-  }
-
-  private unregisterGuestSocket(client: WsClient): void {
-    const ip = client.remoteIp ?? 'unknown';
-    const sockets = this.guestSocketsByIp.get(ip);
-    if (!sockets) {
-      return;
-    }
-
-    sockets.delete(client.id);
-    if (sockets.size === 0) {
-      this.guestSocketsByIp.delete(ip);
-    }
-  }
-
   getRuntimeMetricsSnapshot() {
     let roomMemberships = 0;
     for (const members of this.rooms.values()) {
@@ -1202,8 +1237,8 @@ export class BotGateway
       connectedRobotClients: this.robotClients.size,
       activeRooms: this.rooms.size,
       roomMemberships,
-      activeTurns: this.activeTurns.size,
-      controlCooldowns: this.controlCooldowns.size,
+      activeTurns: this.activeTurns.localSize(),
+      controlCooldowns: this.controlCooldownFallbacks.size,
     };
   }
 

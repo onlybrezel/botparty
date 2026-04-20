@@ -12,7 +12,7 @@ export interface ControlHandlerContext {
   broadcastToRoom(robotId: string, event: string, data: unknown, excludeClientId?: string): void;
   getOpenRobotClient(robotId: string): WsClient | undefined;
   buildCommandMetadata(client: WsClient, robotId: string, ownerId?: string | null): CommandMetadata;
-  consumeControlCooldown(client: WsClient, robotId: string, command: string, cooldownMs: number): boolean;
+  consumeControlCooldown(client: WsClient, robotId: string, command: string, cooldownMs: number): Promise<boolean>;
   isRoomModerator(client: WsClient, ownerId?: string | null): boolean;
 }
 
@@ -77,7 +77,7 @@ export class ControlHandler {
       return;
     }
 
-    if (!this.ctx.consumeControlCooldown(client, data.robotId, command, commandAccess.cooldownMs)) {
+    if (!(await this.ctx.consumeControlCooldown(client, data.robotId, command, commandAccess.cooldownMs))) {
       return;
     }
 

@@ -47,8 +47,11 @@ Quick reference for common production incident scenarios.
 
 **Steps:**
 1. Check memory: `docker compose exec redis redis-cli info memory | grep used_memory_human`
-2. Check max memory config: `docker compose exec redis redis-cli config get maxmemory`
-3. If OOM: clear volatile keys: `docker compose exec redis redis-cli -a <REDIS_PASSWORD> flushdb async`
+2. Check max memory config in [docker/redis/redis.conf](docker/redis/redis.conf)
+3. If OOM: clear volatile keys with SCAN + UNLINK because `FLUSHDB`, `FLUSHALL`, and `KEYS` are disabled in production:
+   ```bash
+   docker compose exec redis sh -lc 'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning --scan | xargs -r -n 200 redis-cli -a "$REDIS_PASSWORD" --no-auth-warning unlink'
+   ```
 4. Restart: `docker compose restart redis`
 5. Note: Redis is ephemeral — queues and presence will reset. Active robot sessions need to rejoin.
 
@@ -74,7 +77,7 @@ Quick reference for common production incident scenarios.
 **Steps:**
 1. Check disk: `df -h /`
 2. Check recordings volume: `du -sh data/livekit-recordings/`
-3. Remove old recordings: `find data/livekit-recordings/ -mtime +7 -delete`
+3. If you still use local recording fallback storage, remove old recordings: `find data/livekit-recordings/ -mtime +7 -delete`
 4. Remove old backups: `find data/backups/ -mtime +30 -delete`
 5. Prune Docker: `docker system prune -f`
 
@@ -137,6 +140,44 @@ For schema changes, run `pnpm db:migrate:prod` before replacing API containers.
 
 ---
 
+## Horizontal Scaling Model
+
+BotParty can run multiple API instances behind a load balancer, but websocket control rooms are not fully stateless yet.
+
+**Guaranteed across instances today:**
+1. Robot claim exclusivity is coordinated through Redis lock keys.
+2. Room broadcasts, queue snapshots, presence fan-out, and shutdown notices replicate through Redis pub/sub.
+3. A reconnecting robot can land on a different instance without duplicating the control channel.
+
+**Current limitations:**
+1. Active turn timers remain in the gateway process memory (`activeTurns` / `turnTimeouts`).
+2. Per-user control cooldowns remain instance-local (`controlCooldowns`).
+3. A single robot room spread across multiple API instances can see edge-case drift during turn handoff or cooldown enforcement.
+
+**Operational guidance:**
+1. Prefer sticky websocket routing for `/ws` by room shard, cookie, or at minimum client IP.
+2. Keep a robot socket and the majority of viewers for that robot on the same API instance when possible.
+3. Drain websocket traffic before rotating replicas; do not use pure round-robin websocket routing for hot rooms until turn state is externalized.
+
+---
+
+## Prisma Pool Tuning
+
+The production defaults now include `connection_limit=10` and `pool_timeout=30` in generated and compose-provided `DATABASE_URL` values.
+
+**Tuning rule of thumb:**
+1. Size `connection_limit` per API replica, not for the whole cluster.
+2. Keep `replica_count * connection_limit` below PostgreSQL `max_connections` with room left for admin tooling and migrations.
+3. If you inject `DATABASE_URL` through secrets, preserve the same query parameters explicitly.
+
+Example:
+
+```bash
+DATABASE_URL=postgresql://botparty:***@postgres:5432/botparty?schema=public&connection_limit=10&pool_timeout=30&sslmode=disable
+```
+
+---
+
 ## Rollback Procedure
 
 BotParty uses image tags via `APP_VERSION`. To roll back:
@@ -158,10 +199,20 @@ docker images | grep botparty
 
 ```bash
 # Via admin panel: Moderation → Active Sessions → End All
-# Or via redis-cli:
-docker compose exec redis redis-cli -a <REDIS_PASSWORD> keys "robot:session:*" | xargs docker compose exec -T redis redis-cli -a <REDIS_PASSWORD> del
+# Or via redis-cli scan:
+docker compose exec redis sh -lc 'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning --scan --pattern "robot:session:*" | xargs -r redis-cli -a "$REDIS_PASSWORD" --no-auth-warning del'
 docker compose restart api
 ```
+
+---
+
+## Observability
+
+- Prometheus scrape endpoints:
+   - API: `/health/metrics`
+   - Streamer: `/metrics`
+- Grafana dashboard template: `docs/grafana/botparty-observability-overview.json`
+- Setup notes and metric inventory: `docs/observability.md`
 
 ---
 

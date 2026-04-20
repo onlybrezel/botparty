@@ -4,8 +4,8 @@ import type { QueueService } from '../queue/queue.service';
 import type { ActiveTurnState, WsClient } from './gateway-types';
 
 export interface ModerationEnforcerContext {
-  readonly activeTurns: Map<string, ActiveTurnState>;
   readonly clients: Map<string, WsClient>;
+  getActiveTurn(robotId: string): Promise<ActiveTurnState | null>;
   clearTurnState(robotId: string, reason?: 'handoff' | 'timeout' | 'clear'): Promise<void>;
   leaveRoom(client: WsClient): Promise<void>;
 }
@@ -37,7 +37,7 @@ export class ModerationEnforcerHandler {
       return;
     }
 
-    const activeTurn = this.ctx.activeTurns.get(robotId);
+    const activeTurn = await this.ctx.getActiveTurn(robotId);
     if (activeTurn?.userId === targetUserId) {
       await this.ctx.clearTurnState(robotId, 'clear');
     }

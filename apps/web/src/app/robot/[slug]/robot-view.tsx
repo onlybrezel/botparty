@@ -3,7 +3,7 @@
 import { useEffect, useRef, useCallback, useState, useLayoutEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import type { RobotPublic } from '@botparty/shared';
+import { WS_PROTOCOL_VERSION, type RobotPublic } from '@botparty/shared';
 import { AlertTriangle, Bot, Radio, Video, Gamepad2 } from 'lucide-react';
 import { api, createApiClient, type AdminRobotRecordingStatus } from '@/lib/api';
 import { useAuth } from '@/lib/store';
@@ -14,6 +14,7 @@ import { RobotViewersList } from '@/components/robot-view/viewers-list';
 import { RobotQueuePanel } from '@/components/robot-view/queue-panel';
 import { RobotChatPanel } from '@/components/robot-view/chat-panel';
 import { RobotPageHeader } from '@/components/robot-view/robot-page-header';
+import { RoomOnboardingOverlay } from '@/components/robot-view/room-onboarding-overlay';
 import { usePreferences } from '@/lib/preferences';
 
 import {
@@ -41,13 +42,38 @@ interface Props {
   robot: RobotPublic;
 }
 
+const MAX_CHAT_BUFFER = 500;
+
+function chatMessageKey(message: ChatMsg): string {
+  return message.clientMessageId
+    ? `client:${message.clientMessageId}`
+    : `msg:${message.userId}:${message.timestamp}:${message.content}`;
+}
+
+function mergeChatMessages(existing: ChatMsg[], incoming: ChatMsg[]): ChatMsg[] {
+  const merged = new Map<string, ChatMsg>();
+
+  for (const message of [...existing, ...incoming]) {
+    const key = chatMessageKey(message);
+    const previous = merged.get(key);
+    merged.set(key, previous ? { ...previous, ...message } : message);
+  }
+
+  return [...merged.values()]
+    .sort((left, right) => left.timestamp - right.timestamp)
+    .slice(-MAX_CHAT_BUFFER);
+}
+
 export default function RobotView({ robot }: Props) {
   const publicApiRef = useRef(createApiClient());
   const searchParams = useSearchParams();
   const { accessToken, userId, username, role, hasHydrated } = useAuth();
+  const preferencesHydrated = usePreferences((state) => state.hydrated);
   const tabSwitchOnlyWhenEmpty = usePreferences((state) => state.keyboardTabSwitchOnlyWhenEmpty);
   const queuePositionNotifications = usePreferences((state) => state.queuePositionNotifications);
   const queueTurnNotifications = usePreferences((state) => state.queueTurnNotifications);
+  const robotRoomOnboardingSeen = usePreferences((state) => state.robotRoomOnboardingSeen);
+  const updatePreference = usePreferences((state) => state.updatePreference);
 
   const [focusMode, setFocusMode] = useState<FocusMode>('controls');
   const [controlButtons, setControlButtons] = useState<ControlButton[]>([]);
@@ -59,6 +85,9 @@ export default function RobotView({ robot }: Props) {
   const [messages, setMessages] = useState<ChatMsg[]>([
     { userId: 'system', username: 'system', content: `Welcome to ${robot.name}!`, timestamp: Date.now(), isSystem: true },
   ]);
+  const [chatHistoryCursor, setChatHistoryCursor] = useState<number | null>(null);
+  const [chatHistoryHasMore, setChatHistoryHasMore] = useState(false);
+  const [chatHistoryLoading, setChatHistoryLoading] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [connected, setConnected] = useState(false);
   const [inQueue, setInQueue] = useState(false);
@@ -210,6 +239,9 @@ export default function RobotView({ robot }: Props) {
   useEffect(() => {
     initialChatScrollDoneRef.current = false;
     chatShouldStickRef.current = true;
+    setChatHistoryCursor(null);
+    setChatHistoryHasMore(false);
+    setChatHistoryLoading(false);
     
     // Load chat history from localStorage
     try {
@@ -220,7 +252,7 @@ export default function RobotView({ robot }: Props) {
         // Only restore if not older than 7 days
         const oldest = parsed[0];
         if (oldest && Date.now() - oldest.timestamp < 7 * 24 * 60 * 60 * 1000) {
-          setMessages(parsed);
+          setMessages(mergeChatMessages([], parsed));
         }
       }
     } catch {
@@ -508,6 +540,7 @@ export default function RobotView({ robot }: Props) {
             event: 'room:join',
             data: {
               robotId: robot.id,
+              protocolVersion: WS_PROTOCOL_VERSION,
               roomAccessToken: roomAccessToken ?? undefined,
             },
           }),
@@ -697,33 +730,29 @@ export default function RobotView({ robot }: Props) {
         break;
       case 'chat:message':
         setMessages((prev) => {
+          const timestamp =
+            typeof data.timestamp === 'number' && Number.isFinite(data.timestamp)
+              ? data.timestamp
+              : Date.now();
           const nextMessage: ChatMsg = {
             userId: data.userId as string,
             username: data.username as string,
             content: data.content as string,
-            timestamp: data.timestamp as number,
+            timestamp,
             clientMessageId:
               typeof data.clientMessageId === 'string' ? data.clientMessageId : undefined,
           };
 
-          if (nextMessage.clientMessageId) {
-            const existingIndex = prev.findIndex((entry) => entry.clientMessageId === nextMessage.clientMessageId);
-            if (existingIndex >= 0) {
-              const next = [...prev];
-              next[existingIndex] = {
-                ...next[existingIndex],
-                ...nextMessage,
-              };
-              return next.slice(-200);
-            }
+          if (data.historical === true) {
+            setChatHistoryCursor((current) => (current === null ? timestamp : Math.min(current, timestamp)));
+            setChatHistoryHasMore(true);
           }
 
-          return [...prev.slice(-200), nextMessage];
+          return mergeChatMessages(prev, [nextMessage]);
         });
         break;
       case 'chat:system':
-        setMessages((prev) => [
-          ...prev.slice(-200),
+        setMessages((prev) => mergeChatMessages(prev, [
           {
             userId: 'system',
             username: 'system',
@@ -734,7 +763,7 @@ export default function RobotView({ robot }: Props) {
                 : Date.now(),
             isSystem: true,
           },
-        ]);
+        ]));
         break;
       case 'queue:update':
         setQueue(normalizeQueueEntries(data.queue as QueueEntryWire[] | undefined));
@@ -1173,8 +1202,7 @@ export default function RobotView({ robot }: Props) {
       return;
     }
     const clientMessageId = buildGuestMessageId();
-    setMessages((prev) => [
-      ...prev.slice(-200),
+    setMessages((prev) => mergeChatMessages(prev, [
       {
         userId: currentViewerId,
         username: userId ? (username ?? 'You') : 'Guest',
@@ -1182,13 +1210,62 @@ export default function RobotView({ robot }: Props) {
         timestamp: Date.now(),
         clientMessageId,
       },
-    ]);
+    ]));
     wsRef.current.send(JSON.stringify({
       event: 'chat:message',
       data: { robotId: robot.id, content: text, clientMessageId },
     }));
     setChatInput('');
   }, [chatInput, currentViewerId, robot.id, userId, username]);
+
+  const loadOlderChatMessages = useCallback(async () => {
+    if (chatHistoryLoading || !chatHistoryHasMore) {
+      return;
+    }
+
+    const before = chatHistoryCursor
+      ?? messages.reduce<number | null>((oldest, entry) => {
+        if (entry.isSystem) {
+          return oldest;
+        }
+        return oldest === null ? entry.timestamp : Math.min(oldest, entry.timestamp);
+      }, null);
+
+    if (before === null) {
+      setChatHistoryHasMore(false);
+      return;
+    }
+
+    const previousHeight = chatScrollRef.current?.scrollHeight ?? 0;
+    chatShouldStickRef.current = false;
+    setChatHistoryLoading(true);
+
+    try {
+      api.setToken(accessToken);
+      const storedGuestSessionId = window.localStorage.getItem('botparty.guestSessionId.v1') ?? undefined;
+      const page = await api.robots.getRobotChatHistory(robot.id, {
+        before,
+        limit: 50,
+        roomAccessToken: roomAccessToken ?? undefined,
+        guestSessionId: storedGuestSessionId,
+      });
+
+      setMessages((prev) => mergeChatMessages(prev, page.messages));
+      setChatHistoryCursor(page.nextCursor);
+      setChatHistoryHasMore(page.hasMore);
+
+      requestAnimationFrame(() => {
+        const container = chatScrollRef.current;
+        if (container && previousHeight > 0) {
+          container.scrollTop = container.scrollHeight - previousHeight;
+        }
+      });
+    } catch (err) {
+      pushToast(err instanceof Error ? err.message : 'Failed to load older chat messages.', 'error', 2200);
+    } finally {
+      setChatHistoryLoading(false);
+    }
+  }, [accessToken, chatHistoryCursor, chatHistoryHasMore, chatHistoryLoading, messages, robot.id, roomAccessToken]);
 
   const requestRoomAccess = useCallback(async () => {
     setAccessLoading(true);
@@ -1310,6 +1387,7 @@ export default function RobotView({ robot }: Props) {
         : `Queue #${Math.max(myQueuePosition, 1)}`
       : 'Join queue'
     : 'Open controls';
+  const showRoomOnboarding = preferencesHydrated && !robotRoomOnboardingSeen;
   const canUseButton = useCallback((button: ControlButton) => {
     if (button.access === 'EVERYONE') return true;
     if (button.access === 'QUEUE_TURN') return isMyTurn;
@@ -1465,6 +1543,12 @@ export default function RobotView({ robot }: Props) {
     wasOnlineRef.current = isOnline;
   }, [isOnline]);
 
+  const dismissRoomOnboarding = useCallback(() => {
+    if (!robotRoomOnboardingSeen) {
+      updatePreference('robotRoomOnboardingSeen', true);
+    }
+  }, [robotRoomOnboardingSeen, updatePreference]);
+
   // ─── UI ───────────────────────────────────────────────────────────────────
 
   return (
@@ -1478,6 +1562,14 @@ export default function RobotView({ robot }: Props) {
         robotStatus={robotStatus}
         queueSummary={queueSummary}
       />
+
+      {showRoomOnboarding && (
+        <RoomOnboardingOverlay
+          queueEnabled={queueEnabled}
+          signedIn={Boolean(accessToken)}
+          onDismiss={dismissRoomOnboarding}
+        />
+      )}
 
       {!connected && (
         <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
@@ -1999,6 +2091,8 @@ export default function RobotView({ robot }: Props) {
           {/* Chat */}
           <RobotChatPanel
             messages={messages}
+            hasOlderMessages={chatHistoryHasMore}
+            historyLoading={chatHistoryLoading}
             chatInput={chatInput}
             setChatInput={setChatInput}
             chatRestriction={chatRestriction}
@@ -2012,6 +2106,7 @@ export default function RobotView({ robot }: Props) {
             chatPanelRef={chatPanelRef}
             chatInputRef={chatInputRef}
             chatShouldStickRef={chatShouldStickRef}
+            onLoadOlder={() => void loadOlderChatMessages()}
             onSend={sendChat}
             onModerate={(uid, action, uname) => void moderateChatUser(uid, action, uname)}
           />

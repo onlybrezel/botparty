@@ -38,6 +38,8 @@ export function RobotQueuePanel({
 
       {accessToken ? (
         <button
+          type="button"
+          aria-label={inQueue ? 'Leave control queue' : 'Join control queue'}
           onClick={onToggleQueue}
           disabled={queueAction !== null}
           className={`w-full rounded-lg py-2 text-sm font-semibold transition ${
@@ -85,6 +87,7 @@ export function RobotQueuePanel({
               {robot.queueMode === 'VOTING' && accessToken && userId && entry.userId !== userId && i > 0 && (
                 <button
                   type="button"
+                  aria-label={`Vote for ${entry.username}`}
                   disabled={votingForUserId === entry.userId}
                   onClick={() => onVoteForUser(entry.userId)}
                   className="ml-auto rounded border border-[var(--border)] px-2 py-0.5 text-[10px] text-[var(--muted-foreground)] hover:text-[var(--foreground)] disabled:opacity-60"

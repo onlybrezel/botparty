@@ -52,6 +52,10 @@ http {
         server livekit-ingress:8080;
     }
 
+    upstream minio {
+        server minio:9000;
+    }
+
     # ─── HTTP → HTTPS redirect ───────────────────────
     server {
         listen 80;
@@ -125,6 +129,14 @@ http {
 
         location /twirp/ {
             proxy_pass http://livekit;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto https;
+        }
+
+        location /storage/ {
+            proxy_pass http://minio/;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

@@ -1,6 +1,7 @@
 import type { PublicRobotOverview, RobotPublic } from '@botparty/shared';
 import type {
   AllowedUserRecord,
+  RobotChatHistoryPage,
   RobotCameraIngress,
   RobotManaged,
   RobotMutationInput,
@@ -164,6 +165,13 @@ export class RobotsApi {
       method: 'POST',
       body: JSON.stringify(data ?? {}),
     });
+  }
+
+  async getRobotChatHistory(
+    robotId: string,
+    params?: { before?: number; limit?: number; roomAccessToken?: string; guestSessionId?: string },
+  ) {
+    return this.req<RobotChatHistoryPage>(`/robots/${robotId}/chat-messages${buildQueryString(params)}`);
   }
 
   async getViewerToken(robotId: string, control = false) {

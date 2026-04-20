@@ -321,6 +321,7 @@ export function ControlKey({
   return (
     <button
       type="button"
+      aria-label={`${label} control button`}
       onPointerDown={disabled ? undefined : onPress}
       onPointerUp={disabled || !isMotionKey ? undefined : onRelease}
       onPointerCancel={disabled || !isMotionKey ? undefined : onRelease}

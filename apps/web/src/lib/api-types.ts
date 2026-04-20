@@ -69,6 +69,17 @@ export interface RobotMutationInput {
   accessPassword?: string;
 }
 
+export interface RobotChatHistoryPage {
+  messages: Array<{
+    userId: string;
+    username: string;
+    content: string;
+    timestamp: number;
+  }>;
+  nextCursor: number | null;
+  hasMore: boolean;
+}
+
 export interface ModRuntimeOverview {
   generatedAt: string;
   summary: {

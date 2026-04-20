@@ -133,6 +133,7 @@ export interface JwtPayload {
   sub: string;
   username: string;
   role: Role;
+  tokenVersion: number;
   iat?: number;
   exp?: number;
 }

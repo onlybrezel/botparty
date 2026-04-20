@@ -7,6 +7,16 @@ import { RedisService } from '../redis/redis.service';
 import { BotGateway } from '../gateway/bot.gateway';
 
 let defaultMetricsEnabled = false;
+const ROBOT_TELEMETRY_FRESH_WINDOW_MS = 180_000;
+
+type RobotTelemetrySummary = {
+  freshRobots: number;
+  controlConnectedRobots: number;
+  livekitConnectedRobots: number;
+  avgCpuPercent: number;
+  avgMemoryPercent: number;
+  avgTemperatureC: number;
+};
 
 function getOrCreateGauge(name: string, help: string): Gauge<string> {
   const existing = register.getSingleMetric(name);
@@ -43,6 +53,38 @@ const wsControlCooldownsGauge = getOrCreateGauge(
 const queueDepthGauge = getOrCreateGauge(
   'botparty_queue_depth',
   'Total queue depth across all robots',
+);
+const databaseUpGauge = getOrCreateGauge(
+  'botparty_dependency_database_up',
+  'Whether the API can reach the database (1=up, 0=down)',
+);
+const redisUpGauge = getOrCreateGauge(
+  'botparty_dependency_redis_up',
+  'Whether the API can reach Redis (1=up, 0=down)',
+);
+const robotTelemetryFreshGauge = getOrCreateGauge(
+  'botparty_robot_telemetry_fresh_robots',
+  'Number of robots with telemetry received in the last 180 seconds',
+);
+const robotTelemetryControlConnectedGauge = getOrCreateGauge(
+  'botparty_robot_telemetry_control_connected_robots',
+  'Number of robots with fresh telemetry and an active control connection',
+);
+const robotTelemetryLivekitConnectedGauge = getOrCreateGauge(
+  'botparty_robot_telemetry_livekit_connected_robots',
+  'Number of robots with fresh telemetry and an active LiveKit connection',
+);
+const robotTelemetryAvgCpuGauge = getOrCreateGauge(
+  'botparty_robot_telemetry_avg_cpu_percent',
+  'Average CPU percent across robots with fresh telemetry',
+);
+const robotTelemetryAvgMemoryGauge = getOrCreateGauge(
+  'botparty_robot_telemetry_avg_memory_percent',
+  'Average memory percent across robots with fresh telemetry',
+);
+const robotTelemetryAvgTemperatureGauge = getOrCreateGauge(
+  'botparty_robot_telemetry_avg_temperature_c',
+  'Average temperature in Celsius across robots with fresh telemetry',
 );
 
 @ApiTags('health')
@@ -129,10 +171,142 @@ export class HealthController {
     wsActiveTurnsGauge.set(ws.activeTurns);
     wsControlCooldownsGauge.set(ws.controlCooldowns);
 
-    const queueDepth = await this.prisma.queueEntry.count();
+    const [databaseUp, redisUp, queueDepth, robotTelemetry] = await Promise.all([
+      this._checkDatabaseUp(),
+      this._checkRedisUp(),
+      this._getQueueDepth(),
+      this._getRobotTelemetrySummary(),
+    ]);
+
+    databaseUpGauge.set(databaseUp);
+    redisUpGauge.set(redisUp);
     queueDepthGauge.set(queueDepth);
+    robotTelemetryFreshGauge.set(robotTelemetry.freshRobots);
+    robotTelemetryControlConnectedGauge.set(robotTelemetry.controlConnectedRobots);
+    robotTelemetryLivekitConnectedGauge.set(robotTelemetry.livekitConnectedRobots);
+    robotTelemetryAvgCpuGauge.set(robotTelemetry.avgCpuPercent);
+    robotTelemetryAvgMemoryGauge.set(robotTelemetry.avgMemoryPercent);
+    robotTelemetryAvgTemperatureGauge.set(robotTelemetry.avgTemperatureC);
 
     res.header('Content-Type', register.contentType);
     return res.send(await register.metrics());
+  }
+
+  private async _checkDatabaseUp(): Promise<number> {
+    try {
+      await this.prisma.$queryRaw`SELECT 1`;
+      return 1;
+    } catch {
+      return 0;
+    }
+  }
+
+  private async _checkRedisUp(): Promise<number> {
+    try {
+      await this.redis.ping();
+      return 1;
+    } catch {
+      return 0;
+    }
+  }
+
+  private async _getQueueDepth(): Promise<number> {
+    try {
+      return await this.prisma.queueEntry.count();
+    } catch {
+      return 0;
+    }
+  }
+
+  private async _getRobotTelemetrySummary(): Promise<RobotTelemetrySummary> {
+    const emptySummary: RobotTelemetrySummary = {
+      freshRobots: 0,
+      controlConnectedRobots: 0,
+      livekitConnectedRobots: 0,
+      avgCpuPercent: 0,
+      avgMemoryPercent: 0,
+      avgTemperatureC: 0,
+    };
+
+    try {
+      const robots = await this.prisma.robot.findMany({ select: { id: true } });
+      if (robots.length === 0) {
+        return emptySummary;
+      }
+
+      const telemetryRaw = await this.redis.mget(...robots.map((robot) => `robot:telemetry:${robot.id}:latest`));
+      const now = Date.now();
+      const cpuSamples: number[] = [];
+      const memorySamples: number[] = [];
+      const temperatureSamples: number[] = [];
+
+      let freshRobots = 0;
+      let controlConnectedRobots = 0;
+      let livekitConnectedRobots = 0;
+
+      for (const raw of telemetryRaw) {
+        if (!raw) {
+          continue;
+        }
+
+        let parsed: Record<string, unknown>;
+        try {
+          parsed = JSON.parse(raw) as Record<string, unknown>;
+        } catch {
+          continue;
+        }
+
+        const telemetryTs = this._asNumber(parsed.ts);
+        if (telemetryTs === null || now - telemetryTs > ROBOT_TELEMETRY_FRESH_WINDOW_MS) {
+          continue;
+        }
+
+        freshRobots += 1;
+        if (Boolean(parsed.controlConnected)) {
+          controlConnectedRobots += 1;
+        }
+        if (Boolean(parsed.livekitConnected)) {
+          livekitConnectedRobots += 1;
+        }
+
+        const cpuPercent = this._asNumber(parsed.cpuPercent);
+        if (cpuPercent !== null) {
+          cpuSamples.push(cpuPercent);
+        }
+
+        const memoryPercent = this._asNumber(parsed.memoryPercent);
+        if (memoryPercent !== null) {
+          memorySamples.push(memoryPercent);
+        }
+
+        const temperatureC = this._asNumber(parsed.temperatureC);
+        if (temperatureC !== null) {
+          temperatureSamples.push(temperatureC);
+        }
+      }
+
+      return {
+        freshRobots,
+        controlConnectedRobots,
+        livekitConnectedRobots,
+        avgCpuPercent: this._average(cpuSamples),
+        avgMemoryPercent: this._average(memorySamples),
+        avgTemperatureC: this._average(temperatureSamples),
+      };
+    } catch {
+      return emptySummary;
+    }
+  }
+
+  private _asNumber(value: unknown): number | null {
+    return typeof value === 'number' && Number.isFinite(value) ? value : null;
+  }
+
+  private _average(values: number[]): number {
+    if (values.length === 0) {
+      return 0;
+    }
+
+    return Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(1));
   }
 }

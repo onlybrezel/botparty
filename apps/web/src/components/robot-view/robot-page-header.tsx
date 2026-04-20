@@ -35,7 +35,11 @@ export function RobotPageHeader({
       </div>
 
       {reconnectNotice && !connected && (
-        <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+        <div
+          role="status"
+          aria-live="polite"
+          className="sticky top-4 z-20 mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100 backdrop-blur"
+        >
           <p className="font-medium">
             {reconnectNotice.reason === 'maintenance'
               ? 'Maintenance window'

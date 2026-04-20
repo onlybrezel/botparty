@@ -11,7 +11,7 @@ This document describes the BotParty realtime protocol used on the API gateway w
 ```json
 {
   "event": "room:join",
-  "data": { "robotId": "uuid" }
+  "data": { "robotId": "uuid", "protocolVersion": 1 }
 }
 ```
 
@@ -20,6 +20,7 @@ This document describes the BotParty realtime protocol used on the API gateway w
 - Browser viewers can join as authenticated users (JWT) or guests.
 - Robots authenticate via `robot:claim` with a `robotAuthToken`.
 - Access and moderation checks are enforced server-side per event.
+- Authenticated viewer sockets are revalidated periodically; expired or revoked access tokens are disconnected with `error: { message: "Invalid session token" }`.
 
 ## Rate Limits
 
@@ -40,12 +41,12 @@ This document describes the BotParty realtime protocol used on the API gateway w
 
 | Event | Payload (shape) | Auth | Notes |
 |---|---|---|---|
-| `room:join` | `{ robotId, accessToken?, guestSessionId?, roomAccessToken? }` | Optional | Joins watcher room, returns presence/queue/chat state. |
+| `room:join` | `{ robotId, protocolVersion?, accessToken?, guestSessionId?, roomAccessToken? }` | Optional | Joins watcher room, returns presence/queue/chat state plus protocol metadata. |
 | `room:ping` | `{ robotId }` | Optional | Keepalive and room liveness signal. |
-| `robot:claim` | `{ robotAuthToken }` | Robot token | Robot realtime identity binding. |
+| `robot:claim` | `{ robotAuthToken, protocolVersion? }` | Robot token | Robot realtime identity binding plus protocol negotiation. |
 | `robot:heartbeat` | `{}` | Robot token | Robot liveness update path. |
 | `robot:telemetry` | `{ clientVersion?, gitBranch?, gitCommit?, gitDirty?, botpartyStreamerVersion?, streamerVersion?, pythonVersion?, cpuPercent?, memoryPercent?, temperatureC?, uptimeSec?, controlConnected?, livekitConnected?, commandsReceived?, cameraFrames? }` | Robot token | Runtime telemetry payload (all fields optional). |
-| `robot:actions` | `{}` | Robot token | Pulls pending robot actions from server queue. |
+| `robot:actions:pull` | `{}` | Robot token | Pulls pending robot actions from server queue. |
 | `control:command` | `{ robotId, command, value?, timestamp? }` | Depends on robot policy | Queue turn, button access, moderation, cooldown enforced server-side. |
 | `control:emergency-stop` | `{ robotId }` | Depends on robot policy | Immediate stop path with stricter checks. |
 | `queue:join` | `{ robotId }` | User token required | Adds user to control queue. |
@@ -93,5 +94,7 @@ The following constants are used only on internal pub/sub channels and are not p
 ## Compatibility Notes
 
 - Event names are defined in `packages/shared/src/constants/index.ts`.
+- `room:join` and `robot:claim` accept `protocolVersion`; when omitted the server assumes the minimum supported protocol version.
+- Successful `room:join` and `robot:claim` responses include `{ protocolVersion, minProtocolVersion, clientProtocolVersion }`.
 - Unknown events are ignored or answered with `error`.
 - Clients should tolerate additional fields in server payloads for forward compatibility.

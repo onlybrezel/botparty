@@ -1,8 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AccessToken, EgressClient, IngressClient, IngressInput, RoomServiceClient } from 'livekit-server-sdk';
-import { EncodedFileOutput, EncodedFileType, TrackType } from '@livekit/protocol';
+import { EncodedFileOutput, EncodedFileType, S3Upload, TrackType } from '@livekit/protocol';
 import type { EgressInfo, IngressInfo } from '@livekit/protocol';
+import {
+  resolveS3CompatibleStorageConfig,
+  type S3CompatibleStorageConfig,
+} from '../common/s3-compatible-storage';
 
 type RobotWhipIngress = {
   type: 'WHIP';
@@ -227,13 +231,10 @@ export class LivekitService {
       return this.toRecordingStatus(roomName, activeEgress, true, trackCameraLookup);
     }
 
+    const recordingObjectStorage = this._recordingObjectStorageConfig();
     const created: Awaited<ReturnType<EgressClient['startTrackCompositeEgress']>>[] = [];
     for (const target of pendingTargets) {
-      const output = new EncodedFileOutput({
-        fileType: EncodedFileType.MP4,
-        filepath: this.resolveRecordingFilepath(roomName, target.cameraId),
-        disableManifest: true,
-      });
+      const output = this.buildRecordingFileOutput(roomName, target.cameraId, recordingObjectStorage);
 
       const session = await this.withTimeout(
         this.egressService.startTrackCompositeEgress(roomName, output, {
@@ -533,20 +534,67 @@ export class LivekitService {
     return `${normalizedBase}/${normalizedKey}`;
   }
 
+  private buildRecordingFileOutput(
+    roomName: string,
+    cameraId: string | null,
+    objectStorage: S3CompatibleStorageConfig | null,
+  ): EncodedFileOutput {
+    if (!objectStorage) {
+      return new EncodedFileOutput({
+        fileType: EncodedFileType.MP4,
+        filepath: this.resolveRecordingFilepath(roomName, cameraId),
+        disableManifest: true,
+      });
+    }
+
+    const objectKey = this.resolveRecordingObjectKey(roomName, cameraId);
+    return new EncodedFileOutput({
+      fileType: EncodedFileType.MP4,
+      filepath: objectKey,
+      disableManifest: true,
+      output: {
+        case: 's3',
+        value: new S3Upload({
+          accessKey: objectStorage.accessKeyId,
+          secret: objectStorage.secretAccessKey,
+          sessionToken: objectStorage.sessionToken ?? '',
+          region: objectStorage.region,
+          endpoint: objectStorage.endpoint ?? '',
+          bucket: objectStorage.bucket,
+          forcePathStyle: objectStorage.forcePathStyle,
+          contentDisposition: `inline; filename="${objectKey}"`,
+        }),
+      },
+    });
+  }
+
   private resolveRecordingFilepath(roomName: string, cameraId: string | null): string {
-    let template = this.config
+    const template = this.config
       .get<string>('LIVEKIT_RECORDING_FILEPATH_TEMPLATE')
-      ?.trim() || 'recordings/{room_name}-{time}.mp4';
+      ?.trim() || '/out/{room_name}-{time}.mp4';
+    return this.resolveRecordingTemplate(template, roomName, cameraId);
+  }
+
+  private resolveRecordingObjectKey(roomName: string, cameraId: string | null): string {
+    const template = this.config
+      .get<string>('LIVEKIT_RECORDING_OBJECT_KEY_TEMPLATE')
+      ?.trim() || '{room_name}-{time}.mp4';
+    const resolved = this.resolveRecordingTemplate(template, roomName, cameraId);
+    return resolved.split(/[\\/]+/).filter(Boolean).at(-1) ?? resolved;
+  }
+
+  private resolveRecordingTemplate(template: string, roomName: string, cameraId: string | null): string {
+    let resolvedTemplate = template;
     const roomSegment = roomName.replace(/[^a-zA-Z0-9._-]/g, '_');
     const cameraSegment = cameraId ? this.sanitizePathSegment(cameraId) : '';
 
-    if (cameraSegment && !template.includes('{camera_id}')) {
-      template = template.includes('{time}')
-        ? template.replace('{time}', `${cameraSegment}-{time}`)
-        : template.replace(/(\.mp4)$/i, `-${cameraSegment}$1`);
+    if (cameraSegment && !resolvedTemplate.includes('{camera_id}')) {
+      resolvedTemplate = resolvedTemplate.includes('{time}')
+        ? resolvedTemplate.replace('{time}', `${cameraSegment}-{time}`)
+        : resolvedTemplate.replace(/(\.mp4)$/i, `-${cameraSegment}$1`);
     }
 
-    let resolved = template
+    let resolved = resolvedTemplate
       .replaceAll('{room_name}', roomSegment)
       .replaceAll('{camera_id}', cameraSegment || 'default')
       .replace(/--+/g, '-')
@@ -557,6 +605,10 @@ export class LivekitService {
     }
 
     return resolved;
+  }
+
+  private _recordingObjectStorageConfig(): S3CompatibleStorageConfig | null {
+    return resolveS3CompatibleStorageConfig(this.config, 'LIVEKIT_RECORDINGS_S3_');
   }
 
   private buildTrackCameraLookup(

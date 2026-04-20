@@ -3,6 +3,8 @@ import type { ChatMsg, FocusMode } from './types';
 
 interface Props {
   messages: ChatMsg[];
+  hasOlderMessages: boolean;
+  historyLoading: boolean;
   chatInput: string;
   setChatInput: (value: string) => void;
   chatRestriction: string | null;
@@ -16,12 +18,15 @@ interface Props {
   chatPanelRef: RefObject<HTMLDivElement | null>;
   chatInputRef: RefObject<HTMLInputElement | null>;
   chatShouldStickRef: RefObject<boolean>;
+  onLoadOlder: () => void;
   onSend: () => void;
   onModerate: (userId: string, action: 'TIMEOUT' | 'BAN' | 'UNBAN', username: string) => void;
 }
 
 export function RobotChatPanel({
   messages,
+  hasOlderMessages,
+  historyLoading,
   chatInput,
   setChatInput,
   chatRestriction,
@@ -35,6 +40,7 @@ export function RobotChatPanel({
   chatPanelRef,
   chatInputRef,
   chatShouldStickRef,
+  onLoadOlder,
   onSend,
   onModerate,
 }: Props) {
@@ -48,6 +54,17 @@ export function RobotChatPanel({
       <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
         Chat
       </p>
+
+      {(hasOlderMessages || historyLoading) && (
+        <button
+          type="button"
+          onClick={onLoadOlder}
+          disabled={historyLoading || !hasOlderMessages}
+          className="mb-2 w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-xs font-medium text-[var(--muted-foreground)] transition hover:border-[var(--primary)]/40 hover:text-[var(--foreground)] disabled:cursor-wait disabled:opacity-60"
+        >
+          {historyLoading ? 'Loading earlier messages...' : 'Load older messages'}
+        </button>
+      )}
 
       <div
         ref={chatScrollRef}
@@ -134,6 +151,7 @@ export function RobotChatPanel({
         <input
           ref={chatInputRef}
           type="text"
+          aria-label="Chat message input"
           value={chatInput}
           onChange={(e) => setChatInput(e.target.value)}
           onKeyDown={(e) => {
@@ -150,6 +168,8 @@ export function RobotChatPanel({
           className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm outline-none transition-colors focus:border-[var(--primary)]"
         />
         <button
+          type="button"
+          aria-label="Send chat message"
           onClick={onSend}
           disabled={!chatInput.trim()}
           className="rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-medium text-white transition-all hover:bg-[var(--primary-hover)] active:scale-95 disabled:opacity-50"

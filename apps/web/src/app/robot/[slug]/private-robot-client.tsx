@@ -5,6 +5,7 @@ import Link from 'next/link';
 import RobotView from './robot-view';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/store';
+import { RobotRoomSkeleton } from '@/components/robot-view/robot-room-skeleton';
 import type { RobotPublic } from '@botparty/shared';
 
 export default function PrivateRobotClient({ slug }: { slug: string }) {
@@ -48,11 +49,7 @@ export default function PrivateRobotClient({ slug }: { slug: string }) {
   }, [accessToken, hasHydrated, slug]);
 
   if (loading) {
-    return (
-      <div className="mx-auto max-w-5xl px-4 py-10 text-sm text-[var(--muted-foreground)]">
-        Loading private robot...
-      </div>
-    );
+    return <RobotRoomSkeleton />;
   }
 
   if (!robot) {

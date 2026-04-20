@@ -57,6 +57,28 @@ export class VerifyRobotAccessDto {
   inviteCode?: string;
 }
 
+export class GetChatHistoryDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  before?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(4)
+  limit?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  roomAccessToken?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  guestSessionId?: string;
+}
+
 export class ClaimRobotDto {
   @IsString()
   claimToken!: string;

@@ -27,7 +27,7 @@ const mockRedis = {
 
 const mockMail = {
   sendEmailVerification: jest.fn().mockResolvedValue(undefined),
-  sendPasswordReset: jest.fn().mockResolvedValue(undefined),
+  sendPasswordResetEmail: jest.fn().mockResolvedValue(undefined),
   sendAccountLockoutNoticeEmail: jest.fn().mockResolvedValue(undefined),
 };
 
@@ -157,6 +157,43 @@ describe('AuthService', () => {
     });
   });
 
+  describe('resolveValidAccessTokenPayload', () => {
+    it('returns null when the access token no longer matches tokenVersion', async () => {
+      mockJwt.verify.mockReturnValueOnce({
+        sub: 'user-1',
+        username: 'testuser',
+        role: 'USER',
+        tokenVersion: 9,
+      });
+      mockPrisma.user.findUnique.mockResolvedValueOnce({ ...fakeUser, tokenVersion: 0 });
+
+      await expect(service.resolveValidAccessTokenPayload('expired-access-token')).resolves.toBeNull();
+    });
+
+    it('returns the fresh user snapshot for valid access tokens', async () => {
+      mockJwt.verify.mockReturnValueOnce({
+        sub: 'user-1',
+        username: 'stale-name',
+        role: 'USER',
+        tokenVersion: 0,
+      });
+      mockPrisma.user.findUnique.mockResolvedValueOnce({
+        id: fakeUser.id,
+        username: 'fresh-name',
+        role: 'ADMIN',
+        isActive: true,
+        tokenVersion: 0,
+      });
+
+      await expect(service.resolveValidAccessTokenPayload('valid-access-token')).resolves.toEqual({
+        sub: 'user-1',
+        username: 'fresh-name',
+        role: 'ADMIN',
+        tokenVersion: 0,
+      });
+    });
+  });
+
   describe('register', () => {
     it('throws ConflictException if email already exists', async () => {
       mockPrisma.user.findFirst.mockResolvedValueOnce(fakeUser);
@@ -182,6 +219,42 @@ describe('AuthService', () => {
           displayName: 'New',
         }),
       ).rejects.toThrow(ConflictException);
+    });
+  });
+
+  describe('requestPasswordReset', () => {
+    it('suppresses reset emails after the per-email rate limit is hit', async () => {
+      mockRedis.incr.mockResolvedValueOnce(4);
+
+      await expect(service.requestPasswordReset({ email: 'test@example.com' })).resolves.toEqual({
+        message: 'If the account exists, a reset email has been sent.',
+      });
+
+      expect(mockRedis.expire).not.toHaveBeenCalled();
+      expect(mockPrisma.user.findUnique).not.toHaveBeenCalled();
+      expect(mockMail.sendPasswordResetEmail).not.toHaveBeenCalled();
+    });
+
+    it('sets the rate-limit TTL on the first request and sends email for active users', async () => {
+      mockRedis.incr.mockResolvedValueOnce(1);
+      mockRedis.expire.mockResolvedValueOnce(1);
+      mockPrisma.user.findUnique.mockResolvedValueOnce({
+        id: fakeUser.id,
+        email: fakeUser.email,
+        username: fakeUser.username,
+        isActive: true,
+      });
+      mockRedis.set.mockResolvedValue('OK');
+
+      await expect(service.requestPasswordReset({ email: fakeUser.email })).resolves.toEqual({
+        message: 'If the account exists, a reset email has been sent.',
+      });
+
+      expect(mockRedis.expire).toHaveBeenCalledWith(
+        `auth:password-reset:limit:${fakeUser.email}`,
+        15 * 60,
+      );
+      expect(mockMail.sendPasswordResetEmail).toHaveBeenCalledTimes(1);
     });
   });
 });

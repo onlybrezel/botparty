@@ -36,6 +36,7 @@ import {
   AddAllowedUserDto,
   CreateIngressCameraDto,
   VerifyRobotAccessDto,
+  GetChatHistoryDto,
   ClaimRobotDto,
   IngestRobotLogsDto,
   CreateRobotWebhookDto,
@@ -364,6 +365,35 @@ export class RobotsController {
       password: body?.password,
       guestSessionId: body?.guestSessionId,
       inviteCode: body?.inviteCode,
+    });
+  }
+
+  @Get(':id/chat-messages')
+  @ApiOperation({ summary: 'Get paginated chat history for a robot room' })
+  async getChatHistory(
+    @Param('id') id: string,
+    @Headers('authorization') authorization?: string,
+    @Headers('cookie') cookieHeader?: string,
+    @Query() query: GetChatHistoryDto = {},
+  ) {
+    const parsedLimit = query.limit ? Number.parseInt(query.limit, 10) : undefined;
+    const parsedBefore = query.before ? Number.parseInt(query.before, 10) : undefined;
+
+    if (query.limit && (!Number.isFinite(parsedLimit) || parsedLimit < 1)) {
+      throw new BadRequestException('limit must be a positive integer');
+    }
+
+    if (query.before && (!Number.isFinite(parsedBefore) || parsedBefore < 0)) {
+      throw new BadRequestException('before must be a unix timestamp in milliseconds');
+    }
+
+    return this.robotsService.getChatHistoryPage({
+      robotId: id,
+      requesterUserId: this.resolveRequesterId(authorization, cookieHeader),
+      guestSessionId: query.guestSessionId,
+      roomAccessToken: query.roomAccessToken,
+      before: parsedBefore,
+      limit: parsedLimit,
     });
   }
 

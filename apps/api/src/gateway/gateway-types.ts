@@ -4,6 +4,8 @@ export interface WsClient extends WebSocket {
   id: string;
   userId?: string;
   username?: string;
+  authAccessToken?: string;
+  protocolVersion?: number;
   isGuest?: boolean;
   /** Which robot room this client is subscribed to */
   watchingRobotId?: string;

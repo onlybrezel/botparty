@@ -86,6 +86,7 @@ export const WS_EVENTS = {
   ROBOT_HEARTBEAT: 'robot:heartbeat',
   ROBOT_TELEMETRY: 'robot:telemetry',
   ROBOT_CONTROLS_UPDATED: 'robot:controls-updated',
+  ROBOT_ACTIONS_PULL: 'robot:actions:pull',
 
   // Control
   CONTROL_COMMAND: 'control:command',
@@ -138,6 +139,9 @@ export const WS_EVENTS = {
   ROOM_JOIN: 'room:join',
   ROBOT_ACTIONS: 'robot:actions',
 } as const;
+
+export const WS_PROTOCOL_VERSION = 1;
+export const WS_MIN_SUPPORTED_PROTOCOL_VERSION = 1;
 
 // ─── Control Command Names ───────────────────────────
 export const CONTROL_COMMANDS = {

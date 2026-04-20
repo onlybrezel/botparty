@@ -24,6 +24,7 @@ import { MonitoringSection } from '@/components/dashboard/monitoring-section';
 import { CreateRobotPanel } from '@/components/dashboard/create-robot-panel';
 import { DashboardFleetSummary } from '@/components/dashboard/dashboard-fleet-summary';
 import { RobotCardGrid } from '@/components/dashboard/robot-card-grid';
+import { RobotCardGridSkeleton } from '@/components/dashboard/robot-card-grid-skeleton';
 import { ControlButtonEditor } from '@/components/dashboard/control-button-editor';
 import { DashboardSidebar } from '@/components/dashboard/dashboard-sidebar';
 import { DashboardPreview } from '@/components/dashboard/dashboard-preview';
@@ -1245,7 +1246,7 @@ export default function DashboardPage() {
         <h2 className="mb-4 text-lg font-bold">My Robots</h2>
 
         {loading ? (
-          <p className="text-sm text-[var(--muted-foreground)]">Loading robots...</p>
+          <RobotCardGridSkeleton />
         ) : robots.length === 0 ? (
           <div className="rounded-xl border border-dashed border-[var(--border)] p-6 text-center">
             <p className="text-base font-semibold">No robots yet</p>

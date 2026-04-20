@@ -8,6 +8,7 @@ import { QueueService } from '../queue/queue.service';
 import { RedisService } from '../redis/redis.service';
 import { ModerationService } from '../moderation/moderation.service';
 import { ControlsService } from '../controls/controls.service';
+import { AuthService } from '../auth/auth.service';
 
 describe('BotGateway', () => {
   let gateway: BotGateway;
@@ -122,6 +123,12 @@ describe('BotGateway', () => {
           } as any,
         },
         {
+          provide: AuthService,
+          useValue: {
+            resolveValidAccessTokenPayload: jest.fn().mockResolvedValue(null),
+          } as any,
+        },
+        {
           provide: ConfigService,
           useValue: {
             get: jest.fn(),
@@ -203,6 +210,40 @@ describe('BotGateway', () => {
     it('should respect emergency stop flow', async () => {
       // Critical security path: emergency stop must work
       expect(gateway).toBeDefined();
+    });
+
+    it('stores control cooldowns in redis with a shared TTL gate', async () => {
+      const client = { id: 'viewer-1', userId: 'user-1' } as any;
+
+      const allowed = await (gateway as any).consumeControlCooldown(client, 'robot-1', 'Forward', 120);
+
+      expect(allowed).toBe(true);
+      expect(redisService.set).toHaveBeenCalledWith(
+        'ws:control-cooldown:robot-1:user-1:forward',
+        expect.any(String),
+        'PX',
+        120,
+        'NX',
+      );
+    });
+
+    it('falls back to local cooldown tracking when redis is unavailable', async () => {
+      const client = { id: 'viewer-1', userId: 'user-1' } as any;
+      redisService.set.mockRejectedValueOnce(new Error('redis down'));
+      redisService.set.mockRejectedValueOnce(new Error('redis still down'));
+      redisService.set.mockResolvedValueOnce('OK');
+
+      const first = await (gateway as any).consumeControlCooldown(client, 'robot-1', 'forward', 120);
+      const second = await (gateway as any).consumeControlCooldown(client, 'robot-1', 'forward', 120);
+      const metricsDuringFallback = gateway.getRuntimeMetricsSnapshot();
+      const recovered = await (gateway as any).consumeControlCooldown(client, 'robot-1', 'left', 120);
+      const metricsAfterRecovery = gateway.getRuntimeMetricsSnapshot();
+
+      expect(first).toBe(true);
+      expect(second).toBe(false);
+      expect(metricsDuringFallback.controlCooldowns).toBe(1);
+      expect(recovered).toBe(true);
+      expect(metricsAfterRecovery.controlCooldowns).toBe(0);
     });
   });
 });
