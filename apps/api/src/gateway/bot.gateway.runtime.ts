@@ -652,36 +652,47 @@ export class BotGateway
 
       const existingRobotClient = this._getOpenRobotClient(robot.id);
       if (existingRobotClient && existingRobotClient !== client) {
-        this.logger.warn(`Rejected duplicate robot claim for ${robot.id}`);
-        client.send(
-          JSON.stringify({
-            event: WS_EVENTS.ERROR,
-            data: { message: 'Robot control channel is already connected' },
-          }),
-        );
-        try {
-          client.close(1008, 'Robot already connected');
-        } catch {
-          // Ignore close failures for rejected claims.
+        const claimLockTransferred = await this.transferRobotClaimLock(robot.id, existingRobotClient.id, client.id);
+        if (!claimLockTransferred) {
+          this.logger.warn(`Rejected duplicate robot claim for ${robot.id}`);
+          client.send(
+            JSON.stringify({
+              event: WS_EVENTS.ERROR,
+              data: { message: 'Robot control channel is already connected' },
+            }),
+          );
+          try {
+            client.close(1008, 'Robot already connected');
+          } catch {
+            // Ignore close failures for rejected claims.
+          }
+          return;
         }
-        return;
-      }
 
-      const claimLockAcquired = await this.acquireRobotClaimLock(robot.id, client.id);
-      if (!claimLockAcquired) {
-        this.logger.warn(`Rejected cross-instance duplicate robot claim for ${robot.id}`);
-        client.send(
-          JSON.stringify({
-            event: WS_EVENTS.ERROR,
-            data: { message: 'Robot control channel is already connected' },
-          }),
-        );
+        this.logger.warn(`Replacing existing robot realtime socket for ${robot.id}`);
+        this.robotClients.set(robot.id, client);
         try {
-          client.close(1008, 'Robot already connected');
+          existingRobotClient.close(1012, 'Replaced by newer robot claim');
         } catch {
-          // Ignore close failures for rejected claims.
+          // Ignore close failures while replacing the previous socket.
         }
-        return;
+      } else {
+        const claimLockAcquired = await this.acquireRobotClaimLock(robot.id, client.id);
+        if (!claimLockAcquired) {
+          this.logger.warn(`Rejected cross-instance duplicate robot claim for ${robot.id}`);
+          client.send(
+            JSON.stringify({
+              event: WS_EVENTS.ERROR,
+              data: { message: 'Robot control channel is already connected' },
+            }),
+          );
+          try {
+            client.close(1008, 'Robot already connected');
+          } catch {
+            // Ignore close failures for rejected claims.
+          }
+          return;
+        }
       }
 
       client.isRobot = true;
@@ -1033,6 +1044,10 @@ export class BotGateway
 
   private async refreshRobotClaimLock(robotId: string, clientId: string): Promise<void> {
     return this.claimLock.refresh(robotId, clientId);
+  }
+
+  private async transferRobotClaimLock(robotId: string, fromClientId: string, toClientId: string): Promise<boolean> {
+    return this.claimLock.transfer(robotId, fromClientId, toClientId);
   }
 
   private async releaseRobotClaimLock(robotId: string, clientId: string): Promise<void> {

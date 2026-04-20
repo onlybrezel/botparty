@@ -289,6 +289,27 @@ export class RobotAccessService implements OnModuleDestroy {
   }
 
   private async _getRoomAccessContext(robotId: string, requesterUserId: string | null) {
+    if (!requesterUserId) {
+      const robot = await this.prisma.robot.findUnique({
+        where: { id: robotId },
+        select: {
+          id: true,
+          ownerId: true,
+          visibility: true,
+          accessMode: true,
+          accessPassword: true,
+          inviteCode: true,
+        },
+      });
+
+      if (!robot) return null;
+      return {
+        ...robot,
+        allowedUsers: [],
+        requesterRole: null as 'ADMIN' | 'MOD' | 'USER' | null,
+      };
+    }
+
     const robot = await this.prisma.robot.findUnique({
       where: { id: robotId },
       select: {
@@ -299,14 +320,13 @@ export class RobotAccessService implements OnModuleDestroy {
         accessPassword: true,
         inviteCode: true,
         allowedUsers: {
-          where: requesterUserId ? { userId: requesterUserId } : { userId: '__none__' },
+          where: { userId: requesterUserId },
           select: { userId: true },
         },
       },
     });
 
     if (!robot) return null;
-    if (!requesterUserId) return { ...robot, requesterRole: null as 'ADMIN' | 'MOD' | 'USER' | null };
 
     const requester = await this.prisma.user.findUnique({
       where: { id: requesterUserId },

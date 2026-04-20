@@ -213,6 +213,45 @@ describe('BotGateway protocol exchange', () => {
     expect(queueService.getQueue).toHaveBeenCalledWith(robotId);
   });
 
+  it('replaces an existing local robot socket when the same robot reconnects', async () => {
+    const existingClient = {
+      id: 'robot-1',
+      send: jest.fn(),
+      close: jest.fn(),
+      readyState: 1,
+      isRobot: true,
+      robotId,
+    } as any;
+    const replacementClient = {
+      id: 'robot-2',
+      send: jest.fn(),
+      close: jest.fn(),
+      readyState: 1,
+    } as any;
+    jwtService.verify.mockReturnValue({
+      sub: robotId,
+      scope: 'robot',
+      deviceHash: 'a'.repeat(64),
+    } as never);
+    (gateway as any).robotClients.set(robotId, existingClient);
+
+    const result = await gateway.handleRobotClaim(replacementClient, {
+      robotAuthToken: 'robot-token',
+      protocolVersion: WS_PROTOCOL_VERSION,
+    });
+
+    expect(result).toEqual({
+      event: WS_EVENTS.ROBOT_CLAIM,
+      data: expect.objectContaining({
+        success: true,
+        robotId,
+      }),
+    });
+    expect(existingClient.close).toHaveBeenCalledWith(1012, 'Replaced by newer robot claim');
+    expect(replacementClient.close).not.toHaveBeenCalled();
+    expect((gateway as any).robotClients.get(robotId)).toBe(replacementClient);
+  });
+
   it('closes authenticated sockets whose access token is no longer valid', async () => {
     const client = {
       id: 'viewer-auth-1',
