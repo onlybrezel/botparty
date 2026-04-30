@@ -274,3 +274,151 @@ docker compose restart api
 - Check application logs first: `docker compose logs -f --since=1h`
 - For persistent issues: check nginx error log in the nginx container
 - LiveKit cloud dashboard (if using managed LiveKit): https://cloud.livekit.io
+
+---
+
+## HSTS Strategy
+
+The TLS template ships with `Strict-Transport-Security: max-age=31536000; includeSubDomains`.
+
+We deliberately do **not** enable `preload` by default because:
+
+- `preload` is irrevocable on the order of months once the domain is on the
+  Chrome preload list.
+- Self-hosters may operate on a sub-domain whose parent does not yet serve
+  HTTPS on every host.
+- We support a 1-year `max-age` which already protects realistic users.
+
+To opt in (e.g. on a stable, fully-HTTPS apex domain):
+
+1. Confirm every sub-domain (incl. `www`, `api`, `livekit`, `egress`, ...) is
+   reachable over HTTPS.
+2. Edit `docker/nginx/nginx.ssl.conf.template` and append `; preload` to the
+   `Strict-Transport-Security` header.
+3. Submit the apex domain on https://hstspreload.org/.
+4. Document the activation date and ETA for delisting in this runbook.
+
+Until then, leave the default in place.
+
+---
+
+## Production Release Checklist
+
+A linear checklist for cutting a production deploy. Do not skip steps.
+
+1. **DNS**
+   - `A`/`AAAA` for app (`botparty.example.com`), API (`api.…`), LiveKit
+     (`livekit.…`), Egress (`egress.…`), MinIO public (`media.…`).
+   - TTL ≤ 300s during cut-over.
+2. **TLS**
+   - Run `./scripts/setup-env.sh` (or generate certs out-of-band) to populate
+     `docker/nginx/nginx.ssl.conf` from the template.
+   - Verify Let's Encrypt staging first, then production.
+3. **Secrets**
+   - All values from `.env.example` set; no `devkey`, no `change_me_*`.
+   - `WEBHOOK_SECRET_ENCRYPTION_KEY` set (≥ 32 chars).
+   - `STRIPE_*`/`PAYPAL_*` only set if billing is enabled — once set, the boot
+     guard will require the respective webhook secret.
+4. **Migrations**
+   - Take a Postgres snapshot (`./scripts/backup-db.sh`).
+   - Bring the API container up; entrypoint runs `prisma migrate deploy`.
+   - Confirm `_prisma_migrations` table contains every committed migration.
+   - In production the entrypoint refuses to fall back to `prisma db push`.
+5. **Smoke tests**
+   - `curl -fsS https://<host>/api/v1/health` returns `200`.
+   - `curl -I https://<host>/` returns identical CSP across HTML and API
+     responses (no `unsafe-eval`).
+   - Headless smoke: `pnpm --filter @botparty/web exec playwright test`.
+6. **Monitoring**
+   - Prometheus is scraping `/health/metrics` (status 200).
+   - Loki / Promtail (if enabled) sees container logs.
+   - Sentry receives a release event (set `SENTRY_RELEASE`).
+7. **Backups**
+   - Cron pulls `./scripts/backup-db.sh` once per day; verify a sample restore
+     into a staging DB at least once per quarter (see Backup/Restore below).
+8. **Rollback plan**
+   - Keep the previous image tag pinned in `docker-compose.yml`.
+   - Restore script ready (see Backup/Restore below).
+   - Operator on call has access to MinIO bucket and Postgres dumps.
+
+---
+
+## Backup & Restore
+
+### Backup
+
+`./scripts/backup-db.sh` produces `data/backups/botparty-<TIMESTAMP>.sql.gz`
+and prunes anything older than `BACKUP_RETENTION_DAYS` (default 14).
+
+Schedule via host cron, e.g.:
+
+```cron
+15 3 * * *  cd /opt/botparty && ./scripts/backup-db.sh >> /var/log/botparty-backup.log 2>&1
+```
+
+Recordings/uploaded media live in MinIO. Mirror the MinIO data directory
+(`./data/minio`) with `restic`, `borg`, or `rclone sync` to an off-host
+target. We recommend object-lock or append-only credentials on the remote.
+
+### Restore
+
+Use `./scripts/restore-db.sh <path/to/dump.sql.gz>`. The script:
+
+1. Stops the API service so no writes happen during restore.
+2. Drops & recreates the `botparty` database.
+3. Pipes the gzip dump through `psql`.
+4. Brings the API back up which re-applies migrations idempotently.
+
+For MinIO, copy the backup tree back to `./data/minio` while the MinIO
+container is stopped. Then restart MinIO and verify `mc ls` lists the
+expected buckets.
+
+Test restores quarterly into the dedicated `botparty-staging` database name
+to validate dumps are usable.
+
+---
+
+## Production Migration Procedure
+
+1. Land the migration in a feature branch via
+   `pnpm --filter @botparty/prisma exec prisma migrate dev --create-only`.
+2. Hand-review the generated SQL (`packages/prisma/prisma/migrations/<ts>_*`).
+3. Open a PR. CI runs `pnpm openapi:export` and the API/Web test suites.
+4. Merge to `main`. Tag a release (`vX.Y.Z`).
+5. The `release` GitHub workflow builds and pushes
+   `ghcr.io/<org>/botparty-api:<version>` and `…-web:<version>`.
+6. On the host:
+   ```bash
+   ./scripts/backup-db.sh
+   docker compose pull
+   docker compose up -d
+   docker compose logs -f --tail=100 api    # entrypoint runs migrate deploy
+   ```
+7. Verify `_prisma_migrations` row count equals committed migration count.
+8. Run the smoke checklist above.
+9. If anything fails, see "Rollback plan" — `docker compose pull` an older
+   tag and `docker compose up -d`, then restore the latest pre-migration
+   dump.
+
+---
+
+## Logrotation / Log Sink
+
+By default container logs are written to the Docker JSON file driver. The
+Compose stack caps this with `logging.options.max-size=20m,max-file=5` so
+disk is bounded.
+
+For long-running production hosts, ship logs into Loki:
+
+```bash
+docker compose --profile observability up -d loki promtail
+```
+
+Promtail reads each container's JSON log file and ships labelled streams
+to Loki. Grafana (also under the `observability` profile) renders the
+included dashboards from `docs/grafana/`.
+
+For non-Loki environments, install the host's standard syslog → file
+forwarder (Vector, Fluent Bit, journald) and point it at
+`/var/lib/docker/containers/*/*.log`. The JSON driver caps already prevent
+runaway disk usage if the forwarder is offline.

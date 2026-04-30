@@ -11,12 +11,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { WalletService } from '../wallet/wallet.service';
 import { UpdateAdminUserDto, UpdateMeDto } from './users.dto';
 import type { JwtPayload } from '@botparty/shared';
+import { PlatformUserService } from '../wallet/platform-user.service';
 
 @Injectable()
 export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly walletService: WalletService,
+    private readonly platformUser: PlatformUserService,
   ) {}
 
   private resolveLeaderboardSince(period?: string) {
@@ -156,7 +158,7 @@ export class UsersService {
         createdAt: true,
       },
     });
-    if (!user) throw new NotFoundException('User not found');
+    if (!user || this.platformUser.isPlatformUser(user.id)) throw new NotFoundException('User not found');
     return user;
   }
 
@@ -165,6 +167,7 @@ export class UsersService {
     const since = this.resolveLeaderboardSince(input?.period);
     const newOperatorThreshold = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const users = await this.prisma.user.findMany({
+      where: { id: { not: this.platformUser.getPlatformUserId() } },
       take: limit,
       orderBy: { balance: 'desc' },
       select: {
@@ -237,17 +240,21 @@ export class UsersService {
   async listUsersForStaff(input?: { q?: string; limit?: number }) {
     const limit = Math.max(1, Math.min(input?.limit ?? 100, 250));
     const query = input?.q?.trim();
+    const platformId = this.platformUser.getPlatformUserId();
 
     return this.prisma.user.findMany({
-      where: query
-        ? {
-            OR: [
-              { username: { contains: query, mode: 'insensitive' } },
-              { email: { contains: query, mode: 'insensitive' } },
-              { displayName: { contains: query, mode: 'insensitive' } },
-            ],
-          }
-        : undefined,
+      where: {
+        id: { not: platformId },
+        ...(query
+          ? {
+              OR: [
+                { username: { contains: query, mode: 'insensitive' } },
+                { email: { contains: query, mode: 'insensitive' } },
+                { displayName: { contains: query, mode: 'insensitive' } },
+              ],
+            }
+          : {}),
+      },
       take: limit,
       orderBy: [{ createdAt: 'desc' }],
       select: {
@@ -310,6 +317,10 @@ export class UsersService {
 
       if (!target) {
         throw new NotFoundException('User not found');
+      }
+
+      if (this.platformUser.isPlatformUser(target.id)) {
+        throw new ForbiddenException('Cannot modify the platform user');
       }
 
       const actorIsAdmin = actor.role === 'ADMIN';
@@ -499,6 +510,10 @@ export class UsersService {
 
       if (!target) {
         throw new NotFoundException('User not found');
+      }
+
+      if (this.platformUser.isPlatformUser(target.id)) {
+        throw new ForbiddenException('Cannot delete the platform user');
       }
 
       if (target.id === actor.id) {

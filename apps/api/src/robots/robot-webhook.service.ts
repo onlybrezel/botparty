@@ -30,10 +30,18 @@ export class RobotWebhookService {
     private readonly config: ConfigService,
     @InjectQueue(JOBS_QUEUE_WEBHOOK) private readonly webhookQueue: Queue<WebhookJobData>,
   ) {
-    this.webhookSecretKey =
-      this.config.get<string>('WEBHOOK_SECRET_ENCRYPTION_KEY')?.trim() ||
-      this.config.get<string>('JWT_SECRET')?.trim() ||
-      'botparty-webhook-secret-fallback';
+    const explicitKey = this.config.get<string>('WEBHOOK_SECRET_ENCRYPTION_KEY')?.trim();
+    if (explicitKey) {
+      this.webhookSecretKey = explicitKey;
+    } else if (process.env.NODE_ENV === 'production') {
+      throw new Error('WEBHOOK_SECRET_ENCRYPTION_KEY is required in production');
+    } else {
+      this.webhookSecretKey =
+        this.config.get<string>('JWT_SECRET')?.trim() || 'botparty-webhook-secret-fallback';
+      this.logger.warn(
+        'WEBHOOK_SECRET_ENCRYPTION_KEY not set — falling back to JWT_SECRET (dev only).',
+      );
+    }
     this.maxWebhooksPerRobot = readNonNegativeIntegerEnv(this.config, 'MAX_WEBHOOKS_PER_ROBOT', 10);
   }
 

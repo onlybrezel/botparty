@@ -31,9 +31,22 @@
       ]
     },
     "collectCoverageFrom": [
-      "**/*.(t|j)s"
+      "**/*.(t|j)s",
+      "!**/*.spec.ts",
+      "!**/*.module.ts",
+      "!**/main.ts",
+      "!**/openapi/**",
+      "!**/types/**"
     ],
     "coverageDirectory": "../coverage",
+    "coverageThreshold": {
+      "global": {
+        "statements": 55,
+        "branches": 40,
+        "functions": 50,
+        "lines": 55
+      }
+    },
     "testEnvironment": "node",
     "moduleNameMapper": {
       "^@botparty/prisma$": "<rootDir>/../node_modules/@botparty/prisma",

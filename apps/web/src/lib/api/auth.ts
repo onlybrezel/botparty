@@ -31,6 +31,13 @@ export class AuthApi {
     });
   }
 
+  async logoutAll() {
+    return this.req<{ message: string }>('/auth/logout-all', {
+      method: 'POST',
+      body: '{}',
+    });
+  }
+
   async forgotPassword(email: string) {
     return this.req<{ message: string }>('/auth/forgot-password', {
       method: 'POST',

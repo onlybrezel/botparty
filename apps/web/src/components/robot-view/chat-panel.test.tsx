@@ -108,4 +108,45 @@ describe('RobotChatPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Load older messages' }));
     expect(onLoadOlder).toHaveBeenCalledTimes(1);
   });
+
+  it('does not execute HTML/script payloads coming from chat content', () => {
+    const xssMessages: ChatMsg[] = [
+      {
+        userId: 'attacker',
+        username: 'mallory',
+        content: '<img src=x onerror="window.__pwned=1"> <script>window.__pwned=2</script>',
+        timestamp: Date.now(),
+        isSystem: false,
+      },
+    ];
+
+    const { container } = render(
+      <RobotChatPanel
+        messages={xssMessages}
+        hasOlderMessages={false}
+        historyLoading={false}
+        chatInput=""
+        setChatInput={vi.fn()}
+        chatRestriction={null}
+        focusMode="chat"
+        setFocusMode={vi.fn()}
+        currentViewerId="viewer-1"
+        canModerate={false}
+        moderatingUserId={null}
+        tabSwitchOnlyWhenEmpty={false}
+        chatScrollRef={createRef()}
+        chatPanelRef={createRef()}
+        chatInputRef={createRef()}
+        chatShouldStickRef={{ current: true }}
+        onLoadOlder={vi.fn()}
+        onSend={vi.fn()}
+        onModerate={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.querySelector('script')).toBeNull();
+    expect((window as unknown as { __pwned?: unknown }).__pwned).toBeUndefined();
+    expect(screen.getByText(/<img src=x onerror/)).toBeInTheDocument();
+  });
 });

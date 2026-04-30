@@ -145,6 +145,22 @@ export default async function ExplorePage({
               ? 'Try a different host, status, or exact tag'
               : 'Nothing is listed yet. The first good room sets the tone.'}
           </p>
+          {!(params.q || params.status || params.tag) && (
+            <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+              <a
+                href="/dashboard/robots/new"
+                className="rounded-full bg-[var(--primary)] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--primary-hover)]"
+              >
+                Host the first robot
+              </a>
+              <a
+                href="/docs"
+                className="rounded-full border border-[var(--border)] bg-[var(--card)] px-5 py-2.5 text-sm font-semibold text-[var(--foreground)] transition hover:border-[var(--primary)]"
+              >
+                Read the host guide
+              </a>
+            </div>
+          )}
         </div>
       ) : (
         <>

@@ -9,13 +9,22 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import type { Request } from 'express';
+import type { FastifyRequest } from 'fastify';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Public } from '../auth/decorators/public.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { JwtPayload } from '@botparty/shared';
 import { BillingService } from './billing.service';
 import { CheckoutDto } from './billing.dto';
+
+type FastifyRequestWithRawBody = FastifyRequest & { rawBody?: Buffer | string };
+
+function extractRawBody(req: FastifyRequestWithRawBody): Buffer {
+  const raw = req.rawBody;
+  if (Buffer.isBuffer(raw)) return raw;
+  if (typeof raw === 'string') return Buffer.from(raw);
+  return Buffer.from('');
+}
 
 @ApiTags('billing')
 @Controller('billing')
@@ -45,17 +54,21 @@ export class BillingController {
   @Public()
   @HttpCode(200)
   @ApiOperation({ summary: 'Stripe webhook receiver' })
-  async stripeWebhook(@Req() req: Request, @Headers() headers: Record<string, string | string[] | undefined>) {
-    const rawBody = (req as Request & { rawBody?: Buffer }).rawBody ?? Buffer.from('');
-    return this.billing.handleStripeWebhook(rawBody, headers);
+  async stripeWebhook(
+    @Req() req: FastifyRequestWithRawBody,
+    @Headers() headers: Record<string, string | string[] | undefined>,
+  ) {
+    return this.billing.handleStripeWebhook(extractRawBody(req), headers);
   }
 
   @Post('webhooks/paypal')
   @Public()
   @HttpCode(200)
   @ApiOperation({ summary: 'PayPal webhook receiver' })
-  async paypalWebhook(@Req() req: Request, @Headers() headers: Record<string, string | string[] | undefined>) {
-    const rawBody = (req as Request & { rawBody?: Buffer }).rawBody ?? Buffer.from('');
-    return this.billing.handlePaypalWebhook(rawBody, headers);
+  async paypalWebhook(
+    @Req() req: FastifyRequestWithRawBody,
+    @Headers() headers: Record<string, string | string[] | undefined>,
+  ) {
+    return this.billing.handlePaypalWebhook(extractRawBody(req), headers);
   }
 }

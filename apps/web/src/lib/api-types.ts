@@ -131,12 +131,14 @@ export interface RobotMutationInput {
 
 export interface RobotChatHistoryPage {
   messages: Array<{
+    id?: string;
     userId: string;
     username: string;
     content: string;
     timestamp: number;
   }>;
   nextCursor: number | null;
+  nextCursorId?: string | null;
   hasMore: boolean;
 }
 

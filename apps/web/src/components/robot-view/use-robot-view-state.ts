@@ -71,6 +71,7 @@ export function useRobotViewState(robot: RobotPublic) {
   const [crowdInputs, setCrowdInputs] = useState<Map<string, number>>(new Map());
   const [messages, setMessages] = useState<ChatMsg[]>(() => createInitialMessages(robot.name));
   const [chatHistoryCursor, setChatHistoryCursor] = useState<number | null>(null);
+  const [chatHistoryCursorId, setChatHistoryCursorId] = useState<string | null>(null);
   const [chatHistoryHasMore, setChatHistoryHasMore] = useState(false);
   const [chatHistoryLoading, setChatHistoryLoading] = useState(false);
   const [chatInput, setChatInput] = useState('');
@@ -208,6 +209,7 @@ export function useRobotViewState(robot: RobotPublic) {
     initialChatScrollDoneRef.current = false;
     chatShouldStickRef.current = true;
     setChatHistoryCursor(null);
+    setChatHistoryCursorId(null);
     setChatHistoryHasMore(false);
     setChatHistoryLoading(false);
 
@@ -952,6 +954,7 @@ export function useRobotViewState(robot: RobotPublic) {
       api.setToken(accessToken);
       const page = await api.robots.getRobotChatHistory(robot.id, {
         before,
+        beforeId: chatHistoryCursorId ?? undefined,
         limit: 50,
         roomAccessToken: roomAccessToken ?? undefined,
         guestSessionId,
@@ -959,6 +962,7 @@ export function useRobotViewState(robot: RobotPublic) {
 
       setMessages((prev) => mergeChatMessages(prev, page.messages));
       setChatHistoryCursor(page.nextCursor);
+      setChatHistoryCursorId(page.nextCursorId ?? null);
       setChatHistoryHasMore(page.hasMore);
 
       requestAnimationFrame(() => {
@@ -975,6 +979,7 @@ export function useRobotViewState(robot: RobotPublic) {
   }, [
     accessToken,
     chatHistoryCursor,
+    chatHistoryCursorId,
     chatHistoryHasMore,
     chatHistoryLoading,
     guestSessionId,

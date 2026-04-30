@@ -1,6 +1,6 @@
 #!/bin/sh
 # BotParty API Entrypoint
-# Runs schema push, seeds only for a fully empty database, then starts the API.
+# Applies migrations (production: strict), seeds an empty database, then starts the API.
 set -e
 
 echo "════════════════════════════════════════"
@@ -17,43 +17,30 @@ MIGRATIONS_DIR="packages/prisma/prisma/migrations"
 
 if [ -d "$MIGRATIONS_DIR" ] && [ "$(find "$MIGRATIONS_DIR" -mindepth 1 -maxdepth 1 -type d | wc -l)" -gt 0 ]; then
   echo "📦 Applying Prisma migrations (migrate deploy)..."
-  MIGRATE_LOG="$(mktemp)"
-  if ! ./node_modules/.bin/prisma migrate deploy \
-    --schema="$SCHEMA" \
-    >"$MIGRATE_LOG" 2>&1; then
-    sed 's/^/  /' "$MIGRATE_LOG"
-    rm -f "$MIGRATE_LOG"
-    echo "⚠️  migrate deploy failed (likely legacy non-baselined DB). Falling back to db push"
+  if ! ./node_modules/.bin/prisma migrate deploy --schema="$SCHEMA"; then
+    echo "❌ migrate deploy failed."
     if [ "${NODE_ENV}" = "production" ]; then
-      ./node_modules/.bin/prisma db push \
-        --schema="$SCHEMA" \
-        --skip-generate \
-        2>&1 | sed 's/^/  /'
-    else
-      ./node_modules/.bin/prisma db push \
-        --schema="$SCHEMA" \
-        --skip-generate \
-        --accept-data-loss \
-        2>&1 | sed 's/^/  /'
+      echo "   Refusing to fall back to 'db push' in production."
+      echo "   Resolve the failed migration manually before redeploying."
+      exit 1
     fi
-  else
-    sed 's/^/  /' "$MIGRATE_LOG"
-    rm -f "$MIGRATE_LOG"
+    echo "⚠️  (dev/non-production) Falling back to 'prisma db push' for convenience."
+    ./node_modules/.bin/prisma db push \
+      --schema="$SCHEMA" \
+      --skip-generate \
+      --accept-data-loss
   fi
 else
-  echo "⚠️  No Prisma migrations found, falling back to db push"
   if [ "${NODE_ENV}" = "production" ]; then
-    ./node_modules/.bin/prisma db push \
-      --schema="$SCHEMA" \
-      --skip-generate \
-      2>&1 | sed 's/^/  /'
-  else
-    ./node_modules/.bin/prisma db push \
-      --schema="$SCHEMA" \
-      --skip-generate \
-      --accept-data-loss \
-      2>&1 | sed 's/^/  /'
+    echo "❌ No Prisma migrations found in $MIGRATIONS_DIR — refusing to start in production."
+    echo "   Run 'pnpm prisma migrate dev' locally and commit the migration."
+    exit 1
   fi
+  echo "⚠️  No Prisma migrations found, falling back to db push (dev only)."
+  ./node_modules/.bin/prisma db push \
+    --schema="$SCHEMA" \
+    --skip-generate \
+    --accept-data-loss
 fi
 echo "✅ Schema up to date"
 

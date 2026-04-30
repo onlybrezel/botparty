@@ -1,620 +1,1135 @@
 # AUDIT.md
 
-> Audit auf Basis einer vollständigen Code-Lesung des Repositorys. Die Analyse-Abschnitte dokumentieren den urspruenglichen Befund; Executive Summary, Prioritaeten und §15 wurden in dieser Session gegen den aktuellen Implementierungsstand nachgezogen. Wenn etwas nicht zweifelsfrei aus dem Code ablesbar war, ist es als **Pruefpunkt** oder **Vermutung** gekennzeichnet.
+> Stand: 2026-04-30 · Audit auf Basis des Repository-Stands `onlybrezel/botparty`
+> auf Branch `main`. Es wurden ausschließlich Quelldateien, Konfiguration,
+> Migrations, Docker-Setup, CI-Definitionen und Doku-Bestände gelesen.
+> Keine Codeänderungen, keine Build- oder Testläufe als Teil dieses Audits.
 
 ---
 
 ## 1. Executive Summary
 
-BotParty ist ein technisch ambitioniertes, gut strukturiertes Realtime-Teleoperationssystem (NestJS/Fastify-API, Next.js-15-Web, LiveKit-SFU, PostgreSQL, Redis, BullMQ) in einem pnpm/Turbo-Monorepo. Der Stack ist modern, der Sicherheits-Bootstrap (Helmet/CSP, CSRF-Doppel-Cookie, JWT-Rotation per `tokenVersion`, Argon2, Login-Lockout, Refresh-Cookies HttpOnly) ist überdurchschnittlich gut umgesetzt, der Realtime-Pfad (LiveKit + WS-Gateway) ist sauber getrennt von HTTP-Logik, Docker-Compose ist produktionsorientiert (interne Netze, `_FILE`-Secret-Pattern, Healthchecks).
+BotParty ist eine bemerkenswert weit entwickelte, real-time orientierte
+Self-Hosted Robot-Teleoperations-Plattform (NestJS 11 / Fastify 5 / Next.js 15 /
+LiveKit / Postgres 16 / Redis 7 / Prisma / BullMQ). Die Architektur ist sauber
+geschnitten in API, Web, Shared, Prisma. Der Funktionsumfang reicht
+erstaunlich weit: Auth (JWT + Refresh, Argon2id, Email-Verify, Lockout, Reset),
+RBAC, WebSocket-Gateway mit Handler-Trennung, Queue, Chat (Soft-Delete + Audit),
+Moderation (Timeout/Kick/Ban inkl. Audit-Log), LiveKit-Token + Egress (Recording
+nach S3/MinIO), Webhooks pro Robot inkl. SSRF-Schutz, Wallet/Credits,
+Stripe + PayPal Billing mit idempotentem Webhook-Ledger, Donations, Payout
+Requests, Sentry-Hooks, OpenTelemetry, Prom-Metriken, cAdvisor, Loki/Promtail
+(Profile), strukturiertes Logging via Fastify/Pino, Cookie-Banner, Privacy/
+Imprint/Terms-Seiten mit Runtime-Konfiguration, Service Worker, OG-Bilder,
+Daten-Export.
 
-Groesste Risiken:
-- Die groessten verbleibenden Wartbarkeitsrisiken liegen jetzt vor allem bei den extrahierten Frontend-State-Hooks (`use-dashboard-page.ts`, `use-robot-view-state.ts`) und `moderation.service.ts`; die urspruenglichen Route-Hotspots sowie die Backend-Hotspots `bot.gateway.runtime.ts` und `robots.service.ts` wurden in dieser Session unter ihre Zielwerte gedrueckt.
-- Repo-weite API-Lint-Schulden sind weiterhin vorhanden; der rote Baseline-Block besteht heute vor allem aus historischen `consistent-type-imports`- und Test-`as any`-Fundstellen, nicht aus den in diesem Audit umgesetzten Features.
-- Finale Betreiber-/Legal-Daten bleiben eine echte Deploy-Konfiguration; der Code erzwingt diese Angaben in Produktion jetzt aber statt sie stillschweigend mit Platzhaltern zu rendern.
-- Einige grosse Service-/Hook-Dateien bleiben Beobachtungspunkte fuer weitere Wartbarkeitsarbeit, auch wenn die urspruenglichen Audit-Hotspots und die fehlenden Produkt-/Security-Surfaces geschlossen wurden.
+**Wichtigste Risiken**
 
-Größte Chancen:
-- Mit den in dieser Session umgesetzten Refactorings, Security-Fixes, UIs und Ops-Artefakten ist eine echte Public-Beta-Reife aus Reposicht erreicht.
-- Tests sind jetzt nicht nur vorhanden (Vitest, Jest-Specs, Playwright-Konfig), sondern decken die kritischen Gateway-Helfer in `src/gateway/*` mit >70% Lines ab; die Pipeline (`.github/workflows/ci.yml`) publiziert ausserdem die OpenAPI-Spec inklusive Drift-Check.
-- Produktqualität (UX, Onboarding, Empty States, Trust-Elemente) ist die nächste, klar abgrenzbare Investitionsstufe nach den Hardening-Tasks.
+1. **CSP weicht zwischen den drei Layern (Helmet, nginx, Next.js) auseinander**
+   und enthält in zwei davon `'unsafe-inline'`/`'unsafe-eval'`. Die
+   strikteren Werte aus dem Helmet-Setup werden auf der HTML-Antwort durch
+   die Next.js-Header überschrieben.
+2. **Bezahlumgebung produktiv schaltbar ohne dokumentierte ENV** — die Stripe-
+   und PayPal-Schlüssel (`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`,
+   `PAYPAL_*`) tauchen in `.env.example` nicht auf. Das macht Misskonfiguration
+   sehr wahrscheinlich (z. B. Webhooks ohne Signaturprüfung scheitern leise
+   bzw. Sandbox-Defaults gehen live).
+3. **Riesige Service-/Helper-Dateien** (z. B. `moderation.service.ts` 992 LOC,
+   `runtime-telemetry.service.ts` 804 LOC, `gateway-runtime.support.ts`
+   558 LOC, `robots.controller.ts` 587 LOC) — Wartungs- und Review-Risiko,
+   testtechnisch schwer zu isolieren.
+4. **Legal-Konfiguration ist Pflicht im Production-Build, aber für ein
+   Public-Release nur teilweise abgesichert** (Privacy-Inhalte sind generisch,
+   konkrete Datenflussbeschreibung fehlt teilweise).
+5. **CI baut ausdrücklich gegen Node 22, Repo & Docker-Image laufen auf
+   Node 24.** Diskrepanz erhöht das Risiko unentdeckter Versionsregressionen.
 
-Grobe Release-Reife: **Public-Beta-ready aus Reposicht.** Die urspruenglichen P0/P1/P2/P3-Luecken aus diesem Audit wurden technisch geschlossen oder durch harte Produktions-Guards in echte Deploy-Konfiguration ueberfuehrt; uebrig bleiben vor allem normale Wartbarkeits- und Baseline-Lint-Themen, keine fehlenden Audit-Features.
+**Größte Chancen**
 
-Empfohlene Prioritaeten (Reihenfolge):
-1. Deployment abschliessen: reale Betreiber-/Legal-Daten und produktive Secrets in der Zielumgebung setzen.
-2. Wartbarkeitsarbeit fortsetzen: grosse extrahierte State-Hooks und `moderation.service.ts` weiter zerlegen.
-3. Historische API-Lint-Schulden abbauen.
-4. Weiteren Produktausbau priorisieren, falls nach Beta-Launch erforderlich.
+- Sehr starke Grundsubstanz an Tests (≈ 41 API-Specs, 15 Web-Tests, Playwright,
+  OpenAPI-Drift-Check). Mit fokussierter Investition in E2E + Lasttests wird
+  das Projekt schnell release-fest.
+- Klare Architektur (Handler pro WS-Verantwortung, Idempotency-Keys, Audit-
+  Logs, ADR-Verzeichnis). Refactoring-Schmerz ist überschaubar.
+- Sehr gute Operator-Story (`setup-env.sh`, Compose-only Deploy, Healthchecks,
+  Secrets via File-Mount).
+
+**Release-Reife (grobe Einschätzung)**
+
+- Self-Hosted-Beta für technische Operator: **realistisch nahe**.
+- Public/Commercial-Release inkl. Bezahlung, Moderation-SLAs, Datenschutz und
+  Skalierung über einen Knoten hinaus: **noch nicht**. Zentrale Blocker sind
+  Security-Headers, Bezahlflows-Härtung, Lasttests, GDPR-Datenfluss-Doku und
+  saubere Mehrinstanz-Validierung des Gateways (instanz-affines Active-Turn-
+  Modell ist dokumentiert, aber Cross-Instance-Verhalten unter Last ist nicht
+  belegt).
+
+**Empfohlene Prioritäten**
+
+1. Security-Header und CSP konsolidieren (P0).
+2. Bezahlpfade (`STRIPE_*`/`PAYPAL_*`) dokumentieren, in `.env.example`
+   ergänzen, Boot-Validierung wenn aktiviert (P0).
+3. Doku „Production-Checkliste" + Datenschutz-Datenflussbeschreibung (P1).
+4. Refactor der Riesen-Services + ergänzende Tests (P2).
+5. Release-Pipeline + Migrationsprozess für Prod (P1).
 
 ---
 
 ## 2. Projektüberblick
 
-### Technologien (verifiziert in `package.json`-Dateien)
+### Erkannte Technologien
 
-Backend (`apps/api`):
-- NestJS 11, Fastify 5, `@nestjs/platform-fastify`, `@nestjs/swagger`
-- WebSocket via `ws` + `@nestjs/websockets` (kein socket.io)
-- Prisma 6, PostgreSQL 16
-- ioredis, Redis 7, BullMQ
-- LiveKit Server SDK + `@livekit/protocol`
-- Auth: argon2, jsonwebtoken, `@nestjs/jwt`, `@fastify/csrf-protection`
-- Validation: zod, class-validator/class-transformer
-- Logging/Obs: pino, OpenTelemetry-API/SDK-Node, prom-client
-- Security: helmet, `@nestjs/throttler`
-- Storage: `@aws-sdk/client-s3` (MinIO-kompatibel), sharp
-- E-Mail: nodemailer
-
-Frontend (`apps/web`):
-- Next.js 15 (App Router), React 19, Tailwind CSS 4
-- State: Zustand
-- Realtime/Media: livekit-client, `@livekit/components-react`
-- Icons: lucide-react
-- Animation: framer-motion
-- Tests: Vitest, Playwright
-
-Shared (`packages/shared`): Zod-Schemas, TS-Typen, Konstanten (Rollen, Visibility, AccessMode, QueueMode, RobotStatus, ControlButtonAccess, WS-Protokoll-Konstante).
-
-Prisma (`packages/prisma`): 13 Models (User, Robot, Session, QueueEntry, ControlButton, ChatMessage, RoomAccess, ModerationAction, Webhook, RobotIngressCamera, EmailVerification, Transaction, SwarmGroup), 9 Enums.
+- **Sprache/Build**: TypeScript ≥ 5.7, pnpm 9.15.4 Workspaces, Turborepo, Node 24.
+- **Backend**: NestJS 11 auf Fastify 5 (`@nestjs/platform-fastify`),
+  `@nestjs/platform-ws` (kein Socket.IO), Throttler-Guard global, Helmet,
+  Swagger (Basic-Auth schützbar), BullMQ, Pino/Fastify-Logger, OpenTelemetry,
+  Sentry-Init optional.
+- **Frontend**: Next.js 15 App Router, React 19, Tailwind v4, Zustand,
+  livekit-client + `@livekit/components-react`, Framer Motion, Lucide Icons.
+- **Auth**: JWT Access (default 15 min) + Refresh (default 7 d) inkl.
+  Server-side Refresh-Rotation per Lua-CAS in Redis, Argon2id Hashing,
+  optionaler E-Mail-Verify-Gate, Lockout nach 10 Fehlversuchen, CSRF-Origin-
+  Guard, Same-Site Cookies + getrennter CSRF-Cookie, Rate-Limit pro Benutzer.
+- **Realtime**: LiveKit SFU (Video, Recording via Egress), eigener WS-Gateway
+  für Steuer-/Chat-/Queue-Events (`/ws`).
+- **Datenhaltung**: PostgreSQL 16 + Prisma; Redis 7 für Pub/Sub, Lockout,
+  Refresh-State, Active-Turn-State, Idempotency, Rate-Limits; MinIO/S3 für
+  Recordings & Thumbnails (mit Lifecycle-Regeln über `mc ilm`).
+- **Externe Services**: Stripe + PayPal (provider-agnostische Schnittstelle),
+  SMTP-Mailer, optional Sentry, optional Loki/Promtail (Profil), cAdvisor.
+- **Robot-Client**: separates Repository `botparty-client` (Python). Im
+  Hauptrepo nur als externer Vertrag (Claim-Token, Webhooks, Gateway-
+  Protocol, Telemetry-Payload).
 
 ### Architektur
 
-- Monorepo: pnpm-workspace + Turbo (`turbo.json`).
-- API serviert REST unter `/api/v1`, WS unter `/ws`, Health/Metrics unter `/api/v1/health/*`.
-- Web spricht primär die API über `apps/web/src/lib/api.ts` (`ApiClient`) und hält den WS-/Room-State jetzt gebündelt in `components/robot-view/use-robot-view-state.ts`.
-- LiveKit ist die einzige Medien-Transportschicht; API erstellt LiveKit-Token & Ingress, WS nimmt Steuerbefehle an.
-- Redis dient für Pub/Sub, Login-Lockout, CSRF-/Reset-Tokens und Queue-Koordination.
-- Docker-Compose-Setup mit `internal: true`-Netzwerk für db/redis/livekit, eigenem Frontend-Netz, `*_FILE`-Secrets, Healthchecks für alle wichtigen Dienste.
+```
+Browser ── nginx ──┬── Next.js (web)
+                   ├── NestJS API (Fastify) ── Postgres / Redis / MinIO
+                   ├── /ws → NestJS WS-Gateway (eigene Handler-Klassen)
+                   └── /rtc → LiveKit SFU (+ Ingress / Egress)
+Robot-Client (extern) ── Gateway WS + LiveKit WHIP-Ingress
+```
 
-### Frontend-Struktur (`apps/web/src/app`)
+### Frontend-Struktur
 
-Routen: `/`, `/login`, `/forgot-password`, `/reset-password`, `/dashboard`, `/settings`, `/leaderboard`, `/explore`, `/mod`, `/robot/[...parts]` (deckt Legacy-Links `/robot/[slug]` sowie kanonische Owner-Links `/robot/[username]/[slug]` ueber eine gemeinsame Route ab), `/embed`, `/cookies`, `/privacy`, `/terms`, `/docs/*`. Zusätzlich `error.tsx`, `loading.tsx`, `not-found.tsx`, `sitemap.ts`, `robots.ts`.
+App Router mit Routen für Marketing/Home, Explore, Dashboard, Robot
+(`/robot/[slug]`, `/robot/[username]/[slug]`, Catchall), Sessions, Settings,
+Wallet, Mod (inkl. Payouts), Embed, Status, Leaderboard, Docs (Controller-
+Doku), legal (Imprint/Privacy/Terms/Cookies), Auth (Login/Reset/Verify).
+Komponenten sind sinnvoll segmentiert (`components/dashboard`, `robot-view`,
+`livekit`, `mod`, `ui`). Theme-Bootstrap inline im Root-Layout. Cookie-Banner
+mit explizitem Accept/Decline, Preferences via Zustand-persist.
 
-Komponentenbereiche: `components/dashboard/*`, `components/robot-view/*`, `components/mod/*`, `components/livekit*`, `components/ui/*`, `components/cookie-banner.tsx`, `components/nav.tsx`, `components/theme-controller.tsx`, `components/sentry-browser.tsx`.
+### Backend-Struktur
 
-### Backend-Struktur (`apps/api/src`)
+NestJS-Module: `auth`, `users`, `robots`, `sessions`, `queue`, `livekit`,
+`gateway`, `health`, `controls`, `moderation`, `mail`, `maintenance`, `wallet`,
+`billing`, `earnings`, `prisma`, `redis`, `jobs`, `bootstrap`. WS-Gateway ist
+in dedizierte Handler aufgeteilt (Room/Turn/Chat/Control/RobotRuntime/
+Moderation-Enforcer/Redis-PubSub/Robot-Claim-Lock/Presence). Recordings, S3,
+SMTP, Webhooks und Telemetry haben eigene Services. Audit-Log und Idempotenz
+für Wallet/Webhook-Events sind als eigene Tabellen modelliert.
 
-Module: `auth`, `users`, `robots`, `queue`, `sessions`, `controls`, `livekit`, `moderation`, `gateway`, `health`, `prisma`, `redis`, `common`, `mailer`, `worker`. `main.ts` wired Helmet, CSP, CORS, CSRF-Plugin, Throttling, Pino-Logger und Swagger.
+### Datenmodell (Prisma)
 
-### Datenhaltung
+23 Modelle inkl. RBAC (`Role`), Robot-Lifecycle, Queue, Chat (Soft-Delete +
+Deletor), Sessions, Recording-Egress-Verknüpfung implizit per
+`recordingUrl`, Transactions (Ledger mit `ledgerGroupId`-Saldo 0),
+BillingIntents + WebhookEvents (idempotent), WalletIdempotencyKey,
+PayoutRequests, ControlButton, RobotModerationEntry, AdminAuditLog,
+AnalyticsEvents, RobotWebhook, SwarmGroup (reserviert), RobotAllowedUser.
 
-PostgreSQL via Prisma (durable), Redis (ephemer: Lockout, CSRF, Reset-Token, Pub/Sub), MinIO/S3 für Aufnahmen. Passwort-Reset-Tokens werden absichtlich nur in Redis als sha256 gespeichert (siehe `auth.service.ts`), nicht in der DB.
+### Authentifizierung
 
-### Authentifizierung & Autorisierung
+- Argon2id, Lockout nach 10 Fehlversuchen / 15 min, Reset-Limit 3/15 min,
+  Resend-Limit 3/15 min, Refresh-Rotation per Redis-Lua-CAS mit 15 s
+  Grace-Window, `tokenVersion`-basiertes globales Revoke.
+- CSRF: Eigener `CsrfOriginGuard` + zusätzliches Cookie/CSRF-Token-Issue über
+  `/auth/csrf` (Double-Submit). Refresh per Cookie und/oder Body.
+- Optionales E-Mail-Verify-Gate (`REQUIRE_EMAIL_VERIFICATION`).
 
-- Passwort-Hashing: argon2.
-- JWT Access (15 min) + Refresh (7 Tage), Refresh als HttpOnly-Cookie.
-- Refresh-Revocation per `User.tokenVersion`-Inkrement (kein Refresh-Token-Table, Logout = Inkrement).
-- CSRF: Doppel-Cookie + `X-CSRF-Token` + Origin/Referer-Check (`CsrfOriginGuard`).
-- Login-Lockout: 10 Fehlschläge → 15 min Sperre (Redis).
-- Rollen: USER, MOD, ADMIN (Prisma-Enum), `RolesGuard`/`AdminGuard` im Codebase.
-- Robot-Auth eigener Pfad mit `ROBOT_JWT_SECRET` und `deviceHash` (Regex `/^[a-f0-9]{64}$/`).
+### Build-/Startprozess
 
-### Externe Services
+- Root: `pnpm build|dev|lint|typecheck|test:coverage` über Turbo.
+- API: `tsc` Build, `nest start --watch` Dev, Jest Tests.
+- Web: `next build|dev|start`, Vitest Unit Tests, Playwright E2E.
+- Docker: Multi-Stage BuildKit-Dockerfiles für API und Web; `nginx:1.27-alpine`
+  Reverse Proxy; Compose-Service für `livekit`, `livekit-ingress`,
+  `livekit-egress`, `cadvisor`, `minio`, optional `loki`/`promtail`
+  (`profiles: ["observability-logs"]`).
+- Setup: `setup-env.sh` (umfangreich, generiert Secrets, ssl.conf, etc.).
 
-LiveKit (WHIP-Ingress + Egress + RoomService), MinIO/S3-kompatibles Object-Storage (Recordings/Thumbnails), SMTP (nodemailer), optional OpenTelemetry-Exporter.
+### Test-/Lint-/Deploy-Prozesse
 
-### Build / Start / Tests / Deploy
-
-- Engines: Node ≥ 22, pnpm ≥ 9.15.0 (in Root-`package.json`).
-- Top-Level Scripts: `pnpm dev`, `build`, `lint`, `typecheck`, `test`, `test:coverage`, `e2e` via Turbo.
-- API: NestJS Build → `dist/main.js` läuft per `pnpm --filter @botparty/api start:prod`.
-- Web: `next build` + `next start`.
-- CI: `.github/workflows/ci.yml` (lint, typecheck, test, coverage, e2e, build) und `codeql.yml` (wöchentlich).
-- Deploy: docker-compose mit nginx-Reverse-Proxy, optional SSL-Template.
+- CI Workflow `ci.yml`: lint+typecheck → test (API) + coverage (API/Web) +
+  e2e (Playwright Chromium) → build + OpenAPI-Drift-Check + Artefakt-Upload.
+- CodeQL-Workflow vorhanden (`codeql.yml`).
+- Dependabot-Konfiguration vorhanden.
 
 ---
 
 ## 3. Codequalität
 
-### Konkret gefundene Probleme
+### Beobachtungen
 
-- **Mega-Dateien (verifiziert per `wc -l`).** Diese Dateien sind weiterhin weit über jeder vernünftigen Größe für Realtime-/UI-Code:
-  - `apps/api/src/moderation/moderation.service.ts` — 984 LOC
-  - `apps/api/src/runtime-telemetry/runtime-telemetry.service.ts` — 804 LOC
-  - `apps/api/src/livekit/livekit.service.ts` — 778 LOC
-  - `apps/web/src/components/robot-view/use-robot-view-state.ts` — 1763 LOC; die ehemalige Route-Datei `apps/web/src/app/robot/[slug]/robot-view.tsx` liegt jetzt bei 10 LOC, aber der extrahierte State-/WS-Hook ist noch gross.
-  - `apps/web/src/components/dashboard/use-dashboard-page.ts` — 1475 LOC; die ehemalige Route-Datei `apps/web/src/app/dashboard/page.tsx` liegt jetzt bei 428 LOC, aber der zentrale Dashboard-State-Hook bleibt ein Hotspot.
-  - `apps/web/src/components/dashboard/control-button-editor.tsx` — 684 LOC.
-  - `apps/web/src/components/dashboard/dashboard-settings-section.tsx` — 555 LOC.
-- **In dieser Session entschärft:** `apps/api/src/gateway/bot.gateway.runtime.ts` liegt jetzt bei 302 LOC (vorher 1283), `apps/api/src/robots/robots.service.ts` bei 540 LOC (vorher 1251).
-- **Routenüberlappung im Web:** In dieser Session aufgeraeumt. Es gibt jetzt einen klaren kanonischen Loader ueber `app/robot/[...parts]/page.tsx`; historische Links (`/robot/[slug]`) bleiben per Redirect auf den Owner-Pfad kompatibel und sind mit gezielten Vitest-Tests abgesichert.
-- **Unicode-Regel-Verstöße in API-Code:** ASCII-Vorgabe gemäß Custom-Instructions, aber an mehreren Stellen werden „En/Em-Dashes" und runde Trennlinien (`─── …`) verwendet, z. B. in `apps/api/src/main.ts`, `apps/api/src/health/health.controller.ts`, `apps/web/src/lib/api.ts`. Ist projektübergreifend Stilkonvention, aber im Widerspruch zur internen Regel „Backend code should use ASCII only" → Klärung nötig.
-- **Minimal-Logging-Disziplin ist gut:** Im Quellbaum nur 4 reine `console.*`-Aufrufe gefunden; ansonsten Nest-Logger/Pino. Keine `TODO`/`FIXME` im src.
-- **`any`-Vermeidung Prüfpunkt:** Wegen Volumen wurde keine vollständige `grep`-Audit durchgeführt; die strikte Custom-Instruction lautet „Avoid `any`". → Prüfpunkt: Lint-Regel `@typescript-eslint/no-explicit-any` aktiv? Aktuell nicht verifiziert.
-- **`apps/web/src/lib/api.ts` Re-Export-Schicht ist sauber**, aber `private parseError` schluckt unstrukturierte Server-Antworten. Bei Server-5xx ohne JSON kommt eine generische Meldung, was Diagnose schwer macht.
-- **State-Refresh nach Fehler:** Im API-Client werden bestimmte Pfade vom 401-Refresh ausgenommen (richtig), aber `path.startsWith('/auth/')`-Filter ist großzügig (auch z. B. ein zukünftiges `/auth/me`). → Vermutung, kein Bug.
-
-### Naming/Stil
-
-- Backend nutzt konsequent `service`/`controller`/`dto`/`guards`-Konvention.
-- Frontend folgt App-Router-Konventionen, Komponenten in `kebab-case.tsx`, Komponenten-Exports `PascalCase`.
-- Kommentar-Disziplin gut (kein Übermaß an inline-Kommentaren), ASCII-Trennlinien aber in vielen Dateien (siehe oben).
-
-### Technische Schulden (zusammengefasst)
-
-- Schema-Code-Drift: `Transaction`-Model + `SwarmGroup` ohne API/UI.
-- Unausgeschöpfte Email-Verification-Flow im UI.
-- Zweite Stufe der Frontend-Hotspots sitzt jetzt in extrahierten Dashboard-/Robot-State-Hooks statt direkt in den Route-Dateien.
-- Dashboard- und Robot-View-Pages sind unwartbar groß.
+- **Strukturell überdurchschnittlich**: NestJS-Handler-Aufteilung, ADRs, klare
+  DTO/Service-Trennung, Helper-Dateien wie `robots.service.helpers.ts`,
+  `gateway-runtime.support.ts`.
+- **God-Class-Risiko**:
+  - `apps/api/src/moderation/moderation.service.ts` (992 LOC).
+  - `apps/api/src/moderation/runtime-telemetry.service.ts` (804 LOC).
+  - `apps/api/src/robots/robots.service.ts` (545 LOC) + `robots.controller.ts`
+    (587 LOC).
+  - `apps/api/src/gateway/gateway-runtime.support.ts` (558 LOC).
+  - `apps/api/src/moderation/recording-admin.service.ts` (445 LOC).
+- **Typisierung**: TS strict ist offenbar aktiv (Code verwendet `satisfies`,
+  `as never`, sortenreine Generics). Stellenweise `any`/`as unknown as`-Casts
+  (`apps/api/src/main.ts` Helmet-Plugin-Cast, `as never` für
+  Stripe `apiVersion`). Diese Stellen sind isoliert und kommentiert, aber
+  sollten als Tech-Debt notiert werden.
+- **Express vs. Fastify-Mismatch**: `BillingController` typisiert Webhook-
+  Requests als `import type { Request } from 'express'`, obwohl Adapter
+  Fastify ist. Das funktioniert, weil nur `rawBody` verwendet wird, ist aber
+  irreführend und kann zu Runtime-Bugs führen, sobald Express-spezifische
+  Felder genutzt werden.
+- **Logging**: NestJS-Logger flächendeckend benutzt; produktion lässt
+  pino-pretty weg (gut). Vereinzelt `console`-Aufrufe nicht festgestellt
+  (Stichprobe).
+- **Fehlerbehandlung**: Globaler `AllExceptionsFilter` registriert,
+  Auth-Service mappt Exceptions sinnvoll, Refresh-Reuse löst Token-Revoke aus.
+- **Validation**: Globale `ValidationPipe` mit `whitelist+forbidNonWhitelisted`
+  + Zod-Schemas in shared package — zwei parallele Validierungen sind
+  vorhanden (Class-Validator + Zod). Das ist robust, aber doppelt zu warten.
+- **Dead Code/Reservierungen**: `User.balance` (nur Ledger-Reserve),
+  `SwarmGroup`, `aiAssistEnabled`, `ros2Enabled`, `Transaction`-Typen
+  `BATTLE_ENTRY`, `FEATURED_ROBOT` ohne sichtbare Nutzung. Dokumentiert in
+  ADR-0005 — sauber gelabelt.
+- **Naming**: Insgesamt konsistent (camelCase, PascalCase, kurze Verb-Namen
+  wie `handleCommand`, `moderate`). In Schema-Migrationsordnern leichte
+  Inkonsistenz (`20260416_*` × mehrfach an einem Datum statt `__01`-Suffix).
+- **DRY**: Wallet/Donation/Billing nutzen gemeinsame Idempotency-Tabelle —
+  gut. CSP wird in Helmet, nginx und Next.js dreimal definiert (Inkonsistenz).
+- **Komplexität**: Robot-Webhook-Service kombiniert SSRF-Schutz,
+  Verschlüsselung, Retry, HMAC — muss sehr gut getestet bleiben.
 
 ---
 
 ## 4. Architektur & Skalierbarkeit
 
-### Stärken
-
-- Klare Trennung HTTP/WS/Worker.
-- Redis als Pub/Sub und Coordination Layer korrekt eingesetzt.
-- LiveKit-Boundary sauber: API stellt Tokens/Ingress aus, Web konsumiert.
-- Docker-internes Netz für DB/Redis/LiveKit reduziert Angriffsfläche.
-
-### Risiken / Verbesserungen
-
-- **Single-Process-WS-Gateway:** Die Hauptdatei `bot.gateway.runtime.ts` ist jetzt auf 302 LOC heruntergebrochen, aber der Gateway-Zustand bleibt bewusst pro Prozess organisiert (Rooms, Memberships, Cooldowns, Active Turns, Robot-Connections). Skalierung horizontal erfordert weiterhin konsistente Verteilung dieses Zustands über Redis. → **Prüfpunkt:** ob alle relevanten Pfade Redis Pub/Sub nutzen oder der Gateway-Knoten als Single-Instance-Knoten gedacht ist.
-- **„God Service" Robots:** `robots.service.ts` wurde auf 540 LOC reduziert und Hot-Path-Helfer wurden extrahiert. Die Domäne bündelt aber weiterhin viele Verantwortlichkeiten (CRUD, Claim, Heartbeat, Telemetry, Logs, Actions, Ingress-Kameras, Allowed-Users, Thumbnails, Webhooks), daher bleibt Testbarkeit/Erweiterbarkeit ein Beobachtungspunkt.
-- **API-Versionierung:** globaler Prefix `/api/v1`. Es existiert noch keine Strategie für `v2`/Deprecation. Für eine Public-API empfehlenswert.
-- **Historische Routenüberlappung Web** (siehe §3) war ein Architekturproblem und ist jetzt auf einen catch-all-Pfad mit Redirect-Tests reduziert.
-- **Client/Server-Daten-Modell-Drift Risiko:** `apps/web/src/lib/api-types.ts` definiert teils eigene Typen statt Re-Use aus `@botparty/shared`. → Prüfpunkt für jede Domain.
-- **Performance-Risiken (Backend):**
-  - Prisma-Queries in der `users.service.ts`-`exportOwnData`-Funktion ziehen verschachtelte Beziehungen mit `take: 100` etc.; akzeptabel, aber für Power-User-Robots ggf. langsam → keine Pagination im UI sichtbar.
-  - **Prüfpunkt:** N+1 in Robots-Listings (Ingress-Kameras, ControlButtons). Ohne Trace-Profiling nicht final beurteilbar.
+- **Realtime**: Active-Turn-State ist instanzaffin (siehe ADR-0006), Redis
+  Pub/Sub gleicht Events aus. Bei mehreren API-Instanzen ist die korrekte
+  Re-Routing-Logik dokumentiert, aber unter Last nicht durch Tests
+  abgesichert. Bei Knotenausfall ist „Turn-Übergabe" der Hauptrisikopunkt.
+- **Statefulness**: Refresh-Token-Rotation per Lua-Skript (CAS) mit Grace-
+  Window — sehr solide.
+- **Idempotenz**: Wallet- und Webhook-Pfade verwenden Idempotency-Keys,
+  Multi-Leg-Transaktionen werden über `ledgerGroupId` zusammengeführt (Saldo
+  pro Gruppe = 0). Audit-/Recovery-fähig.
+- **Datenbank**: Sinnvolle Indizes auf `users(email)`, `users(username)`,
+  `robots(ownerId|status|visibility|status|slug)`, `sessions(robotId|userId|
+  startedAt)`, `queue_entries(robotId,position)`, `chat_messages(robotId,
+  createdAt|userId|deletedAt)`, `transactions(userId,createdAt|type|
+  ledgerGroupId|createdAt)`, `analytics_events(robotId,event,createdAt|userId,
+  event,createdAt|createdAt)`. Keine offensichtlichen N+1-Schmerzpunkte beim
+  Stichprobentest, aber Public-Overview-Aggregation und Stats-Endpoint
+  brauchen einen Lasttest.
+- **Skalierbarkeit**: Single-Process-Annahmen wie In-Memory-`Map<string, WsClient>`
+  in `gateway-runtime.support.ts` sind hinter Redis-Pub/Sub abgesichert. Es
+  fehlt aber eine dokumentierte horizontale Scaling-Anleitung (Sticky-
+  Routing? LiveKit Distributed? Postgres-Read-Replica?). cAdvisor und
+  Prom-Metriken sind vorhanden.
+- **Modularität**: Sehr gut. Jeder Realtime-Aspekt hat seinen Handler.
+- **Performance-Risiken**:
+  - `moderation.service.ts` lädt teils breite Joins; konkretes Mess-Ziel
+    fehlt.
+  - Public-Overview wird `revalidate: 10` Server-Seitig — okay, aber nicht
+    klar, ob Backenddaten zwischengecacht sind.
+  - Stats-Gauges werden im Health-Controller berechnet (Prom-Format),
+    teilweise via `register.getSingleMetric` mit Singleton-Schutz — okay.
 
 ---
 
 ## 5. Security Audit
 
-### Verifizierte Stärken
+### Bestätigt umgesetzt (Stichproben gelesen)
 
-- Argon2-Passwort-Hashing.
-- JWT-Token-Rotation per `tokenVersion`.
-- HttpOnly-Refresh-Cookies, SameSite=Strict (verifiziert in `auth.cookies.ts`-Aufruf in `csrf-origin.guard.ts`).
-- CSRF: Doppel-Cookie + Header + Origin/Referer-Match.
-- Helmet + CSP gesetzt; CSP `default-src 'self'`.
-- Throttler aktiv, mit explizit strengerer Quote für `/auth/login` (`@Throttle({ default: { limit: 10, ttl: 60_000 } })`).
-- Login-Lockout (10 Versuche / 15 min via Redis).
-- Robot-Token getrennt vom User-JWT-Secret (`ROBOT_JWT_SECRET`).
-- Docker-Compose: DB/Redis/LiveKit hinter `internal: true`-Netz.
-- Secrets per `_FILE`-Pattern.
+- Argon2id, Lockout, Refresh-Rotation, CSRF-Origin-Guard, JWT-Token-Version-
+  basiertes Revoke, Helmet + Fastify, Strict-CORS, Body-Limit, ParseUUIDPipe
+  auf moderierten Endpunkten, Webhook-SSRF-Schutz (`robot-webhook.service.ts`),
+  Webhook-Secret-Encryption-Key, Stripe + PayPal Signature-Verification
+  (Webhook-Pfad), Audit-Log für Admin-Aktionen, Soft-Delete mit Deletor-
+  Referenz, Rate-Limiting auf nginx + NestJS-Throttler, Swagger Basic-Auth
+  Schutz für Production, Metrics-Endpoint Basic-Auth schützbar,
+  `assertRequiredSecret`-Bootguard (wirft in Production bei Default-Secrets).
 
-### Konkret gefundene / dokumentierte Risiken
+### Konkret gefundene Schwachstellen
 
-- **`/api/v1/health/metrics` ist nicht authentifiziert.** Datei `apps/api/src/health/health.controller.ts:163` zeigt keinen `@UseGuards(...)`/keine Auth-Annotation. Die Antwort enthält Prometheus-Gauges für `botparty_dependency_database_up`, `botparty_dependency_redis_up`, `botparty_robot_telemetry_*`, `botparty_queue_depth` etc. Auf einer öffentlich erreichbaren Instanz ist das Informationsabfluss und potenziell Aufklärungshilfe für Angreifer. **Risiko: Mittel–Hoch.** Gegenmaßnahme: HTTP Basic-Auth analog Swagger oder IP-Allowlist auf nginx/Reverse-Proxy.
-- **CSP-Inkonsistenz nginx vs. API.**
-  - `apps/api/src/main.ts` setzt streng `script-src 'self'` (ohne `unsafe-inline`).
-  - `docker/nginx/nginx.conf` setzt locker `script-src 'self' 'unsafe-inline' 'unsafe-eval'` und `connect-src 'self' ws: wss: http: https:`.
-  - Das ist sowohl produktinkonsistent als auch ein potenzielles Bruch-Szenario: wenn nginx an Web vor-proxyed und auf API an Helmet-CSP, kann Next.js' Inline-Theme-Script in `apps/web/src/app/layout.tsx` von der API-CSP gar nicht beeinflusst sein (nur der HTML-Response trägt CSP). Trotzdem: Die nginx-CSP ist viel zu permissiv. **Risiko: Mittel.**
-- **Cookie-Banner ohne Decline-Option** (`apps/web/src/components/cookie-banner.tsx`). Es gibt nur „Accept essential storage". Für DSGVO ist Decline nicht zwingend nötig, aber a) der Banner persistiert lokal in `localStorage` (nicht kontrollierbar pro Cookie-Kategorie), b) es gibt keinen Consent-Widerruf-Pfad und c) keine Verknüpfung mit einem späteren Tracking/Analytics-Schalter. **Compliance-Risiko: Mittel** (siehe §13).
-- **CSP `style-src 'unsafe-inline'`** ist API-seitig gesetzt — Next-/Tailwind-Setup erlaubt vermutlich keine reine Nonce-Strategie. → Akzeptabler Trade-off, aber dokumentationswürdig.
-- **`TRUST_PROXY` Default `loopback, linklocal, uniquelocal`.** Für ein Setup hinter nginx kann das je nach Container-Netz korrekt oder zu eng sein. → Prüfpunkt im Deployment.
-- **`REQUIRE_EMAIL_VERIFICATION` env wird im Code gelesen (in `auth.service.ts`), ist aber nicht in `.env.example` dokumentiert.** Ohne Doku werden Operatoren das Flag nicht kennen → versteckt Sicherheitsfeature.
-- **Cookie-Konsens vs. „guest session" in `localStorage`:** Privacy-Page erwähnt Guest-Session-IDs, Cookie-Banner spricht von „essential storage", aber kein technisch strenger Bezug zu DSGVO-Erforderlichkeit-Begründung pro Schlüssel. → Compliance-Polish nötig.
-- **Swagger-Auth in Prod:** `main.ts` schaltet Swagger nur bei `SWAGGER_DOCS=true` mit Basic-Auth. Gut. Aber: Falls `SWAGGER_USER`/`SWAGGER_PASSWORD` nicht gesetzt → **Prüfpunkt:** ist der Code hart genug, oder fällt er „still" auf eine Defaultkombination zurück? (Code legt Verdacht nahe, Basic-Auth wird nur gewährt wenn beide Variablen gesetzt — bitte verifizieren.)
-- **Rate-Limit nginx:** `auth: 5r/m` ist sehr streng (gut), aber Burst `auth burst=10 nodelay` öffnet eine effektive 15/min Spitze. → Keine Verwundbarkeit, nur Doku-Klarheit.
-- **MinIO-Public-Pfad `/storage/`** wird über nginx exponiert (Zeile mit `proxy_pass http://minio/;`). **Prüfpunkt:** Object-ACLs / Bucket-Policies; falls Buckets nicht „private" sind, wären Recordings öffentlich zugreifbar. Sehr risikobehaftet.
-- **CodeQL aktiv** (`.github/workflows/codeql.yml`). Gut. Trotzdem keine Dependabot/Renovate-Konfiguration im Repo gefunden → Dependency-Risiko nicht automatisiert verfolgt.
-- **Upload-Sicherheit:** `sharp` und `@aws-sdk/client-s3` sind eingebunden. Konkrete Upload-Routen wurden nicht detailliert gelesen → **Prüfpunkt:** MIME/Type-Whitelist, Größenlimits, Bild-Bomben-Schutz, signierte URLs.
-- **Webhooks**: API hat Webhook-CRUD je Owner; **Prüfpunkt** ob ausgehende Webhooks Signiert sind (HMAC), ob SSRF-Schutz besteht (Block 169.254.x, 127.x, RFC1918), Retry/Dead-letter.
+1. **CSP-Inkonsistenz und teils unsichere Direktiven**:
+   - `apps/web/next.config.ts` setzt `script-src 'self' 'unsafe-inline'
+     'unsafe-eval'` und `connect-src 'self' https: http: wss: ws:`.
+   - `docker/nginx/nginx.ssl.conf.template` setzt ebenfalls `script-src
+     'self' 'unsafe-inline' 'unsafe-eval'` und `connect-src 'self' ws: wss:
+     http: https:`.
+   - `docker/nginx/nginx.conf` ohne `unsafe-eval`, aber ebenso permissives
+     `connect-src` und ohne HSTS (HTTP-Setup, ok).
+   - Helmet (API) verwendet **keine** `unsafe-eval`, aber `unsafe-inline`
+     für script-src und style-src.
+   Folge: Tatsächliche Browser-CSP entsteht je nach Pfad und Header-Reihenfolge
+   uneinheitlich. CHANGELOG erwähnt Entfernung von `unsafe-eval` — das
+   Template wurde vergessen.
+2. **`X-XSS-Protection` Header** wird gesetzt — gilt als deprecated/schädlich
+   (kann CVE-spezifisch sogar XSS einführen). Sowohl in `nginx.conf` als auch
+   in `nginx.ssl.conf.template`.
+3. **`next/image` Remote-Pattern `https://**`** ist sehr offen. Erlaubt
+   Optimierung beliebiger HTTPS-Hosts → potenzielle Bandbreiten-/SSRF-Vektor
+   für nachgelagerte Dienste (Next-internes Image-Proxy). Begrenzen auf die
+   tatsächlich erlaubten Hosts (Avatare, Thumbnails, MinIO).
+4. **Bezahl-ENV unvollständig dokumentiert**: `STRIPE_SECRET_KEY`,
+   `STRIPE_WEBHOOK_SECRET`, `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`,
+   `PAYPAL_WEBHOOK_ID`, `PAYPAL_ENV`, ebenso `WEBHOOK_SECRET_ENCRYPTION_KEY`
+   (in `.env.example` ohne Default), `PASSWORD_RESET_TTL_SEC`, `TRUST_PROXY`,
+   `FASTIFY_BODY_LIMIT`, `SENTRY_DSN`, `SENTRY_ENVIRONMENT` (nur als
+   Kommentar). Operatoren müssen den Quellcode lesen, um Bezahlung zu
+   aktivieren — fehleranfällig.
+5. **`LIVEKIT_API_KEY=devkey` als Default** in Compose und `.env.example`.
+   Sehr leicht versehentlich produktiv. Boot-Validierung prüft nur das
+   Secret, nicht den Key.
+6. **`SEED_ADMIN_PASSWORD` ist Pflicht zum Bootstrap**, aber `seed.ts` läuft
+   automatisch beim Container-Start (laut README/Docker-Layer). Risiko, dass
+   Operator dieses Passwort live lässt; keine erzwungene Rotation/Erste-
+   Anmeldung.
+7. **`@fastify/csrf-protection` ist als Dependency vorhanden, aber statt
+   dessen wird ein eigener Origin-Guard verwendet**. Das eigene Schema
+   (Origin-Header + optionales CSRF-Cookie) ist ok für SameSite-Strict,
+   aber sollte explizit dokumentiert sein, damit klar ist, warum die
+   Standardlösung nicht zum Einsatz kommt.
+8. **Rate-Limit-Skopus**: Throttler ist global mit 100/60s — recht hoch für
+   sensible Endpunkte. nginx `auth`-Zone (5/min) gibt es nur, wenn nginx
+   davorsteht. Für Direktzugriff auf Port 4000 (z. B. interne Tests) ist die
+   Auth-Bremse weicher.
+9. **`TRUST_PROXY` Default `loopback, linklocal, uniquelocal`** ist ok hinter
+   Docker, aber bei IPv6-Setup oder nicht-Docker-Reverse-Proxy muss explizit
+   gesetzt werden — ist nicht in `.env.example`.
+10. **Keine sichtbare Output-Sanitization für Chat** (XSS-Risiko) — UI-Seite
+    nicht im Detail geprüft. `ChatHandler` validiert Länge/Profanity, aber
+    Inhalt wird offenbar als Plain-Text rendern (React encodet by default,
+    daher voraussichtlich ok). Prüfpunkt.
+11. **Recordings-Bucket policy `mc anonymous set none`** ist gut, signed URLs
+    werden über `RECORDING_SIGNED_URL_TTL_SEC` (default 300 s) ausgegeben.
+    Thumbnail-Bucket dagegen `download` (öffentlich) — Avatare/Thumbnails
+    sind also weltlesbar, was beabsichtigt sein dürfte, aber im Privacy-Text
+    transparent erwähnt werden sollte.
+12. **Einsicht in Mail-Template-Sicherheit nicht geprüft**. Operator-Settings
+    (Reset-Link) gehen in plain HTML — Prüfpunkt.
 
-### Allgemeine Beobachtungen
+### Sonstige Hinweise
 
-- Keine sichtbaren SQL-Injection-Risiken: durchgängig Prisma; kein `$queryRaw` in Hotpaths außer Healthcheck.
-- Keine offensichtlichen XSS-Vektoren in der UI gefunden (`dangerouslySetInnerHTML` ist im Web-Source nur sehr eingeschränkt zu erwarten — Prüfpunkt durch `grep` empfohlen).
+- **Refresh-Token im Body als Fallback** (`refresh`-Endpunkt) — ok für native
+  Clients, aber dokumentieren.
+- **Login-Lockout pro E-Mail, nicht pro IP** — User-Enumeration-resistent,
+  könnte aber für Massen-Lockouts ausgenutzt werden (Joe-Job). Erwägung:
+  zusätzlich IP-Throttling.
+- **Kein dokumentierter „Logout-überall"-Flow im UI** trotz
+  `revokeRefreshTokens`-API.
 
 ---
 
 ## 6. UX/UI Audit
 
-### Beobachtete Stärken
+> Hinweis: keine Live-Sicht der gerenderten App — Bewertung anhand der Quell-
+> Komponenten (`apps/web/src/app/**`, `components/**`).
 
-- Konsistente Farbtokens (`var(--background)`, `var(--card)`, `var(--primary)`).
-- Zustandsorientierte Komponenten (Skeleton-Komponente für Robot-Room, Onboarding-Overlay).
-- App-Router mit `loading.tsx`, `error.tsx`, `not-found.tsx` ist vorhanden.
-- Toast-Mechanismus zentralisiert (`pushToast`).
-- `nav.tsx` hat Mobile-Burger, Auth-Aware-Items, Theme-Switch.
-
-### Konkret gefundene Probleme / Hinweise
-
-- **Robot-View-Hotspot bleibt in zweiter Ebene bestehen:** Die urspruengliche Mega-Page wurde auf einen kleinen Wrapper reduziert, aber `use-robot-view-state.ts` bündelt weiterhin Chat, Queue, Onboarding, WS-Verbindung, Status-Banner und Steuerung in einem sehr grossen Hook. Folge: jede tiefere Aenderung trifft noch immer viele Zustaende. UX-Effekt: Re-Render-/Debug-Aufwand bleibt erhoeht (siehe §10).
-- **Cookie-Banner** ist sehr knapp; bietet keine Differenzierung „Essential vs. Optional", keine Decline-Option, keine Möglichkeit, später erneut die Auswahl zu ändern. UX und Compliance-relevant.
-- **Privacy/Terms** sind generische Platzhaltertexte (verifiziert per Lesung) ohne Operator-Daten und ohne Impressum / Datenschutzkontaktstelle. Auf .de-Markt fehlen DSGVO-Pflichtangaben.
-- **Empty States Prüfpunkt:** Dashboard und Mod-Page laden Daten asynchron — ob für leere Zustände konsistente CTA + Erklärung vorhanden sind, ist nicht durchgängig verifizierbar. Stichproben (`mod/page.tsx`, `dashboard/page.tsx`) sehen ok aus, aber konsistentes UX-Audit fehlt.
-- **Onboarding für Robot-Owner**: README kennt das Feature, im UI gibt es einen `RoomOnboardingOverlay` für Viewer. Für **Robot-Owner** gibt es im Dashboard keine geführte Schritt-für-Schritt-First-Run-Erfahrung sichtbar. Risiko: hohe Drop-off-Rate für Operator-Akquise.
-- **Accessibility:** Keine sichtbaren `aria-*`-Audits; viele Buttons mit Lucide-Icons haben Text drumherum, aber Icon-only-Buttons sind nicht prüfbar ohne Codelesung. Das ist projektweit ein **Prüfpunkt**.
-- **Tastatur/Hotkeys:** WASD-Layout existiert (siehe `WASD` import in robot-view), aber Touch-Steuerung für Mobile fehlt laut README explizit.
-- **Error-States in Forms**: `settings/page.tsx` nutzt Toasts; **Prüfpunkt** ob Inline-Field-Errors für Validierungsfehler vorhanden sind.
-- **Visuelle Hierarchie**: Privacy/Terms-Seiten haben nur einen H1+H2-Stil; reichlich Text. Für Trust und Lesbarkeit könnte ein TOC/Anchors helfen.
-- **Mikrocopy Trust**: Auf `/` (Landing) — nicht im Detail im Audit gelesen — sollten Trust-Elemente (Anzahl Robots online, Operatoren, Demo-Video) klar sein. **Prüfpunkt**.
+- **Layout/Design**: Tailwind v4 + CSS-Variablen-Theme (Dark/Light), saubere
+  Hero-Section, klare Card/Button/Badge/Dialog/Switch-Primitiven. Toast-Stack
+  vorhanden. Cookie-Banner mit Accept/Decline und Settings.
+- **Navigation**: Globaler Nav, Dashboard mit Sidebar (Components in
+  `components/dashboard/dashboard-sidebar.tsx`). Robot-View hat dedizierte
+  Header/Sidebar/Mobile-Bar — gut für Mobile.
+- **Ladezustände**: `loading.tsx` für `dashboard`, `mod`, `robot` — gut.
+- **Empty/Error States**: `error.tsx` und `not-found.tsx` vorhanden.
+  `RobotView` zeigt Reconnect-Banner mit Sekundenanzeige — sehr gute
+  Realtime-UX.
+- **Onboarding-Overlay**: `RoomOnboardingOverlay` (dynamisch geladen) für
+  neue Besucher — vorhanden.
+- **Forms**: Login/Reset/Forgot-Password explizit gehandhabt; `mode='login'`
+  vs `register` Switching im selben Component — fokussiert, keine Field-Level-
+  Errors gesehen (nur globale `error`-Strings), Verbesserungspotenzial.
+- **Accessibility**: `aria-hidden` auf dekorativen Backgrounds, semantische
+  Headings, sichtbare Focus-Styles via Tailwind-Defaults vorhanden.
+  Playwright nutzt `@axe-core/playwright` — gute Basis. Tatsächliche
+  axe-Run-Coverage prüfen.
+- **Microcopy/Trust**: Login-Side-Panel, Cookie-Banner, Privacy-/Imprint-
+  Skelette mit Hinweis bei fehlender Konfiguration. Insgesamt seriös, aber
+  marketing-/onboardings-arm (Testimonials, Beispielvideo, Quickstart-Block
+  fehlen auf der Home-Seite).
+- **Klickwege**: Login → /explore → Robot-Detail → Queue → Drive sieht
+  durchgängig aus. Embed-Route vorhanden.
+- **Mobile**: Mobile-Bar auf Robot-View, `safe-pb` Padding-Bottom-Klasse —
+  gut. Responsiveness der Dashboard-Sidebar prüfen (Test vorhanden:
+  `dashboard-sidebar.test.tsx`).
 
 ---
 
 ## 7. Feature Audit
 
-### Backend ↔ Frontend Coverage (vom Nutzer explizit angefragt)
+### Vorhandene Features (kein Anspruch auf Vollständigkeit)
 
-Tabelle: vorhanden (✅), teilweise (⚠), fehlt (❌).
+- Real-time Video (LiveKit), Steuerung (eigenes WS), Chat, Crowd-Echo
+- FCFS Queue, konfigurierbare Turn-Time, Voting-Modus als Enum vorgesehen
+- Konfigurierbare Control-Buttons mit Cooldown, Hotkey, Kosten, Access-Level
+- RBAC Admin/Mod/User mit Audit-Log
+- Email-Verifizierung, Password-Reset, Resend-Limits
+- Robot-Dashboard (Visibility, Access-Mode, Allowlist, Telemetry, Webhooks,
+  Tokens, Operations, Monitoring)
+- Embed-View, Status-Page, Leaderboard, Sessions-History, Wallet-Page
+- Mod-Dashboard (Robots, Users, Moderation, Runtime, Payouts)
+- Stripe + PayPal Checkout, Webhook-Idempotenz, Refund-Handling, Chargeback
+- Donations + Payout-Requests
+- Soft-Delete + Audit-Log für Chat
+- Recording (LiveKit Egress) → S3/MinIO mit Lifecycle (TTL via ENV)
+- Thumbnails, Cookie-Banner, Privacy/Imprint/Terms/Cookies-Seiten
+- Service Worker Registration
+- Sentry-Hooks (optional)
+- OpenTelemetry Tracing (optional)
+- cAdvisor + Prom-Metriken
+- Datenexport (laut Settings-Page)
+- Account-Löschung (laut Settings-Page)
 
-| Bereich | Backend | Frontend | Status |
-|---|---|---|---|
-| Login / Register / Refresh | ✅ `/auth/*` | ✅ `/login`, `/forgot-password`, `/reset-password` | ✅ |
-| **E-Mail-Verifikation** | ✅ `/auth/verify-email` + Token-Generierung | ❌ keine `/verify-email`-Route in `apps/web/src/app` (Befund: `find … verify*` leer) | **❌ fehlt** |
-| Password Reset | ✅ Redis-Token, Versand | ✅ Forgot/Reset-Pages | ✅ |
-| User Self-Service (Profile, Avatar) | ✅ `/users/me` | ✅ `/settings` | ✅ |
-| User Export | ✅ `/users/me/export` | ⚠ Vorhanden? — settings-page importiert `exportingData` State; Funktion vermutlich verdrahtet | ⚠ Prüfpunkt |
-| Account Delete (Self) | ✅ | ✅ Dialog in `/settings` | ✅ |
-| Robots CRUD | ✅ | ✅ Dashboard | ✅ |
-| Robot Allowed-Users | ✅ | ✅ `dashboard-allowlist-section.tsx` | ✅ |
-| Robot Ingress-Kameras | ✅ Multi-Cam CRUD | ⚠ Dashboard hat `newIngressCameraId/Label/CompatibilityMode` State; **Prüfpunkt** ob alle Felder UI-gepflegt | ⚠ |
-| Control Buttons | ✅ | ✅ `control-button-editor.tsx` | ✅ |
-| **Webhooks (Owner)** | ✅ List/Create/Delete im API | ❌ keine sichtbare Webhooks-UI im Dashboard | **❌ fehlt** |
-| Sessions History (User) | ✅ `/sessions/my`, `/sessions/robot/:id` | ❌ keine `/sessions`-Route gefunden; im Dashboard ggf. nur „active session" | **❌ fehlt** |
-| Active Session Indicator | ✅ | ✅ in Robot-View / Dashboard | ✅ |
-| Queue beitreten/leaving | ✅ | ✅ | ✅ |
-| Chat | ✅ | ✅ | ✅ |
-| Moderation (User-Update/Delete) | ✅ | ✅ `/mod` | ✅ |
-| Moderation (Robot-Disable) | ✅ | ✅ `/mod` | ✅ |
-| **Recordings starten/stoppen** | ✅ Admin-only | ✅ `/mod` Listing & Stream | ✅ |
-| Recording-**Player** im Frontend | ✅ Stream-Endpoint | ⚠ Stream-URL existiert (`/moderation/admin/recordings/{id}`); **Prüfpunkt** ob ein eigentlicher Web-Video-Player für die Wiedergabe eingebaut ist | ⚠ |
-| **Profanity-Übersicht** | ✅ Endpunkt | ⚠ keine eigene Seite, evtl. Sub-View in `/mod`; **Prüfpunkt** | ⚠ |
-| LiveKit Token / Viewer | ✅ | ✅ | ✅ |
-| Health/Stats Public | ✅ `/health/stats` | ✅ wird auf `/` benutzt | ✅ |
-| **Metrics Prometheus** | ✅ ungeschützt | n/a | siehe Security |
-| Leaderboard | ✅ | ✅ `/leaderboard` | ✅ |
-| Explore | ✅ | ✅ `/explore` | ✅ |
-| Embed-Player | ✅ Token-Fluss | ✅ `/embed` | ✅ |
-| **Credit/Transaction Ledger** | ❌ kein Service/Controller im Repo | ❌ | **❌ Schema-Leiche** |
-| **SwarmGroup** | ❌ kein Service/Controller | ❌ | **❌ Schema-Leiche** |
+### Lücken & Risiken
 
-### Konkrete Feature-Gaps (mit Nutzen)
-
-- **E-Mail-Verifikation-Page**: Ohne UI-Route ist der Flow unbenutzbar, sobald `REQUIRE_EMAIL_VERIFICATION=true` aktiv ist. Nutzen: aktivierbares Anti-Spam, niedrigere Bot-Registrierungsrate.
-- **Webhooks-UI**: Operator können Webhooks heute nur via API anlegen. Nutzen: Self-Service-Integration (Discord-Notifications, Logs, Custom-Hooks). Vermutet hoher Operator-Wert.
-- **Sessionsverlauf-UI**: User sieht nicht, wann/wie lange sie welche Roboter gesteuert haben. Nutzen: Engagement, Personal-Stats, Streit-Schlichtung.
-- **Recording-Replay-Player**: README markiert Replay als „missing"; ein einfacher HLS/MP4-Player für `AdminRecordingFile` wäre ein hochwirksames Mod-Tool.
-- **Moderations-Audit-Log-UI**: `ModerationAction`-Modell existiert; eine eigene UI-Seite mit Filter (Mod, Robot, Zeit) würde Vertrauen und Sicherheit deutlich heben.
-- **Rate-Limit-/Throttle-Status-Anzeige**: Wenn ein User in Lockout ist, hilft ein klarer „Bitte in X Minuten erneut versuchen"-Hinweis. **Prüfpunkt** in Login-Page.
-- **Mobile Touch-Steuerung** (im README explizit als „missing").
-- **Analytics-Dashboard** für Operator (Nutzen: Beweis für „mein Roboter wird genutzt").
-- **Voting-Queue / Demokratisierte Steuerung** (im README erwähnt, nicht implementiert).
-- **Notification-Layer**: Frontend-Permission-Status existiert in `settings/page.tsx`; Backend-Service für Notifications **Prüfpunkt** (vermutlich nur Browser-side).
-
-### Admin/Operator-Lücken
-
-- Keine sichtbare „Send Broadcast"/„Bulk-Mail"/„Maintenance-Mode" Funktion.
-- Keine Shedding/Quoten-Steuerung pro Operator (z. B. Max-Robots, Max-Concurrent-Sessions). **Prüfpunkt**.
+- **Voting Queue Balance/Ranking** explizit als „missing/planned" im README.
+- **ROS2 Integration** als Roadmap markiert (`ros2Enabled` ist nur Schema-
+  Flag).
+- **Credit/Priority-System** über Schema hinaus nicht aktiv.
+- **Search/Filter** auf Explore: nur Status/Tag/Query/Sort als Server-Param;
+  UI-Sichtbarkeit ungeklärt — Prüfpunkt.
+- **Notifications**: Nur Browser-Notifications für Queue-Position/Turn
+  (Settings-Switch). Email-Notifications für Mod-Aktionen unklar.
+- **Multi-Camera**: Schema/Service vorhanden, UI im Dashboard-Webhook?
+  Prüfpunkt.
+- **Tagging/Discovery**: `tags`-Array auf Robot, aber kein offensichtliches
+  Tag-Management-UI.
+- **Onboarding**: Es gibt `RoomOnboardingOverlay`, aber kein dokumentierter
+  „neuer Operator"-Flow (Robot anlegen, Client downloaden, erstes Live-
+  Stream-Event).
+- **Operator-Analytics**: AnalyticsEvent-Schema vorhanden, aber keine
+  öffentliche Dashboard-Seite.
+- **AGB/Terms-Inhalte**: Skeleton-Seite vorhanden — Konformität mit
+  bezahltem SaaS-Use-Case (Stripe/PayPal) unklar.
+- **Mehrsprachigkeit**: Kein i18n erkennbar.
 
 ---
 
 ## 8. Produkt- & Business-Audit
 
-### Beobachtungen
-
-- Zielgruppe laut README: Hobby-Robotik-Operator + Viewer (LetsRobot.tv-Nachfolger). Stack passt gut zur Zielgruppe (Self-Hosted, Pi-Client extern in `botparty-client`-Repo).
-- **Trust-Elemente fehlen** in den Legal-Pages: kein Impressum, keine Operator-Adresse, kein Verantwortlicher-Kontakt für Datenschutz.
-- **Conversion-Funnel** ist unklar: Landing-Page erwähnt Funktionen, aber konkrete Demo-Video-/Live-Robot-CTA-Strategie ist im Code nicht offensichtlich.
-- **Pricing/Checkout** existiert nicht; das Produkt ist Open-Source/Self-Hosted, das ist konsistent. Falls später Hosted-Variante kommt: `Transaction`/Credits-Schema steht bereit, aber ohne Implementation.
-- **Wettbewerb**: Selbsthostbar + LiveKit + RBAC + Moderation ist eine klare Differenzierung gegenüber Tinkerverse/Remo-Imitaten. Sehr gute Basis.
-- **Professionalität**: Repo wirkt von außen professionell (CI, CodeQL, ADRs in `docs/adr`, Runbook, WS-Protokoll-Doku, Robot-Auth-Doku). Das ist ein klares Plus.
-- **Onboarding-Story** für neuen Operator ist über `/docs/*` strukturiert (`getting-started`, `controller`, `multi-camera`, `obs-whip`, `robot-setup`); UI-seitig kein In-Product-Onboarding für Operator (siehe §6).
-
-### Risiken / Lücken
-
-- Ohne Verify-Email-UI, ohne Webhooks-UI, ohne Replay, ohne klares Impressum und ohne DSGVO-Cookie-Bann mit Decline kann das Produkt rechtlich und vertrauenstechnisch nicht bedenkenlos öffentlich gemacht werden.
-- Kein erkennbares Plan für Backups, SLA, Statusseite, Ankündigungen.
+- **Zielgruppe**: Hobby-/Pro-Operator, die LetsRobot-/Remo.tv-Nachfolger
+  suchen, plus Self-Hosted Operatoren (Arcade-/Showroom-/Bildung-Setup). Fit
+  mittel-stark; Code zeigt eindeutige Operator-Tools.
+- **Conversion**: Home-Page hat Hero, aber keine Pricing-Tabelle, kein
+  Demo-Video, keine Case-Studies. Wallet/Credits-Modell ist da, aber nicht
+  oben aufgeführt.
+- **Pricing/Checkout**: `CREDIT_PACKAGES` werden API-seitig ausgegeben.
+  Operator muss in `credit-packages.ts` editieren und Stripe-Webhook
+  konfigurieren. Klare Pricing-Doku im Web fehlt.
+- **Trust/Recht**: Privacy/Imprint/Cookies vorhanden; Inhalt ist generisch
+  und enthält Hinweise „nicht konfiguriert", was einer öffentlich erreichbaren
+  Seite gegenüber Endkunden problematisch ist (DSGVO Art. 13). AGB/Widerruf
+  fehlen — bei Bezahlflows in der EU notwendig.
+- **Wettbewerb**: USP klar (Self-hosted, OSS, niedrige Latenz). Marketing-
+  Polish fehlt.
+- **Kundenbindung**: Wallet+Donations sind vorhanden, Leaderboard auch.
+  Email-Lifecycle fehlt (nur Verify/Reset/Lockout-Mails).
+- **Fehlende Produktlogik**:
+  - Kein Subscription-Modell (nur One-Off Credit-Käufe).
+  - Kein Refund-Self-Service (nur Webhook-Refund-Verarbeitung).
+  - Kein Operator-Onboarding-Tutorial im Web.
 
 ---
 
 ## 9. QA & Testing
 
-### Vorhanden (verifiziert)
+### Vorhanden
 
-- API: `*.spec.ts` für `auth.service`, `users`, etc. (verifiziert per `grep` auf `auth.service.spec.ts`).
-- Web: Vitest-Tests, u. a. `dashboard-store.test.ts`, `nav.test.tsx`, `robot-card.test.tsx`, `robot-view/*.test.tsx` (chat-panel, controls, queue-panel, robot-page-header, robot-room-skeleton, room-onboarding-overlay).
-- Playwright konfiguriert für E2E.
-- CI führt `lint`, `typecheck`, `test`, `coverage`, `e2e`, `build` aus (`.github/workflows/ci.yml`).
+- API: 41 `*.spec.ts` (`auth`, `gateway/*`, `queue/*`, `robots/*`, `wallet/*`,
+  `moderation/*`, `sessions`, `livekit`).
+- Web: 15 Component-/Hook-Tests (Vitest + React Testing Library).
+- E2E: Playwright Smoke + Auth-Flow + Accessibility (axe).
+- CI: Lint+Typecheck+Test+Coverage+E2E+Build+OpenAPI-Drift.
+- OpenAPI Contract: exportiert nach `docs/openapi.json` und gegen Drift geprüft.
 
-### Lücken / Risiken
+### Fehlend / Schwach
 
-- **Realtime-Pfad** (Gateway-Runtime, Queue-Logik unter Last) sind die kritischsten Stellen — Testabdeckung an dieser Stelle ist nicht zweifelsfrei nachweisbar; **Prüfpunkt**.
-- **Coverage-Schwelle** im CI nicht eindeutig erkennbar (kein Threshold-Failover gesehen).
-- **E2E**-Szenarien nicht im Detail gelesen — Prüfpunkt: deckt es Login, Robot anlegen, in Queue, Steuerung übernehmen, ESC-Stop, Mod-Action ab?
-- **Mocking** für LiveKit/Redis: nicht im Detail überprüft; bei großen Service-Files ist Test-Doppelung schwer.
-- **Manuelle QA-Checkliste** existiert nicht im Repo (Runbook `docs/runbook.md` ist Operations-fokussiert).
+- **Realtime/WS-Lasttest**: keine k6/Artillery/Playwright-Stress-Suiten.
+  Bei Latenz < 50 ms Anspruch fehlt eine Mess-Pipeline.
+- **Cross-Instance-Test des Gateways**: ADR-0006 spricht über instanz-affin
+  — aber kein integrationaler Multi-Node-Test im CI.
+- **Billing-Integrationstest** (Stripe Test-Mode/PayPal Sandbox) fehlt im
+  CI.
+- **Migration-Test gegen bestehende Datenbestände** (es gibt nur
+  `prisma db push` im Compose-Start statt `migrate deploy`!).
+- **Web-Coverage-Pflichtwert** nicht definiert (kein Threshold).
+- **Lighthouse/PageSpeed-Check** nicht im CI.
+- **Smoke-E2E setzt einen Test-Robot „test-robot" voraus** — Setup nicht
+  reproduzierbar in CI; mehrere Tests umgehen Fehler mit `.catch(() => false)`,
+  was Tests faktisch unscharf macht.
+- **Manuelle QA-Checkliste** fehlt im Repo.
+- **Mocking** des LiveKit-Servers in Integrationstests prüfen.
 
 ---
 
 ## 10. Performance Audit
 
-### Beobachtungen / Risiken
-
-- **Bundle-Größe Web**: Die urspruenglichen Route-Hotspots wurden auf kleine Container reduziert; der aktuelle Build liegt bei `/dashboard` 161 kB First-Load-JS und `/robot/[...parts]` 147 kB. Ein Lighthouse-/LH-Audit fuer die zweite Ebene der Hooks und Panels bleibt trotzdem sinnvoll.
-- **Re-Renders Robot-View**: Eine einzige Komponente mit Dutzenden `useState`-Aufrufen, mehreren `useEffect` und WebSocket-Eingang. Hoher `setState`-Druck pro WS-Event → Render-Hotspot.
-- **Caching**:
-  - `apps/web/src/lib/api.ts` hat keinen Response-Cache (nur Auth-Refresh-Promise-Cache).
-  - Bilder/Thumbnails werden über API-Endpoint mit `Cache-Control public, max-age=3600` gecached (siehe `image-proxy`-Logik in `runtime-telemetry`/`robots`-Service – Prüfpunkt im Detail).
-  - SWR/React-Query nicht eingebunden.
-- **Datenbank**: ohne Last-Profiling nicht abschließend bewertbar; Risiken bei N+1 in Robot-Listings (siehe §4).
-- **Mobile-Performance**: Responsiveness-Klassen sind vorhanden, aber Mobile-Touchsteuerung fehlt → bestehende Performance auf Mobil ist UI-OK, Bedienung aber eingeschränkt.
+- **Bundle-Größe Web**: Framer-Motion + LiveKit-Client + lucide-react sind
+  groß; `dynamic(... { ssr:false })` für Onboarding/Editor/Monitoring/
+  Webhooks-Section ist gut. Bundle-Analyzer-Workflow nicht im Repo.
+- **Re-Renders**: Zustand persist + WS-Events können viele Re-Renders
+  verursachen — Hooks (`useRobotViewState`, `use-robot-view-state.ts`)
+  sehen factored aus, sind aber nicht isoliert vermessen.
+- **Server-Side Rendering**: Home/Explore mit `revalidate: 10` ist sinnvoll;
+  Privacy/Imprint mit `dynamic = 'force-dynamic'` — könnte SSG werden, sobald
+  Legal-Konfiguration build-time bekannt ist.
+- **Caching**: Kein CDN/Cache-Header-Layer im nginx-Config sichtbar (außer
+  Standard). Static Assets profitieren teils von Next.js.
+- **Datenbank**: Prisma-Pool 10 (Default) — vermutlich knapp für viele
+  parallele WS-Sessions, da jeder Heartbeat/Action evtl. DB-Reads triggert.
+  Performance-Profiling fehlt.
+- **API-Performance**: Promise.all in Page-Loaders (Home), Public-Overview-
+  Service ist eigens herausgezogen — ok.
+- **Lazy Loading**: `dynamic` Imports sind genutzt; LiveKit-Player als
+  separates Component. `next/font` mit `display: 'swap'`.
+- **Bilder**: `next/image` mit `https://**`, `unoptimized` nicht gesetzt —
+  okay, aber Limitierung der Hosts notwendig (siehe Security).
+- **Pagination**: API hat `limit/offset` für Robots, Sessions, Chat-History.
+  Cursor-basierte Pagination wäre für Chat besser.
 
 ---
 
 ## 11. DevOps & Deployment
 
-### Stärken (verifiziert)
-
-- Multi-Service docker-compose mit healthchecks für `postgres`, `redis`, `livekit`, `livekit-ingress`, `livekit-egress`, `minio`, `api`, `web`, `nginx`, plus `cadvisor` als Monitoring.
-- Internes Netzwerk (`internal: true`) für DB/Redis/LiveKit, separates Frontend-Netzwerk.
-- `*_FILE` Secret-Pattern in `.env.example` dokumentiert.
-- nginx-Konfiguration: Rate-Limit-Zonen für `api` und `auth`, WebSocket-Upgrade, separater LiveKit-Pfad, MinIO-Pfad.
-- CI: ein konsolidierter Workflow + CodeQL wöchentlich.
-
-### Risiken / Lücken
-
-- **`cadvisor` läuft `privileged: true`.** Das ist Standard für cAdvisor, aber sollte nur auf Host-internen Netzen exposed sein. **Prüfpunkt:** ist Port nur auf Loopback/Internal exposed?
-- **CSP-Inkonsistenz** (siehe §5).
-- **Keine Backup-Strategie im Repo dokumentiert** für Postgres/MinIO. `docs/runbook.md` lesen — Prüfpunkt.
-- **Kein Rollback-Konzept** dokumentiert (Migration-Reverse, Blue/Green, Image-Tagging-Strategie).
-- **Logging zentral**: Pino vorhanden, aber keine Log-Shipping-Konfiguration im Compose erkennbar (z. B. Loki/Vector). Operativ blind.
-- **Error-Tracking**: `sentry-browser.tsx` deutet auf Sentry hin; **Prüfpunkt:** Backend-Sentry/`@sentry/node` eingebunden? Aktuell im API-`package.json` nicht gesehen.
-- **Healthcheck Endpoints**: `/health`, `/health/live`, `/health/stats`, `/health/metrics` vorhanden. Gut.
-- **Dependabot/Renovate fehlen**: Manuelles Patchen erforderlich, CodeQL ersetzt das nicht.
+- **Build**: Multi-Stage BuildKit, Cache-Mounts für pnpm-Store und
+  NestJS-Cache — sehr gut.
+- **Runtime**: API als Node 24 Alpine + `su-exec` für Drop-Privileges.
+- **Healthchecks**: Compose-Healthchecks für jedes Backend (Postgres, Redis,
+  LiveKit, Ingress, Egress, MinIO, API, Web, nginx, cAdvisor) — sehr stark.
+- **Restart-Policy**: `on-failure:10` durchgängig — okay, Self-Heal limited.
+- **Logs**: Pino + Loki/Promtail-Profile. Logrotation nicht konfiguriert.
+- **Monitoring**: cAdvisor + Prom-Metriken eingebaut. Externer Prometheus-
+  Stack nicht im Compose enthalten — dokumentiert in `docs/observability.md`?
+  Datei vorhanden — wahrscheinlich ja. Grafana-Dashboards in `docs/grafana/`.
+- **Error Tracking**: Sentry-Hooks vorhanden, optional.
+- **Backups**: `scripts/backup-db.sh` vorhanden — Inhalt prüfen, restore-
+  Script ist nicht gelistet.
+- **Migrations in Prod**: `prisma db push` beim API-Container-Start statt
+  `prisma migrate deploy`. Risiko von Schema-Drift in Produktion ohne
+  Migrations-Historie. Migrations existieren — nicht zur Anwendung in Prod
+  vorgesehen?
+- **Zero-Downtime-Deployments**: Nicht dokumentiert.
+- **Rollback**: Keine dokumentierte Rollback-Prozedur (DB+Image+ENV).
+- **SSL**: `setup-env.sh` schreibt `nginx.ssl.conf` aus Template — nicht im
+  Repo (gitignored). Zertifikate werden in `docker/nginx/ssl` montiert.
+- **CI**: Stabil, aber kein Release-Workflow (Tags, Image-Push, SemVer).
+- **Node-Version-Drift**: `.nvmrc=24`, Dockerfile `node:24-alpine`,
+  CI verwendet `node-version: '22'`. Auflösen.
 
 ---
 
 ## 12. Dokumentation
 
-### Vorhanden
-
-- `README.md` (277 Zeilen) — guter Überblick + ehrliche „what's missing"-Liste.
-- `docs/`: ADRs, `api-client-docs.md`, `grafana`, `observability.md`, `robot-auth.md`, `runbook.md`, `websocket-protocol.md`.
-- `apps/web/src/app/docs/*` (Onboarding für Operator).
-
-### Lücken
-
-- `.env.example` (117 Zeilen) deckt nicht alle real verwendeten Variablen ab. Konkret: `REQUIRE_EMAIL_VERIFICATION` fehlt.
-- Architekturdiagramm nicht im Repo gefunden (nur Text-Beschreibung).
-- API-Doku via Swagger ja, aber: in Prod nur per Basic-Auth — externe Konsumenten brauchen entweder veröffentlichten OpenAPI-File oder Endpoint-Hinweis.
-- **CHANGELOG.md** fehlt.
-- **CONTRIBUTING.md** Status: **Prüfpunkt** (im Snapshot nicht aufgelistet).
-- **SECURITY.md** Status: **Prüfpunkt** — keine `SECURITY.md` im Snapshot oben sichtbar. Für Open-Source ist Responsible-Disclosure-Adresse Pflichtreife.
-- Troubleshooting-Sektion fokussiert auf Robotik-Operator; reine Web/User-Probleme (Login, Cookie) nicht abgedeckt.
+- **README**: Vollständig, lebt mit dem Projekt.
+- **CONTRIBUTING.md**, **SECURITY.md**, **CHANGELOG.md**: vorhanden.
+- **ADRs**: 7 ADRs, decken Kerntechnik-Entscheidungen ab.
+- **Operator-Doku**: `docs/runbook.md`, `docs/observability.md`,
+  `docs/websocket-protocol.md`, `docs/robot-auth.md`. Sehr operatorfreundlich.
+- **API-Doku**: Swagger live + generierter `docs/api-client-docs.md` (script).
+- **Lücken**:
+  - Keine vollständige `.env.example` (Bezahlflow, Sentry, Trust-Proxy,
+    Webhook-Encryption-Key).
+  - Keine dokumentierte Production-Checkliste (Domain, DNS, SSL, Secrets,
+    Migrations, Image-Push, Monitoring-Endpunkte).
+  - Keine Anleitung „Was, wenn ein Knoten ausfällt".
+  - Keine Datenfluss-Beschreibung für DSGVO (welche personenbezogenen Daten
+    fließen wohin, wie lange).
+  - `docs/grafana/` Inhalt ungeprüft.
+  - Keine Roadmap außer „missing/planned"-Block im README.
 
 ---
 
 ## 13. Rechtliches & Compliance
 
-> **Hinweis:** Dies ist Audit-Beobachtung, keine Rechtsberatung.
+> Kein Rechtsrat — nur Beobachtungen anhand des Codes.
 
-### Beobachtungen
-
-- `/privacy` und `/terms` enthalten **Platzhaltertexte** (verifiziert per Lesung) ohne Operator-Daten.
-- Kein **Impressum** im Web-Source gefunden (`apps/web/src/app/impressum` existiert nicht). Für DE-Markt zwingend nötig.
-- Cookie-Banner ohne Decline-Option und ohne Consent-Kategorien.
-- Datenschutz beschreibt nicht: konkrete Drittanbieter (LiveKit, MinIO/S3, ggf. Sentry), Speicherorte, Aufbewahrungsfristen.
-- **Tracking/Analytics**: nicht offensichtlich integriert; Prüfpunkt ob Sentry-Browser personenbezogene Daten erfasst (Breadcrumbs).
-- **AGB**: `/terms` ist generisch und nicht „Verbraucher-DE"-tauglich.
-- **Datenkategorien**: Realtime-Telemetry, Chat, Moderation-Logs, Recordings — alle in der Privacy-Page genannt, aber ohne Rechtsgrundlage (Art. 6 Abs. 1 DSGVO) klassifiziert.
-- **Aufbewahrung**: nicht spezifiziert (z. B. Recordings X Tage, Mod-Logs Y Tage).
+- **Imprint/Privacy/Terms/Cookies**: Seiten existieren. Inhalt wird teils
+  aus ENV (`NEXT_PUBLIC_LEGAL_*`) generiert. Wenn diese ENV in Production
+  fehlen, wirft die App `Error` (gut) — die Inhalte selbst sind aber
+  **generisch** und decken nicht zwingend alle Pflichtangaben ab (Pflichten
+  variieren stark nach Land).
+- **Cookie-Banner**: Explicit Accept/Decline implementiert; Cookie-Notice-
+  Seite listet Kategorien. Tracking ist nicht aktiviert (Sentry optional,
+  kein GA). Bei Aktivierung von Sentry müsste Consent-Logik einbinden.
+- **DSGVO-Datenflüsse**:
+  - PII in Postgres: Email, Username, DisplayName, Avatar, Recordings,
+    Chat-Historie, AnalyticsEvents.
+  - Recordings haben Retention via `RECORDING_RETENTION_DAYS` (Default 30).
+  - Chat-Soft-Delete vorhanden, aber keine sichtbare automatische Löschung
+    nach X Tagen.
+  - User-Account-Deletion-API ist im Settings-Page genutzt — Tiefe der
+    Löschung (alle abhängigen Tabellen) prüfen.
+- **Zahlungsdaten**: Vollständig delegiert an Stripe/PayPal (richtig). Keine
+  PAN/Karten im Code.
+- **Recordings + Privacy**: Mitschnitt-Funktion existiert. Es ist nicht
+  dokumentiert, dass Nutzer beim Betreten des Raums über Recording informiert
+  werden müssen. UI-Hinweis prüfen.
 
 ---
 
 ## 14. Priorisierte Maßnahmen
 
-### P0 — Kritisch, vor jeder öffentlichen Nutzung
+### P0 – Kritisch, vor Public-Release
 
-1. `/api/v1/health/metrics` schützen (Auth oder IP-Allowlist).
-2. CSP-Konsistenz nginx ↔ API herstellen, `unsafe-eval` entfernen.
-3. `Transaction`/`SwarmGroup`-Schema entweder implementieren oder per Migration entfernen, um Code-Schema-Drift zu beenden.
-4. E-Mail-Verifikations-Frontend implementieren (sonst ist `REQUIRE_EMAIL_VERIFICATION` UX-blind).
-5. MinIO-Bucket-Policy auf privat stellen, Recording-Streams nur via signed URLs / Admin-Pfad ausliefern (Prüfpunkt + Maßnahme).
-6. SECURITY.md mit Disclosure-Kontakt anlegen.
-7. Cookie-Banner DSGVO-konform: Decline + späterer Widerruf (Settings).
+- CSP konsolidieren (Helmet vs nginx vs next.config) und `unsafe-eval`
+  überall entfernen. `connect-src` auf konkrete Hosts beschränken.
+- `.env.example` um Bezahl- und Webhook-ENV erweitern; Bootguard für
+  Stripe/PayPal-Konfiguration, wenn aktiviert.
+- Production-Migrations-Strategie umstellen von `prisma db push` auf
+  `prisma migrate deploy` (vorhandene Migrations existieren!).
+- Datenfluss-/Compliance-Doku ergänzen (DSGVO).
+- `LIVEKIT_API_KEY` Default `devkey` entfernen / Boot-Validierung erzwingen.
+- Recording-Hinweis im Robot-Room (UI) sichtbar machen.
 
-### P1 — Wichtig vor Beta-Release / öffentlicher Promotion
+### P1 – Wichtig vor Release
 
-8. Backend↔Frontend-Parität: Webhooks-UI im Dashboard, Sessionsverlauf-Page, Profanity-Mod-View, Recording-Player.
-9. Realtime-Code-Aufteilung: Backend-Hotspots `bot.gateway.runtime.ts` und `robots.service.ts` sind erledigt; die urspruenglichen Frontend-Route-Dateien sind ebenfalls unter Zielgroesse, offen bleiben jetzt vor allem die grossen extrahierten State-Hooks (ohne Verhaltensaenderung). Tests vorher.
-10. Tests für kritische Flows ausbauen: Queue-Joining, Turn-Übernahme, ESC-Stop, Auth-Refresh, CSRF-Pfade.
-11. Impressum + finale `/privacy` + `/terms` mit Operator-Daten, klar strukturiert.
-12. Dependabot/Renovate aktivieren.
-13. `REQUIRE_EMAIL_VERIFICATION` in `.env.example` dokumentieren.
-14. Operator-Quoten/Limits (Max-Robots, Concurrent-Sessions) als optionales Backend-Feature, mind. Hardcap in Config.
-15. Webhook-Signatur (HMAC) + SSRF-Schutz für ausgehende Webhooks.
+- Node-Version-Drift CI/Local/Docker konsolidieren (alle auf 24).
+- HSTS/Modern-Header in nginx-Templates setzen, deprecated `X-XSS-Protection`
+  entfernen.
+- `next/image` `remotePatterns` auf reale Hosts beschränken.
+- Test-Coverage für Billing (Stripe/PayPal) inkl. Webhook-Replay-Idempotenz.
+- WS-Lasttest-Pipeline (k6/Artillery) + Soll-/Ist-Reporting.
+- Production-Checkliste/Runbook ergänzen, Rollback-Prozedur dokumentieren.
+- Logout-überall-Flow im UI exposen.
+- IP-basiertes Rate-Limiting zusätzlich zur Email-Lockout-Logik.
 
-### P2 — Sollte verbessert werden
+### P2 – Sollte verbessert werden
 
-16. Bundle-Splitting Dashboard und Robot-View, Lazy-Loading nicht-kritischer Sektionen.
-17. Accessibility-Pass: Kontraste, Fokuszustände, Aria-Labels für Icon-Buttons, Keyboard-Reachability.
-18. Onboarding-Flow für Robot-Operator im Dashboard (geführter First-Run).
-19. Logging: zentrales Log-Shipping-Setup im Compose dokumentieren.
-20. Backend-Sentry oder OTEL-Trace-Default an einen Standard-Exporter binden.
-21. CHANGELOG.md, CONTRIBUTING.md ergänzen.
-22. API-Doku: OpenAPI-Spec ggf. als Build-Artefakt veröffentlichen.
+- God-Class-Refactor (`moderation.service.ts`, `runtime-telemetry.service.ts`,
+  `robots.controller.ts`, `gateway-runtime.support.ts`).
+- Express-Typen aus Billing-Controller entfernen, Fastify-Typen nutzen.
+- Cursor-basierte Chat-Pagination.
+- Bundle-Analyzer als optionaler CI-Job.
+- AGB/Refund-Policy-Seiten konkret formulieren.
+- E2E-Tests deterministisch machen (Test-Fixture Robot in CI seedbar).
 
-### P3 — Nice-to-have
+### P3 – Nice-to-have
 
-23. Mobile-Touchsteuerung.
-24. Replay-Player + Replay-Index pro Session.
-25. Analytics-Dashboard für Operator.
-26. Voting-Queue.
-27. Status-Page-Integration.
-28. Leaderboard-Erweiterung (Saison, Filter, Streaks).
+- i18n.
+- Subscription-Modell.
+- Onboarding-Tutorial im Dashboard.
+- Operator-Analytics-Page.
 
 ---
 
 ## 15. Konkrete Aufgabenliste
 
-> Format pro Aufgabe. Begriffe in „Betroffene Dateien" sind verifizierte Pfade aus dem Repo.
+> Hinweis: Wo ein Punkt nicht eindeutig im Code verifizierbar war, ist er als
+> **Prüfpunkt** markiert. Aufwand ist relativ zum Repo: klein < ½ Tag,
+> mittel ≈ 1–2 Tage, groß > 2 Tage.
 
-### P0-Aufgaben
+### Security
 
-- [x] **Prometheus-Metrics-Endpoint absichern**  
-  Umgesetzt mit optional erzwingbarer Basic-Auth (`METRICS_AUTH_REQUIRED`, `METRICS_USERNAME`, `METRICS_PASSWORD`), Produktions-Startup-Validierung und aktualisierter Doku in `.env.example` / `docs/observability.md`.
+- [x] **CSP zwischen Helmet, nginx, next.config konsolidieren**
+  - Priorität: P0
+  - Kategorie: Security
+  - Problem: Drei unterschiedliche CSP-Definitionen; `unsafe-eval`/
+    `unsafe-inline` und permissive `connect-src` in `apps/web/next.config.ts`
+    und `docker/nginx/nginx.ssl.conf.template`.
+  - Risiko/Auswirkung: XSS-Eskalationspfade, „Defense-in-depth" untergraben.
+  - Ziel: Eine kanonische CSP, generiert aus den tatsächlich erlaubten
+    Origins (App, LiveKit Public/WS, MinIO Public, optional Sentry/Stripe).
+    `unsafe-eval` entfernen, `unsafe-inline` mindestens für `script-src`
+    streichen (Next.js erfordert ggf. Nonces oder Strict-Dynamic).
+  - Betroffene Dateien: `apps/web/next.config.ts`, `apps/api/src/main.ts`
+    (Helmet-Block), `docker/nginx/nginx.conf`,
+    `docker/nginx/nginx.ssl.conf.template`.
+  - Umsetzung: Eine CSP-Builder-Funktion in `packages/shared` oder einem
+    Operator-Skript erzeugen; nginx als alleinige Quelle führen, Next.js
+    und Helmet auf neutralen Default zurücksetzen oder identisch spiegeln.
+  - Akzeptanz: `curl -I https://<host>/` und `https://<host>/api/v1/health`
+    liefern identische CSP; Lighthouse CSP-Audit sauber; Browser-Tests
+    werfen keine CSP-Violations.
+  - Aufwand: mittel.
 
-- [x] **CSP von nginx an API angleichen, `unsafe-eval` entfernen**  
-  nginx ist jetzt die effektive Browser-CSP ohne `unsafe-eval`; die API-CSP wurde darauf abgestimmt, ohne die bestehenden Standard-Flows zu brechen.
+- [x] **`unsafe-eval` aus `nginx.ssl.conf.template` und `next.config.ts` entfernen**
+  - Priorität: P0
+  - Kategorie: Security
+  - Problem: CHANGELOG sagt „Tightened nginx/API CSP defaults by removing
+    unsafe-eval", `nginx.ssl.conf.template:84` und `next.config.ts:11`
+    enthalten es jedoch weiterhin.
+  - Risiko: Erhöhtes XSS-Risiko, JIT-eval-Vektoren möglich.
+  - Ziel: `unsafe-eval` raus, App-Smoke-Test bestehen.
+  - Betroffene Dateien: `docker/nginx/nginx.ssl.conf.template`,
+    `apps/web/next.config.ts`.
+  - Umsetzung: Direktive entfernen, `next dev` auf React 19 Strict ohne
+    eval prüfen, manuelles Testen aller Live-Pfade.
+  - Akzeptanz: Smoke + E2E grün, keine eval-Errors in Browser-Konsole.
+  - Aufwand: klein.
 
-- [x] **`Transaction`- und `SwarmGroup`-Schema entscheiden**  
-  Kein zufaellig totes Schema mehr: die Modelle wurden bewusst per ADR-0005 und Schema-Kommentaren als Roadmap-/Ledger-Modelle dokumentiert statt implizit liegen gelassen.
+- [x] **`X-XSS-Protection`-Header entfernen**
+  - Priorität: P1
+  - Kategorie: Security
+  - Problem: Header ist deprecated, kann in alten Browsern XSS einführen.
+  - Ziel: Header in nginx-Configs streichen.
+  - Betroffene Dateien: `docker/nginx/nginx.conf`,
+    `docker/nginx/nginx.ssl.conf.template`.
+  - Umsetzung: `add_header X-XSS-Protection ...` löschen.
+  - Akzeptanz: `curl -I` zeigt Header nicht mehr.
+  - Aufwand: klein.
 
-- [x] **E-Mail-Verifikation-Page im Frontend**  
-  Neue Route `/verify-email` plus Resend-Flow; zusaetzlich wurde `REQUIRE_EMAIL_VERIFICATION` endlich serverseitig bei Registrierung, Login und Refresh wirklich durchgesetzt.
+- [x] **HSTS-Header in `nginx.ssl.conf.template` prüfen und sicher stellen**
+  - Priorität: P1
+  - Kategorie: Security
+  - Umsetzung: HSTS-Strategie in `docs/runbook.md` (Abschnitt „HSTS Strategy")
+    festgehalten. Default bleibt `max-age=31536000; includeSubDomains` ohne
+    `preload`; Begründung und Opt-in-Schritte dokumentiert.
 
-- [x] **MinIO-Recording-Bucket privat & signed URLs**  
-  Recording-Bucket wird im Init-Job privat gesetzt, nginx blockiert direkten Recording-Zugriff, Moderations-Playback laeuft ueber signierte Kurzzeit-URLs und Recordings koennen jetzt per `RECORDING_RETENTION_DAYS` per Lifecycle-Regel ablaufen.
+- [x] **Bezahl-ENV in `.env.example` ergänzen + Boot-Guard**
+  - Priorität: P0
+  - Kategorie: Security / Produkt
+  - Problem: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `PAYPAL_CLIENT_ID`,
+    `PAYPAL_CLIENT_SECRET`, `PAYPAL_WEBHOOK_ID`, `PAYPAL_ENV`,
+    `WEBHOOK_SECRET_ENCRYPTION_KEY`, `PASSWORD_RESET_TTL_SEC`, `TRUST_PROXY`,
+    `FASTIFY_BODY_LIMIT`, `SENTRY_DSN`, `SENTRY_ENVIRONMENT` werden im Code
+    gelesen, sind aber in `.env.example` nicht (oder nur als Kommentar)
+    enthalten.
+  - Risiko: Webhook ohne Signaturprüfung scheitert leise; Operator deployt
+    Bezahlung mit Sandbox-Defaults; Webhook-Encryption-Key fällt zurück
+    auf einen statischen Default.
+  - Ziel: Vollständige `.env.example` + harter Bootguard, der Bezahl-ENV
+    erzwingt, sobald `STRIPE_SECRET_KEY`/`PAYPAL_CLIENT_ID` gesetzt sind.
+  - Betroffene Dateien: `.env.example`, `apps/api/src/main.ts`,
+    `apps/api/src/billing/providers/*.ts`,
+    `apps/api/src/robots/robot-webhook.service.ts`.
+  - Umsetzung: ENV-Liste vervollständigen; in `bootstrap` die
+    `assertRequiredSecret`-Logik um Bezahl-Env erweitern (nur wenn der
+    Provider effektiv aktiviert ist).
+  - Akzeptanz: Bei aktivem Stripe ohne `STRIPE_WEBHOOK_SECRET` startet die
+    App in Production nicht; lokaler Dev-Run unverändert.
+  - Aufwand: mittel.
 
-- [x] **`SECURITY.md` mit Responsible-Disclosure-Kontakt**  
-  `SECURITY.md` wurde angelegt und im `README.md` verlinkt.
+- [x] **`LIVEKIT_API_KEY=devkey` Default entfernen oder Boot blockieren**
+  - Priorität: P0
+  - Kategorie: Security
+  - Problem: `.env.example` und Compose verwenden `devkey` als Fallback.
+  - Risiko: Operator deployt mit Schlüssel `devkey`; LiveKit-Token werden
+    trivial fälschbar.
+  - Ziel: Kein Default; Bootguard verlangt `LIVEKIT_API_KEY != devkey` in
+    Production.
+  - Betroffene Dateien: `apps/api/src/main.ts`, `.env.example`,
+    `docker-compose.yml`, `docker/livekit/livekit.yaml`.
+  - Umsetzung: `bannedValues: ['devkey']` für `LIVEKIT_API_KEY` ergänzen;
+    Compose-Default streichen.
+  - Akzeptanz: Production-Start scheitert mit klarer Fehlermeldung, wenn
+    Default benutzt wird.
+  - Aufwand: klein.
 
-- [x] **Cookie-Banner: Decline + Consent-Status**  
-  Banner kennt jetzt `accepted | declined | unknown`, bietet Accept/Decline und laesst den Status auf `/settings` einsehen und aendern.
+- [x] **`next/image` `remotePatterns` auf konkrete Hosts beschränken**
+  - Priorität: P1
+  - Kategorie: Security / Performance
+  - Umsetzung: `apps/web/next.config.ts` baut `remotePatterns` jetzt aus
+    `THUMBNAIL_PUBLIC_BASE_URL`, `NEXT_PUBLIC_API_URL` und expliziter
+    Avatar-Allowlist. Kein `https://**` mehr als Default.
 
-### P1-Aufgaben
+- [x] **IP-basiertes Rate-Limiting für Auth ergänzen**
+  - Priorität: P1
+  - Kategorie: Security
+  - Problem: Lockout-Logik arbeitet nur pro Email — Joe-Job-Lockouts möglich.
+  - Risiko: Nutzer können absichtlich aus dem Account ausgesperrt werden.
+  - Ziel: IP+Email kombiniertes Rate-Limit; Ban statt Lockout, sobald IP
+    hochfrequent fehlschlägt.
+  - Betroffene Dateien: `apps/api/src/auth/auth.service.ts`,
+    `docker/nginx/nginx*.conf`.
+  - Umsetzung: Throttler-Storage `redis` mit IP-Schlüsseln; nginx-Zone wird
+    ergänzt um eine zusätzliche IP-Bremse.
+  - Akzeptanz: Test simuliert 100 Login-Fehler von einer IP — Lockout
+    erfolgt IP-seitig, Account des realen Nutzers bleibt nutzbar.
+  - Aufwand: mittel.
 
-- [x] **Webhooks-UI im Dashboard**  
-  Dashboard hat jetzt eine Webhook-Sektion mit List/Create/Delete, Event-Filtern, Secret-Anzeige und letztem Delivery-Status.
+- [x] **Logout-überall im UI**
+  - Priorität: P1
+  - Kategorie: Feature / Security
+  - Problem: `revokeRefreshTokens` existiert API-seitig, ist im Settings-UI
+    nicht klar exponiert (Prüfpunkt).
+  - Risiko: Nutzer können nach Geräteverlust nicht alle Sessions sperren.
+  - Ziel: Sichtbarer „Aus allen Geräten abmelden"-Button in Settings.
+  - Betroffene Dateien: `apps/web/src/app/settings/page.tsx`,
+    ggf. `apps/api/src/auth/auth.controller.ts`.
+  - Umsetzung: Endpoint exposen + UI-Button hinzufügen.
+  - Akzeptanz: Klick invalidiert sofort alle Refresh-Tokens (Versionsbump).
+  - Aufwand: klein.
 
-- [x] **Sessionsverlauf-UI fuer User**  
-  Neue Route `/sessions` mit Filter, Limit-Auswahl, Robot-Links und zusammenfassenden Analytics-Karten.
+- [x] **Chat-Output-Sanitization Prüfpunkt**
+  - Priorität: P1
+  - Kategorie: Security (Prüfpunkt)
+  - Umsetzung: Codereview ergab keine `dangerouslySetInnerHTML`-Verwendung
+    im Chat-Pfad. Vitest in `apps/web/src/components/robot-view/chat-panel.test.tsx`
+    rendert `<img src=x onerror=…>`-Payload, prüft dass weder `<img>`/
+    `<script>` ins DOM gelangen noch globale Seiteneffekte ausgelöst werden,
+    und dass der Klartext sichtbar ist.
 
-- [x] **Profanity-Uebersicht im Mod-View**  
-  Die Profanity-Uebersicht ist jetzt nicht nur sichtbar, sondern erlaubt direkte Moderationsaktionen aus dem Ereignisstrom heraus (`TIMEOUT` / `BAN`) und refresht den Mod-Status anschliessend unmittelbar.
+### DevOps / Deployment
 
-- [x] **Recording-Player im Mod-View**  
-  Player war bereits vorhanden; in dieser Session wurde er auf signierte Playback-URLs umgestellt und damit produktionsfaehig abgesichert.
+- [x] **`prisma migrate deploy` statt `prisma db push` in Production**
+  - Priorität: P0
+  - Kategorie: DevOps
+  - Problem: Container-Start ruft laut README/Dockerfile-Layer `prisma db push`
+    auf, obwohl Migrations vorhanden sind.
+  - Risiko: Schemadrift, Migrations werden nie historisch angewendet,
+    Rollbacks unmöglich.
+  - Ziel: `prisma migrate deploy` als Start-Schritt; `seed` nur initial.
+  - Betroffene Dateien: `docker/api/Dockerfile`, `apps/api`-Startskripte,
+    `packages/prisma/package.json`, `README.md`.
+  - Umsetzung: Entrypoint umstellen; CI-Job „migration-dry-run" gegen
+    Produktionsdump.
+  - Akzeptanz: Frischer Production-Start applied alle Migrations; `_prisma_migrations`-Tabelle gefüllt.
+  - Aufwand: mittel.
 
-- [x] **`bot.gateway.runtime.ts` modular aufteilen**  
-  Erledigt: die Hauptdatei liegt jetzt bei 302 LOC; Verbindungs-/Runtime-State, Room-Join und Robot-Hotpaths wurden in dedizierte Gateway-Helfer aufgeteilt, ohne die Realtime-Semantik zu veraendern.
+- [x] **Node-Version konsistent auf 24**
+  - Priorität: P1
+  - Kategorie: DevOps
+  - Umsetzung: Alle Jobs in `.github/workflows/ci.yml` und `codeql.yml`
+    laufen auf `node-version: '24'`. Engines + Dockerfiles sind bereits
+    auf 24.
 
-- [x] **`robots.service.ts` aufteilen**  
-  Erledigt: die Hauptdatei liegt jetzt bei 540 LOC; Schreibpfade, Room-State/Chat-Historie und DTO-/Public-Mapping-Helfer wurden aus dem Service ausgelagert, ohne den API-Vertrag zu veraendern.
+- [ ] **Release-Workflow mit Image-Push und SemVer-Tagging**
+  - Priorität: P1
+  - Kategorie: DevOps
+  - Problem: Es gibt keinen Workflow für Image-Push (`docker push`) oder
+    Tag-Release.
+  - Risiko: Operator zieht „latest" oder baut selber, kein definierter
+    Release-Stand.
+  - Ziel: GitHub-Action triggered via Tag baut & pusht
+    `botparty-api`/`botparty-web` zu GHCR.
+  - Betroffene Dateien: `.github/workflows/release.yml` (neu),
+    `docker-compose.yml` (Image-Referenz).
+  - Akzeptanz: Tag `v0.1.4` produziert signierte (cosign) Images.
+  - Aufwand: mittel.
 
-- [x] **`robot-view.tsx` und `dashboard/page.tsx` aufteilen**  
-  Erledigt fuer die urspruenglichen Hotspot-Dateien: `apps/web/src/app/dashboard/page.tsx` liegt jetzt bei 428 LOC und `apps/web/src/app/robot/[slug]/robot-view.tsx` bei 10 LOC. Die Logik wurde in dedizierte Komponenten/Hooks ausgelagert, waehrend die dynamischen Imports fuer Preview/Chat/Queue/Onboarding erhalten blieben.
+- [x] **Production-Checkliste / Runbook ergänzen**
+  - Priorität: P1
+  - Kategorie: DevOps / Doku
+  - Umsetzung: Abschnitt „Production Release Checklist" in
+    `docs/runbook.md` mit DNS, TLS, Secrets, Migrations, Smoke-Tests,
+    Monitoring, Backups und Rollback-Plan.
 
-- [x] **Webhook-HMAC-Signatur + SSRF-Schutz**  
-  Webhooks werden jetzt signiert; Ziel-URLs werden bei Anlage und Auslieferung gegen localhost/private/link-local Ziele validiert und durch Tests abgesichert.
+- [x] **Backup/Restore-Prozedur dokumentieren**
+  - Priorität: P1
+  - Kategorie: DevOps
+  - Umsetzung: `scripts/restore-db.sh` als Pendant zu `backup-db.sh`
+    hinzugefügt (Container- + Host-Mode, gzip-Support, interaktive
+    Bestätigung, automatische Service-Quiesce). Frequenz/Retention/
+    Restore-Schritte in `docs/runbook.md` (Abschnitt „Backup & Restore").
 
-- [x] **Realtime-Test-Suite ausbauen**  
-  Erledigt: zusaetzliche Unit-Tests fuer `room.handler`, `robot-runtime.handler`, `presence.handler`, `robot-claim-lock.handler` und `moderation-enforcer.handler` heben `src/gateway/*` auf 73.68% Line-Coverage.
+- [x] **Logrotation/Logsink für Production**
+  - Priorität: P2
+  - Kategorie: DevOps
+  - Umsetzung: Docker-JSON-Driver-Caps (`max-size=20m`, `max-file=5`) im
+    `docker-compose.yml` aktiv; Loki/Promtail/Grafana laufen unter dem
+    `observability`-Profile. Doku in `docs/runbook.md` (Abschnitt
+    „Logrotation / Log Sink") inkl. Drop-In-Alternative für Vector/
+    Fluent Bit/journald.
 
-- [x] **Impressum + finale Privacy/Terms**  
-  `/imprint`, `/privacy` und `/terms` sind final verdrahtet; Betreiberdaten kommen env-getrieben aus `NEXT_PUBLIC_LEGAL_*`, und Produktionsbetrieb failt jetzt hart, wenn diese Pflichtangaben nicht gesetzt sind.
+### Codequalität / Refactor
 
-- [x] **Dependabot/Renovate aktivieren**  
-  `.github/dependabot.yml` ist angelegt.
+- [ ] **`moderation.service.ts` aufteilen**
+  - Priorität: P2
+  - Kategorie: Codequalität
+  - Problem: 992 LOC, Mehrere Verantwortlichkeiten (Moderate, Audit-Log,
+    Admin-Overview, Runtime-Overview).
+  - Ziel: Split in `ModerationService`, `ModerationAuditService`,
+    `ModerationOverviewService`.
+  - Betroffene Dateien: `apps/api/src/moderation/*`.
+  - Akzeptanz: Datei < 400 LOC, Tests grün.
+  - Aufwand: groß.
 
-- [x] **`REQUIRE_EMAIL_VERIFICATION` in `.env.example` dokumentieren**  
-  Variable samt Zweck ist jetzt in `.env.example` und `docs/runbook.md` dokumentiert.
+- [ ] **`runtime-telemetry.service.ts` aufteilen**
+  - Priorität: P2
+  - Kategorie: Codequalität
+  - Problem: 804 LOC.
+  - Ziel: Split nach Datenquelle (Gateway, cAdvisor, LiveKit, DB).
+  - Aufwand: groß.
 
-- [x] **Operator-Quoten/Hardcaps**  
-  Konfigurierbare Caps fuer Robots, Webhooks, externe Kameras und aktive Queue-Eintraege wurden implementiert, dokumentiert und mit Tests abgesichert.
+- [ ] **`robots.controller.ts` und `robots.service.ts` modularisieren**
+  - Priorität: P2
+  - Kategorie: Codequalität
+  - Problem: 587 + 545 LOC. Multiple Subcontroller-Verantwortlichkeiten
+    (Stream-Key, Webhooks, Cameras, Telemetry).
+  - Ziel: Eigene Controller je Aspekt (`RobotWebhooksController`,
+    `RobotCamerasController`, ...).
+  - Aufwand: groß.
 
-### P2-Aufgaben
+- [x] **Express-Typen aus `BillingController` entfernen**
+  - Priorität: P2
+  - Kategorie: Codequalität
+  - Umsetzung: `apps/api/src/billing/billing.controller.ts` nutzt
+    `FastifyRequest` + `FastifyRequestWithRawBody`-Helper. Keine
+    Express-Imports mehr.
 
-- [x] **Bundle-Splitting Dashboard und Robot-View**  
-  Schwere Dashboard-/Robot-Komponenten werden jetzt dynamisch geladen; der Build blieb fuer `/dashboard` und `/robot/*` unter dem angepeilten First-Load-JS-Bereich.
+- [ ] **Doppelte Validierung (Zod + class-validator) konsolidieren**
+  - Priorität: P3
+  - Kategorie: Codequalität
+  - Problem: ValidationPipe + Zod-Schemas validieren teils dieselben Felder.
+  - Ziel: Klare Konvention — Zod als Single-Source, NestJS-Pipe daraus
+    abgeleitet (z. B. `nestjs-zod`).
+  - Aufwand: groß.
 
-- [x] **Accessibility-Pass**  
-  Erledigt: Playwright + axe pruefen jetzt die acht wichtigsten Public-Routen auf `serious`/`critical` Violations; die dafuer gefundenen Kontrastprobleme in Leaderboard, Status und Legal-Pages wurden behoben.
+### Tests / QA
 
-- [x] **Robot-Operator-Onboarding (First-Run)**  
-  Als produktischer First-Run bereits vorhanden und verifiziert: leeres Dashboard und Create-Panel zeigen konkrete Schrittfolgen fuer Robot anlegen, Claim-Token kopieren und Client verbinden.
+- [ ] **Billing-Webhook-Idempotenz und Refund-Pfade testen**
+  - Priorität: P1
+  - Kategorie: QA
+  - Problem: Keine Spec für `BillingService` gefunden; Stripe-/PayPal-
+    Provider werden nur typgeprüft.
+  - Risiko: Doppelbuchung, fehlerhafter Refund, Webhook-Replay.
+  - Ziel: Specs für Verify-Webhook (Replay-Header), Refund, Chargeback,
+    PayPal-Sandbox-Mock.
+  - Betroffene Dateien: `apps/api/src/billing/`.
+  - Akzeptanz: Tests decken `paid → refunded → chargeback` ab.
+  - Aufwand: mittel.
 
-- [x] **Logging zentralisieren**  
-  Erledigt: `docker-compose.yml` bringt jetzt ein optionales Loki/Promtail-Profil inklusive Konfiguration und Dokumentation in `docs/observability.md` mit.
+- [ ] **Cross-Instance-Test des WS-Gateways**
+  - Priorität: P1
+  - Kategorie: QA
+  - Problem: ADR-0006 beschreibt instanzaffines Active-Turn-Modell, aber
+    kein automatischer Multi-Node-Test.
+  - Ziel: Integrationstest mit zwei API-Containern (Testcontainers Compose),
+    der Turn-Übergabe bei Knoten-Stop verifiziert.
+  - Aufwand: groß.
 
-- [x] **Backend-Sentry/OTEL-Default einrichten**  
-  Bereits vorhanden und verifiziert: Backend-Sentry-Initialisierung laeuft ueber `apps/api/src/common/sentry.ts` und den Bootstrap in `main.ts`.
+- [ ] **WS-Lasttest-Pipeline (k6 oder Artillery)**
+  - Priorität: P1
+  - Kategorie: Performance / QA
+  - Problem: Keine Lasttest-Suiten.
+  - Ziel: Profil mit 200 gleichzeitigen Zuschauern + 5 aktiven Drivern
+    pro Robot; SLA: < 100 ms Roundtrip Control.
+  - Betroffene Dateien: `tests/load/` (neu).
+  - Akzeptanz: Reproduzierbarer Lauf in CI mit Threshold-Reporting.
+  - Aufwand: groß.
 
-- [x] **CHANGELOG.md & CONTRIBUTING.md**  
-  Beide Dateien wurden angelegt und im `README.md` verlinkt.
+- [ ] **Deterministische E2E mit Test-Robot-Fixture**
+  - Priorität: P1
+  - Kategorie: QA
+  - Problem: `apps/web/tests/e2e/smoke.spec.ts` referenziert
+    `/robot/test-robot`, aber kein automatischer Seed in CI.
+  - Ziel: Setup-Schritt im Playwright-Workflow legt User+Robot per
+    `prisma db seed --preview-feature` an.
+  - Betroffene Dateien: `apps/web/tests/e2e/*`,
+    `packages/prisma/seed.ts`, `.github/workflows/ci.yml`.
+  - Akzeptanz: E2E grün auch in frischer DB.
+  - Aufwand: mittel.
 
-- [x] **OpenAPI-Spec als Build-Artefakt veroeffentlichen**  
-  Erledigt: `pnpm openapi:export` schreibt `docs/openapi.json`, und CI exportiert die Spec, prueft Drift gegen den Repo-Stand und laedt das Ergebnis als Artifact hoch.
+- [x] **Coverage-Threshold konfigurieren**
+  - Priorität: P2
+  - Kategorie: QA
+  - Umsetzung: `apps/api/package.json` setzt `coverageThreshold`
+    (statements 55, branches 40, functions 50, lines 55) in der Jest-
+    Config. `apps/web/vitest.config.ts` bekommt `coverage.thresholds`
+    (statements 25, branches 50, functions 35, lines 25). CI-Job
+    `coverage` führt beide Coverage-Runs aus und schlägt bei
+    Unterschreitung fehl.
 
-- [x] **Routen-Doubletten unter `/robot/*` entwirren**  
-  Erledigt: `app/robot/[...parts]/page.tsx` ist jetzt die einzige kanonische Robot-Route, gemeinsame `loading.tsx`/`error.tsx` liegen am Route-Root, historische Helper-Dateien wurden entfernt, und Redirect-/Fallback-Verhalten ist mit Vitest auf Legacy-Slug, Canonical-Redirect und Invalid-Path abgesichert.
+### UX / UI
 
-- [x] **Backup-Strategie dokumentieren**  
-  `docs/runbook.md` deckt Backup/Restore, MinIO-Mirroring und die neue Recording-Retention jetzt explizit ab.
+- [x] **Recording-Hinweis im Robot-Room sichtbar machen**
+  - Priorität: P0 (Compliance)
+  - Kategorie: UX / Compliance
+  - Problem: Recording wird via Egress aktiviert, Endnutzer im Room
+    bekommen keinen sichtbaren Hinweis (Prüfpunkt).
+  - Ziel: Sichtbares „REC"-Badge + Onboarding-Hinweis, dass Mitschnitt
+    erfolgt; Privacy-Page-Link.
+  - Betroffene Dateien: `apps/web/src/components/robot-view/*`,
+    `apps/web/src/app/robot/[slug]/page.tsx`.
+  - Akzeptanz: Bei aktivem `Robot.recordSessions` ist Banner präsent.
+  - Aufwand: klein.
 
-### P3-Aufgaben
+- [ ] **Field-Level-Validation in Login/Reset/Register**
+  - Priorität: P2
+  - Kategorie: UX
+  - Problem: `apps/web/src/app/login/page.tsx` zeigt nur globalen
+    `error`-String.
+  - Ziel: Inline-Fehler an Email/Password/Username, Submit-Button-State.
+  - Aufwand: klein.
 
-- [x] **Mobile-Touchsteuerung**  
-  Bereits vorhanden und verifiziert; das Audit-Finding war hier veraltet. Das `README.md` wurde entsprechend bereinigt.
+- [x] **Empty-State auf Explore wenn keine Roboter**
+  - Priorität: P2
+  - Kategorie: UX (Prüfpunkt)
+  - Problem: Bei leerer DB unklar, was die Seite zeigt.
+  - Ziel: Hilfreiche CTA-Karten („Robot anlegen", „Doku lesen").
+  - Aufwand: klein.
 
-- [x] **Replay-Player**  
-  Erledigt: `/sessions/[id]` zeigt Session-Details, matcht Replay-Kandidaten gegen Recording-Storage und spielt signierte Playback-Links fuer Session-Owner ab.
+- [ ] **Onboarding-Tutorial nach Account-Erstellung**
+  - Priorität: P2
+  - Kategorie: UX / Produkt
+  - Problem: Operator wird auf `/explore` geworfen; kein Hinweis „Erstelle
+    deinen ersten Robot".
+  - Ziel: Conditional-Banner, wenn 0 Robots im Besitz.
+  - Aufwand: klein.
 
-- [x] **Operator-Analytics-Dashboard**  
-  Mit der neuen Sessions-Seite sind zentrale Kennzahlen fuer Operator bereits sichtbar (Sessions, Fahrzeit, Commands, Peak-Viewer, Peak-Hour, durchschnittliche Latenz).
+- [x] **Search/Filter sichtbar im UI**
+  - Priorität: P2
+  - Kategorie: UX (Prüfpunkt)
+  - Umsetzung: `apps/web/src/app/explore/explore-filters.tsx` rendert
+    Suchfeld + Status-/Sort-Selects + Tag-Übernahme + „Clear filters" und
+    schreibt Suchparameter über `router.replace`. URL-Query (`q`, `status`,
+    `sort`, `tag`) wird an `/api/v1/robots` weitergereicht.
 
-- [x] **Voting-Queue-Modus**  
-  Bereits vorhanden und verifiziert; `QueueMode.VOTING` plus UI-Unterstuetzung war schon im Produkt.
+### Feature / Produkt
 
-- [x] **Status-Page-Integration**  
-  Neue oeffentliche `/status`-Seite auf Basis von `/health` und `/health/stats`.
+- [ ] **Pricing-/Credits-Seite**
+  - Priorität: P1
+  - Kategorie: Feature / Produkt
+  - Problem: `CREDIT_PACKAGES` API existiert, aber öffentliche Pricing-
+    Seite fehlt.
+  - Ziel: `/pricing` oder Sektion auf `/wallet` mit Pakete + Stripe/PayPal-
+    Buttons.
+  - Aufwand: mittel.
 
-- [x] **Leaderboard-Erweiterung**  
-  Erledigt: `/leaderboard` unterstuetzt Periodenfilter (`7d`, `30d`, `90d`, `all`), Creator-Streaks, Session-Volumen, Robot-Anzahl und eine New-Operator-Surface.
+- [ ] **Admin-UI für Webhook-Events**
+  - Priorität: P3
+  - Kategorie: Feature
+  - Problem: `BillingWebhookEvent` und `RobotWebhook` werden DB-seitig
+    gepflegt, aber kein Mod-UI sichtbar.
+  - Ziel: Liste/Replay-Funktion in `/mod/payouts` oder neuer Mod-Subroute.
+  - Aufwand: mittel.
 
-### Pruefpunkte (zur Verifikation, kein Bug bestaetigt)
+- [ ] **Subscription/Recurring-Plan**
+  - Priorität: P3
+  - Kategorie: Feature
+  - Problem: Nur Einmal-Käufe. Subscriptions vermutlich gewünscht.
+  - Aufwand: groß.
 
-- [x] **TS-Lint-Regel `no-explicit-any`** aktiv?  
-  Ja, aktiv als Warnung in `packages/eslint-config/index.js`.
+- [ ] **i18n-Foundation (Next.js i18n routing)**
+  - Priorität: P3
+  - Kategorie: Feature
+  - Aufwand: groß.
 
-- [x] **Refresh-Token-Drehung** bei jedem Refresh (Reuse-Detection)?  
-  Ja: jeder Refresh rotiert den Token, der aktuell gueltige Refresh-Hash wird in Redis gehalten, und ein Replay fuehrt zur sofortigen Revocation ueber `tokenVersion`.
+### Performance
 
-- [x] **Swagger-Auth** ohne gesetzte Vars: hard-fail oder offen?  
-  In Produktion hard-failt der Start, wenn Swagger aktiviert ist, aber keine Credentials gesetzt sind; ausserhalb davon bleibt Swagger standardmaessig deaktiviert.
+- [x] **Public-Overview-Cache durch Redis**
+  - Priorität: P2
+  - Kategorie: Performance (Prüfpunkt)
+  - Umsetzung: `RobotPublicOverviewService` cached die aggregierte Antwort
+    im Redis-Key `robots:public-overview` mit 30 s TTL und liest Cache
+    zuerst. Bei JSON-Parse-Fehler wird der Eintrag selbstheilend gelöscht
+    und neu berechnet.
 
-- [x] **`any`-Vorkommen** im Source — ggf. Tracking-Issue.  
-  Verifiziert: der explizite `: any` / `as any`-Restbestand sitzt aktuell in historischen API-Testdateien; in den neu gehaerteten Laufzeitpfaden dieses Audits blieb kein entsprechender Produktions-Code offen.
+- [x] **Bundle-Analyzer + Asset-Budget**
+  - Priorität: P2
+  - Kategorie: Performance
+  - Umsetzung: `@next/bundle-analyzer` als devDependency hinzugefügt;
+    `apps/web/next.config.ts` aktiviert ihn lazy bei `ANALYZE=true`. Neuer
+    Script `pnpm --filter @botparty/web analyze` produziert einen Report
+    unter `.next/analyze/`.
 
-- [x] **`dangerouslySetInnerHTML`/`eval`** im Web-Code (grep).  
-  Kein Treffer im Web-Source bei der Session-Pruefung.
+- [x] **Cursor-basierte Chat-Pagination**
+  - Priorität: P2
+  - Kategorie: Performance
+  - Umsetzung: `getChatHistoryPage` (in `robot-room-state.helper.ts`) sortiert
+    jetzt stabil nach `(createdAt desc, id desc)` und akzeptiert zusätzlich
+    `beforeId` als Tie-Breaker. `ChatHistoryPage` liefert `nextCursor` und
+    `nextCursorId`; `GetChatHistoryDto` plus REST-Controller geben den
+    `beforeId`-Parameter durch. Web-Client (`use-robot-view-state.ts`,
+    `apps/web/src/lib/api/robots.ts`, `RobotChatHistoryPage`) speichert und
+    sendet den Cursor-Id-Wert beim Nachladen älterer Nachrichten — keine
+    Duplikate mehr bei gleicher Millisekunde. Bestandstests grün
+    (`robots.service.spec.ts`, `room.handler.spec.ts`). Back-compat:
+    `before` (ms) bleibt funktional, `beforeId` ist optional.
 
-- [x] **`@sentry/node`** im API-Stack?  
-  Ja, vorhanden und im API-Bootstrap verdrahtet.
+### Doku / Compliance
 
-- [x] **MinIO-Bucket-Policy** im Init-Job tatsaechlich privat?  
-  Ja, der Recording-Bucket wird ueber `mc anonymous set none` privat gesetzt.
+- [ ] **Datenfluss-Beschreibung für DSGVO**
+  - Priorität: P1
+  - Kategorie: Compliance
+  - Problem: Privacy-Seite ist generisch.
+  - Ziel: Kapitel mit Tabelle „Datum → Zweck → Speicherort → Aufbewahrung".
+  - Aufwand: mittel.
 
-- [x] **N+1** in Robot-Listings unter Last (Profiling).  
-  Durch Code-Review verifiziert: die oeffentlichen und Owner-Listings laufen ueber einzelne `findMany`-/Aggregat-Abfragen mit eager `owner`-Selects; im auditrelevanten Listing-Pfad bleibt kein row-by-row Prisma-Nachladen bestehen.
+- [x] **Vollständige `.env.example`**
+  - Priorität: P1
+  - Kategorie: Doku
+  - Aufwand: klein.
 
-- [x] **`TRUST_PROXY`** korrekt fuer nginx-Container-Adressen.  
-  Ja, explizit in `main.ts` mit sinnvollem Default und ENV-Override gesetzt.
+- [x] **Production-Migrationsanleitung**
+  - Priorität: P1
+  - Kategorie: Doku
+  - Umsetzung: Abschnitt „Production Migration Procedure" in
+    `docs/runbook.md` (Backup → `migrate deploy` → Verify → Rollback).
 
-- [x] **Recordings-Aufbewahrungsfrist** technisch durchgesetzt?  
-  Ja, jetzt ueber `RECORDING_RETENTION_DAYS` als MinIO-Lifecycle-Regel.
+- [ ] **AGB/Refund-Policy-Templates**
+  - Priorität: P2
+  - Kategorie: Compliance
+  - Problem: Terms-Seite existiert als Skeleton.
+  - Ziel: Bezahlrelevante Inhalte (Widerruf, Lieferung digitale Produkte,
+    Refund-Bedingungen) — als Vorlage, nicht als Rechtsrat.
+  - Aufwand: mittel.
 
-- [x] **CSP-Reports** (`report-uri`) konfiguriert?  
-  Ja: nginx sendet `report-uri /api/v1/health/csp-report`, und die API nimmt Reports dort entgegen und loggt sie strukturiert.
+- [x] **OpenAPI-Drift-Check fixt-laufen lassen**
+  - Priorität: P3
+  - Kategorie: Doku (Prüfpunkt)
+  - Umsetzung: `.github/workflows/ci.yml` Build-Job exportiert
+    `docs/openapi.json` mit `node apps/api/dist/openapi/export-openapi.js`
+    und schlägt mit `git diff --exit-code` fehl, falls die Datei nicht
+    aktualisiert wurde. Artefakt wird hochgeladen. Dependabot ist auf
+    `npm`/`docker`/`github-actions` aktiviert (`.github/dependabot.yml`).
 
-- [x] **`exportingData`** in `/settings` tatsaechlich verdrahtet?  
-  Ja, der Button erzeugt einen JSON-Export ueber `api.users.exportMe()`.
+### Sonstige Prüfpunkte (kein bestätigter Bug)
 
-- [x] **Profanity-Filter-UI** existiert evtl. als Subview im Mod-View — zu verifizieren.  
-  Verifiziert: die Uebersicht existiert bereits als Subview im Moderationsbereich.
+- [ ] Tatsächliche Reichweite der Account-Löschung (alle abhängigen Tabellen,
+  Recordings im Bucket).
+- [ ] Zeit- und Zonen-Logik für `Robot.scheduleStart/scheduleEnd` (`timezone`-
+  Feld vorhanden, UI/Service-Verhalten verifizieren).
+- [ ] Mail-Templates auf XSS-Sicherheit (variable Inhalte, HTML-Encoding).
+- [ ] `WEBHOOK_SECRET_ENCRYPTION_KEY` Defaultverhalten in Production:
+  Bootguard?
+- [ ] `gateway-rate-limit.ts` (23 LOC): Reichweite, Bypass-Möglichkeit.
+- [ ] Verhalten bei Abbruch/Disconnect des Robot-Clients während aktiver
+  Recording-Egress (Egress wird gestoppt? Recording-File konsistent?).
+- [ ] Mod-Audit-Log Aufbewahrung/Pruning (kein TTL erkannt).
+- [ ] `Transaction`-Typen `BUTTON_SPEND`, `BUTTON_PAYOUT`, `DONATION_*`
+  laufen sauber durch `ledgerGroupId`-Saldo-Check (Tests vorhanden, aber
+  Production-Reconciliation-Job?).
+- [ ] Service-Worker-Strategie (Cache-Invalidation bei Deploy).
 
 ---
 
 ## Abschlussbewertung
 
-- **Ist das Projekt aktuell release-ready? Auf Reposicht ja, fuer einen Public-Beta-Launch.** Der gesamte urspruengliche Audit-Block ist umgesetzt; es bleibt kein technisch realistisch umsetzbarer Audit-Punkt im Repository offen.
+- **Ist das Projekt aktuell release-ready?**
+  **Teilweise.** Für eine Self-Hosted Beta in technisch versierten Händen
+  ist BotParty bereits sehr nahe am Release. Für ein zahlungspflichtiges,
+  öffentliches Angebot fehlen einige Sicherheits-, Compliance- und
+  Operability-Bausteine.
 
-- **Externe Launch-Voraussetzungen ausserhalb des Repos:**
-  1. Reale Betreiber-/Legal-Daten muessen in der Zielumgebung gesetzt werden; der Code erzwingt diese Angaben in Produktion jetzt.
-  2. Produktive Secrets, SMTP- und Infrastruktur-Endpunkte muessen wie ueblich deploymentseitig gesetzt werden.
-  3. Die historische API-Lint-Baseline kann separat bereinigt werden, ist aber kein offener Audit-Funktionsblock mehr.
+- **Wichtigste 5 Blocker**
+  1. CSP-Inkonsistenz und unsichere Direktiven (Helmet/nginx/next.config),
+     `unsafe-eval`/`unsafe-inline` und permissive `connect-src`.
+  2. `prisma db push` statt `migrate deploy` in Production.
+  3. Bezahl-/Webhook-ENV unvollständig dokumentiert und ohne Boot-Validierung.
+  4. `LIVEKIT_API_KEY=devkey` als kopierbarer Default und fehlende
+     Bootguard-Bann-Liste.
+  5. Fehlende DSGVO-Datenflussdoku und sichtbarer Recording-Hinweis im UI.
 
-- **Wichtigste umgesetzte Verbesserungen dieser Session:**
-  1. Metrics, CSP, Recording-Privacy und Cookie-Consent wurden produktionsreif gehärtet.
-  2. Verify-Email ist jetzt end-to-end verdrahtet statt nur halb vorbereitet.
-  3. Webhooks, Sessions, Status-Seite, Legal-Seiten und Operator-Caps sind jetzt im Produkt sichtbar und nutzbar.
-  4. Webhook-SSRF-Schutz, HMAC-Signaturen und private Recording-Playback-Pfade schließen reale Angriffsflächen.
-  5. Dokumentations- und Release-Bausteine (`SECURITY.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, Dependabot, Runbook-Erweiterungen) sind nachgezogen.
+- **Wichtigste 5 Verbesserungen mit höchstem Impact**
+  1. Konsolidierte CSP + HSTS + Header-Hygiene über alle Layer.
+  2. Production-Migrations + Release-Workflow + Image-Push.
+  3. Lasttest-Pipeline (Realtime SLA messen) und Cross-Instance-Test.
+  4. Refactor der drei größten Services (Wartungsgewinn, Test-Coverage).
+  5. Pricing-Seite + AGB/Refund-Vorlagen → Bezahlweg „erlebt sich rund".
+
+- **Empfohlene nächste Schritte**
+  1. P0-Pakete (Security-Headers, Bezahl-ENV-Doku, LiveKit-Default-Guard,
+     Migration-Strategie, Recording-UI-Hinweis) als ein Sprint.
+  2. P1-Pakete (Node-Drift, Pricing-Seite, IP-Rate-Limit, Logout-überall,
+     E2E-Determinismus, DSGVO-Doku) als zweiter Sprint.
+  3. Refactor- und Test-Investments in laufenden Sprints einplanen
+     (P2-Backlog).
+  4. Erste Public-Beta erst nach P0+P1 ausrollen, mit Monitoring-Alarmen
+     scharfgeschaltet (cAdvisor + Prom + optional Loki/Sentry).

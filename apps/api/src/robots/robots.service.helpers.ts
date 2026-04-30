@@ -163,6 +163,7 @@ export function toPublicRobot<
     maxViewers: number;
     maxControllers: number;
     metadata: unknown;
+    recordSessions?: boolean;
     tags: string[];
     viewerCount: number;
     createdAt: Date;
@@ -174,6 +175,14 @@ export function toPublicRobot<
     };
   },
 >(robot: T) {
+  const baseMetadata = normalizeRobotMetadata(robot.metadata) ?? {};
+  const metadata = robot.recordSessions
+    ? {
+        ...baseMetadata,
+        recording: { ...(baseMetadata.recording ?? {}), enabled: true },
+      }
+    : baseMetadata;
+
   return {
     id: robot.id,
     name: robot.name,
@@ -189,7 +198,7 @@ export function toPublicRobot<
     maxTurnTime: robot.maxTurnTime,
     maxViewers: robot.maxViewers,
     maxControllers: robot.maxControllers,
-    metadata: normalizeRobotMetadata(robot.metadata),
+    metadata,
     tags: robot.tags,
     status: normalizePublicRobotStatus(
       robot.status,

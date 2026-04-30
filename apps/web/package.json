@@ -11,6 +11,7 @@
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "analyze": "ANALYZE=true next build",
     "typecheck": "rm -rf .next && next typegen && tsc --noEmit",
     "clean": "rm -rf .next .turbo"
   },
@@ -43,6 +44,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^5.0.2",
+    "@next/bundle-analyzer": "^15.2.0",
     "jsdom": "^26.1.0",
     "typescript": "^5.7.3",
     "@vitest/coverage-v8": "^3.2.4",

@@ -17,10 +17,18 @@ export class WebhookProcessor extends WorkerHost {
     private readonly config: ConfigService,
   ) {
     super();
-    this.secretKey =
-      this.config.get<string>('WEBHOOK_SECRET_ENCRYPTION_KEY')?.trim() ||
-      this.config.get<string>('JWT_SECRET')?.trim() ||
-      'botparty-webhook-secret-fallback';
+    const explicitKey = this.config.get<string>('WEBHOOK_SECRET_ENCRYPTION_KEY')?.trim();
+    if (explicitKey) {
+      this.secretKey = explicitKey;
+    } else if (process.env.NODE_ENV === 'production') {
+      throw new Error('WEBHOOK_SECRET_ENCRYPTION_KEY is required in production');
+    } else {
+      this.secretKey =
+        this.config.get<string>('JWT_SECRET')?.trim() || 'botparty-webhook-secret-fallback';
+      this.logger.warn(
+        'WEBHOOK_SECRET_ENCRYPTION_KEY not set — falling back to JWT_SECRET (dev only).',
+      );
+    }
   }
 
   async process(job: Job<WebhookJobData>): Promise<void> {

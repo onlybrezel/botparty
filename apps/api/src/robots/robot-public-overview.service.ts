@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
+import { PlatformUserService } from '../wallet/platform-user.service';
 import {
   normalizePublicRobotStatus,
   normalizePublicViewerCount,
@@ -55,10 +56,15 @@ export interface PublicRobotOverview {
 
 @Injectable()
 export class RobotPublicOverviewService {
+  private readonly platformUserId: string;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
-  ) {}
+    private readonly platformUser: PlatformUserService,
+  ) {
+    this.platformUserId = this.platformUser.getPlatformUserId();
+  }
 
   async getPublicOverview(): Promise<PublicRobotOverview> {
     const cacheKey = 'robots:public-overview';
@@ -101,11 +107,13 @@ export class RobotPublicOverviewService {
           SUM(CASE WHEN "status" = 'MAINTENANCE' THEN 1 ELSE 0 END)::int AS "maintenance"
         FROM "robots"
         WHERE "visibility" = 'PUBLIC'
+          AND "ownerId" != ${this.platformUserId}
       `,
       this.prisma.queueEntry.count({
         where: {
           robot: {
             visibility: 'PUBLIC',
+            ownerId: { not: this.platformUserId },
             status: { in: ['ONLINE', 'BUSY'] },
             lastOnlineAt: { gte: staleCutoff },
           },
@@ -118,13 +126,14 @@ export class RobotPublicOverviewService {
         FROM "robots"
         CROSS JOIN LATERAL UNNEST("tags") AS tag_table(tag)
         WHERE "visibility" = 'PUBLIC'
+          AND "ownerId" != ${this.platformUserId}
           AND BTRIM(tag) <> ''
         GROUP BY BTRIM(tag)
         ORDER BY COUNT(*) DESC, BTRIM(tag) ASC
         LIMIT 12
       `,
       this.prisma.robot.findMany({
-        where: { visibility: 'PUBLIC', isFeatured: true },
+        where: { visibility: 'PUBLIC', isFeatured: true, ownerId: { not: this.platformUserId } },
         select: {
           id: true,
           name: true,
@@ -146,6 +155,7 @@ export class RobotPublicOverviewService {
       this.prisma.robot.findMany({
         where: {
           visibility: 'PUBLIC',
+          ownerId: { not: this.platformUserId },
           status: { in: ['ONLINE', 'BUSY'] },
           lastOnlineAt: { gte: staleCutoff },
         },

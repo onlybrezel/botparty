@@ -100,7 +100,11 @@ function buildService(prismaOverrides?: Record<string, unknown>, configValues?: 
   const slugService = new RobotSlugService(mockPrisma as never);
   const inviteService = new RobotInviteService(mockPrisma as never);
   const cameraService = new RobotCameraService(mockPrisma as never, mockAccess as never, mockConfig as never);
-  const publicOverviewService = new RobotPublicOverviewService(mockPrisma as never, mockRedis as never);
+  const mockPlatformUser = {
+    getPlatformUserId: jest.fn().mockReturnValue('00000000-0000-0000-0000-00000000fee5'),
+    isPlatformUser: jest.fn((id) => id === '00000000-0000-0000-0000-00000000fee5'),
+  } as never;
+  const publicOverviewService = new RobotPublicOverviewService(mockPrisma as never, mockRedis as never, mockPlatformUser as never);
 
   const service = new RobotsService(
     mockPrisma as never,
@@ -117,6 +121,7 @@ function buildService(prismaOverrides?: Record<string, unknown>, configValues?: 
     cameraService,
     mockActionQueue as never,
     publicOverviewService,
+    mockPlatformUser as never,
   );
 
   return { service, mockPrisma, mockRedis, mockAccess, mockConfig, mockActionQueue };
@@ -549,6 +554,7 @@ describe('RobotsService.getPublicOverview', () => {
       where: {
         robot: {
           visibility: 'PUBLIC',
+          ownerId: { not: '00000000-0000-0000-0000-00000000fee5' },
           status: { in: ['ONLINE', 'BUSY'] },
           lastOnlineAt: { gte: expect.any(Date) },
         },

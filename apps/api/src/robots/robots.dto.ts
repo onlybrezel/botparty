@@ -65,6 +65,11 @@ export class GetChatHistoryDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(64)
+  beforeId?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(4)
   limit?: string;
 

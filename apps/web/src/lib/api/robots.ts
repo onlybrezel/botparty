@@ -192,7 +192,7 @@ export class RobotsApi {
 
   async getRobotChatHistory(
     robotId: string,
-    params?: { before?: number; limit?: number; roomAccessToken?: string; guestSessionId?: string },
+    params?: { before?: number; beforeId?: string; limit?: number; roomAccessToken?: string; guestSessionId?: string },
   ) {
     return this.req<RobotChatHistoryPage>(`/robots/${robotId}/chat-messages${buildQueryString(params)}`);
   }

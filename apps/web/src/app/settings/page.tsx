@@ -3,7 +3,7 @@
 import type { FormEvent } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { BellRing, Palette, Save, ShieldAlert, UserRound, Eye, EyeOff, Trash2, Cookie } from 'lucide-react';
+import { BellRing, Palette, Save, ShieldAlert, UserRound, Eye, EyeOff, Trash2, Cookie, LogOut } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/store';
 import { pushToast } from '@/lib/toast';
@@ -35,6 +35,7 @@ export default function SettingsPage() {
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [exportingData, setExportingData] = useState(false);
+  const [revokingSessions, setRevokingSessions] = useState(false);
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | 'unsupported'>(
     'default',
   );
@@ -162,6 +163,24 @@ export default function SettingsPage() {
       pushToast(err instanceof Error ? err.message : 'Failed to export account data.', 'error');
     } finally {
       setExportingData(false);
+    }
+  };
+
+  const handleRevokeAllSessions = async () => {
+    if (!accessToken) return;
+    if (!window.confirm('Sign out of every browser and device that is currently logged in?')) {
+      return;
+    }
+    setRevokingSessions(true);
+    try {
+      api.setToken(accessToken);
+      await api.auth.logoutAll();
+      pushToast('Signed out from all devices.', 'success');
+      auth.logout();
+      router.push('/login');
+    } catch (err) {
+      pushToast(err instanceof Error ? err.message : 'Failed to sign out everywhere.', 'error');
+      setRevokingSessions(false);
     }
   };
 
@@ -342,6 +361,25 @@ export default function SettingsPage() {
             className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm font-medium disabled:opacity-50"
           >
             {exportingData ? 'Preparing export...' : 'Download my data'}
+          </button>
+        </div>
+
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-5">
+          <h2 className="mb-4 flex items-center gap-2 text-lg font-bold">
+            <LogOut className="h-5 w-5 text-rose-300" />
+            Active Sessions
+          </h2>
+          <p className="mb-4 text-sm text-[var(--muted-foreground)]">
+            Sign out of every device that is currently logged in. You will need to sign in again on this device too.
+          </p>
+          <button
+            type="button"
+            onClick={() => void handleRevokeAllSessions()}
+            disabled={revokingSessions}
+            className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-4 py-2 text-sm font-medium disabled:opacity-50"
+          >
+            <LogOut className="h-4 w-4" />
+            {revokingSessions ? 'Signing out everywhere...' : 'Sign out of all devices'}
           </button>
         </div>
 

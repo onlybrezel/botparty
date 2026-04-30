@@ -1,5 +1,5 @@
 import { Controller, Post, Get, Query, Body, HttpCode, HttpStatus, Headers, Res, UseGuards } from '@nestjs/common';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { Throttle } from '@nestjs/throttler';
 import { randomBytes } from 'crypto';
@@ -20,6 +20,9 @@ import {
   shouldUseSecureAuthCookies,
 } from './auth.cookies';
 import { CsrfOriginGuard } from './guards/csrf-origin.guard';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { CurrentUser } from './decorators/current-user.decorator';
+import type { JwtPayload } from '@botparty/shared';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -125,6 +128,20 @@ export class AuthController {
 
     this.clearAuthCookies(reply);
     return { message: 'Logged out successfully' };
+  }
+
+  @Post('logout-all')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(JwtAuthGuard, CsrfOriginGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Revoke all refresh tokens for the current user (sign out everywhere)' })
+  async logoutAll(
+    @CurrentUser() user: JwtPayload,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    await this.authService.revokeRefreshTokens(user.sub);
+    this.clearAuthCookies(reply);
+    return { message: 'Signed out from all devices' };
   }
 
   @Post('forgot-password')

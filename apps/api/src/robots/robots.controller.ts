@@ -393,6 +393,7 @@ export class RobotsController {
       guestSessionId: query.guestSessionId,
       roomAccessToken: query.roomAccessToken,
       before: parsedBefore ?? undefined,
+      beforeId: query.beforeId,
       limit: parsedLimit ?? undefined,
     });
   }

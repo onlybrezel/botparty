@@ -80,10 +80,33 @@ async function bootstrap() {
       bannedValues: ['CHANGE_ME_REFRESH_SECRET_min_32_chars!!', 'change_me_refresh_secret_min_32_chars!!'],
     });
     assertRequiredSecret(process.env, 'ROBOT_JWT_SECRET', { minLength: 32 });
+    assertRequiredSecret(process.env, 'LIVEKIT_API_KEY', {
+      bannedValues: ['devkey', 'APIxxxxxxxxxxxxx'],
+    });
     assertRequiredSecret(process.env, 'LIVEKIT_API_SECRET', {
       minLength: 32,
       bannedValues: ['secret_that_is_at_least_32_characters_long'],
     });
+
+    if (process.env.NODE_ENV === 'production') {
+      assertRequiredSecret(process.env, 'WEBHOOK_SECRET_ENCRYPTION_KEY', {
+        minLength: 32,
+        bannedValues: ['botparty-webhook-secret-fallback'],
+      });
+    }
+
+    // Stripe is opt-in via STRIPE_SECRET_KEY. Once enabled, the webhook secret is mandatory.
+    const stripeKey = process.env.STRIPE_SECRET_KEY?.trim();
+    if (stripeKey) {
+      assertRequiredSecret(process.env, 'STRIPE_WEBHOOK_SECRET', { minLength: 16 });
+    }
+
+    // PayPal is opt-in via PAYPAL_CLIENT_ID. Both the secret and the webhook id are needed.
+    const paypalClientId = process.env.PAYPAL_CLIENT_ID?.trim();
+    if (paypalClientId) {
+      assertRequiredSecret(process.env, 'PAYPAL_CLIENT_SECRET');
+      assertRequiredSecret(process.env, 'PAYPAL_WEBHOOK_ID');
+    }
 
     const metricsAuthMode = process.env.METRICS_AUTH_REQUIRED?.trim().toLowerCase();
     const metricsAuthRequired =
@@ -99,7 +122,10 @@ async function bootstrap() {
     logger.warn(`Security configuration warning: ${(error as Error).message}`);
   }
 
-  const connectSrc = ["'self'", ...collectConnectSrcOrigins(process.env)];
+  const connectSrc = ["'self'", 'https:', 'wss:', ...collectConnectSrcOrigins(process.env)];
+  if (process.env.NODE_ENV !== 'production') {
+    connectSrc.push('http:', 'ws:');
+  }
 
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
@@ -148,12 +174,15 @@ async function bootstrap() {
       contentSecurityPolicy: {
         directives: {
           defaultSrc: ["'self'"],
+          baseUri: ["'self'"],
           scriptSrc: ["'self'", "'unsafe-inline'"],
           styleSrc: ["'self'", "'unsafe-inline'"],
-          imgSrc: ["'self'", 'data:', 'blob:'],
+          imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
           connectSrc,
-          mediaSrc: ["'self'", 'blob:'],
-          fontSrc: ["'self'"],
+          mediaSrc: ["'self'", 'blob:', 'https:'],
+          fontSrc: ["'self'", 'data:'],
+          workerSrc: ["'self'", 'blob:'],
+          manifestSrc: ["'self'"],
           objectSrc: ["'none'"],
           frameAncestors: ["'none'"],
           upgradeInsecureRequests: [],

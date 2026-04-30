@@ -59,6 +59,7 @@ export class RobotRoomStateHelper {
       },
       take: clampedLimit,
       select: {
+        id: true,
         userId: true,
         content: true,
         createdAt: true,
@@ -71,6 +72,7 @@ export class RobotRoomStateHelper {
     });
 
     return rows.reverse().map((row) => ({
+      id: row.id,
       userId: row.userId,
       username: row.user.username,
       content: row.content,
@@ -84,6 +86,7 @@ export class RobotRoomStateHelper {
     guestSessionId?: string;
     roomAccessToken?: string;
     before?: number;
+    beforeId?: string;
     limit?: number;
   }): Promise<ChatHistoryPage> {
     const robot = await this.prisma.robot.findUnique({
@@ -121,18 +124,35 @@ export class RobotRoomStateHelper {
       typeof input.before === 'number' && Number.isFinite(input.before)
         ? new Date(input.before)
         : null;
+    const beforeId = typeof input.beforeId === 'string' && input.beforeId.length > 0 ? input.beforeId : null;
+
+    // Stable cursor on (createdAt desc, id desc): when beforeId is provided
+    // along with the timestamp, fetch strictly older rows including ties on
+    // the millisecond boundary that still sort earlier by id.
+    const cursorWhere = beforeDate
+      ? beforeId
+        ? {
+            OR: [
+              { createdAt: { lt: beforeDate } },
+              { AND: [{ createdAt: beforeDate }, { id: { lt: beforeId } }] },
+            ],
+          }
+        : { createdAt: { lt: beforeDate } }
+      : {};
 
     const rows = await this.prisma.chatMessage.findMany({
       where: {
         robotId: input.robotId,
         deletedAt: null,
-        ...(beforeDate ? { createdAt: { lt: beforeDate } } : {}),
+        ...cursorWhere,
       },
-      orderBy: {
-        createdAt: 'desc',
-      },
+      orderBy: [
+        { createdAt: 'desc' },
+        { id: 'desc' },
+      ],
       take: clampedLimit + 1,
       select: {
+        id: true,
         userId: true,
         content: true,
         createdAt: true,
@@ -147,15 +167,18 @@ export class RobotRoomStateHelper {
     const hasMore = rows.length > clampedLimit;
     const pageRows = hasMore ? rows.slice(0, clampedLimit) : rows;
     const messages = pageRows.reverse().map((row) => ({
+      id: row.id,
       userId: row.userId,
       username: row.user.username,
       content: row.content,
       timestamp: row.createdAt.getTime(),
     }));
 
+    const oldest = messages.length > 0 ? messages[0]! : null;
     return {
       messages,
-      nextCursor: hasMore && messages.length > 0 ? messages[0]!.timestamp : null,
+      nextCursor: hasMore && oldest ? oldest.timestamp : null,
+      nextCursorId: hasMore && oldest ? oldest.id : null,
       hasMore,
     };
   }

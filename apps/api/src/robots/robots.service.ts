@@ -26,6 +26,7 @@ import { readNonNegativeIntegerEnv } from '../common/config-number';
 import { RobotPublicOverviewService, type PublicRobotOverview } from './robot-public-overview.service';
 import { RobotRoomStateHelper } from './robot-room-state.helper';
 import { RobotWriteHelper } from './robot-write.helper';
+import { PlatformUserService } from '../wallet/platform-user.service';
 import {
   sanitizeManagedRobot,
   toPublicRobot,
@@ -53,6 +54,7 @@ export interface RoomAccessGrant {
 }
 
 export interface ChatHistoryMessage {
+  id: string;
   userId: string;
   username: string;
   content: string;
@@ -62,6 +64,7 @@ export interface ChatHistoryMessage {
 export interface ChatHistoryPage {
   messages: ChatHistoryMessage[];
   nextCursor: number | null;
+  nextCursorId: string | null;
   hasMore: boolean;
 }
 
@@ -91,6 +94,7 @@ export class RobotsService implements OnModuleDestroy {
   private readonly maxRobotsPerOwner: number;
   private readonly writeHelper: RobotWriteHelper;
   private readonly roomStateHelper: RobotRoomStateHelper;
+  private readonly platformUserId: string;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -107,8 +111,10 @@ export class RobotsService implements OnModuleDestroy {
     private readonly cameraService: RobotCameraService,
     private readonly actionQueueService: RobotActionQueueService,
     private readonly publicOverviewService: RobotPublicOverviewService,
+    private readonly platformUser: PlatformUserService,
   ) {
     this.maxRobotsPerOwner = readNonNegativeIntegerEnv(this.configService, 'MAX_ROBOTS_PER_OWNER', 25);
+    this.platformUserId = this.platformUser.getPlatformUserId();
     this.writeHelper = new RobotWriteHelper(
       this.prisma,
       this.access,
@@ -160,6 +166,7 @@ export class RobotsService implements OnModuleDestroy {
     const robots = await this.prisma.robot.findMany({
       where: {
         visibility: 'PUBLIC',
+        ownerId: { not: this.platformUserId },
         ...(statusFilter && { status: statusFilter }),
         ...(filters?.tag && { tags: { has: filters.tag } }),
         ...(query && {
@@ -486,6 +493,7 @@ export class RobotsService implements OnModuleDestroy {
     guestSessionId?: string;
     roomAccessToken?: string;
     before?: number;
+    beforeId?: string;
     limit?: number;
   }): Promise<ChatHistoryPage> {
     return this.roomStateHelper.getChatHistoryPage(input);
@@ -493,7 +501,7 @@ export class RobotsService implements OnModuleDestroy {
 
   async getFeatured() {
     const robots = await this.prisma.robot.findMany({
-      where: { isFeatured: true, visibility: 'PUBLIC' },
+      where: { isFeatured: true, visibility: 'PUBLIC', ownerId: { not: this.platformUserId } },
       include: {
         owner: {
           select: { id: true, username: true, displayName: true, avatarUrl: true },

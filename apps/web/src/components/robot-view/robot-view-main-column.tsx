@@ -135,6 +135,16 @@ export function RobotViewMainColumn({ state }: Props) {
             LIVE
           </div>
         )}
+
+        {(state.recordingState?.active || state.robot.metadata?.recording?.enabled) && (
+          <div
+            className="absolute right-3 top-3 flex items-center gap-1 rounded-full bg-red-600/90 px-2 py-0.5 text-xs font-semibold text-white backdrop-blur-sm"
+            title="This session may be recorded for moderation. See the privacy policy for details."
+          >
+            <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-white" />
+            REC
+          </div>
+        )}
       </div>
 
       {(state.robot.accessMode === 'PASSWORD' || state.robot.accessMode === 'ALLOWED_USERS') &&

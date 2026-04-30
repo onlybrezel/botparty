@@ -161,6 +161,9 @@ export interface RobotPublic {
       activeCameraId?: string;
       cameras?: RobotStreamCameraConfig[];
     };
+    recording?: {
+      enabled?: boolean;
+    };
   } | null;
   tags: string[];
   viewerCount: number;

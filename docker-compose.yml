@@ -108,7 +108,7 @@ services:
     restart: on-failure:10
     command: --config /etc/livekit.yaml
     environment:
-      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:-devkey}: ${LIVEKIT_API_SECRET:?Set LIVEKIT_API_SECRET}"
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:?Set LIVEKIT_API_KEY (must not be devkey)}: ${LIVEKIT_API_SECRET:?Set LIVEKIT_API_SECRET}"
       REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
     ports:
       - "7880:7880"
@@ -138,7 +138,7 @@ services:
       - "7885:7885/udp"
     environment:
       INGRESS_CONFIG_BODY: |
-        api_key: ${LIVEKIT_API_KEY:-devkey}
+        api_key: ${LIVEKIT_API_KEY:?Set LIVEKIT_API_KEY (must not be devkey)}
         api_secret: ${LIVEKIT_API_SECRET:?Set LIVEKIT_API_SECRET}
         ws_url: ws://livekit:7880
         redis:
@@ -171,7 +171,7 @@ services:
     restart: on-failure:10
     environment:
       EGRESS_CONFIG_BODY: |
-        api_key: ${LIVEKIT_API_KEY:-devkey}
+        api_key: ${LIVEKIT_API_KEY:?Set LIVEKIT_API_KEY (must not be devkey)}
         api_secret: ${LIVEKIT_API_SECRET:?Set LIVEKIT_API_SECRET}
         ws_url: ws://livekit:7880
         redis:
@@ -262,7 +262,7 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_PASSWORD_FILE: ${SMTP_PASSWORD_FILE:-/run/secrets/smtp_password}
       SMTP_FROM: ${SMTP_FROM:-BotParty <no-reply@botparty.live>}
-      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?Set LIVEKIT_API_KEY (must not be devkey)}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?Set LIVEKIT_API_SECRET}
       LIVEKIT_API_SECRET_FILE: ${LIVEKIT_API_SECRET_FILE:-/run/secrets/livekit_api_secret}
       LIVEKIT_URL: ${LIVEKIT_URL:-ws://livekit:7880}

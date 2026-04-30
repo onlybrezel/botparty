@@ -16,12 +16,14 @@ import { RobotPublicOverviewService } from './robot-public-overview.service';
 import { RobotsController } from './robots.controller';
 import { LivekitModule } from '../livekit/livekit.module';
 import { JwtModule } from '@nestjs/jwt';
+import { WalletModule } from '../wallet/wallet.module';
 
 @Module({
   imports: [
     forwardRef(() => LivekitModule),
     JwtModule,
     BullModule.registerQueue({ name: JOBS_QUEUE_WEBHOOK }),
+    WalletModule,
   ],
   providers: [
     RobotsService,
