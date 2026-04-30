@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@botparty/prisma';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { PlatformUserService } from '../wallet/platform-user.service';
@@ -89,7 +90,7 @@ export class RobotPublicOverviewService {
         busy: number | bigint;
         offline: number | bigint;
         maintenance: number | bigint;
-      }>>`
+      }>>(Prisma.sql`
         SELECT
           COUNT(*)::int AS "publicRobots",
           SUM(CASE WHEN "status" IN ('ONLINE', 'BUSY') AND "lastOnlineAt" >= ${staleCutoff} THEN 1 ELSE 0 END)::int AS "liveRobots",
@@ -107,8 +108,8 @@ export class RobotPublicOverviewService {
           SUM(CASE WHEN "status" = 'MAINTENANCE' THEN 1 ELSE 0 END)::int AS "maintenance"
         FROM "robots"
         WHERE "visibility" = 'PUBLIC'
-          AND "ownerId" != ${this.platformUserId}
-      `,
+          AND "ownerId" != ${this.platformUserId}::uuid
+      `),
       this.prisma.queueEntry.count({
         where: {
           robot: {
@@ -119,19 +120,19 @@ export class RobotPublicOverviewService {
           },
         },
       }),
-      this.prisma.$queryRaw<Array<{ tag: string; count: number | bigint }>>`
+      this.prisma.$queryRaw<Array<{ tag: string; count: number | bigint }>>(Prisma.sql`
         SELECT
           BTRIM(tag) AS tag,
           COUNT(*)::int AS count
         FROM "robots"
         CROSS JOIN LATERAL UNNEST("tags") AS tag_table(tag)
         WHERE "visibility" = 'PUBLIC'
-          AND "ownerId" != ${this.platformUserId}
+          AND "ownerId" != ${this.platformUserId}::uuid
           AND BTRIM(tag) <> ''
         GROUP BY BTRIM(tag)
         ORDER BY COUNT(*) DESC, BTRIM(tag) ASC
         LIMIT 12
-      `,
+      `),
       this.prisma.robot.findMany({
         where: { visibility: 'PUBLIC', isFeatured: true, ownerId: { not: this.platformUserId } },
         select: {

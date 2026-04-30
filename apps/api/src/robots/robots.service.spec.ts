@@ -562,6 +562,23 @@ describe('RobotsService.getPublicOverview', () => {
     });
     expect(mockRedis.set).toHaveBeenCalledWith('robots:public-overview', JSON.stringify(result), 'EX', 30);
   });
+
+  it('casts the platform user id to uuid in raw overview queries', async () => {
+    const { service, mockPrisma, mockRedis } = buildService({
+      robot: { findMany: jest.fn().mockResolvedValue([]) },
+      queueEntry: { count: jest.fn().mockResolvedValue(0) },
+      $queryRaw: jest.fn().mockResolvedValueOnce([]).mockResolvedValueOnce([]),
+    });
+    mockRedis.get.mockResolvedValueOnce(null);
+
+    await service.getPublicOverview();
+
+    const aggregateQuery = mockPrisma.$queryRaw.mock.calls[0]?.[0] as { sql?: string };
+    const topTagsQuery = mockPrisma.$queryRaw.mock.calls[1]?.[0] as { sql?: string };
+
+    expect(aggregateQuery.sql).toContain('"ownerId" != ?::uuid');
+    expect(topTagsQuery.sql).toContain('"ownerId" != ?::uuid');
+  });
 });
 
 // ──────────────────────────────────────────────────────────────
