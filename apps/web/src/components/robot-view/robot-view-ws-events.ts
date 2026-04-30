@@ -302,8 +302,8 @@ export function createRobotWsEventHandler(params: RobotWsEventHandlerParams) {
         const required = typeof data.required === 'number' ? data.required : null;
         pushToast(
           required !== null
-            ? `Nicht genug Credits für diesen Druck (${required} cr nötig).`
-            : 'Nicht genug Credits für diesen Druck.',
+            ? `Not enough credits for this press (${required} cr needed).`
+            : 'Not enough credits for this press.',
           'error',
           3500,
         );

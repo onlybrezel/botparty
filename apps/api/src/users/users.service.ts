@@ -166,13 +166,13 @@ export class UsersService {
     const newOperatorThreshold = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const users = await this.prisma.user.findMany({
       take: limit,
-      orderBy: { credits: 'desc' },
+      orderBy: { balance: 'desc' },
       select: {
         id: true,
         username: true,
         displayName: true,
         avatarUrl: true,
-        credits: true,
+        balance: true,
         createdAt: true,
         sessions: {
           where: since ? { startedAt: { gte: since } } : undefined,
@@ -196,7 +196,7 @@ export class UsersService {
       username: user.username,
       displayName: user.displayName,
       avatarUrl: user.avatarUrl,
-      credits: user.credits,
+      credits: user.balance,
       createdAt: user.createdAt,
       recentSessions: user.sessions.length,
       streakDays: this.countSessionStreak(user.sessions),

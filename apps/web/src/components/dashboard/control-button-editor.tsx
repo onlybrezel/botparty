@@ -265,8 +265,8 @@ export function ControlButtonEditor({
       type="number"
       min={0}
       className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-      placeholder="Kosten (cr)"
-      title="Kosten pro Druck in Credits (0 = gratis)"
+      placeholder="Cost (cr)"
+      title="Cost per press in credits (0 = free)"
       value={controlDraft.costCredits}
       onChange={(event) =>
         setControlDraft((prev) => ({ ...prev, costCredits: event.target.value }))
@@ -545,8 +545,8 @@ export function ControlButtonEditor({
           type="number"
           min={0}
           className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-          placeholder="Kosten (cr)"
-          title="Kosten pro Druck in Credits (0 = gratis)"
+          placeholder="Cost (cr)"
+          title="Cost per press in credits (0 = free)"
           value={controlEditDraft.costCredits}
           onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, costCredits: event.target.value } : prev))}
         />
@@ -646,7 +646,7 @@ export function ControlButtonEditor({
               </div>
               <p className="mt-1 text-xs text-[var(--muted-foreground)]">
                 Access: {button.access} · Cooldown: {button.cooldownMs}ms
-                {button.costCredits > 0 ? ` · Kosten: ${button.costCredits} cr` : ''}
+                {button.costCredits > 0 ? ` · Cost: ${button.costCredits} cr` : ''}
                 {button.hotKey ? ` · Hotkey: ${button.hotKey}` : ''}
                 {button.icon?.startsWith('widget:') ? ` · Widget: ${button.icon}` : ''}
                 {button.color ? ` · Color: ${button.color}` : ''}

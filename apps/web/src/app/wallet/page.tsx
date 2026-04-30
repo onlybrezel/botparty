@@ -22,27 +22,27 @@ function formatMoney(amountCents: number, currency: string) {
 function txLabel(t: WalletTransactionRecord) {
   switch (t.type) {
     case 'DEPOSIT':
-      return 'Credits gekauft';
+      return 'Credits purchased';
     case 'BUTTON_SPEND':
-      return 'Button-Druck';
+      return 'Button press';
     case 'BUTTON_PAYOUT':
-      return 'Button-Einnahme';
+      return 'Button earnings';
     case 'DONATION_SENT':
-      return 'Spende gesendet';
+      return 'Donation sent';
     case 'DONATION_RECEIVED':
-      return 'Spende erhalten';
+      return 'Donation received';
     case 'PLATFORM_FEE':
-      return 'Plattform-Fee';
+      return 'Platform fee';
     case 'WITHDRAWAL':
-      return 'Auszahlung';
+      return 'Withdrawal';
     case 'REFUND':
-      return 'Erstattung';
+      return 'Refund';
     case 'CHARGEBACK':
       return 'Chargeback';
     case 'ADMIN_ADJUSTMENT':
-      return 'Admin-Anpassung';
+      return 'Admin adjustment';
     case 'REWARD':
-      return 'Belohnung';
+      return 'Reward';
     default:
       return t.type;
   }
@@ -75,7 +75,7 @@ export default function WalletPage() {
       setPackages(pkgRes.packages);
       setPayouts(payoutRes.items);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Wallet konnte nicht geladen werden');
+      setError(err instanceof Error ? err.message : 'Wallet could not be loaded');
     } finally {
       setLoading(false);
     }
@@ -94,7 +94,7 @@ export default function WalletPage() {
           window.location.href = res.redirectUrl;
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Kauf konnte nicht gestartet werden');
+        setError(err instanceof Error ? err.message : 'Could not start checkout');
       } finally {
         setBuyingId(null);
       }
@@ -107,7 +107,7 @@ export default function WalletPage() {
       event.preventDefault();
       const amount = Number(payoutAmount);
       if (!Number.isFinite(amount) || amount <= 0) {
-        setError('Ungültiger Betrag');
+        setError('Invalid amount');
         return;
       }
       setPayoutSubmitting(true);
@@ -122,7 +122,7 @@ export default function WalletPage() {
         setPayoutNotes('');
         await reload();
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Auszahlung konnte nicht angefordert werden');
+        setError(err instanceof Error ? err.message : 'Could not request payout');
       } finally {
         setPayoutSubmitting(false);
       }
@@ -134,7 +134,7 @@ export default function WalletPage() {
     return (
       <main className="mx-auto max-w-3xl px-4 py-12">
         <h1 className="mb-4 text-2xl font-semibold">Wallet</h1>
-        <p className="text-[var(--muted-foreground)]">Bitte melde dich an, um deine Wallet zu sehen.</p>
+        <p className="text-[var(--muted-foreground)]">Please sign in to view your wallet.</p>
       </main>
     );
   }
@@ -148,7 +148,7 @@ export default function WalletPage() {
         </h1>
         {summary && (
           <div className="text-right">
-            <div className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Guthaben</div>
+            <div className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Balance</div>
             <div className="text-3xl font-bold tabular-nums">{formatCredits(summary.balance)} cr</div>
           </div>
         )}
@@ -162,15 +162,15 @@ export default function WalletPage() {
 
       {loading && !summary ? (
         <div className="flex items-center gap-2 text-[var(--muted-foreground)]">
-          <Loader2 className="h-4 w-4 animate-spin" /> Lädt…
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading…
         </div>
       ) : (
         <>
           <section className="mb-10">
-            <h2 className="mb-3 text-lg font-semibold">Credits kaufen</h2>
+            <h2 className="mb-3 text-lg font-semibold">Buy credits</h2>
             {packages.length === 0 ? (
               <p className="text-sm text-[var(--muted-foreground)]">
-                Aktuell sind keine Pakete verfügbar.
+                No packages are currently available.
               </p>
             ) : (
               <div className="grid gap-3 sm:grid-cols-2">
@@ -184,7 +184,7 @@ export default function WalletPage() {
                         <div className="font-medium">{pkg.label}</div>
                         <div className="text-sm text-[var(--muted-foreground)]">
                           {formatCredits(pkg.credits)} cr
-                          {pkg.bonus ? ` (+${formatCredits(pkg.bonus)} Bonus)` : ''}
+                          {pkg.bonus ? ` (+${formatCredits(pkg.bonus)} bonus)` : ''}
                         </div>
                       </div>
                       <div className="text-lg font-semibold">
@@ -197,14 +197,14 @@ export default function WalletPage() {
                         disabled={buyingId === `${pkg.id}:stripe`}
                         onClick={() => handleBuy(pkg, 'stripe')}
                       >
-                        {buyingId === `${pkg.id}:stripe` ? 'Lädt…' : 'Mit Karte'}
+                        {buyingId === `${pkg.id}:stripe` ? 'Loading…' : 'Card'}
                       </button>
                       <button
                         className="flex-1 rounded-md border border-[var(--border)] px-3 py-1.5 text-sm hover:bg-[var(--muted)]"
                         disabled={buyingId === `${pkg.id}:paypal`}
                         onClick={() => handleBuy(pkg, 'paypal')}
                       >
-                        {buyingId === `${pkg.id}:paypal` ? 'Lädt…' : 'PayPal'}
+                        {buyingId === `${pkg.id}:paypal` ? 'Loading…' : 'PayPal'}
                       </button>
                     </div>
                   </div>
@@ -214,7 +214,7 @@ export default function WalletPage() {
           </section>
 
           <section className="mb-10">
-            <h2 className="mb-3 text-lg font-semibold">Aktivität</h2>
+            <h2 className="mb-3 text-lg font-semibold">Activity</h2>
             {summary && summary.recentTransactions.length > 0 ? (
               <ul className="divide-y divide-[var(--border)] rounded-lg border border-[var(--border)] bg-[var(--background)]">
                 {summary.recentTransactions.map((t) => {
@@ -248,20 +248,20 @@ export default function WalletPage() {
                 })}
               </ul>
             ) : (
-              <p className="text-sm text-[var(--muted-foreground)]">Noch keine Buchungen.</p>
+              <p className="text-sm text-[var(--muted-foreground)]">No activity yet.</p>
             )}
           </section>
 
           <section className="mb-10">
-            <h2 className="mb-3 text-lg font-semibold">Auszahlung anfordern</h2>
+            <h2 className="mb-3 text-lg font-semibold">Request payout</h2>
             <p className="mb-3 text-sm text-[var(--muted-foreground)]">
-              Auszahlungen werden manuell vom Team geprüft. Sobald sie genehmigt sind, wird der Betrag
-              abgebucht und ausbezahlt.
+              Payouts are reviewed manually by the team. Once approved, the credits will be deducted
+              and paid out.
             </p>
             <form onSubmit={submitPayout} className="space-y-3">
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="block text-sm">
-                  <span className="mb-1 block text-[var(--muted-foreground)]">Betrag (cr)</span>
+                  <span className="mb-1 block text-[var(--muted-foreground)]">Amount (cr)</span>
                   <input
                     type="number"
                     min={1}
@@ -271,10 +271,10 @@ export default function WalletPage() {
                   />
                 </label>
                 <label className="block text-sm">
-                  <span className="mb-1 block text-[var(--muted-foreground)]">Zahlungsmethode</span>
+                  <span className="mb-1 block text-[var(--muted-foreground)]">Payout method</span>
                   <input
                     type="text"
-                    placeholder="z. B. PayPal-E-Mail oder IBAN"
+                    placeholder="e.g. PayPal email or IBAN"
                     value={payoutDestination}
                     onChange={(e) => setPayoutDestination(e.target.value)}
                     className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-2"
@@ -282,7 +282,7 @@ export default function WalletPage() {
                 </label>
               </div>
               <label className="block text-sm">
-                <span className="mb-1 block text-[var(--muted-foreground)]">Notizen (optional)</span>
+                <span className="mb-1 block text-[var(--muted-foreground)]">Notes (optional)</span>
                 <textarea
                   value={payoutNotes}
                   onChange={(e) => setPayoutNotes(e.target.value)}
@@ -295,7 +295,7 @@ export default function WalletPage() {
                 disabled={payoutSubmitting || !payoutAmount || !payoutDestination}
                 className="rounded-md bg-amber-500 px-4 py-2 text-sm font-medium text-black hover:bg-amber-400 disabled:opacity-50"
               >
-                {payoutSubmitting ? 'Wird gesendet…' : 'Anfordern'}
+                {payoutSubmitting ? 'Sending…' : 'Request'}
               </button>
             </form>
 

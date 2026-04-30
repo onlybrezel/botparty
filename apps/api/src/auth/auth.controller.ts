@@ -91,7 +91,11 @@ export class AuthController {
       body?.refreshToken?.trim() ||
       parseCookie(cookieHeader, getRefreshCookieName(this.configService));
     const tokens = await this.authService.refreshToken(refreshToken);
-    this.applyAuthCookies(reply, tokens.accessToken, tokens.refreshToken);
+    if (tokens.refreshToken) {
+      this.applyAuthCookies(reply, tokens.accessToken, tokens.refreshToken);
+    } else {
+      this.applyAccessCookie(reply, tokens.accessToken);
+    }
     return { accessToken: tokens.accessToken, user: tokens.user };
   }
 
@@ -173,6 +177,20 @@ export class AuthController {
         sameSite,
       }),
     ]);
+  }
+
+  private applyAccessCookie(reply: FastifyReply, accessToken: string) {
+    const secure = shouldUseSecureAuthCookies(this.configService);
+    const sameSite = getAuthCookieSameSite(this.configService);
+    reply.header(
+      'set-cookie',
+      buildHttpOnlyCookie(getAccessCookieName(this.configService), accessToken, {
+        path: '/',
+        maxAgeMs: getAccessCookieTtlMs(this.configService),
+        secure,
+        sameSite,
+      }),
+    );
   }
 
   private clearAuthCookies(reply: FastifyReply) {

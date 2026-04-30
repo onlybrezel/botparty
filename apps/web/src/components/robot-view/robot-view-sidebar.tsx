@@ -97,7 +97,7 @@ export function RobotViewSidebar({ state }: Props) {
             className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-pink-500/30 bg-pink-500/10 px-3 py-2 text-sm font-medium text-pink-200 transition hover:bg-pink-500/20"
           >
             <Heart className="h-4 w-4" />
-            Spenden
+            Donate
           </button>
         )}
 

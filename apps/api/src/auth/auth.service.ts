@@ -59,6 +59,23 @@ type AuthResult =
 
 type AuthTokenResult = Extract<AuthResult, { accessToken: string }>;
 
+export type RefreshTokenResult = {
+  accessToken: string;
+  refreshToken: string | null;
+  user: AuthTokenResult['user'];
+  rotated: boolean;
+};
+
+const REFRESH_TOKEN_GRACE_SEC = 15;
+
+const ROTATE_REFRESH_LUA = `
+local cur = redis.call('GET', KEYS[1])
+if cur ~= ARGV[1] then return 0 end
+redis.call('SET', KEYS[2], ARGV[1], 'EX', ARGV[4])
+redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
+return 1
+`;
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -207,7 +224,7 @@ export class AuthService {
     return this.generateTokens(user);
   }
 
-  async refreshToken(refreshToken: string | null | undefined): Promise<AuthTokenResult> {
+  async refreshToken(refreshToken: string | null | undefined): Promise<RefreshTokenResult> {
     if (!refreshToken?.trim()) {
       throw new UnauthorizedException('Invalid refresh token');
     }
@@ -229,13 +246,46 @@ export class AuthService {
         throw new ForbiddenException('Email address not verified');
       }
 
-      const isCurrentToken = await this.isCurrentRefreshToken(user.id, refreshToken);
-      if (!isCurrentToken) {
-        await this.revokeRefreshTokens(user.id);
-        throw new UnauthorizedException('Refresh token reuse detected');
+      const incomingHash = this.hashRefreshToken(refreshToken);
+
+      // Sign a candidate new refresh token; only stored if we win the rotate CAS.
+      const newRefreshToken = this.signRefreshToken(user);
+      const newRefreshHash = this.hashRefreshToken(newRefreshToken);
+      const refreshTtlSec = this.refreshTokenTtlSec(newRefreshToken);
+
+      const rotated = await this.tryRotateRefreshToken(
+        user.id,
+        incomingHash,
+        newRefreshHash,
+        refreshTtlSec,
+      );
+
+      if (rotated) {
+        const accessToken = this.signAccessToken(user);
+        return {
+          accessToken,
+          refreshToken: newRefreshToken,
+          user: this.buildSessionUser(user),
+          rotated: true,
+        };
       }
 
-      return this.generateTokens(user);
+      // CAS failed. Could be a concurrent refresh from another tab — check the
+      // grace window to avoid logging the user out on benign races.
+      const prevHash = await this.redis.get(this.refreshTokenPrevKey(user.id));
+      if (prevHash && prevHash === incomingHash) {
+        const accessToken = this.signAccessToken(user);
+        return {
+          accessToken,
+          refreshToken: null,
+          user: this.buildSessionUser(user),
+          rotated: false,
+        };
+      }
+
+      // Genuine reuse of an old/unknown token.
+      await this.revokeRefreshTokens(user.id);
+      throw new UnauthorizedException('Refresh token reuse detected');
     } catch (error) {
       if (error instanceof ForbiddenException || error instanceof UnauthorizedException) {
         throw error;
@@ -249,7 +299,7 @@ export class AuthService {
       where: { id: userId },
       data: { tokenVersion: { increment: 1 } },
     });
-    await this.redis.del(this.refreshTokenKey(userId));
+    await this.redis.del(this.refreshTokenKey(userId), this.refreshTokenPrevKey(userId));
   }
 
   async resolveValidAccessTokenPayload(accessToken?: string | null): Promise<JwtPayload | null> {
@@ -430,6 +480,62 @@ export class AuthService {
     return { message: 'Password reset successful' };
   }
 
+  private signAccessToken(user: {
+    id: string;
+    username: string;
+    role: string;
+    tokenVersion: number;
+  }) {
+    const jwtPayload: JwtPayload = {
+      sub: user.id,
+      username: user.username,
+      role: user.role as JwtPayload['role'],
+      tokenVersion: user.tokenVersion,
+    };
+    return this.jwt.sign(jwtPayload);
+  }
+
+  private signRefreshToken(user: { id: string; tokenVersion: number }) {
+    const refreshPayload: RefreshTokenPayload = {
+      sub: user.id,
+      tokenVersion: user.tokenVersion,
+      jti: randomBytes(16).toString('hex'),
+    };
+    const refreshExpiresIn = this.config.getOrThrow<string>('JWT_REFRESH_EXPIRES_IN');
+    return this.jwt.sign(refreshPayload, {
+      secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
+      expiresIn: asJwtExpiresIn(refreshExpiresIn),
+    } satisfies JwtSignOptions);
+  }
+
+  private refreshTokenTtlSec(refreshToken: string) {
+    const payload = this.jwt.verify<RefreshTokenPayload & { exp?: number }>(refreshToken, {
+      secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
+    });
+    return typeof payload.exp === 'number'
+      ? Math.max(1, payload.exp - Math.floor(Date.now() / 1000))
+      : 7 * 24 * 60 * 60;
+  }
+
+  private async tryRotateRefreshToken(
+    userId: string,
+    oldHash: string,
+    newHash: string,
+    refreshTtlSec: number,
+  ): Promise<boolean> {
+    const result = (await this.redis.eval(
+      ROTATE_REFRESH_LUA,
+      2,
+      this.refreshTokenKey(userId),
+      this.refreshTokenPrevKey(userId),
+      oldHash,
+      newHash,
+      String(refreshTtlSec),
+      String(REFRESH_TOKEN_GRACE_SEC),
+    )) as number;
+    return result === 1;
+  }
+
   private async generateTokens(user: {
     id: string;
     username: string;
@@ -439,25 +545,8 @@ export class AuthService {
     avatarUrl?: string | null;
     createdAt?: Date;
   }): Promise<AuthTokenResult> {
-    const jwtPayload: JwtPayload = {
-      sub: user.id,
-      username: user.username,
-      role: user.role as JwtPayload['role'],
-      tokenVersion: user.tokenVersion,
-    };
-
-    const refreshPayload: RefreshTokenPayload = {
-      sub: user.id,
-      tokenVersion: user.tokenVersion,
-      jti: randomBytes(16).toString('hex'),
-    };
-
-    const accessToken = this.jwt.sign(jwtPayload);
-    const refreshExpiresIn = this.config.getOrThrow<string>('JWT_REFRESH_EXPIRES_IN');
-    const refreshTokenValue = this.jwt.sign(refreshPayload, {
-      secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
-      expiresIn: asJwtExpiresIn(refreshExpiresIn),
-    } satisfies JwtSignOptions);
+    const accessToken = this.signAccessToken(user);
+    const refreshTokenValue = this.signRefreshToken(user);
     await this.storeRefreshToken(user.id, refreshTokenValue);
 
     return {
@@ -535,19 +624,16 @@ export class AuthService {
     return `auth:refresh-token:${userId}`;
   }
 
-  private async storeRefreshToken(userId: string, refreshToken: string) {
-    const payload = this.jwt.verify<RefreshTokenPayload & { exp?: number }>(refreshToken, {
-      secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
-    });
-    const ttlSec = typeof payload.exp === 'number' ? Math.max(1, payload.exp - Math.floor(Date.now() / 1000)) : 7 * 24 * 60 * 60;
-    await this.redis.set(this.refreshTokenKey(userId), this.hashRefreshToken(refreshToken), 'EX', ttlSec);
+  private refreshTokenPrevKey(userId: string) {
+    return `auth:refresh-token:prev:${userId}`;
   }
 
-  private async isCurrentRefreshToken(userId: string, refreshToken: string) {
-    const storedHash = await this.redis.get(this.refreshTokenKey(userId));
-    if (!storedHash) {
-      return false;
-    }
-    return storedHash === this.hashRefreshToken(refreshToken);
+  private async storeRefreshToken(userId: string, refreshToken: string) {
+    const ttlSec = this.refreshTokenTtlSec(refreshToken);
+    const pipeline = this.redis.multi();
+    pipeline.set(this.refreshTokenKey(userId), this.hashRefreshToken(refreshToken), 'EX', ttlSec);
+    pipeline.del(this.refreshTokenPrevKey(userId));
+    await pipeline.exec();
   }
+
 }

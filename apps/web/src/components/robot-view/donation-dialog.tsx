@@ -23,7 +23,7 @@ export function DonationDialog({ robotId, robotName, ownerName, onClose, onDonat
 
   const submit = async () => {
     if (!Number.isFinite(amount) || amount <= 0) {
-      setError('Bitte gültigen Betrag eingeben');
+      setError('Please enter a valid amount');
       return;
     }
     setSubmitting(true);
@@ -34,7 +34,7 @@ export function DonationDialog({ robotId, robotName, ownerName, onClose, onDonat
       onDonated?.();
       setTimeout(onClose, 1200);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Spende fehlgeschlagen';
+      const msg = err instanceof Error ? err.message : 'Donation failed';
       setError(msg);
     } finally {
       setSubmitting(false);
@@ -55,7 +55,7 @@ export function DonationDialog({ robotId, robotName, ownerName, onClose, onDonat
         <header className="mb-3 flex items-center justify-between">
           <h2 className="flex items-center gap-2 text-base font-semibold">
             <Heart className="h-4 w-4 text-pink-400" />
-            {ownerName ? `${ownerName} unterstützen` : 'Creator unterstützen'}
+            {ownerName ? `Support ${ownerName}` : 'Support creator'}
           </h2>
           <button
             type="button"
@@ -67,13 +67,13 @@ export function DonationDialog({ robotId, robotName, ownerName, onClose, onDonat
         </header>
 
         <p className="mb-3 text-sm text-[var(--muted-foreground)]">
-          Spende Credits an <span className="text-[var(--foreground)]">{robotName}</span>. 10 % gehen
-          an die Plattform, der Rest an den Creator.
+          Donate credits to <span className="text-[var(--foreground)]">{robotName}</span>. 10% goes
+          to the platform, the rest to the creator.
         </p>
 
         {success ? (
           <div className="rounded-lg border border-green-500/30 bg-green-500/10 p-3 text-sm text-green-300">
-            Danke für deine Spende! 🎉
+            Thanks for your donation! 🎉
           </div>
         ) : (
           <>
@@ -95,7 +95,7 @@ export function DonationDialog({ robotId, robotName, ownerName, onClose, onDonat
             </div>
 
             <label className="mb-3 block text-sm">
-              <span className="mb-1 block text-[var(--muted-foreground)]">Betrag (Credits)</span>
+              <span className="mb-1 block text-[var(--muted-foreground)]">Amount (credits)</span>
               <input
                 type="number"
                 min={1}
@@ -106,12 +106,12 @@ export function DonationDialog({ robotId, robotName, ownerName, onClose, onDonat
             </label>
 
             <label className="mb-3 block text-sm">
-              <span className="mb-1 block text-[var(--muted-foreground)]">Nachricht (optional)</span>
+              <span className="mb-1 block text-[var(--muted-foreground)]">Message (optional)</span>
               <textarea
                 value={message}
                 onChange={(e) => setMessage(e.target.value.slice(0, 200))}
                 rows={2}
-                placeholder="Sag etwas Nettes…"
+                placeholder="Say something nice…"
                 className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
               />
             </label>
@@ -128,7 +128,7 @@ export function DonationDialog({ robotId, robotName, ownerName, onClose, onDonat
                 onClick={onClose}
                 className="rounded-md border border-[var(--border)] px-3 py-1.5 text-sm hover:bg-[var(--muted)]"
               >
-                Abbrechen
+                Cancel
               </button>
               <button
                 type="button"
@@ -136,7 +136,7 @@ export function DonationDialog({ robotId, robotName, ownerName, onClose, onDonat
                 onClick={submit}
                 className="rounded-md bg-pink-500 px-4 py-1.5 text-sm font-medium text-white hover:bg-pink-400 disabled:opacity-60"
               >
-                {submitting ? 'Sende…' : `${amount} cr spenden`}
+                {submitting ? 'Sending…' : `Donate ${amount} cr`}
               </button>
             </div>
           </>

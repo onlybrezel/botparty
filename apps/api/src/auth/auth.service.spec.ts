@@ -15,12 +15,20 @@ const mockPrisma = {
   },
 };
 
+const mockRedisMulti = {
+  set: jest.fn().mockReturnThis(),
+  del: jest.fn().mockReturnThis(),
+  exec: jest.fn().mockResolvedValue([]),
+};
+
 const mockRedis = {
   get: jest.fn(),
   set: jest.fn(),
   del: jest.fn(),
   incr: jest.fn(),
   expire: jest.fn(),
+  eval: jest.fn(),
+  multi: jest.fn(() => mockRedisMulti),
 };
 
 const mockMail = {
@@ -184,15 +192,31 @@ describe('AuthService', () => {
 
     it('returns new tokens on valid refresh', async () => {
       mockPrisma.user.findUnique.mockResolvedValueOnce({ ...fakeUser, emailVerified: true });
-      mockRedis.get.mockResolvedValueOnce('ba518c093e1e0df01cfe01436563cd37f6a1f47697fcc620e818a2d062665083');
-      mockRedis.set.mockResolvedValueOnce('OK');
+      mockRedis.eval.mockResolvedValueOnce(1);
 
       const result = await service.refreshToken('valid-refresh-token');
       expect(result).toHaveProperty('accessToken');
+      expect(result.refreshToken).toBeTruthy();
+      expect(result.rotated).toBe(true);
+    });
+
+    it('returns access-only token when prev hash matches (concurrent refresh)', async () => {
+      mockPrisma.user.findUnique.mockResolvedValueOnce({ ...fakeUser, emailVerified: true });
+      mockRedis.eval.mockResolvedValueOnce(0);
+      mockRedis.get.mockResolvedValueOnce(
+        'ba518c093e1e0df01cfe01436563cd37f6a1f47697fcc620e818a2d062665083',
+      );
+
+      const result = await service.refreshToken('valid-refresh-token');
+      expect(result).toHaveProperty('accessToken');
+      expect(result.refreshToken).toBeNull();
+      expect(result.rotated).toBe(false);
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
     });
 
     it('revokes tokens when an older refresh token is replayed', async () => {
       mockPrisma.user.findUnique.mockResolvedValueOnce({ ...fakeUser, emailVerified: true });
+      mockRedis.eval.mockResolvedValueOnce(0);
       mockRedis.get.mockResolvedValueOnce('different-hash');
       mockPrisma.user.update.mockResolvedValueOnce({ ...fakeUser, tokenVersion: 1 });
       mockRedis.del.mockResolvedValueOnce(1);
