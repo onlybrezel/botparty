@@ -141,3 +141,31 @@ export const queueJoinSchema = z.object({
   robotId: z.string().uuid(),
   priority: z.boolean().default(false),
 });
+
+// ─── Wallet & Billing Schemas ────────────────────────
+export const donationRequestSchema = z.object({
+  robotId: z.string().uuid(),
+  amount: z
+    .number()
+    .int()
+    .min(LIMITS.MIN_DONATION_CREDITS)
+    .max(LIMITS.MAX_DONATION_CREDITS),
+  message: z.string().trim().max(280).optional(),
+});
+
+export const checkoutRequestSchema = z.object({
+  provider: z.enum(['stripe', 'paypal']),
+  packageId: z.string().min(1).max(64),
+  successUrl: z.string().url().max(512).optional(),
+  cancelUrl: z.string().url().max(512).optional(),
+});
+
+export const payoutRequestSchema = z.object({
+  amount: z
+    .number()
+    .int()
+    .min(LIMITS.MIN_PAYOUT_REQUEST_CREDITS)
+    .max(LIMITS.MAX_PAYOUT_REQUEST_CREDITS),
+  destination: z.string().trim().min(3).max(128),
+  notes: z.string().trim().max(1000).optional(),
+});

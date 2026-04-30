@@ -1,10 +1,12 @@
-import { Controller, Get, Res } from '@nestjs/common';
+import { Body, Controller, Get, Headers, InternalServerErrorException, Logger, Post, Res } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import type { FastifyReply } from 'fastify';
 import { collectDefaultMetrics, Gauge, register } from 'prom-client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { BotGateway } from '../gateway/bot.gateway';
+import { hasBasicAuthCredentials, isAuthorizedBasicAuth } from '../common/http-basic-auth';
 
 let defaultMetricsEnabled = false;
 const ROBOT_TELEMETRY_FRESH_WINDOW_MS = 180_000;
@@ -90,10 +92,13 @@ const robotTelemetryAvgTemperatureGauge = getOrCreateGauge(
 @ApiTags('health')
 @Controller('health')
 export class HealthController {
+  private readonly logger = new Logger(HealthController.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly gateway: BotGateway,
+    private readonly config: ConfigService,
   ) {
     if (!defaultMetricsEnabled) {
       collectDefaultMetrics({ prefix: 'botparty_api_' });
@@ -162,7 +167,14 @@ export class HealthController {
 
   @Get('metrics')
   @ApiOperation({ summary: 'Prometheus metrics endpoint' })
-  async metrics(@Res() res: FastifyReply) {
+  async metrics(
+    @Headers('authorization') authorization: string | undefined,
+    @Res() res: FastifyReply,
+  ) {
+    if (!this._authorizeMetricsRequest(authorization, res)) {
+      return;
+    }
+
     const ws = this.gateway.getRuntimeMetricsSnapshot();
     wsConnectedClientsGauge.set(ws.connectedClients);
     wsConnectedRobotsGauge.set(ws.connectedRobotClients);
@@ -190,6 +202,13 @@ export class HealthController {
 
     res.header('Content-Type', register.contentType);
     return res.send(await register.metrics());
+  }
+
+  @Post('csp-report')
+  @ApiOperation({ summary: 'Receive browser Content Security Policy violation reports' })
+  cspReport(@Body() body: unknown, @Headers('user-agent') userAgent?: string) {
+    this.logger.warn(`CSP violation report received from ${userAgent ?? 'unknown-agent'}: ${JSON.stringify(body)}`);
+    return { ok: true };
   }
 
   private async _checkDatabaseUp(): Promise<number> {
@@ -262,10 +281,10 @@ export class HealthController {
         }
 
         freshRobots += 1;
-        if (Boolean(parsed.controlConnected)) {
+        if (parsed.controlConnected) {
           controlConnectedRobots += 1;
         }
-        if (Boolean(parsed.livekitConnected)) {
+        if (parsed.livekitConnected) {
           livekitConnectedRobots += 1;
         }
 
@@ -308,5 +327,36 @@ export class HealthController {
     }
 
     return Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(1));
+  }
+
+  private _authorizeMetricsRequest(
+    authorization: string | undefined,
+    res: FastifyReply,
+  ): boolean {
+    const metricsAuthMode = this.config.get<string>('METRICS_AUTH_REQUIRED')?.trim().toLowerCase();
+    const metricsAuthRequired =
+      metricsAuthMode === 'true'
+      || (metricsAuthMode !== 'false' && this.config.get<string>('NODE_ENV') === 'production');
+
+    if (!metricsAuthRequired) {
+      return true;
+    }
+
+    const username = this.config.get<string>('METRICS_USERNAME')?.trim();
+    const password = this.config.get<string>('METRICS_PASSWORD')?.trim();
+    if (!hasBasicAuthCredentials(username, password)) {
+      throw new InternalServerErrorException(
+        'Metrics auth is enabled but METRICS_USERNAME and METRICS_PASSWORD are not configured',
+      );
+    }
+
+    const authorized = isAuthorizedBasicAuth(authorization, { username, password: password! });
+    if (authorized) {
+      return true;
+    }
+
+    res.header('www-authenticate', 'Basic realm="BotParty Metrics"');
+    res.code(401).send({ message: 'Authentication required' });
+    return false;
   }
 }

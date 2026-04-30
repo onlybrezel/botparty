@@ -148,9 +148,11 @@ export class ModerationApi {
     return this.req<AdminRecordingFile[]>('/moderation/admin/recordings');
   }
 
-  getAdminRecordingStreamUrl(fileName: string) {
-    const encoded = encodeURIComponent(fileName);
-    return `${this.baseUrl}/moderation/admin/recordings/${encoded}`;
+  getAdminRecordingStreamUrl(recording: { fileName: string; playbackPath?: string } | string) {
+    const resolvedPath: string = typeof recording === 'string'
+      ? `/moderation/admin/recordings/${encodeURIComponent(recording)}`
+      : recording.playbackPath || `/moderation/admin/recordings/${encodeURIComponent(recording.fileName)}`;
+    return new URL(resolvedPath, `${this.baseUrl}/`).toString();
   }
 
   async getActiveSession(robotId: string) {

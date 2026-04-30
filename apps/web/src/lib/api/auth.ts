@@ -44,4 +44,15 @@ export class AuthApi {
       body: JSON.stringify({ token, password }),
     });
   }
+
+  async verifyEmail(token: string) {
+    return this.req<{ message: string }>(`/auth/verify-email?token=${encodeURIComponent(token)}`);
+  }
+
+  async resendVerificationEmail(email: string) {
+    return this.req<{ message: string }>('/auth/verify-email/resend', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  }
 }

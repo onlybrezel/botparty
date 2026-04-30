@@ -4,38 +4,52 @@ import { RobotDeviceService } from './robot-device.service';
 import { RobotSlugService } from './robot-slug.service';
 import { RobotInviteService } from './robot-invite.service';
 import { RobotCameraService } from './robot-camera.service';
-import { RobotActionQueueService } from './robot-action-queue.service';
+import { RobotPublicOverviewService } from './robot-public-overview.service';
 
 // ──────────────────────────────────────────────────────────────
 // Shared mock factories
 // ──────────────────────────────────────────────────────────────
 
 function buildMockPrisma(overrides: Record<string, unknown> = {}) {
+  const {
+    robot: robotOverrides,
+    controlButton: controlButtonOverrides,
+    slugAlias: slugAliasOverrides,
+    chatMessage: chatMessageOverrides,
+    queueEntry: queueEntryOverrides,
+    ...restOverrides
+  } = overrides;
+
   return {
     $queryRaw: jest.fn().mockResolvedValue([]),
     robot: {
       findMany: jest.fn().mockResolvedValue([]),
       findUnique: jest.fn().mockResolvedValue(null),
       findFirst: jest.fn().mockResolvedValue(null),
+      count: jest.fn().mockResolvedValue(0),
       create: jest.fn(),
       update: jest.fn(),
       delete: jest.fn(),
-      ...((overrides.robot as object | undefined) ?? {}),
+      ...((robotOverrides as object | undefined) ?? {}),
     },
     controlButton: {
       createMany: jest.fn().mockResolvedValue(undefined),
+      ...((controlButtonOverrides as object | undefined) ?? {}),
     },
     slugAlias: {
       deleteMany: jest.fn().mockResolvedValue(undefined),
       findFirst: jest.fn().mockResolvedValue(null),
+      ...((slugAliasOverrides as object | undefined) ?? {}),
     },
     chatMessage: {
       findMany: jest.fn().mockResolvedValue([]),
+      ...((chatMessageOverrides as object | undefined) ?? {}),
     },
     queueEntry: {
       count: jest.fn().mockResolvedValue(0),
+      ...((queueEntryOverrides as object | undefined) ?? {}),
     },
-    ...overrides,
+    ...restOverrides,
   };
 }
 
@@ -74,10 +88,6 @@ function buildService(prismaOverrides?: Record<string, unknown>, configValues?: 
   const mockWebhooks = { deliver: jest.fn() };
   const mockChatPersistence = { enqueue: jest.fn() };
   const mockConfig = buildMockConfig(configValues ?? {});
-  const mockCamera = {
-    upsertExternalStreamCamera: jest.fn(),
-    removeExternalStreamCamera: jest.fn(),
-  };
   const mockActionQueue = {
     enqueueAction: jest.fn(),
     enqueueActionForRobot: jest.fn(),
@@ -89,6 +99,8 @@ function buildService(prismaOverrides?: Record<string, unknown>, configValues?: 
   const deviceService = new RobotDeviceService(mockPrisma as never, mockConfig as never);
   const slugService = new RobotSlugService(mockPrisma as never);
   const inviteService = new RobotInviteService(mockPrisma as never);
+  const cameraService = new RobotCameraService(mockPrisma as never, mockAccess as never, mockConfig as never);
+  const publicOverviewService = new RobotPublicOverviewService(mockPrisma as never, mockRedis as never);
 
   const service = new RobotsService(
     mockPrisma as never,
@@ -102,11 +114,12 @@ function buildService(prismaOverrides?: Record<string, unknown>, configValues?: 
     deviceService,
     slugService,
     inviteService,
-    mockCamera as never,
+    cameraService,
     mockActionQueue as never,
+    publicOverviewService,
   );
 
-  return { service, mockPrisma, mockRedis, mockAccess, mockConfig, mockCamera, mockActionQueue };
+  return { service, mockPrisma, mockRedis, mockAccess, mockConfig, mockActionQueue };
 }
 
 // Minimal robot fixture matching the shape returned by prisma includes
@@ -562,6 +575,21 @@ describe('RobotsService profanity filter', () => {
     // NFKD normalization strips the diacritic: 'f\u00fcck' → 'fuck'
     await expect(
       service.create('owner-1', { name: 'f\u00fcck this', slug: undefined } as never),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('create() rejects when the owner reached the robot cap', async () => {
+    const { service } = buildService(
+      {
+        robot: {
+          count: jest.fn().mockResolvedValue(2),
+        },
+      },
+      { MAX_ROBOTS_PER_OWNER: '2' },
+    );
+
+    await expect(
+      service.create('owner-1', { name: 'Cap reached', slug: undefined } as never),
     ).rejects.toThrow(BadRequestException);
   });
 });

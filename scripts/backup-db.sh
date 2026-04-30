@@ -3,7 +3,8 @@
 # Usage: ./scripts/backup-db.sh [output-dir]
 #
 # Reads DB_PASSWORD from the environment or .env file.
-# The dump is written to OUTPUT_DIR/botparty-<ISO8601>.sql.gz (default: ./data/backups)
+# The dump is written to OUTPUT_DIR/botparty-<ISO-8601>.sql.gz (default: ./data/backups)
+# Uses docker exec when the postgres container is available, falls back to host pg_dump.
 
 set -euo pipefail
 
@@ -21,6 +22,7 @@ DB_PORT="${DB_PORT:-5433}"
 DB_NAME="${DB_NAME:-botparty}"
 DB_USER="${DB_USER:-botparty}"
 DB_PASSWORD="${DB_PASSWORD:-botparty_secret}"
+CONTAINER_NAME="${DB_CONTAINER:-botparty-postgres}"
 
 OUTPUT_DIR="${1:-${PROJECT_ROOT}/data/backups}"
 mkdir -p "${OUTPUT_DIR}"
@@ -30,14 +32,24 @@ OUTFILE="${OUTPUT_DIR}/botparty-${TIMESTAMP}.sql.gz"
 
 echo "Backing up ${DB_NAME} → ${OUTFILE}"
 
-PGPASSWORD="${DB_PASSWORD}" pg_dump \
-  --host="${DB_HOST}" \
-  --port="${DB_PORT}" \
-  --username="${DB_USER}" \
-  --no-password \
-  --format=plain \
-  "${DB_NAME}" \
-  | gzip -9 > "${OUTFILE}"
+if docker container inspect "${CONTAINER_NAME}" --format '{{.State.Running}}' 2>/dev/null | grep -q true; then
+  echo "Using docker exec on ${CONTAINER_NAME}"
+  docker exec "${CONTAINER_NAME}" pg_dump \
+    --username="${DB_USER}" \
+    --format=plain \
+    "${DB_NAME}" \
+    | gzip -9 > "${OUTFILE}"
+else
+  echo "Using host pg_dump (${DB_HOST}:${DB_PORT})"
+  PGPASSWORD="${DB_PASSWORD}" pg_dump \
+    --host="${DB_HOST}" \
+    --port="${DB_PORT}" \
+    --username="${DB_USER}" \
+    --no-password \
+    --format=plain \
+    "${DB_NAME}" \
+    | gzip -9 > "${OUTFILE}"
+fi
 
 echo "Backup complete: ${OUTFILE} ($(du -sh "${OUTFILE}" | cut -f1))"
 

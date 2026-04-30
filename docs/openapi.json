@@ -1,0 +1,3165 @@
+{
+  "openapi": "3.0.0",
+  "paths": {
+    "/auth/register": {
+      "post": {
+        "operationId": "AuthController_register",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "Register a new user",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/csrf": {
+      "get": {
+        "operationId": "AuthController_getCsrfToken",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Issue CSRF token for double-submit protection",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "operationId": "AuthController_login",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Login with email/password",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/refresh": {
+      "post": {
+        "operationId": "AuthController_refresh",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Refresh access token",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "operationId": "AuthController_logout",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Logout / revoke refresh tokens",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/forgot-password": {
+      "post": {
+        "operationId": "AuthController_forgotPassword",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Request a password reset email",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/reset-password": {
+      "post": {
+        "operationId": "AuthController_resetPassword",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Reset password with token",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/verify-email": {
+      "get": {
+        "operationId": "AuthController_verifyEmail",
+        "parameters": [
+          {
+            "name": "token",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Verify email address with one-time token",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/verify-email/resend": {
+      "post": {
+        "operationId": "AuthController_resendVerifyEmail",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Resend an email verification link",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/users/me": {
+      "get": {
+        "operationId": "UsersController_getMe",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get current user profile",
+        "tags": [
+          "users"
+        ]
+      },
+      "patch": {
+        "operationId": "UsersController_updateMe",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMeDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update current user profile",
+        "tags": [
+          "users"
+        ]
+      },
+      "delete": {
+        "operationId": "UsersController_deleteMe",
+        "parameters": [],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete own account (GDPR self-service)",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/users/me/export": {
+      "get": {
+        "operationId": "UsersController_exportMe",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Export own account data",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/users/admin/list": {
+      "get": {
+        "operationId": "UsersController_getAdminUsers",
+        "parameters": [
+          {
+            "name": "q",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List users for admin/mod dashboard",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/users/admin/{id}": {
+      "patch": {
+        "operationId": "UsersController_updateAdminUser",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAdminUserDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update user profile/role as staff",
+        "tags": [
+          "users"
+        ]
+      },
+      "delete": {
+        "operationId": "UsersController_deleteAdminUser",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete user account as staff",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/users/leaderboard": {
+      "get": {
+        "operationId": "UsersController_getLeaderboard",
+        "parameters": [
+          {
+            "name": "limit",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "period",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Get credits leaderboard",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/users/{username}": {
+      "get": {
+        "operationId": "UsersController_getByUsername",
+        "parameters": [
+          {
+            "name": "username",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Get user by username",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/wallet/me": {
+      "get": {
+        "operationId": "WalletController_getMe",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get current wallet summary (balance + recent transactions)",
+        "tags": [
+          "wallet"
+        ]
+      }
+    },
+    "/wallet/transactions": {
+      "get": {
+        "operationId": "WalletController_listTransactions",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List wallet transactions (cursor-paginated)",
+        "tags": [
+          "wallet"
+        ]
+      }
+    },
+    "/wallet/donations": {
+      "post": {
+        "operationId": "WalletController_donate",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DonationDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Donate credits to a robot owner",
+        "tags": [
+          "wallet"
+        ]
+      }
+    },
+    "/robots": {
+      "get": {
+        "operationId": "RobotsController_findAll",
+        "parameters": [
+          {
+            "name": "status",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "tag",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "offset",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "List all public robots",
+        "tags": [
+          "robots"
+        ]
+      },
+      "post": {
+        "operationId": "RobotsController_create",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a new robot",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/featured": {
+      "get": {
+        "operationId": "RobotsController_getFeatured",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Get featured robots",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/overview": {
+      "get": {
+        "operationId": "RobotsController_getOverview",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Get public robot overview for discovery surfaces",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/my": {
+      "get": {
+        "operationId": "RobotsController_getMyRobots",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get my robots",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/private/{slug}": {
+      "get": {
+        "operationId": "RobotsController_findPrivateBySlug",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get private robot by slug for owner/staff",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/private/{username}/{slug}": {
+      "get": {
+        "operationId": "RobotsController_findPrivateByUsernameAndSlug",
+        "parameters": [
+          {
+            "name": "username",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get private robot by owner username + slug for owner/staff",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/{slug}": {
+      "get": {
+        "operationId": "RobotsController_findBySlug",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Get robot by slug (legacy route)",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/{id}": {
+      "put": {
+        "operationId": "RobotsController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update robot settings",
+        "tags": [
+          "robots"
+        ]
+      },
+      "delete": {
+        "operationId": "RobotsController_delete",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete a robot",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/admin/{id}": {
+      "put": {
+        "operationId": "RobotsController_updateAsStaff",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update robot settings as staff",
+        "tags": [
+          "robots"
+        ]
+      },
+      "delete": {
+        "operationId": "RobotsController_deleteAsStaff",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete robot as staff",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/{id}/webhooks": {
+      "get": {
+        "operationId": "RobotsController_listWebhooks",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List robot webhooks (owner only)",
+        "tags": [
+          "robots"
+        ]
+      },
+      "post": {
+        "operationId": "RobotsController_createWebhook",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRobotWebhookDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create robot webhook (owner only)",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/{id}/webhooks/{webhookId}": {
+      "delete": {
+        "operationId": "RobotsController_deleteWebhook",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "webhookId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete robot webhook (owner only)",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/{id}/regenerate-token": {
+      "post": {
+        "operationId": "RobotsController_regenerateToken",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Regenerate claim token",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/{id}/regenerate-invite": {
+      "post": {
+        "operationId": "RobotsController_regenerateInviteCode",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Regenerate invite code for link-only access",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/{id}/ensure-invite": {
+      "post": {
+        "operationId": "RobotsController_ensureInviteCode",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Ensure a stable invite code exists for a robot (owner only)",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/{id}/thumbnail": {
+      "post": {
+        "operationId": "RobotsController_uploadThumbnail",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadThumbnailDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Upload or replace a robot thumbnail (owner only)",
+        "tags": [
+          "robots"
+        ]
+      },
+      "delete": {
+        "operationId": "RobotsController_deleteThumbnail",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Remove a robot thumbnail (owner only)",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/{id}/thumbnail-image": {
+      "get": {
+        "operationId": "RobotsController_getThumbnail",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Get a robot thumbnail image",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/{id}/allowed-users": {
+      "get": {
+        "operationId": "RobotsController_getAllowedUsers",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List allow-listed users for a robot (owner only)",
+        "tags": [
+          "robots"
+        ]
+      },
+      "post": {
+        "operationId": "RobotsController_addAllowedUser",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddAllowedUserDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Add a user to the robot allow list (owner only)",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/{id}/allowed-users/{userId}": {
+      "delete": {
+        "operationId": "RobotsController_removeAllowedUser",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Remove a user from the robot allow list (owner only)",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/{id}/ingress-cameras": {
+      "get": {
+        "operationId": "RobotsController_listIngressCameras",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List WHIP camera ingresses for a robot (owner only)",
+        "tags": [
+          "robots"
+        ]
+      },
+      "post": {
+        "operationId": "RobotsController_createIngressCamera",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateIngressCameraDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create or update a WHIP camera ingress for OBS/manual streaming (owner only)",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/{id}/ingress-cameras/{ingressId}": {
+      "delete": {
+        "operationId": "RobotsController_deleteIngressCamera",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ingressId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete an external camera WHIP ingress (owner only)",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/{id}/access/verify": {
+      "post": {
+        "operationId": "RobotsController_verifyRoomAccess",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cookie",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyRobotAccessDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "Verify room access and issue a temporary room access grant",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/{id}/chat-messages": {
+      "get": {
+        "operationId": "RobotsController_getChatHistory",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cookie",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Get paginated chat history for a robot room",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/claim": {
+      "post": {
+        "operationId": "RobotsController_claim",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClaimRobotDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "Claim a robot and get LiveKit token for hardware client",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/heartbeat": {
+      "post": {
+        "operationId": "RobotsController_heartbeat",
+        "parameters": [
+          {
+            "name": "authorization",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "Heartbeat from robot hardware client",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/{id}/actions": {
+      "post": {
+        "operationId": "RobotsController_enqueueAction",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnqueueActionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Enqueue remote robot action (owner only)",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/{id}/actions/pending": {
+      "get": {
+        "operationId": "RobotsController_getPendingActions",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List pending remote robot actions (owner only)",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/actions/poll": {
+      "post": {
+        "operationId": "RobotsController_pollActions",
+        "parameters": [
+          {
+            "name": "authorization",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "Robot polls pending remote actions using robot bearer auth",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/logs": {
+      "post": {
+        "operationId": "RobotsController_pushLogs",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestRobotLogsDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "Robot uploads temporary diagnostics logs using robot bearer auth",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/telemetry": {
+      "post": {
+        "operationId": "RobotsController_pushTelemetry",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PushTelemetryDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "Robot uploads temporary runtime telemetry using robot bearer auth",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/{id}/logs": {
+      "get": {
+        "operationId": "RobotsController_getLogs",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get recent temporary robot logs (owner only)",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/{id}/telemetry": {
+      "get": {
+        "operationId": "RobotsController_getTelemetry",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get recent temporary robot telemetry (owner only)",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/{username}/{slug}": {
+      "get": {
+        "operationId": "RobotsController_findByUsernameAndSlug",
+        "parameters": [
+          {
+            "name": "username",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Get robot by owner username + slug",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/livekit/token/viewer/{robotId}": {
+      "post": {
+        "operationId": "LivekitController_getViewerToken",
+        "parameters": [
+          {
+            "name": "robotId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "control",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "roomAccessToken",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get LiveKit viewer/controller token",
+        "tags": [
+          "livekit"
+        ]
+      }
+    },
+    "/livekit/token/viewer-public/{robotId}": {
+      "post": {
+        "operationId": "LivekitController_getPublicViewerToken",
+        "parameters": [
+          {
+            "name": "robotId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "guestSessionId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "roomAccessToken",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "Get guest LiveKit viewer token (ACL-aware)",
+        "tags": [
+          "livekit"
+        ]
+      }
+    },
+    "/livekit/token/robot/{robotId}": {
+      "post": {
+        "operationId": "LivekitController_getRobotToken",
+        "parameters": [
+          {
+            "name": "robotId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get LiveKit robot publisher token",
+        "tags": [
+          "livekit"
+        ]
+      }
+    },
+    "/queue/{robotId}": {
+      "get": {
+        "operationId": "QueueController_getQueue",
+        "parameters": [
+          {
+            "name": "robotId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cookie",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "roomAccessToken",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "guestSessionId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Get queue for a robot",
+        "tags": [
+          "queue"
+        ]
+      }
+    },
+    "/queue/{robotId}/join": {
+      "post": {
+        "operationId": "QueueController_join",
+        "parameters": [
+          {
+            "name": "robotId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Join the control queue",
+        "tags": [
+          "queue"
+        ]
+      }
+    },
+    "/queue/{robotId}/leave": {
+      "delete": {
+        "operationId": "QueueController_leave",
+        "parameters": [
+          {
+            "name": "robotId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Leave the control queue",
+        "tags": [
+          "queue"
+        ]
+      }
+    },
+    "/queue/{robotId}/vote/{targetUserId}": {
+      "post": {
+        "operationId": "QueueController_vote",
+        "parameters": [
+          {
+            "name": "robotId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "targetUserId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Vote for a user in the queue",
+        "tags": [
+          "queue"
+        ]
+      }
+    },
+    "/sessions/my": {
+      "get": {
+        "operationId": "SessionsController_getMySessions",
+        "parameters": [
+          {
+            "name": "limit",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get my session history",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
+    "/sessions/my/{sessionId}": {
+      "get": {
+        "operationId": "SessionsController_getMySession",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get detailed session replay data for the authenticated requester",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
+    "/sessions/robot/{robotId}": {
+      "get": {
+        "operationId": "SessionsController_getByRobot",
+        "parameters": [
+          {
+            "name": "robotId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cookie",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "roomAccessToken",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "guestSessionId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Get session history for a robot",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
+    "/sessions/robot/{robotId}/active": {
+      "get": {
+        "operationId": "SessionsController_getActiveSession",
+        "parameters": [
+          {
+            "name": "robotId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cookie",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "roomAccessToken",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "guestSessionId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Get active session for a robot",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
+    "/moderation/robot/{robotId}": {
+      "post": {
+        "operationId": "ModerationController_moderate",
+        "parameters": [
+          {
+            "name": "robotId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModerateUserDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Apply a moderation action (timeout / kick / ban / unban)",
+        "tags": [
+          "moderation"
+        ]
+      }
+    },
+    "/moderation/robot/{robotId}/log": {
+      "get": {
+        "operationId": "ModerationController_getLog",
+        "parameters": [
+          {
+            "name": "robotId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get moderation log for a robot (owner / staff)",
+        "tags": [
+          "moderation"
+        ]
+      }
+    },
+    "/moderation/admin/overview": {
+      "get": {
+        "operationId": "ModerationController_getAdminOverview",
+        "parameters": [
+          {
+            "name": "robotId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get moderation overview for admin/mod dashboard",
+        "tags": [
+          "moderation"
+        ]
+      }
+    },
+    "/moderation/admin/runtime-overview": {
+      "get": {
+        "operationId": "ModerationController_getAdminRuntimeOverview",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get runtime, host, and LiveKit overview for staff dashboard",
+        "tags": [
+          "moderation"
+        ]
+      }
+    },
+    "/moderation/admin/robot/{robotId}/actions": {
+      "post": {
+        "operationId": "ModerationController_enqueueStaffRobotAction",
+        "parameters": [
+          {
+            "name": "robotId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Queue a remote robot action from the staff dashboard",
+        "tags": [
+          "moderation"
+        ]
+      }
+    },
+    "/moderation/admin/robot/{robotId}/recording": {
+      "get": {
+        "operationId": "ModerationController_getAdminRobotRecordingStatus",
+        "parameters": [
+          {
+            "name": "robotId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get LiveKit recording status for a robot room (admin only)",
+        "tags": [
+          "moderation"
+        ]
+      }
+    },
+    "/moderation/admin/robot/{robotId}/recording/start": {
+      "post": {
+        "operationId": "ModerationController_startAdminRobotRecording",
+        "parameters": [
+          {
+            "name": "robotId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Start LiveKit recording for a robot room (admin only)",
+        "tags": [
+          "moderation"
+        ]
+      }
+    },
+    "/moderation/admin/robot/{robotId}/recording/stop": {
+      "post": {
+        "operationId": "ModerationController_stopAdminRobotRecording",
+        "parameters": [
+          {
+            "name": "robotId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Stop LiveKit recording for a robot room (admin only)",
+        "tags": [
+          "moderation"
+        ]
+      }
+    },
+    "/moderation/admin/recordings": {
+      "get": {
+        "operationId": "ModerationController_listAdminRecordings",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List available recording files (admin only)",
+        "tags": [
+          "moderation"
+        ]
+      }
+    },
+    "/moderation/admin/recordings/{fileName}": {
+      "get": {
+        "operationId": "ModerationController_streamAdminRecording",
+        "parameters": [
+          {
+            "name": "fileName",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Stream a recording file (admin only)",
+        "tags": [
+          "moderation"
+        ]
+      }
+    },
+    "/moderation/admin/recordings/{fileName}/signed": {
+      "get": {
+        "operationId": "ModerationController_streamSignedAdminRecording",
+        "parameters": [
+          {
+            "name": "fileName",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "expires",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "signature",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Stream a recording file via short-lived signed URL",
+        "tags": [
+          "moderation"
+        ]
+      }
+    },
+    "/moderation/admin/profanity-overview": {
+      "get": {
+        "operationId": "ModerationController_getAdminProfanityOverview",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get profanity counters and events across all robots for staff",
+        "tags": [
+          "moderation"
+        ]
+      }
+    },
+    "/moderation/robot/{robotId}/profanity": {
+      "get": {
+        "operationId": "ModerationController_getProfanityOverview",
+        "parameters": [
+          {
+            "name": "robotId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get profanity counters and recent events for a robot",
+        "tags": [
+          "moderation"
+        ]
+      }
+    },
+    "/controls/robot/{robotId}": {
+      "get": {
+        "operationId": "ControlsController_getPublicButtons",
+        "parameters": [
+          {
+            "name": "robotId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cookie",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "roomAccessToken",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "guestSessionId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Get active control buttons for a robot",
+        "tags": [
+          "controls"
+        ]
+      },
+      "post": {
+        "operationId": "ControlsController_create",
+        "parameters": [
+          {
+            "name": "robotId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateControlButtonDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a control button",
+        "tags": [
+          "controls"
+        ]
+      }
+    },
+    "/controls/robot/{robotId}/all": {
+      "get": {
+        "operationId": "ControlsController_getAllButtons",
+        "parameters": [
+          {
+            "name": "robotId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get all control buttons (owner only)",
+        "tags": [
+          "controls"
+        ]
+      }
+    },
+    "/controls/{buttonId}": {
+      "patch": {
+        "operationId": "ControlsController_update",
+        "parameters": [
+          {
+            "name": "buttonId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateControlButtonDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update a control button",
+        "tags": [
+          "controls"
+        ]
+      },
+      "delete": {
+        "operationId": "ControlsController_remove",
+        "parameters": [
+          {
+            "name": "buttonId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete a control button",
+        "tags": [
+          "controls"
+        ]
+      }
+    },
+    "/controls/robot/{robotId}/reorder": {
+      "put": {
+        "operationId": "ControlsController_reorder",
+        "parameters": [
+          {
+            "name": "robotId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReorderControlButtonsDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Reorder control buttons",
+        "tags": [
+          "controls"
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "HealthController_check",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Health check",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/health/live": {
+      "get": {
+        "operationId": "HealthController_live",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Liveness check for container startup probes",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/health/stats": {
+      "get": {
+        "operationId": "HealthController_stats",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Public platform stats for landing pages and dashboards",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/health/metrics": {
+      "get": {
+        "operationId": "HealthController_metrics",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Prometheus metrics endpoint",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/health/csp-report": {
+      "post": {
+        "operationId": "HealthController_cspReport",
+        "parameters": [
+          {
+            "name": "user-agent",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "Receive browser Content Security Policy violation reports",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/billing/packages": {
+      "get": {
+        "operationId": "BillingController_listPackages",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "List available credit packages",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
+    "/billing/checkout": {
+      "post": {
+        "operationId": "BillingController_checkout",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckoutDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a credit purchase checkout session",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
+    "/billing/webhooks/stripe": {
+      "post": {
+        "operationId": "BillingController_stripeWebhook",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Stripe webhook receiver",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
+    "/billing/webhooks/paypal": {
+      "post": {
+        "operationId": "BillingController_paypalWebhook",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "PayPal webhook receiver",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
+    "/earnings/me": {
+      "get": {
+        "operationId": "EarningsController_me",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get earnings summary for the current creator",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
+    "/payouts": {
+      "post": {
+        "operationId": "PayoutsController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePayoutRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Submit a payout request",
+        "tags": [
+          "payouts"
+        ]
+      },
+      "get": {
+        "operationId": "PayoutsController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List my payout requests",
+        "tags": [
+          "payouts"
+        ]
+      }
+    },
+    "/payouts/review": {
+      "get": {
+        "operationId": "PayoutsController_listReview",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List pending payout requests (staff)",
+        "tags": [
+          "payouts"
+        ]
+      }
+    },
+    "/payouts/{id}/approve": {
+      "post": {
+        "operationId": "PayoutsController_approve",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Approve a payout request (staff)",
+        "tags": [
+          "payouts"
+        ]
+      }
+    },
+    "/payouts/{id}/reject": {
+      "post": {
+        "operationId": "PayoutsController_reject",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectPayoutDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Reject a payout request (staff)",
+        "tags": [
+          "payouts"
+        ]
+      }
+    },
+    "/payouts/{id}/mark-paid": {
+      "post": {
+        "operationId": "PayoutsController_markPaid",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Mark approved payout as paid and debit wallet (staff)",
+        "tags": [
+          "payouts"
+        ]
+      }
+    }
+  },
+  "info": {
+    "title": "BotParty API",
+    "description": "Real-time robot teleoperation platform API",
+    "version": "0.1.3",
+    "contact": {}
+  },
+  "tags": [
+    {
+      "name": "auth",
+      "description": "Authentication & authorization"
+    },
+    {
+      "name": "users",
+      "description": "User management"
+    },
+    {
+      "name": "robots",
+      "description": "Robot management"
+    },
+    {
+      "name": "sessions",
+      "description": "Session management"
+    },
+    {
+      "name": "queue",
+      "description": "Queue system"
+    },
+    {
+      "name": "livekit",
+      "description": "LiveKit token generation"
+    }
+  ],
+  "servers": [],
+  "components": {
+    "securitySchemes": {
+      "bearer": {
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "type": "http"
+      }
+    },
+    "schemas": {
+      "UpdateMeDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "UpdateAdminUserDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "DonationDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "CreateRobotWebhookDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "UploadThumbnailDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "AddAllowedUserDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "CreateIngressCameraDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "VerifyRobotAccessDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "ClaimRobotDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "EnqueueActionDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "IngestRobotLogsDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "PushTelemetryDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "ModerateUserDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "CreateControlButtonDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "UpdateControlButtonDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "ReorderControlButtonsDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "CheckoutDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "CreatePayoutRequestDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "RejectPayoutDto": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  }
+}

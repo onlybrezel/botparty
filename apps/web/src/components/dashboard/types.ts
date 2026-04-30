@@ -36,6 +36,7 @@ export type ControlButtonDraft = {
   xyYMax: string;
   xyYStart: string;
   cooldownMs: string;
+  costCredits: string;
   access: ControlButtonAccess;
   color: string;
 };
@@ -129,6 +130,7 @@ export const DEFAULT_CONTROL_DRAFT: ControlButtonDraft = {
   xyYMax: '100',
   xyYStart: '0',
   cooldownMs: '200',
+  costCredits: '0',
   access: ControlButtonAccessEnum.QUEUE_TURN,
   color: '',
 };
@@ -155,6 +157,7 @@ export const DASHBOARD_SECTIONS = [
   { id: 'section-token', label: 'Token & Links' },
   { id: 'section-controls', label: 'Controls' },
   { id: 'section-operations', label: 'Operations' },
+  { id: 'section-webhooks', label: 'Webhooks' },
   { id: 'section-monitoring', label: 'Monitoring' },
 ] as const;
 
@@ -352,6 +355,7 @@ export function draftFromControl(button: ControlButtonRecord): ControlButtonDraf
     command: button.command,
     hotKey: button.hotKey ?? '',
     cooldownMs: String(button.cooldownMs),
+    costCredits: String(button.costCredits ?? 0),
     access: button.access,
     color: button.color ?? '',
   };

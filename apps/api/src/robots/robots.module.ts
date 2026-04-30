@@ -12,6 +12,7 @@ import { RobotSlugService } from './robot-slug.service';
 import { RobotInviteService } from './robot-invite.service';
 import { RobotCameraService } from './robot-camera.service';
 import { RobotActionQueueService } from './robot-action-queue.service';
+import { RobotPublicOverviewService } from './robot-public-overview.service';
 import { RobotsController } from './robots.controller';
 import { LivekitModule } from '../livekit/livekit.module';
 import { JwtModule } from '@nestjs/jwt';
@@ -34,6 +35,7 @@ import { JwtModule } from '@nestjs/jwt';
     RobotInviteService,
     RobotCameraService,
     RobotActionQueueService,
+    RobotPublicOverviewService,
   ],
   controllers: [RobotsController],
   exports: [
@@ -48,6 +50,7 @@ import { JwtModule } from '@nestjs/jwt';
     RobotInviteService,
     RobotCameraService,
     RobotActionQueueService,
+    RobotPublicOverviewService,
   ],
 })
 export class RobotsModule {}

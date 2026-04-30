@@ -4,9 +4,11 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 
 export type ThemePreference = 'system' | 'dark' | 'light';
+export type CookieConsentStatus = 'unknown' | 'accepted' | 'declined';
 
 export type AppPreferences = {
   theme: ThemePreference;
+  cookieConsent: CookieConsentStatus;
   dashboardMaskToken: boolean;
   keyboardTabSwitchOnlyWhenEmpty: boolean;
   queuePositionNotifications: boolean;
@@ -23,6 +25,7 @@ type PreferencesState = AppPreferences & {
 
 export const DEFAULT_PREFERENCES: AppPreferences = {
   theme: 'system',
+  cookieConsent: 'unknown',
   dashboardMaskToken: true,
   keyboardTabSwitchOnlyWhenEmpty: true,
   queuePositionNotifications: true,
@@ -44,6 +47,7 @@ export const usePreferences = create<PreferencesState>()(
       storage: createJSONStorage(() => window.localStorage),
       partialize: (state) => ({
         theme: state.theme,
+        cookieConsent: state.cookieConsent,
         dashboardMaskToken: state.dashboardMaskToken,
         keyboardTabSwitchOnlyWhenEmpty: state.keyboardTabSwitchOnlyWhenEmpty,
         queuePositionNotifications: state.queuePositionNotifications,
@@ -70,4 +74,8 @@ export function resolveThemeClass(theme: ThemePreference) {
   }
 
   return 'dark';
+}
+
+export function hasOptionalCookieConsent(status: CookieConsentStatus) {
+  return status === 'accepted';
 }

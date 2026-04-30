@@ -1,4 +1,7 @@
 import type { Metadata } from 'next';
+import { getLegalConfig } from '@/lib/legal';
+
+export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
   title: 'Terms of Service',
@@ -21,15 +24,23 @@ function Section({
 }
 
 export default function TermsPage() {
+  const legal = getLegalConfig();
+
   return (
     <div className="mx-auto max-w-4xl px-4 py-10 sm:px-6 lg:px-8">
       <div className="mb-8">
-        <p className="text-xs uppercase tracking-[0.22em] text-violet-300">Legal</p>
+        <p className="text-xs uppercase tracking-[0.22em] text-violet-700 dark:text-violet-300">Legal</p>
         <h1 className="mt-2 text-3xl font-black tracking-tight">Terms of Service</h1>
         <p className="mt-3 max-w-2xl text-sm text-[var(--muted-foreground)]">
           These terms describe the basic rules for using BotParty, hosting robots, and participating in live shared-control sessions.
         </p>
       </div>
+
+      {!legal.isConfigured ? (
+        <div className="mb-5 rounded-2xl border border-amber-500/40 bg-amber-100 text-amber-950 p-4 text-sm dark:bg-amber-500/10 dark:text-amber-100">
+          Final operator details are still missing for this deployment. Configure the `NEXT_PUBLIC_LEGAL_*` variables before public launch.
+        </div>
+      ) : null}
 
       <div className="space-y-5">
         <Section title="Use of the service">
@@ -57,9 +68,13 @@ export default function TermsPage() {
           <p>We do not guarantee uninterrupted availability, low latency, or compatibility with every robot setup or network environment.</p>
         </Section>
 
-        <Section title="Liability and operator details">
-          <p>These terms should be reviewed and adapted by the operator of the deployed BotParty instance, including local legal requirements, business identity, governing law, and contact information.</p>
-          <p>If you plan to run BotParty publicly, this page should be finalized with operator-specific details before launch.</p>
+        <Section title="Liability and governing law">
+          <p><strong className="text-[var(--foreground)]">Operator:</strong> {legal.operatorName}</p>
+          <p><strong className="text-[var(--foreground)]">Governing law:</strong> {legal.governingLaw}</p>
+          <p>
+            Service and legal notices should be sent to{' '}
+            <a className="underline" href={`mailto:${legal.operatorEmail}`}>{legal.operatorEmail}</a>.
+          </p>
         </Section>
       </div>
     </div>

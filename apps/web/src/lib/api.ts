@@ -5,6 +5,8 @@ import { RobotsApi } from './api/robots';
 import { ModerationApi } from './api/moderation';
 import { QueueApi } from './api/queue';
 import { ControlsApi } from './api/controls';
+import { SessionsApi } from './api/sessions';
+import { WalletApi } from './api/wallet';
 import type { ApiRequestOptions, AuthSessionResponse, RequestFn } from './api/types';
 import type { PlatformStats } from './api-types';
 
@@ -16,12 +18,16 @@ export type {
   ControlButtonRecord,
   ModRuntimeOverview,
   PlatformStats,
+  RobotWebhookCreateResponse,
+  RobotWebhookRecord,
   RobotChatHistoryPage,
   RobotCameraIngress,
   RobotManaged,
   RobotMutationInput,
   RobotTelemetryPoint,
   RoomAccessGrant,
+  UserSessionDetail,
+  UserSessionRecord,
 } from './api-types';
 
 class ApiError extends Error {
@@ -66,6 +72,8 @@ class ApiClient {
   readonly moderation: ModerationApi;
   readonly queue: QueueApi;
   readonly controls: ControlsApi;
+  readonly sessions: SessionsApi;
+  readonly wallet: WalletApi;
 
   constructor(baseUrl: string) {
     this.baseUrl = `${baseUrl}/api/v1`;
@@ -76,6 +84,8 @@ class ApiClient {
     this.moderation = new ModerationApi(req, this.baseUrl);
     this.queue = new QueueApi(req);
     this.controls = new ControlsApi(req);
+    this.sessions = new SessionsApi(req);
+    this.wallet = new WalletApi(req);
   }
 
   setToken(token: string | null) {
@@ -118,6 +128,11 @@ class ApiClient {
       }
 
       const refreshed = (await refreshRes.json()) as AuthSessionResponse;
+      if (!refreshed.accessToken) {
+        useAuth.getState().logout();
+        this.setToken(null);
+        return null;
+      }
       this.setToken(refreshed.accessToken);
       useAuth.getState().login({
         accessToken: refreshed.accessToken,

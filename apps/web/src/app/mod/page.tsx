@@ -201,6 +201,7 @@ export default function ModDashboardPage() {
   const [userDraft, setUserDraft] = useState<UserDraft | null>(null);
   const [editingRobotId, setEditingRobotId] = useState<string | null>(null);
   const [robotDraft, setRobotDraft] = useState<RobotDraft | null>(null);
+  const [moderationActionUserId, setModerationActionUserId] = useState<string | null>(null);
   const [runtimeActionLoading, setRuntimeActionLoading] = useState<string | null>(null);
   const [recordingActionLoading, setRecordingActionLoading] = useState<string | null>(null);
   const [recordingFiles, setRecordingFiles] = useState<Awaited<ReturnType<typeof api.moderation.listAdminRecordings>>>([]);
@@ -596,6 +597,7 @@ export default function ModDashboardPage() {
   const unrestrict = async (robotId: string, userId: string) => {
     if (!accessToken) return;
     try {
+      setModerationActionUserId(userId);
       api.setToken(accessToken);
       await api.moderation.moderateRobotUser(robotId, {
         targetUserId: userId,
@@ -606,6 +608,47 @@ export default function ModDashboardPage() {
       pushToast('User unbanned.', 'success');
     } catch (err) {
       pushToast(err instanceof Error ? err.message : 'Unban failed.', 'error');
+    } finally {
+      setModerationActionUserId(null);
+    }
+  };
+
+  const timeoutProfanityUser = async (robotId: string, userId: string) => {
+    if (!accessToken) return;
+    try {
+      setModerationActionUserId(userId);
+      api.setToken(accessToken);
+      await api.moderation.moderateRobotUser(robotId, {
+        targetUserId: userId,
+        action: 'TIMEOUT',
+        durationSec: 10 * 60,
+        reason: 'Blocked profanity confirmed by staff dashboard',
+      });
+      await refresh();
+      pushToast('User timed out for 10 minutes.', 'success');
+    } catch (err) {
+      pushToast(err instanceof Error ? err.message : 'Timeout failed.', 'error');
+    } finally {
+      setModerationActionUserId(null);
+    }
+  };
+
+  const banProfanityUser = async (robotId: string, userId: string) => {
+    if (!accessToken) return;
+    try {
+      setModerationActionUserId(userId);
+      api.setToken(accessToken);
+      await api.moderation.moderateRobotUser(robotId, {
+        targetUserId: userId,
+        action: 'BAN',
+        reason: 'Repeated or severe profanity confirmed by staff dashboard',
+      });
+      await refresh();
+      pushToast('User banned from the robot.', 'success');
+    } catch (err) {
+      pushToast(err instanceof Error ? err.message : 'Ban failed.', 'error');
+    } finally {
+      setModerationActionUserId(null);
     }
   };
 
@@ -945,6 +988,9 @@ export default function ModDashboardPage() {
           onSelectedRobotIdChange={setSelectedRobotId}
           filteredProfanityEvents={filteredProfanityEvents}
           onUnrestrict={unrestrict}
+          onTimeoutProfanityUser={timeoutProfanityUser}
+          onBanProfanityUser={banProfanityUser}
+          moderationActionUserId={moderationActionUserId}
         />
       ) : null}
 

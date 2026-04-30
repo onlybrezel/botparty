@@ -7,6 +7,7 @@ export interface ControlButton {
   hotKey: string | null;
   icon: string | null;
   cooldownMs: number;
+  costCredits: number;
   access: string;
   position: number;
   color: string | null;
@@ -121,7 +122,24 @@ export const WASD: Record<string, string> = {
 };
 
 export function getOrCreateGuestSessionId(): string {
-  return crypto.randomUUID();
+  if (typeof window === 'undefined') {
+    return crypto.randomUUID();
+  }
+
+  const storageKey = 'botparty.guestSessionId.v1';
+
+  try {
+    const existing = window.localStorage.getItem(storageKey);
+    if (existing) {
+      return existing;
+    }
+
+    const next = crypto.randomUUID();
+    window.localStorage.setItem(storageKey, next);
+    return next;
+  } catch {
+    return crypto.randomUUID();
+  }
 }
 
 export function normalizeQueueEntries(rows: QueueEntryWire[] | undefined): QueueEntry[] {

@@ -4,6 +4,7 @@ import { useState, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { api } from '@/lib/api';
+import { ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/store';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -34,12 +35,15 @@ export default function LoginPage() {
     const email = emailRef.current!.value.trim();
     const password = passwordRef.current!.value;
 
-    try {
-      if (mode === 'login') {
-        const { accessToken, user } = await api.auth.login({ email, password });
-        api.setToken(accessToken);
-        login({
-          accessToken,
+      try {
+        if (mode === 'login') {
+          const { accessToken, user } = await api.auth.login({ email, password });
+          if (!accessToken) {
+            throw new Error('Login response did not include an access token.');
+          }
+          api.setToken(accessToken);
+          login({
+            accessToken,
           username: user.username,
           userId: user.id,
           displayName: user.displayName,
@@ -47,24 +51,37 @@ export default function LoginPage() {
         });
 
         router.push('/explore');
-      } else {
-        const username = usernameRef.current!.value.trim();
-        const { accessToken, user } = await api.auth.register({ username, email, password });
-        api.setToken(accessToken);
-        login({
-          accessToken,
-          username: user.username,
-          userId: user.id,
-          displayName: user.displayName,
-          role: user.role,
-        });
+        } else {
+          const username = usernameRef.current!.value.trim();
+          const result = await api.auth.register({ username, email, password });
+          if (result.accessToken) {
+            api.setToken(result.accessToken);
+            login({
+              accessToken: result.accessToken,
+              username: result.user.username,
+              userId: result.user.id,
+              displayName: result.user.displayName,
+              role: result.user.role,
+            });
+            router.push('/explore');
+            return;
+          }
 
-        router.push('/explore');
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong');
-    } finally {
-      setLoading(false);
+          router.push(`/verify-email?email=${encodeURIComponent(email)}&sent=1`);
+        }
+      } catch (err) {
+        if (
+          mode === 'login'
+          && err instanceof ApiError
+          && err.status === 403
+          && err.message.toLowerCase().includes('verify')
+        ) {
+          router.push(`/verify-email?email=${encodeURIComponent(email)}`);
+          return;
+        }
+        setError(err instanceof Error ? err.message : 'Something went wrong');
+      } finally {
+        setLoading(false);
     }
   }
 

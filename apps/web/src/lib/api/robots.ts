@@ -3,6 +3,8 @@ import type {
   AllowedUserRecord,
   RobotChatHistoryPage,
   RobotCameraIngress,
+  RobotWebhookCreateResponse,
+  RobotWebhookRecord,
   RobotManaged,
   RobotMutationInput,
   RobotTelemetryPoint,
@@ -71,6 +73,27 @@ export class RobotsApi {
 
   async deleteRobot(id: string) {
     return this.req(`/robots/${id}`, { method: 'DELETE', expectNoContent: true });
+  }
+
+  async listRobotWebhooks(robotId: string) {
+    return this.req<RobotWebhookRecord[]>(`/robots/${robotId}/webhooks`);
+  }
+
+  async createRobotWebhook(
+    robotId: string,
+    payload: { url: string; events: string[]; isActive?: boolean },
+  ) {
+    return this.req<RobotWebhookCreateResponse>(`/robots/${robotId}/webhooks`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteRobotWebhook(robotId: string, webhookId: string) {
+    return this.req(`/robots/${robotId}/webhooks/${encodeURIComponent(webhookId)}`, {
+      method: 'DELETE',
+      expectNoContent: true,
+    });
   }
 
   async deleteRobotAsStaff(id: string) {

@@ -1,8 +1,10 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type { Prisma } from '@botparty/prisma';
 import { PrismaService } from '../prisma/prisma.service';
 import { RobotAccessService } from './robot-access.service';
 import { mergeRobotMetadata } from './robot-metadata.schema';
+import { readNonNegativeIntegerEnv } from '../common/config-number';
 
 type RobotStreamCameraDescriptor = {
   id: string;
@@ -14,10 +16,19 @@ type RobotStreamCameraDescriptor = {
 
 @Injectable()
 export class RobotCameraService {
+  private readonly maxExternalCamerasPerRobot: number;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly access: RobotAccessService,
-  ) {}
+    private readonly config: ConfigService,
+  ) {
+    this.maxExternalCamerasPerRobot = readNonNegativeIntegerEnv(
+      this.config,
+      'MAX_EXTERNAL_CAMERAS_PER_ROBOT',
+      6,
+    );
+  }
 
   async upsertExternalStreamCamera(
     robotId: string,
@@ -42,6 +53,15 @@ export class RobotCameraService {
 
     const stream = this.access.parseStreamFromMetadata(robot.metadata);
     const currentCameras = stream.cameras ?? [];
+    if (
+      this.maxExternalCamerasPerRobot > 0 &&
+      !currentCameras.some((entry) => entry.id === cameraId) &&
+      currentCameras.length >= this.maxExternalCamerasPerRobot
+    ) {
+      throw new BadRequestException(
+        `Maximum of ${this.maxExternalCamerasPerRobot} external cameras allowed per robot`,
+      );
+    }
     const withoutCamera = currentCameras.filter((entry) => entry.id !== cameraId);
 
     const nextCamera: RobotStreamCameraDescriptor = {

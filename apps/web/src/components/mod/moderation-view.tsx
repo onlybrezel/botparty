@@ -30,6 +30,9 @@ type ModerationViewProps = {
   onSelectedRobotIdChange: (id: string) => void;
   filteredProfanityEvents: ProfanityOverview['events'];
   onUnrestrict: (robotId: string, userId: string) => Promise<void>;
+  onTimeoutProfanityUser: (robotId: string, userId: string) => Promise<void>;
+  onBanProfanityUser: (robotId: string, userId: string) => Promise<void>;
+  moderationActionUserId: string | null;
 };
 
 export function ModerationView({
@@ -40,6 +43,9 @@ export function ModerationView({
   onSelectedRobotIdChange,
   filteredProfanityEvents,
   onUnrestrict,
+  onTimeoutProfanityUser,
+  onBanProfanityUser,
+  moderationActionUserId,
 }: ModerationViewProps) {
   return (
     <section className="mb-6 grid gap-6 xl:grid-cols-[1.2fr,0.8fr]">
@@ -115,9 +121,33 @@ export function ModerationView({
                 <p className="text-xs text-[var(--muted-foreground)]">No events yet.</p>
               ) : (
                 filteredProfanityEvents.map((event, idx) => (
-                  <p key={`${event.ts}-${idx}`} className="mb-1 text-xs text-[var(--muted-foreground)]">
-                    [{new Date(event.ts).toLocaleTimeString()}] <span className="text-[var(--foreground)]">{event.username}</span> in <span className="text-sky-300">{event.robotName}</span>: {event.content}
-                  </p>
+                  <div
+                    key={`${event.ts}-${idx}`}
+                    className="mb-2 rounded-xl border border-[var(--border)] bg-[var(--card)]/60 p-2 text-xs text-[var(--muted-foreground)]"
+                  >
+                    <p>
+                      [{new Date(event.ts).toLocaleTimeString()}] <span className="text-[var(--foreground)]">{event.username}</span> in{' '}
+                      <span className="text-sky-300">{event.robotName}</span>: {event.content}
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={moderationActionUserId === event.userId}
+                        onClick={() => void onTimeoutProfanityUser(event.robotId, event.userId)}
+                        className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2 py-1 font-semibold text-amber-200 disabled:opacity-60"
+                      >
+                        {moderationActionUserId === event.userId ? 'Working...' : 'Timeout 10m'}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={moderationActionUserId === event.userId}
+                        onClick={() => void onBanProfanityUser(event.robotId, event.userId)}
+                        className="rounded-lg border border-red-500/30 bg-red-500/10 px-2 py-1 font-semibold text-red-200 disabled:opacity-60"
+                      >
+                        {moderationActionUserId === event.userId ? 'Working...' : 'Ban user'}
+                      </button>
+                    </div>
+                  </div>
                 ))
               )}
             </div>

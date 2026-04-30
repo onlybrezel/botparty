@@ -3,23 +3,22 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import RobotView from '../[slug]/robot-view';
+import type { RobotPublic } from '@botparty/shared';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/store';
 import { RobotRoomSkeleton } from '@/components/robot-view/robot-room-skeleton';
-import type { RobotPublic } from '@botparty/shared';
+import RobotView from '@/components/robot-view/robot-view';
 
 function canonicalRobotPath(robot: RobotPublic): string {
   return `/robot/${robot.owner.username}/${robot.slug}`;
 }
 
-export default function PrivateRobotClient({
-  username,
-  slug,
-}: {
-  username: string | null;
+type Props = {
   slug: string;
-}) {
+  username?: string | null;
+};
+
+export function PrivateRobotLoader({ slug, username = null }: Props) {
   const router = useRouter();
   const { accessToken, hasHydrated } = useAuth();
   const [robot, setRobot] = useState<RobotPublic | null>(null);

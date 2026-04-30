@@ -6,7 +6,7 @@ When tracing is enabled, the API also emits Prisma database query spans through 
 
 ## Metrics Endpoints
 
-- API: `/health/metrics`
+- API: `/api/v1/health/metrics`
 - Streamer: `/metrics`
 
 The API endpoint includes these robot telemetry aggregates sourced from Redis keys written by robot clients:
@@ -23,15 +23,20 @@ It also exports dependency reachability gauges for dashboard and alert wiring:
 - `botparty_dependency_database_up`
 - `botparty_dependency_redis_up`
 
+The API metrics endpoint now supports HTTP basic auth. In production, BotParty requires `METRICS_USERNAME` and `METRICS_PASSWORD` unless `METRICS_AUTH_REQUIRED=false` is set explicitly.
+
 ## Prometheus Scrape Example
 
 ```yaml
 scrape_configs:
   - job_name: botparty-api
-    metrics_path: /health/metrics
+    metrics_path: /api/v1/health/metrics
+    basic_auth:
+      username: metrics
+      password: change-this-metrics-password
     static_configs:
       - targets:
-          - api:3001
+          - api:4000
 
   - job_name: botparty-streamer
     metrics_path: /metrics

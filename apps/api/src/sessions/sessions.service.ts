@@ -2,6 +2,7 @@ import { Injectable, Logger, ForbiddenException, NotFoundException } from '@nest
 import { PrismaService } from '../prisma/prisma.service';
 import { RobotsService } from '../robots/robots.service';
 import { RobotWebhookService } from '../robots/robot-webhook.service';
+import { RecordingAdminService } from '../moderation/recording-admin.service';
 
 @Injectable()
 export class SessionsService {
@@ -11,6 +12,7 @@ export class SessionsService {
     private readonly prisma: PrismaService,
     private readonly robotsService: RobotsService,
     private readonly robotWebhookService: RobotWebhookService,
+    private readonly recordingAdminService: RecordingAdminService,
   ) {}
 
   async create(robotId: string, userId: string) {
@@ -98,6 +100,85 @@ export class SessionsService {
         },
       },
     });
+  }
+
+  async findDetailForRequester(sessionId: string, requesterId: string) {
+    const session = await this.prisma.session.findUnique({
+      where: { id: sessionId },
+      include: {
+        robot: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            thumbnailUrl: true,
+            ownerId: true,
+            owner: {
+              select: {
+                id: true,
+                username: true,
+                displayName: true,
+              },
+            },
+          },
+        },
+        user: {
+          select: {
+            id: true,
+            username: true,
+            displayName: true,
+            avatarUrl: true,
+          },
+        },
+      },
+    });
+
+    if (!session) {
+      throw new NotFoundException('Session not found');
+    }
+
+    const requester = await this.prisma.user.findUnique({
+      where: { id: requesterId },
+      select: { id: true, role: true },
+    });
+    if (!requester) {
+      throw new ForbiddenException('Authentication is required to view this session');
+    }
+
+    const isStaff = requester.role === 'ADMIN' || requester.role === 'MOD';
+    const canView = isStaff || session.userId === requesterId || session.robot.ownerId === requesterId;
+    if (!canView) {
+      throw new ForbiddenException('Not allowed to view this session');
+    }
+
+    const replayCandidates = await this.recordingAdminService.findReplayCandidatesForSession({
+      robotId: session.robotId,
+      startedAt: session.startedAt,
+      endedAt: session.endedAt,
+      recordingUrl: session.recordingUrl,
+    });
+
+    return {
+      id: session.id,
+      status: session.status,
+      startedAt: session.startedAt,
+      endedAt: session.endedAt,
+      durationMs: session.durationMs,
+      recordingUrl: session.recordingUrl,
+      peakViewers: session.peakViewers,
+      totalCommands: session.totalCommands,
+      avgLatencyMs: session.avgLatencyMs,
+      metadata: session.metadata,
+      robot: {
+        id: session.robot.id,
+        name: session.robot.name,
+        slug: session.robot.slug,
+        thumbnailUrl: session.robot.thumbnailUrl,
+        owner: session.robot.owner,
+      },
+      user: session.user,
+      replayCandidates,
+    };
   }
 
   async getActiveSession(robotId: string) {

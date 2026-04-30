@@ -1,37 +1,21 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
-
-const COOKIE_CONSENT_KEY = 'botparty.cookie-consent.v1';
+import { Button } from '@/components/ui/button';
+import { usePreferences } from '@/lib/preferences';
 
 export function CookieBanner() {
-  const [visible, setVisible] = useState(false);
+  const hydrated = usePreferences((state) => state.hydrated);
+  const cookieConsent = usePreferences((state) => state.cookieConsent);
+  const updatePreference = usePreferences((state) => state.updatePreference);
 
-  useEffect(() => {
-    try {
-      setVisible(window.localStorage.getItem(COOKIE_CONSENT_KEY) !== 'accepted');
-    } catch {
-      setVisible(true);
-    }
-  }, []);
-
-  const accept = () => {
-    try {
-      window.localStorage.setItem(COOKIE_CONSENT_KEY, 'accepted');
-    } catch {
-      // ignore storage errors
-    }
-    setVisible(false);
-  };
-
-  if (!visible) {
+  if (!hydrated || cookieConsent !== 'unknown') {
     return null;
   }
 
   return (
     <div className="fixed inset-x-4 bottom-4 z-[90] mx-auto max-w-3xl rounded-2xl border border-[var(--border)] bg-[var(--card)]/95 p-4 shadow-2xl shadow-black/40 backdrop-blur-md">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="text-sm text-[var(--muted-foreground)]">
           <p className="font-semibold text-[var(--foreground)]">Cookie notice</p>
           <p className="mt-1">
@@ -41,14 +25,25 @@ export function CookieBanner() {
               Learn more
             </Link>
           </p>
+          <p className="mt-1 text-xs">
+            You can accept the notice now or decline non-essential storage acknowledgement and keep using essential storage only.
+          </p>
         </div>
-        <button
-          type="button"
-          onClick={accept}
-          className="rounded-xl bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[var(--primary-hover)]"
-        >
-          Accept essential storage
-        </button>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => updatePreference('cookieConsent', 'declined')}
+          >
+            Decline optional acknowledgement
+          </Button>
+          <Button
+            type="button"
+            onClick={() => updatePreference('cookieConsent', 'accepted')}
+          >
+            Accept
+          </Button>
+        </div>
       </div>
     </div>
   );

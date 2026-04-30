@@ -9,6 +9,7 @@ import { RedisService } from '../redis/redis.service';
 import { ModerationService } from '../moderation/moderation.service';
 import { ControlsService } from '../controls/controls.service';
 import { AuthService } from '../auth/auth.service';
+import { WalletService } from '../wallet/wallet.service';
 
 describe('BotGateway', () => {
   let gateway: BotGateway;
@@ -133,6 +134,15 @@ describe('BotGateway', () => {
           useValue: {
             get: jest.fn(),
             getOrThrow: jest.fn(),
+          } as any,
+        },
+        {
+          provide: WalletService,
+          useValue: {
+            transfer: jest.fn().mockResolvedValue({ status: 'ok' }),
+            credit: jest.fn(),
+            debit: jest.fn(),
+            getBalance: jest.fn().mockResolvedValue(0),
           } as any,
         },
       ],

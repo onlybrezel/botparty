@@ -9,8 +9,11 @@ import type {
   controlCommandSchema,
   chatMessageSchema,
   queueJoinSchema,
+  donationRequestSchema,
+  checkoutRequestSchema,
+  payoutRequestSchema,
 } from '../schemas/index.js';
-import type { Role, RobotVisibility, RobotAccessMode, QueueMode, RobotStatus, ControlButtonAccess } from '../constants/index.js';
+import type { Role, RobotVisibility, RobotAccessMode, QueueMode, RobotStatus, ControlButtonAccess, TransactionType } from '../constants/index.js';
 
 // ─── Auth ────────────────────────────────────────────
 export type LoginInput = z.infer<typeof loginSchema>;
@@ -26,6 +29,82 @@ export type UpdateRobotInput = z.infer<typeof updateRobotSchema>;
 export type ControlCommand = z.infer<typeof controlCommandSchema>;
 export type ChatMessage = z.infer<typeof chatMessageSchema>;
 export type QueueJoinInput = z.infer<typeof queueJoinSchema>;
+
+// ─── Wallet & Billing ────────────────────────────────
+export type DonationRequest = z.infer<typeof donationRequestSchema>;
+export type CheckoutRequest = z.infer<typeof checkoutRequestSchema>;
+export type PayoutRequestInput = z.infer<typeof payoutRequestSchema>;
+
+export interface WalletTransactionRecord {
+  id: string;
+  type: TransactionType;
+  amount: number;
+  balanceAfter: number;
+  description: string | null;
+  ledgerGroupId: string | null;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+}
+
+export interface WalletSummary {
+  balance: number;
+  recentTransactions: WalletTransactionRecord[];
+}
+
+export interface WsWalletUpdatePayload {
+  balance: number;
+  delta: number;
+  type: TransactionType;
+  ledgerGroupId: string | null;
+}
+
+export interface WsInsufficientFundsPayload {
+  required: number;
+  balance: number;
+  reason: string;
+}
+
+export interface CreditPackage {
+  id: string;
+  label: string;
+  credits: number;
+  amountCents: number;
+  currency: string;
+  bonus?: number;
+}
+
+export interface CheckoutResponse {
+  provider: 'stripe' | 'paypal';
+  intentId: string;
+  redirectUrl: string;
+  expiresAt: string;
+}
+
+export interface PayoutRequestRecord {
+  id: string;
+  amount: number;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'PAID';
+  destination: string;
+  notes: string | null;
+  createdAt: string;
+  reviewedAt: string | null;
+  paidAt: string | null;
+}
+
+export interface CreatorEarningsSummary {
+  totalEarnedCredits: number;
+  donationsCredits: number;
+  buttonPayoutCredits: number;
+  pendingPayoutHoldCredits: number;
+  availableForPayoutCredits: number;
+  byRobot: Array<{
+    robotId: string;
+    robotName: string;
+    earned: number;
+    donations: number;
+    buttonPayouts: number;
+  }>;
+}
 
 // ─── API Response ────────────────────────────────────
 export interface ApiResponse<T = unknown> {
@@ -141,6 +220,7 @@ export interface JwtPayload {
 export interface RefreshTokenPayload {
   sub: string;
   tokenVersion: number;
+  jti: string;
 }
 
 // ─── LiveKit ─────────────────────────────────────────
@@ -314,6 +394,7 @@ export interface WsChatSystemPayload {
     hotKey: string | null;
     icon: string | null;
     cooldownMs: number;
+    costCredits: number;
     access: ControlButtonAccess;
     position: number;
     color: string | null;
@@ -327,6 +408,8 @@ export interface WsChatSystemPayload {
     robotId: string | null;
     cameraId?: string | null;
     recordedAt?: string | null;
+    playbackPath?: string;
+    playbackExpiresAt?: string;
   }
 
   export interface AdminRobotRecordingStatus {

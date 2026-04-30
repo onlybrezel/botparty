@@ -1,6 +1,4 @@
-import { UnauthorizedException, ConflictException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { JwtService } from '@nestjs/jwt';
+import { ConflictException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { AuthService } from './auth.service';
 
 jest.mock('argon2', () => ({
@@ -31,8 +29,11 @@ const mockMail = {
   sendAccountLockoutNoticeEmail: jest.fn().mockResolvedValue(undefined),
 };
 
+const configValues: Record<string, string | undefined> = {};
+
 const mockConfig = {
   get: jest.fn((key: string) => {
+    if (key in configValues) return configValues[key];
     if (key === 'JWT_SECRET') return 'test-secret';
     if (key === 'JWT_REFRESH_SECRET') return 'test-refresh-secret';
     if (key === 'JWT_EXPIRES_IN') return '15m';
@@ -50,7 +51,9 @@ const mockConfig = {
 };
 
 const mockJwt = {
-  sign: jest.fn().mockReturnValue('mock-token'),
+  sign: jest.fn()
+    .mockReturnValueOnce('mock-access-token')
+    .mockReturnValueOnce('mock-refresh-token'),
   verify: jest.fn().mockReturnValue({ sub: 'user-1', username: 'testuser', role: 'USER', tokenVersion: 0 }),
 };
 
@@ -70,6 +73,19 @@ describe('AuthService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    Object.keys(configValues).forEach((key) => delete configValues[key]);
+    mockJwt.sign
+      .mockReturnValueOnce('mock-access-token')
+      .mockReturnValueOnce('mock-refresh-token');
+    mockJwt.verify.mockImplementation((token: string) => {
+      if (token === 'mock-refresh-token' || token === 'valid-refresh-token') {
+        return { sub: 'user-1', tokenVersion: 0, jti: 'refresh-1', exp: Math.floor(Date.now() / 1000) + 3600 };
+      }
+      if (token === 'old-token') {
+        return { sub: 'user-1', tokenVersion: 99, jti: 'refresh-old', exp: Math.floor(Date.now() / 1000) + 3600 };
+      }
+      return { sub: 'user-1', username: 'testuser', role: 'USER', tokenVersion: 0 };
+    });
 
     service = new AuthService(
       mockPrisma as never,
@@ -125,13 +141,32 @@ describe('AuthService', () => {
 
     it('returns tokens on successful login', async () => {
       mockRedis.get.mockResolvedValueOnce(null);
-      mockPrisma.user.findUnique.mockResolvedValueOnce(fakeUser);
+      mockPrisma.user.findUnique.mockResolvedValueOnce({ ...fakeUser, emailVerified: true });
       mockRedis.del.mockResolvedValue(undefined);
       mockPrisma.user.update.mockResolvedValueOnce(fakeUser);
+      mockRedis.set.mockResolvedValueOnce('OK');
 
       const result = await service.login({ email: 'test@example.com', password: 'correctpass' });
       expect(result).toHaveProperty('accessToken');
       expect(result).toHaveProperty('refreshToken');
+    });
+
+    it('blocks unverified accounts when verification is required', async () => {
+      configValues.REQUIRE_EMAIL_VERIFICATION = 'true';
+      mockRedis.get.mockResolvedValueOnce(null);
+      mockPrisma.user.findUnique.mockResolvedValueOnce({
+        ...fakeUser,
+        emailVerified: false,
+      });
+      mockRedis.incr.mockResolvedValueOnce(1);
+      mockRedis.expire.mockResolvedValueOnce(1);
+      mockPrisma.user.update.mockResolvedValueOnce({});
+
+      await expect(
+        service.login({ email: fakeUser.email, password: 'correctpass' }),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(mockMail.sendEmailVerification).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -142,18 +177,32 @@ describe('AuthService', () => {
     });
 
     it('throws when token version mismatch', async () => {
-      mockJwt.verify.mockReturnValueOnce({ sub: 'user-1', tokenVersion: 99 });
       mockPrisma.user.findUnique.mockResolvedValueOnce({ ...fakeUser, tokenVersion: 0 });
 
       await expect(service.refreshToken('old-token')).rejects.toThrow(UnauthorizedException);
     });
 
     it('returns new tokens on valid refresh', async () => {
-      mockJwt.verify.mockReturnValueOnce({ sub: 'user-1', tokenVersion: 0 });
-      mockPrisma.user.findUnique.mockResolvedValueOnce(fakeUser);
+      mockPrisma.user.findUnique.mockResolvedValueOnce({ ...fakeUser, emailVerified: true });
+      mockRedis.get.mockResolvedValueOnce('ba518c093e1e0df01cfe01436563cd37f6a1f47697fcc620e818a2d062665083');
+      mockRedis.set.mockResolvedValueOnce('OK');
 
       const result = await service.refreshToken('valid-refresh-token');
       expect(result).toHaveProperty('accessToken');
+    });
+
+    it('revokes tokens when an older refresh token is replayed', async () => {
+      mockPrisma.user.findUnique.mockResolvedValueOnce({ ...fakeUser, emailVerified: true });
+      mockRedis.get.mockResolvedValueOnce('different-hash');
+      mockPrisma.user.update.mockResolvedValueOnce({ ...fakeUser, tokenVersion: 1 });
+      mockRedis.del.mockResolvedValueOnce(1);
+
+      await expect(service.refreshToken('valid-refresh-token')).rejects.toThrow(UnauthorizedException);
+
+      expect(mockPrisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-1' },
+        data: { tokenVersion: { increment: 1 } },
+      });
     });
   });
 
@@ -219,6 +268,31 @@ describe('AuthService', () => {
           displayName: 'New',
         }),
       ).rejects.toThrow(ConflictException);
+    });
+
+    it('returns a verification-pending response when email verification is required', async () => {
+      configValues.REQUIRE_EMAIL_VERIFICATION = 'true';
+      mockPrisma.user.findFirst.mockResolvedValueOnce(null);
+      mockPrisma.user.create.mockResolvedValueOnce({
+        ...fakeUser,
+        emailVerified: false,
+        createdAt: new Date('2026-04-29T12:00:00Z'),
+      });
+
+      await expect(
+        service.register({
+          email: fakeUser.email,
+          password: 'StrongPass1!',
+          username: fakeUser.username,
+          displayName: 'New User',
+        }),
+      ).resolves.toEqual(
+        expect.objectContaining({
+          requiresEmailVerification: true,
+          message: expect.stringContaining('verify your email'),
+        }),
+      );
+      expect(mockMail.sendEmailVerification).toHaveBeenCalledTimes(1);
     });
   });
 

@@ -15,6 +15,7 @@
     "lint": "turbo run lint",
     "docs:api-client": "node scripts/generate-api-client-docs.mjs",
     "generate:ts-api-client": "node scripts/generate-ts-api-client.mjs",
+    "openapi:export": "pnpm --filter @botparty/api build && node apps/api/dist/openapi/export-openapi.js docs/openapi.json",
     "test:coverage": "turbo run test:coverage",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "docker:build:api": "docker compose build api",

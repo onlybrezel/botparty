@@ -6,20 +6,30 @@ import {
   BadRequestException,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { RobotsService } from '../robots/robots.service';
 import { Prisma } from '@botparty/prisma';
+import { readNonNegativeIntegerEnv } from '../common/config-number';
 
 @Injectable()
 export class QueueService {
   private readonly logger = new Logger(QueueService.name);
+  private readonly maxActiveQueueEntriesPerUser: number;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly robotsService: RobotsService,
-  ) {}
+    private readonly config: ConfigService,
+  ) {
+    this.maxActiveQueueEntriesPerUser = readNonNegativeIntegerEnv(
+      this.config,
+      'MAX_ACTIVE_QUEUE_ENTRIES_PER_USER',
+      5,
+    );
+  }
 
   async join(robotId: string, userId: string, roomAccessToken?: string, isPriority = false) {
     const access = await this.robotsService.getAccessPolicy(robotId);
@@ -39,6 +49,15 @@ export class QueueService {
     });
     if (!allowed) {
       throw new ForbiddenException('Room access verification required');
+    }
+
+    if (this.maxActiveQueueEntriesPerUser > 0) {
+      const existingEntries = await this.prisma.queueEntry.count({ where: { userId } });
+      if (existingEntries >= this.maxActiveQueueEntriesPerUser) {
+        throw new BadRequestException(
+          `Maximum of ${this.maxActiveQueueEntriesPerUser} active queue entries allowed per user`,
+        );
+      }
     }
 
     const entry = await this.prisma.$transaction(

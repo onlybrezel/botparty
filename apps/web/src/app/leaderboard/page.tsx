@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import type { PublicRobotOverview, RobotPublic } from '@botparty/shared';
-import { Trophy, Eye, Radio, Clock3 } from 'lucide-react';
+import { Trophy, Eye, Radio, Clock3, Sparkles, Flame } from 'lucide-react';
 import { getServerApiUrl } from '@/lib/server-api-url';
 
 type CreatorLeaderboardEntry = {
@@ -10,7 +10,19 @@ type CreatorLeaderboardEntry = {
   displayName: string | null;
   avatarUrl: string | null;
   credits: number;
+  createdAt: string;
+  recentSessions: number;
+  streakDays: number;
+  robotCount: number;
+  isNewOperator: boolean;
 };
+
+const PERIOD_OPTIONS = [
+  { id: '7d', label: '7 days' },
+  { id: '30d', label: '30 days' },
+  { id: '90d', label: '90 days' },
+  { id: 'all', label: 'All time' },
+] as const;
 
 export const metadata: Metadata = {
   title: 'Leaderboard',
@@ -40,10 +52,10 @@ async function getRobots(): Promise<RobotPublic[]> {
   }
 }
 
-async function getTopCreators(): Promise<CreatorLeaderboardEntry[]> {
+async function getTopCreators(period: string): Promise<CreatorLeaderboardEntry[]> {
   const apiUrl = getServerApiUrl();
   try {
-    const res = await fetch(`${apiUrl}/api/v1/users/leaderboard?limit=10`);
+    const res = await fetch(`${apiUrl}/api/v1/users/leaderboard?limit=10&period=${encodeURIComponent(period)}`);
     if (!res.ok) return [];
     return res.json() as Promise<CreatorLeaderboardEntry[]>;
   } catch {
@@ -69,22 +81,47 @@ function statusColor(status: RobotPublic['status']) {
   return 'text-zinc-400 bg-zinc-700/40';
 }
 
-export default async function LeaderboardPage() {
-  const [robots, creators, overview] = await Promise.all([getRobots(), getTopCreators(), getOverview()]);
+export default async function LeaderboardPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ period?: string }>;
+}) {
+  const params = await searchParams;
+  const selectedPeriod = PERIOD_OPTIONS.some((option) => option.id === params?.period) ? params?.period ?? '30d' : '30d';
+  const [robots, creators, overview] = await Promise.all([getRobots(), getTopCreators(selectedPeriod), getOverview()]);
   const ranked = [...robots].sort((a, b) => b.viewerCount - a.viewerCount);
+  const newOperators = [...robots]
+    .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
+    .filter((robot, index, source) => source.findIndex((candidate) => candidate.owner.id === robot.owner.id) === index)
+    .slice(0, 5);
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
       <section className="mb-8 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6 sm:p-8">
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--primary)]/15">
             <Trophy className="h-5 w-5 text-violet-300" />
           </span>
-          <div>
+          <div className="flex-1">
             <h1 className="text-3xl font-black tracking-tight">Leaderboard</h1>
             <p className="text-sm text-[var(--muted-foreground)]">
-              A quick look at which rooms have attention right now.
+              Live room rankings, seasonal activity, and the newest operators on the platform.
             </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {PERIOD_OPTIONS.map((option) => (
+              <Link
+                key={option.id}
+                href={`/leaderboard?period=${option.id}`}
+                className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
+                  selectedPeriod === option.id
+                    ? 'border-sky-500/50 bg-sky-500/15 text-sky-900 dark:text-sky-100'
+                    : 'border-[var(--border)] bg-[var(--background)] text-[var(--muted-foreground)]'
+                }`}
+              >
+                {option.label}
+              </Link>
+            ))}
           </div>
         </div>
       </section>
@@ -175,8 +212,8 @@ export default async function LeaderboardPage() {
 
       <section className="mt-6 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 sm:p-5">
         <div className="mb-3 flex items-center justify-between gap-2">
-          <h2 className="text-lg font-bold">Top Creators (Credits)</h2>
-          <p className="text-xs text-[var(--muted-foreground)]">Hosts ranked by current credit totals</p>
+          <h2 className="text-lg font-bold">Seasonal creators</h2>
+          <p className="text-xs text-[var(--muted-foreground)]">Credits, activity streaks, and session volume for the selected window</p>
         </div>
 
         {creators.length === 0 ? (
@@ -190,14 +227,59 @@ export default async function LeaderboardPage() {
               >
                 <div className="flex min-w-0 items-center gap-3">
                   <span className="w-6 text-xs font-bold text-[var(--muted-foreground)]">{index + 1}</span>
-                  <span className="truncate text-sm font-medium">
-                    {creator.displayName ?? creator.username}
-                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">
+                      {creator.displayName ?? creator.username}
+                    </p>
+                    <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-[var(--muted-foreground)]">
+                      <span className="inline-flex items-center gap-1">
+                        <Flame className="h-3 w-3 text-orange-300" />
+                        {creator.streakDays}d streak
+                      </span>
+                      <span>{creator.recentSessions} sessions</span>
+                      <span>{creator.robotCount} robots</span>
+                      {creator.isNewOperator ? (
+                        <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-2 py-0.5 text-emerald-200">
+                          New operator
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
                 </div>
                 <span className="text-sm font-semibold text-amber-300">{creator.credits} cr</span>
               </li>
             ))}
           </ul>
+        )}
+      </section>
+
+      <section className="mt-6 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 sm:p-5">
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <h2 className="inline-flex items-center gap-2 text-lg font-bold">
+            <Sparkles className="h-4 w-4 text-emerald-300" />
+            New operators
+          </h2>
+          <p className="text-xs text-[var(--muted-foreground)]">Latest robot hosts to launch a room</p>
+        </div>
+
+        {newOperators.length === 0 ? (
+          <p className="text-sm text-[var(--muted-foreground)]">No operator launches yet.</p>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {newOperators.map((robot) => (
+              <Link
+                key={robot.owner.id}
+                href={`/robot/${robot.owner.username}/${robot.slug}`}
+                className="rounded-xl border border-[var(--border)] bg-[var(--background)] p-4 transition hover:border-sky-400/30"
+              >
+                <p className="text-sm font-semibold">{robot.owner.displayName ?? robot.owner.username}</p>
+                <p className="mt-1 text-xs text-[var(--muted-foreground)]">Launched {robot.name}</p>
+                <p className="mt-3 text-[11px] uppercase tracking-wide text-[var(--muted-foreground)]">
+                  Joined {new Date(robot.createdAt).toLocaleDateString()}
+                </p>
+              </Link>
+            ))}
+          </div>
         )}
       </section>
     </div>

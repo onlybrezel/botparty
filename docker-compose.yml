@@ -89,6 +89,10 @@ services:
         mc mb -p local/${THUMBNAIL_S3_BUCKET:-botparty-thumbnails} || true
         mc anonymous set download local/${THUMBNAIL_S3_BUCKET:-botparty-thumbnails}
         mc mb -p local/${LIVEKIT_RECORDINGS_S3_BUCKET:-botparty-recordings} || true
+        mc anonymous set none local/${LIVEKIT_RECORDINGS_S3_BUCKET:-botparty-recordings}
+        if [ "${RECORDING_RETENTION_DAYS:-30}" -gt 0 ] 2>/dev/null; then
+          mc ilm rule add --expire-days "${RECORDING_RETENTION_DAYS:-30}" local/${LIVEKIT_RECORDINGS_S3_BUCKET:-botparty-recordings} || true
+        fi
     depends_on:
       minio:
         condition: service_started
@@ -242,9 +246,14 @@ services:
       JWT_REFRESH_SECRET_FILE: ${JWT_REFRESH_SECRET_FILE:-/run/secrets/jwt_refresh_secret}
       ROBOT_JWT_SECRET: ${ROBOT_JWT_SECRET:?Set ROBOT_JWT_SECRET}
       ROBOT_JWT_SECRET_FILE: ${ROBOT_JWT_SECRET_FILE:-/run/secrets/robot_jwt_secret}
+      REQUIRE_EMAIL_VERIFICATION: ${REQUIRE_EMAIL_VERIFICATION:-false}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
       JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-7d}
+      METRICS_AUTH_REQUIRED: ${METRICS_AUTH_REQUIRED:-true}
+      METRICS_USERNAME: ${METRICS_USERNAME:-metrics}
+      METRICS_PASSWORD: ${METRICS_PASSWORD:-}
       PASSWORD_RESET_TTL_SEC: ${PASSWORD_RESET_TTL_SEC:-3600}
+      RECORDING_SIGNED_URL_TTL_SEC: ${RECORDING_SIGNED_URL_TTL_SEC:-300}
       APP_URL: ${APP_URL:-https://botparty.live}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
@@ -265,6 +274,7 @@ services:
       LIVEKIT_RECORDINGS_S3_ACCESS_KEY_ID: ${LIVEKIT_RECORDINGS_S3_ACCESS_KEY_ID:-botpartyminio}
       LIVEKIT_RECORDINGS_S3_SECRET_ACCESS_KEY: ${LIVEKIT_RECORDINGS_S3_SECRET_ACCESS_KEY:-}
       LIVEKIT_RECORDINGS_S3_FORCE_PATH_STYLE: ${LIVEKIT_RECORDINGS_S3_FORCE_PATH_STYLE:-true}
+      RECORDING_RETENTION_DAYS: ${RECORDING_RETENTION_DAYS:-30}
       CADVISOR_URL: ${CADVISOR_URL:-http://cadvisor:8080}
       CORS_ORIGIN: ${CORS_ORIGIN:-https://botparty.live}
       THROTTLE_TTL: ${THROTTLE_TTL:-60000}
@@ -361,6 +371,36 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # ═══════════════════════════════════════════════════
+  # Optional centralized logs (Loki + Promtail)
+  # ═══════════════════════════════════════════════════
+  loki:
+    profiles: ["observability-logs"]
+    image: grafana/loki:3.2.1
+    container_name: botparty-loki
+    restart: on-failure:10
+    command: ["-config.file=/etc/loki/config.yaml"]
+    volumes:
+      - ./docker/loki/config.yaml:/etc/loki/config.yaml:ro
+    networks:
+      - frontend
+
+  promtail:
+    profiles: ["observability-logs"]
+    image: grafana/promtail:3.2.1
+    container_name: botparty-promtail
+    restart: on-failure:10
+    command: ["-config.file=/etc/promtail/config.yaml"]
+    volumes:
+      - ./docker/promtail/config.yaml:/etc/promtail/config.yaml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      loki:
+        condition: service_started
+    networks:
+      - frontend
 
 volumes:
   postgres_data:

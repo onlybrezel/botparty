@@ -1,10 +1,12 @@
-import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { ConfigService } from '@nestjs/config';
 import { createHmac, randomBytes, randomUUID } from 'crypto';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { JOBS_QUEUE_WEBHOOK, type WebhookJobData } from '../jobs/jobs.constants';
+import { assertSafeWebhookTarget } from '../common/webhook-target';
+import { readNonNegativeIntegerEnv } from '../common/config-number';
 
 export const ROBOT_WEBHOOK_EVENTS = [
   'robot.online',
@@ -21,6 +23,7 @@ type WebhookPayload = Record<string, unknown>;
 export class RobotWebhookService {
   private readonly logger = new Logger(RobotWebhookService.name);
   private readonly webhookSecretKey: string;
+  private readonly maxWebhooksPerRobot: number;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -31,6 +34,7 @@ export class RobotWebhookService {
       this.config.get<string>('WEBHOOK_SECRET_ENCRYPTION_KEY')?.trim() ||
       this.config.get<string>('JWT_SECRET')?.trim() ||
       'botparty-webhook-secret-fallback';
+    this.maxWebhooksPerRobot = readNonNegativeIntegerEnv(this.config, 'MAX_WEBHOOKS_PER_ROBOT', 10);
   }
 
   async listForOwner(robotId: string, ownerId: string) {
@@ -58,13 +62,27 @@ export class RobotWebhookService {
     input: { url: string; events: RobotWebhookEvent[]; isActive?: boolean },
   ) {
     await this.assertOwner(robotId, ownerId);
+    if (this.maxWebhooksPerRobot > 0) {
+      const existingHooks = await this.prisma.robotWebhook.count({ where: { robotId } });
+      if (existingHooks >= this.maxWebhooksPerRobot) {
+        throw new BadRequestException(
+          `Maximum of ${this.maxWebhooksPerRobot} webhooks allowed per robot`,
+        );
+      }
+    }
+    let target: URL;
+    try {
+      target = await assertSafeWebhookTarget(input.url);
+    } catch (error) {
+      throw new BadRequestException((error as Error).message);
+    }
     const id = randomUUID();
     const plainSecret = randomBytes(32).toString('hex');
     const hook = await this.prisma.robotWebhook.create({
       data: {
         id,
         robotId,
-        url: input.url.trim(),
+        url: target.toString(),
         events: Array.from(new Set(input.events)),
         isActive: input.isActive ?? true,
         secret: this.encryptWebhookSecret(id, plainSecret),
@@ -76,6 +94,9 @@ export class RobotWebhookService {
       url: hook.url,
       events: hook.events,
       isActive: hook.isActive,
+      lastTriggeredAt: null,
+      lastStatusCode: null,
+      secretPreview: `${plainSecret.slice(0, 8)}...`,
       secret: plainSecret,
       createdAt: hook.createdAt.toISOString(),
     };

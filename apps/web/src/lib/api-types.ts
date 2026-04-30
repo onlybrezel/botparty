@@ -40,6 +40,66 @@ export interface RobotManaged extends RobotPublic {
   updatedAt: string;
 }
 
+export interface RobotWebhookRecord {
+  id: string;
+  url: string;
+  events: string[];
+  isActive: boolean;
+  lastTriggeredAt: string | null;
+  lastStatusCode: number | null;
+  createdAt: string;
+  secretPreview: string;
+}
+
+export interface RobotWebhookCreateResponse extends RobotWebhookRecord {
+  secret: string;
+}
+
+export interface UserSessionRecord {
+  id: string;
+  status: 'ACTIVE' | 'ENDED' | 'RECORDING';
+  startedAt: string;
+  endedAt: string | null;
+  durationMs: number | null;
+  recordingUrl: string | null;
+  peakViewers: number;
+  totalCommands: number;
+  avgLatencyMs: number | null;
+  robot: {
+    id: string;
+    name: string;
+    slug: string;
+    thumbnailUrl: string | null;
+  };
+}
+
+export interface UserSessionDetail extends UserSessionRecord {
+  metadata: Record<string, unknown> | null;
+  user: {
+    id: string;
+    username: string;
+    displayName: string | null;
+    avatarUrl: string | null;
+  };
+  robot: UserSessionRecord['robot'] & {
+    owner: {
+      id: string;
+      username: string;
+      displayName: string | null;
+    };
+  };
+  replayCandidates: Array<{
+    fileName: string;
+    sizeBytes: number;
+    modifiedAt: string;
+    robotId: string | null;
+    cameraId: string | null;
+    recordedAt: string | null;
+    playbackPath: string;
+    playbackExpiresAt: string;
+  }>;
+}
+
 export interface RobotMutationInput {
   name?: string;
   slug?: string;

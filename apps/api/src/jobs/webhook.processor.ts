@@ -5,6 +5,7 @@ import { Job } from 'bullmq';
 import { createHmac, randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { JOBS_QUEUE_WEBHOOK, type WebhookJobData } from './jobs.constants';
+import { assertSafeWebhookTarget } from '../common/webhook-target';
 
 @Processor(JOBS_QUEUE_WEBHOOK, { concurrency: 4 })
 export class WebhookProcessor extends WorkerHost {
@@ -37,7 +38,8 @@ export class WebhookProcessor extends WorkerHost {
     const signature = createHmac('sha256', signingSecret).update(body).digest('hex');
 
     try {
-      const response = await fetch(hook.url, {
+      const target = await assertSafeWebhookTarget(hook.url);
+      const response = await fetch(target, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',

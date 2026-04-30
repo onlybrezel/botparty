@@ -25,6 +25,14 @@ export class SessionsController {
     return this.sessionsService.findByUser(user.sub, limit ? Number(limit) : 50);
   }
 
+  @Get('my/:sessionId')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get detailed session replay data for the authenticated requester' })
+  async getMySession(@CurrentUser() user: JwtPayload, @Param('sessionId') sessionId: string) {
+    return this.sessionsService.findDetailForRequester(sessionId, user.sub);
+  }
+
   @Get('robot/:robotId')
   @ApiOperation({ summary: 'Get session history for a robot' })
   async getByRobot(

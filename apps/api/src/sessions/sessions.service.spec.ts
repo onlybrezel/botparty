@@ -3,6 +3,9 @@ import { SessionsService } from './sessions.service';
 
 describe('SessionsService', () => {
   let prisma: {
+    user: {
+      findUnique: jest.Mock;
+    };
     session: {
       findMany: jest.Mock;
       update: jest.Mock;
@@ -22,6 +25,9 @@ describe('SessionsService', () => {
     emitSessionStarted: jest.Mock;
     emitSessionEnded: jest.Mock;
   };
+  let recordingAdminService: {
+    findReplayCandidatesForSession: jest.Mock;
+  };
   let service: SessionsService;
 
   beforeEach(() => {
@@ -37,6 +43,9 @@ describe('SessionsService', () => {
       update: jest.fn(),
     };
     prisma = {
+      user: {
+        findUnique: jest.fn(),
+      },
       session,
       robot,
       analyticsEvent: { create: jest.fn().mockResolvedValue(undefined) },
@@ -51,7 +60,15 @@ describe('SessionsService', () => {
       emitSessionStarted: jest.fn(),
       emitSessionEnded: jest.fn(),
     };
-    service = new SessionsService(prisma as never, robotsService as never, robotWebhookService as never);
+    recordingAdminService = {
+      findReplayCandidatesForSession: jest.fn().mockResolvedValue([]),
+    };
+    service = new SessionsService(
+      prisma as never,
+      robotsService as never,
+      robotWebhookService as never,
+      recordingAdminService as never,
+    );
   });
 
   afterEach(() => {
@@ -141,6 +158,57 @@ describe('SessionsService', () => {
       expect.objectContaining({ where: { robotId: 'robot-1' }, take: 25 }),
     );
     expect(sessions).toEqual([{ id: 'session-1' }]);
+  });
+
+  it('returns replay details for the session owner', async () => {
+    prisma.session.findUnique.mockResolvedValue({
+      id: 'session-1',
+      userId: 'user-1',
+      robotId: 'robot-1',
+      status: 'ENDED',
+      startedAt: new Date('2026-04-29T10:00:00.000Z'),
+      endedAt: new Date('2026-04-29T10:10:00.000Z'),
+      durationMs: 600_000,
+      recordingUrl: null,
+      peakViewers: 12,
+      totalCommands: 40,
+      avgLatencyMs: 90,
+      metadata: null,
+      robot: {
+        id: 'robot-1',
+        name: 'Test Robot',
+        slug: 'test-robot',
+        thumbnailUrl: null,
+        ownerId: 'owner-1',
+        owner: {
+          id: 'owner-1',
+          username: 'owner',
+          displayName: 'Owner',
+        },
+      },
+      user: {
+        id: 'user-1',
+        username: 'driver',
+        displayName: 'Driver',
+        avatarUrl: null,
+      },
+    });
+    prisma.user.findUnique.mockResolvedValue({ id: 'user-1', role: 'USER' });
+    recordingAdminService.findReplayCandidatesForSession.mockResolvedValue([{ fileName: 'session-1.mp4' }]);
+
+    const session = await service.findDetailForRequester('session-1', 'user-1');
+
+    expect(recordingAdminService.findReplayCandidatesForSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        robotId: 'robot-1',
+      }),
+    );
+    expect(session).toEqual(
+      expect.objectContaining({
+        id: 'session-1',
+        replayCandidates: [{ fileName: 'session-1.mp4' }],
+      }),
+    );
   });
 
   it('reconciles orphaned active sessions on startup', async () => {

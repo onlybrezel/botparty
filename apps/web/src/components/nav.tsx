@@ -17,6 +17,7 @@ export default function Nav() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [guestLabel, setGuestLabel] = useState('Guest');
+  const [balance, setBalance] = useState<number | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const theme = usePreferences((state) => state.theme);
   const updatePreference = usePreferences((state) => state.updatePreference);
@@ -90,6 +91,37 @@ export default function Nav() {
     };
   }, [menuOpen]);
 
+  useEffect(() => {
+    if (!mounted || !accessToken) {
+      setBalance(null);
+      return;
+    }
+    let cancelled = false;
+    const load = () => {
+      api.wallet
+        .me()
+        .then((res) => {
+          if (!cancelled) setBalance(res.balance);
+        })
+        .catch(() => undefined);
+    };
+    load();
+    const onFocus = () => load();
+    const onWalletUpdate = (event: Event) => {
+      const detail = (event as CustomEvent<{ balance?: number }>).detail;
+      if (detail && typeof detail.balance === 'number') {
+        if (!cancelled) setBalance(detail.balance);
+      }
+    };
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('botparty:wallet-update', onWalletUpdate as EventListener);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('botparty:wallet-update', onWalletUpdate as EventListener);
+    };
+  }, [accessToken, mounted, pathname]);
+
   const isActive = (href: string) => pathname === href || pathname.startsWith(href + '/');
   const navLinks = [
     { href: '/', label: 'Home', active: pathname === '/' },
@@ -161,7 +193,18 @@ export default function Nav() {
           {!mounted ? (
             <div className="hidden h-8 w-20 rounded-lg bg-[var(--muted)] animate-pulse sm:block" />
           ) : accessToken && username ? (
-            <div className="relative" ref={dropdownRef}>
+            <div className="relative flex items-center gap-2" ref={dropdownRef}>
+              <Link
+                href="/wallet"
+                className="hidden items-center gap-1 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-300 transition hover:bg-amber-500/20 sm:inline-flex"
+                title="Wallet"
+              >
+                <span aria-hidden>◈</span>
+                <span className="tabular-nums">
+                  {balance === null ? '—' : balance.toLocaleString()}
+                </span>
+                <span className="text-[10px] uppercase tracking-wide opacity-70">cr</span>
+              </Link>
               <button
                 onClick={() => setDropdownOpen((open) => !open)}
                 className="hidden items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-sm font-medium transition hover:border-[var(--muted-foreground)] sm:flex"
@@ -186,6 +229,13 @@ export default function Nav() {
                   >
                     Robots Dashboard
                   </Link>
+                  <Link
+                    href="/wallet"
+                    onClick={() => setDropdownOpen(false)}
+                    className="block px-4 py-2 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition"
+                  >
+                    Wallet
+                  </Link>
                   {(role === 'ADMIN' || role === 'MOD') && (
                     <Link
                       href="/mod"
@@ -201,6 +251,13 @@ export default function Nav() {
                     className="block px-4 py-2 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition"
                   >
                     Settings
+                  </Link>
+                  <Link
+                    href="/sessions"
+                    onClick={() => setDropdownOpen(false)}
+                    className="block px-4 py-2 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition"
+                  >
+                    Sessions
                   </Link>
                   <div className="px-4 py-2">
                     <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--muted-foreground)]">
@@ -298,6 +355,9 @@ export default function Nav() {
                   <Link href="/dashboard" className="rounded-xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--foreground)]">
                     Robots Dashboard
                   </Link>
+                  <Link href="/wallet" className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm font-medium text-amber-200">
+                    Wallet{balance !== null ? ` · ${balance.toLocaleString()} cr` : ''}
+                  </Link>
                   {(role === 'ADMIN' || role === 'MOD') && (
                     <Link href="/mod" className="rounded-xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--foreground)]">
                       Mod Dashboard
@@ -305,6 +365,9 @@ export default function Nav() {
                   )}
                   <Link href="/settings" className="rounded-xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--foreground)]">
                     Settings
+                  </Link>
+                  <Link href="/sessions" className="rounded-xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--foreground)]">
+                    Sessions
                   </Link>
                   <button
                     type="button"

@@ -55,6 +55,29 @@ enum TransactionType {
   FEATURED_ROBOT
   BATTLE_ENTRY
   REWARD
+  BUTTON_SPEND
+  BUTTON_PAYOUT
+  DONATION_SENT
+  DONATION_RECEIVED
+  PLATFORM_FEE
+  ADMIN_ADJUSTMENT
+  REFUND
+  CHARGEBACK
+}
+
+enum BillingIntentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+  CHARGEBACK
+}
+
+enum PayoutRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  PAID
 }
 
 enum SessionStatus {
@@ -90,8 +113,8 @@ model User {
   displayName  String?  @db.VarChar(64)
   avatarUrl    String?  @db.VarChar(512)
   role         Role     @default(USER)
-  balance      Int      @default(0) // Virtual currency balance
-  credits      Int      @default(0) // Earned credits
+  balance      Int      @default(0) // Reserved for the durable credits ledger. See docs/adr/0005-schema-cleanup-decisions.md.
+  credits      Int      @default(0) // Exposed in staff and leaderboard flows; intentionally kept. See ADR-0005.
   tokenVersion Int      @default(0) // For refresh token invalidation
   isActive     Boolean  @default(true)
   emailVerified         Boolean   @default(false) // existing users are backfilled true in migration; new users default to unverified
@@ -113,6 +136,9 @@ model User {
   moderationEntries   RobotModerationEntry[]
   givenModerations    RobotModerationEntry[] @relation("ModeratorActions")
   adminAuditLogs      AdminAuditLog[]
+  billingIntents      BillingIntent[]
+  walletIdempotency   WalletIdempotencyKey[]
+  payoutRequests      PayoutRequest[]
 
   @@index([email])
   @@index([username])
@@ -215,23 +241,100 @@ model RobotAllowedUser {
 
 // ═════════════════════════════════════════════════════
 // TRANSACTION (Virtual Currency)
+// Kept intentionally as the future-proof ledger model. See ADR-0005.
 // ═════════════════════════════════════════════════════
 
 model Transaction {
-  id          String          @id @default(uuid()) @db.Uuid
-  userId      String          @db.Uuid
-  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type        TransactionType
-  amount      Int             // Positive = credit, Negative = debit
-  balanceAfter Int            // Balance snapshot after transaction
-  description String?         @db.VarChar(255)
-  metadata    Json?
-  createdAt   DateTime        @default(now())
+  id            String          @id @default(uuid()) @db.Uuid
+  userId        String          @db.Uuid
+  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type          TransactionType
+  amount        Int             // Positive = credit, Negative = debit
+  balanceAfter  Int             // Balance snapshot after transaction
+  ledgerGroupId String?         @db.Uuid // Groups multi-leg events (payer/payee/fee). Sum across group must equal 0.
+  description   String?         @db.VarChar(255)
+  metadata      Json?
+  createdAt     DateTime        @default(now())
 
-  @@index([userId])
+  @@index([userId, createdAt])
   @@index([type])
+  @@index([ledgerGroupId])
   @@index([createdAt])
   @@map("transactions")
+}
+
+// ═════════════════════════════════════════════════════
+// BILLING (Provider-agnostic purchase intents + idempotent webhook events)
+// ═════════════════════════════════════════════════════
+
+model BillingIntent {
+  id             String              @id @default(uuid()) @db.Uuid
+  userId         String              @db.Uuid
+  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider       String              @db.VarChar(16)       // 'stripe' | 'paypal'
+  providerRef    String?             @db.VarChar(128)      // checkout/session/order/intent id once known
+  packageId      String              @db.VarChar(64)
+  amountCents    Int
+  currency       String              @db.VarChar(8)
+  creditsAmount  Int
+  status         BillingIntentStatus @default(PENDING)
+  metadata       Json?
+  paidAt         DateTime?
+  refundedAt     DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@unique([provider, providerRef])
+  @@index([userId, status])
+  @@index([status, createdAt])
+  @@map("billing_intents")
+}
+
+model BillingWebhookEvent {
+  id          String   @id @default(uuid()) @db.Uuid
+  provider    String   @db.VarChar(16)
+  eventId     String   @db.VarChar(128)
+  eventType   String   @db.VarChar(64)
+  payload     Json
+  processedAt DateTime @default(now())
+
+  @@unique([provider, eventId])
+  @@index([processedAt])
+  @@map("billing_webhook_events")
+}
+
+model WalletIdempotencyKey {
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String   @db.Uuid
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scope         String   @db.VarChar(32)        // 'donation' | 'control_press'
+  key           String   @db.VarChar(128)
+  transactionId String?  @db.Uuid
+  result        Json?
+  createdAt     DateTime @default(now())
+
+  @@unique([userId, scope, key])
+  @@index([createdAt])
+  @@map("wallet_idempotency_keys")
+}
+
+model PayoutRequest {
+  id             String              @id @default(uuid()) @db.Uuid
+  userId         String              @db.Uuid
+  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount         Int                                       // credits requested for payout
+  status         PayoutRequestStatus @default(PENDING)
+  destination    String              @db.VarChar(128)      // payout method reference (manual review for now)
+  notes          String?             @db.VarChar(1000)
+  reviewedById   String?             @db.Uuid
+  reviewedAt     DateTime?
+  paidAt         DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@index([userId, status])
+  @@index([status, createdAt])
+  @@map("payout_requests")
 }
 
 // ═════════════════════════════════════════════════════
@@ -327,6 +430,7 @@ model AdminAuditLog {
 
 // ═════════════════════════════════════════════════════
 // SWARM GROUP (Multi-Robot Control)
+// Reserved for roadmap-capability grouping. See ADR-0005.
 // ═════════════════════════════════════════════════════
 
 model SwarmGroup {
@@ -396,6 +500,7 @@ model ControlButton {
   hotKey      String?             @db.VarChar(8)     // Keyboard shortcut (e.g. "w", "ArrowUp")
   icon        String?             @db.VarChar(64)    // Optional emoji or icon name
   cooldownMs  Int                 @default(200)      // Minimum time between presses
+  costCredits Int                 @default(0)        // Credits charged per press (0 = free)
   access      ControlButtonAccess @default(QUEUE_TURN)
   position    Int                 @default(0)        // Sort order
   isEnabled   Boolean             @default(true)

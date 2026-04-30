@@ -1,10 +1,13 @@
 import { Logger } from '@nestjs/common';
 import { WS_EVENTS, LIMITS, ControlButtonAccess, controlCommandSchema } from '@botparty/shared';
+import { TransactionType } from '@botparty/prisma';
 import { isStaffRole } from '../common/robot-access';
 import type { ModerationService } from '../moderation/moderation.service';
 import type { RobotsService } from '../robots/robots.service';
 import type { QueueService } from '../queue/queue.service';
 import type { ControlsService } from '../controls/controls.service';
+import type { WalletService } from '../wallet/wallet.service';
+import { InsufficientFundsError } from '../wallet/wallet.service';
 import type { CommandMetadata, WsClient } from './gateway-types';
 import { z } from 'zod';
 
@@ -29,6 +32,7 @@ export class ControlHandler {
     private readonly moderationService: ModerationService,
     private readonly queueService: QueueService,
     private readonly controlsService: ControlsService,
+    private readonly walletService: WalletService,
   ) {}
 
   async handle(client: WsClient, rawPayload: unknown): Promise<void> {
@@ -77,10 +81,6 @@ export class ControlHandler {
       return;
     }
 
-    if (!(await this.ctx.consumeControlCooldown(client, data.robotId, command, commandAccess.cooldownMs))) {
-      return;
-    }
-
     if (client.userId) {
       const restriction = await this.moderationService.getActiveRestriction(data.robotId, client.userId);
       if (restriction) {
@@ -91,18 +91,84 @@ export class ControlHandler {
       }
     }
 
-    this.ctx.broadcastToRoom(
-      data.robotId,
-      WS_EVENTS.CROWD_INPUT,
-      { userId: client.userId, username: client.username, command },
-      client.id,
-    );
-
+    // Verify the robot is online before charging or consuming cooldown.
     const robotClient = this.ctx.getOpenRobotClient(data.robotId);
     if (!robotClient) {
       client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Robot realtime control channel is offline' } }));
       return;
     }
+
+    if (!(await this.ctx.consumeControlCooldown(client, data.robotId, command, commandAccess.cooldownMs))) {
+      return;
+    }
+
+    // Charge for costed buttons. Owner pressing own button is a no-op transfer
+    // (skipped). Errors abort before broadcasting/sending the command.
+    const cost = commandAccess.costCredits;
+    if (cost > 0) {
+      if (!client.userId) {
+        client.send(
+          JSON.stringify({
+            event: WS_EVENTS.ERROR,
+            data: { code: 'AUTH_REQUIRED', message: 'Sign in to use paid controls' },
+          }),
+        );
+        return;
+      }
+
+      if (!robot.ownerId) {
+        client.send(
+          JSON.stringify({
+            event: WS_EVENTS.ERROR,
+            data: { message: 'Robot owner is unavailable for paid controls' },
+          }),
+        );
+        return;
+      }
+
+      if (client.userId !== robot.ownerId) {
+        try {
+          const result = await this.walletService.transfer(client.userId, robot.ownerId, cost, {
+            payerType: TransactionType.BUTTON_SPEND,
+            payeeType: TransactionType.BUTTON_PAYOUT,
+            description: `Press ${command}`,
+            metadata: {
+              robotId: robot.id,
+              command,
+            },
+          });
+
+          client.send(
+            JSON.stringify({
+              event: WS_EVENTS.WALLET_UPDATE,
+              data: { balance: result.payerBalanceAfter },
+            }),
+          );
+        } catch (err) {
+          if (err instanceof InsufficientFundsError) {
+            client.send(
+              JSON.stringify({
+                event: WS_EVENTS.WALLET_INSUFFICIENT_FUNDS,
+                data: { required: err.required, balance: err.balance, command },
+              }),
+            );
+            return;
+          }
+          this.logger.error(`Wallet transfer failed for press: ${(err as Error).message}`);
+          client.send(
+            JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Could not charge for control' } }),
+          );
+          return;
+        }
+      }
+    }
+
+    this.ctx.broadcastToRoom(
+      data.robotId,
+      WS_EVENTS.CROWD_INPUT,
+      { userId: client.userId, username: client.username, command, costCredits: cost },
+      client.id,
+    );
 
     const now = Date.now();
     robotClient.send(
@@ -140,7 +206,7 @@ export class ControlHandler {
     client: WsClient;
     command: string;
     currentControllerUserId: string | null;
-  }): Promise<{ allowed: boolean; message: string; cooldownMs: number }> {
+  }): Promise<{ allowed: boolean; message: string; cooldownMs: number; costCredits: number }> {
     const { robot, client, command, currentControllerUserId } = input;
     const normalizedCommand = command.trim();
     const queueDisabled = robot.queueMode === 'DISABLED';
@@ -150,30 +216,41 @@ export class ControlHandler {
     if (enabledButtons.length === 0) {
       const fallbackCommands = new Set(['forward', 'backward', 'left', 'right', 'stop']);
       if (!fallbackCommands.has(normalizedCommand)) {
-        return { allowed: false, message: 'Unknown or disabled control', cooldownMs: 0 };
+        return { allowed: false, message: 'Unknown or disabled control', cooldownMs: 0, costCredits: 0 };
       }
 
       if (!queueDisabled && !isCurrentController) {
-        return { allowed: false, message: 'Wait for your turn in the queue before sending controls', cooldownMs: 0 };
+        return {
+          allowed: false,
+          message: 'Wait for your turn in the queue before sending controls',
+          cooldownMs: 0,
+          costCredits: 0,
+        };
       }
 
       return {
         allowed: true,
         message: '',
         cooldownMs: normalizedCommand === 'stop' ? 0 : LIMITS.DEFAULT_CONTROL_COOLDOWN_MS,
+        costCredits: 0,
       };
     }
 
     if (normalizedCommand === 'stop') {
       if (queueDisabled || isCurrentController || this.ctx.isRoomModerator(client, robot.ownerId)) {
-        return { allowed: true, message: '', cooldownMs: 0 };
+        return { allowed: true, message: '', cooldownMs: 0, costCredits: 0 };
       }
-      return { allowed: false, message: 'Wait for your turn in the queue before sending controls', cooldownMs: 0 };
+      return {
+        allowed: false,
+        message: 'Wait for your turn in the queue before sending controls',
+        cooldownMs: 0,
+        costCredits: 0,
+      };
     }
 
     const matchingButtons = enabledButtons.filter((button) => button.command === normalizedCommand);
     if (matchingButtons.length === 0) {
-      return { allowed: false, message: 'Unknown or disabled control', cooldownMs: 0 };
+      return { allowed: false, message: 'Unknown or disabled control', cooldownMs: 0, costCredits: 0 };
     }
 
     const allowedButtons = matchingButtons.filter((button) =>
@@ -181,22 +258,42 @@ export class ControlHandler {
     );
 
     if (allowedButtons.length > 0) {
+      // Pick the cheapest matching button so legitimate access is preserved.
+      const cheapest = allowedButtons.reduce((best, button) =>
+        button.costCredits < best.costCredits ? button : best,
+      );
       return {
         allowed: true,
         message: '',
         cooldownMs: Math.max(0, Math.min(...allowedButtons.map((button) => Math.max(0, button.cooldownMs)))),
+        costCredits: Math.max(0, cheapest.costCredits ?? 0),
       };
     }
 
     if (matchingButtons.some((button) => button.access === ControlButtonAccess.OWNER)) {
-      return { allowed: false, message: 'This control is reserved for the robot owner', cooldownMs: 0 };
+      return {
+        allowed: false,
+        message: 'This control is reserved for the robot owner',
+        cooldownMs: 0,
+        costCredits: 0,
+      };
     }
 
     if (matchingButtons.some((button) => button.access === ControlButtonAccess.MODERATOR)) {
-      return { allowed: false, message: 'This control is reserved for moderators', cooldownMs: 0 };
+      return {
+        allowed: false,
+        message: 'This control is reserved for moderators',
+        cooldownMs: 0,
+        costCredits: 0,
+      };
     }
 
-    return { allowed: false, message: 'Wait for your turn in the queue before sending controls', cooldownMs: 0 };
+    return {
+      allowed: false,
+      message: 'Wait for your turn in the queue before sending controls',
+      cooldownMs: 0,
+      costCredits: 0,
+    };
   }
 
   private _canUseButton(input: {

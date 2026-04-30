@@ -50,7 +50,7 @@ export class MailService {
   }
 
   async sendEmailVerification(email: string, token: string) {
-    const verifyUrl = new URL('/auth/verify-email', this.appUrl);
+    const verifyUrl = new URL('/verify-email', this.appUrl);
     verifyUrl.searchParams.set('token', token);
 
     if (!this.transport) {

@@ -13,6 +13,9 @@ describe('RobotCameraService', () => {
     parseStreamFromMetadata: jest.Mock;
     invalidateCache: jest.Mock;
   };
+  let config: {
+    get: jest.Mock;
+  };
 
   beforeEach(() => {
     prisma = {
@@ -29,7 +32,10 @@ describe('RobotCameraService', () => {
       parseStreamFromMetadata: jest.fn().mockReturnValue({ targetBitrateKbps: 1200, cameras: [] }),
       invalidateCache: jest.fn(),
     };
-    service = new RobotCameraService(prisma as any, access as any);
+    config = {
+      get: jest.fn().mockReturnValue(undefined),
+    };
+    service = new RobotCameraService(prisma as never, access as never, config as never);
   });
 
   it('adds a new external camera and makes it active when none is selected', async () => {
@@ -99,6 +105,21 @@ describe('RobotCameraService', () => {
     );
 
     await expect(service.upsertExternalStreamCamera('robot-1', 'owner-1', { id: '   ' })).rejects.toThrow(
+      BadRequestException,
+    );
+  });
+
+  it('enforces the external camera cap for new camera ids', async () => {
+    config.get.mockImplementation((key: string) =>
+      key === 'MAX_EXTERNAL_CAMERAS_PER_ROBOT' ? '1' : undefined,
+    );
+    service = new RobotCameraService(prisma as never, access as never, config as never);
+    access.parseStreamFromMetadata.mockReturnValue({
+      targetBitrateKbps: 1200,
+      cameras: [{ id: 'front', label: 'Front' }],
+    });
+
+    await expect(service.upsertExternalStreamCamera('robot-1', 'owner-1', { id: 'rear' })).rejects.toThrow(
       BadRequestException,
     );
   });

@@ -5,6 +5,7 @@ import { SessionsController } from './sessions.controller';
 describe('SessionsController', () => {
   let sessionsService: {
     findByUser: jest.Mock;
+    findDetailForRequester: jest.Mock;
     findByRobotForRequester: jest.Mock;
     getActiveSessionForRequester: jest.Mock;
   };
@@ -15,6 +16,7 @@ describe('SessionsController', () => {
   beforeEach(() => {
     sessionsService = {
       findByUser: jest.fn(),
+      findDetailForRequester: jest.fn(),
       findByRobotForRequester: jest.fn(),
       getActiveSessionForRequester: jest.fn(),
     };
@@ -30,6 +32,15 @@ describe('SessionsController', () => {
 
     expect(sessionsService.findByUser).toHaveBeenCalledWith('user-1', 25);
     expect(sessions).toEqual([{ id: 'session-1' }]);
+  });
+
+  it('returns a requester-scoped session detail entry', async () => {
+    sessionsService.findDetailForRequester.mockResolvedValue({ id: 'session-1', replayCandidates: [] });
+
+    const session = await controller.getMySession({ sub: 'user-1' } as never, 'session-1');
+
+    expect(sessionsService.findDetailForRequester).toHaveBeenCalledWith('session-1', 'user-1');
+    expect(session).toEqual({ id: 'session-1', replayCandidates: [] });
   });
 
   it('resolves requester identity from bearer auth for robot session history', async () => {

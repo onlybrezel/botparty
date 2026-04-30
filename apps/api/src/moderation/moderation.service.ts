@@ -970,6 +970,14 @@ export class ModerationService {
     return this.recordingAdmin.streamAdminRecording(fileName, requesterId);
   }
 
+  async streamSignedAdminRecording(
+    fileName: string,
+    expires: string | undefined,
+    signature: string | undefined,
+  ): Promise<StreamableFile> {
+    return this.recordingAdmin.streamSignedAdminRecording(fileName, expires, signature);
+  }
+
   private async _assertStaffOrOwner(robotId: string, userId: string) {
     const [robot, user] = await Promise.all([
       this.prisma.robot.findUnique({ where: { id: robotId } }),

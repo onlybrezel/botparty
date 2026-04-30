@@ -1,0 +1,218 @@
+import { BadRequestException } from '@nestjs/common';
+import type { GuestAccess, RobotAccessPolicy, RobotStreamPolicy } from './robots.service';
+import { mergeRobotMetadata, normalizeRobotMetadata } from './robot-metadata.schema';
+import { normalizePublicRobotStatus, normalizePublicViewerCount } from './robot-public-state';
+import { SLUG_PROFANITY_TERMS } from './profanity-terms';
+
+export type RobotStreamCameraDescriptor = {
+  id: string;
+  label?: string;
+  role?: string;
+  enabled?: boolean;
+  publishMode?: string;
+};
+
+const DEFAULT_ACCESS_POLICY: RobotAccessPolicy = {
+  video: 'AUTHENTICATED',
+  control: 'AUTHENTICATED',
+  chat: 'AUTHENTICATED',
+  estop: 'AUTHENTICATED',
+};
+
+const DEFAULT_STREAM_POLICY: RobotStreamPolicy = {
+  targetBitrateKbps: null,
+};
+
+export const DEFAULT_ROBOT_CONTROLS = [
+  { label: 'Forward', command: 'forward', hotKey: 'w', icon: '▲', position: 0 },
+  { label: 'Left', command: 'left', hotKey: 'a', icon: '◀', position: 1 },
+  { label: 'Back', command: 'backward', hotKey: 's', icon: '▼', position: 2 },
+  { label: 'Right', command: 'right', hotKey: 'd', icon: '▶', position: 3 },
+] as const;
+
+const ROBOT_TEXT_PROFANITY_TERMS = Array.from(new Set(SLUG_PROFANITY_TERMS));
+
+type RobotAclPatch = {
+  video?: GuestAccess;
+  control?: GuestAccess;
+  chat?: GuestAccess;
+  estop?: GuestAccess;
+};
+
+type RobotStreamPatch = {
+  targetBitrateKbps?: number;
+  activeCameraId?: string;
+  cameras?: RobotStreamCameraDescriptor[];
+};
+
+export function mergeRobotMetadataPatch(
+  current: unknown,
+  acl?: RobotAclPatch,
+  stream?: RobotStreamPatch,
+): Record<string, unknown> {
+  return mergeRobotMetadata(current, {
+    access: acl
+      ? {
+          ...DEFAULT_ACCESS_POLICY,
+          ...acl,
+        }
+      : undefined,
+    stream: stream
+      ? {
+          ...DEFAULT_STREAM_POLICY,
+          ...stream,
+        }
+      : undefined,
+  }) as Record<string, unknown>;
+}
+
+export function stripRobotWriteFields<
+  T extends { acl?: unknown; stream?: unknown; accessPassword?: unknown; slug?: unknown },
+>(data: T): Omit<T, 'acl' | 'stream' | 'accessPassword' | 'slug'> {
+  const rest = {
+    ...(data as T & {
+      acl?: unknown;
+      stream?: unknown;
+      accessPassword?: unknown;
+      slug?: unknown;
+    }),
+  };
+  delete rest.acl;
+  delete rest.stream;
+  delete rest.accessPassword;
+  delete rest.slug;
+  return rest as Omit<T, 'acl' | 'stream' | 'accessPassword' | 'slug'>;
+}
+
+export function withStreamKeyIssuedAt(metadata: unknown): Record<string, unknown> {
+  const base = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+    ? { ...(metadata as Record<string, unknown>) }
+    : {};
+  base.streamKeyIssuedAt = new Date().toISOString();
+  return base;
+}
+
+export function assertRobotTextAllowed(input: {
+  name?: string;
+  description?: string;
+  tags?: string[];
+}) {
+  assertFieldModeration('name', input.name);
+  assertFieldModeration('description', input.description);
+  for (const tag of input.tags ?? []) {
+    assertFieldModeration('tag', tag);
+  }
+}
+
+function assertFieldModeration(field: 'name' | 'description' | 'tag', value?: string) {
+  if (!value) {
+    return;
+  }
+
+  const normalized = normalizeModerationText(value);
+  if (!normalized) {
+    return;
+  }
+
+  const compact = normalized.replace(/[\s_-]+/g, '');
+  const blocked = ROBOT_TEXT_PROFANITY_TERMS.some((term) => normalized.includes(term) || compact.includes(term));
+  if (!blocked) {
+    return;
+  }
+
+  if (field === 'tag') {
+    throw new BadRequestException('One or more tags are blocked by moderation policy');
+  }
+
+  throw new BadRequestException(`${field} blocked by moderation policy`);
+}
+
+function normalizeModerationText(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9\s_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function sanitizeManagedRobot<T extends { accessPassword?: string | null }>(robot: T): T {
+  return {
+    ...robot,
+    accessPassword: null,
+  };
+}
+
+export function toPublicRobot<
+  T extends {
+    id: string;
+    name: string;
+    slug: string;
+    description: string | null;
+    thumbnailUrl: string | null;
+    status: string;
+    lastOnlineAt?: Date | null;
+    visibility: string;
+    accessMode: string;
+    queueMode: string;
+    scheduleStart?: Date | null;
+    scheduleEnd?: Date | null;
+    timezone?: string;
+    maxTurnTime: number;
+    maxViewers: number;
+    maxControllers: number;
+    metadata: unknown;
+    tags: string[];
+    viewerCount: number;
+    createdAt: Date;
+    owner?: {
+      id: string;
+      username: string;
+      displayName: string | null;
+      avatarUrl: string | null;
+    };
+  },
+>(robot: T) {
+  return {
+    id: robot.id,
+    name: robot.name,
+    slug: robot.slug,
+    description: robot.description,
+    thumbnailUrl: robot.thumbnailUrl,
+    visibility: robot.visibility,
+    accessMode: robot.accessMode,
+    queueMode: robot.queueMode,
+    scheduleStart: robot.scheduleStart ? robot.scheduleStart.toISOString() : null,
+    scheduleEnd: robot.scheduleEnd ? robot.scheduleEnd.toISOString() : null,
+    timezone: robot.timezone ?? 'UTC',
+    maxTurnTime: robot.maxTurnTime,
+    maxViewers: robot.maxViewers,
+    maxControllers: robot.maxControllers,
+    metadata: normalizeRobotMetadata(robot.metadata),
+    tags: robot.tags,
+    status: normalizePublicRobotStatus(
+      robot.status,
+      'lastOnlineAt' in robot ? (robot as { lastOnlineAt?: Date | null }).lastOnlineAt ?? null : null,
+    ),
+    viewerCount: normalizePublicViewerCount(
+      robot.status,
+      'lastOnlineAt' in robot ? (robot as { lastOnlineAt?: Date | null }).lastOnlineAt ?? null : null,
+      robot.viewerCount,
+    ),
+    owner: robot.owner
+      ? {
+          id: robot.owner.id,
+          username: robot.owner.username,
+          displayName: robot.owner.displayName,
+          avatarUrl: robot.owner.avatarUrl,
+        }
+      : {
+          id: '',
+          username: 'unknown',
+          displayName: null,
+          avatarUrl: null,
+        },
+    createdAt: robot.createdAt.toISOString(),
+  } as const;
+}

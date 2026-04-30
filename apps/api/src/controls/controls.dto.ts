@@ -13,7 +13,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { ControlButtonAccess } from '@botparty/shared';
+import { ControlButtonAccess, LIMITS } from '@botparty/shared';
 
 export class CreateControlButtonDto {
   @IsString()
@@ -57,6 +57,12 @@ export class CreateControlButtonDto {
   @IsString()
   @MaxLength(16)
   color?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(LIMITS.MAX_BUTTON_COST_CREDITS)
+  costCredits?: number;
 }
 
 export class UpdateControlButtonDto {
@@ -103,6 +109,12 @@ export class UpdateControlButtonDto {
   @IsString()
   @MaxLength(16)
   color?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(LIMITS.MAX_BUTTON_COST_CREDITS)
+  costCredits?: number;
 }
 
 export class ReorderControlButtonItemDto {

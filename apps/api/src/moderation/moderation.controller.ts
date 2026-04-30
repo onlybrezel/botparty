@@ -138,6 +138,16 @@ export class ModerationController {
     return this.moderationService.streamAdminRecording(fileName, requesterId);
   }
 
+  @Get('admin/recordings/:fileName/signed')
+  @ApiOperation({ summary: 'Stream a recording file via short-lived signed URL' })
+  async streamSignedAdminRecording(
+    @Param('fileName') fileName: string,
+    @Query('expires') expires?: string,
+    @Query('signature') signature?: string,
+  ): Promise<StreamableFile> {
+    return this.moderationService.streamSignedAdminRecording(fileName, expires, signature);
+  }
+
   @Get('admin/profanity-overview')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN, Role.MOD)

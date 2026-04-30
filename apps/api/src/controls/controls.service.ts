@@ -20,6 +20,7 @@ type EnabledControlButtonRecord = {
   access: ControlButtonAccess;
   position: number;
   color: string | null;
+  costCredits: number;
 };
 
 type VisibleControlsRequester = {
@@ -122,6 +123,7 @@ export class ControlsService implements OnModuleDestroy {
         access: true,
         position: true,
         color: true,
+        costCredits: true,
       },
       })
     ).map((button) => ({
@@ -222,6 +224,7 @@ export class ControlsService implements OnModuleDestroy {
           position: dto.position ?? count,
           isEnabled: dto.isEnabled ?? true,
           color: dto.color,
+          costCredits: dto.costCredits ?? 0,
         },
       });
     });
@@ -333,6 +336,7 @@ export class ControlsService implements OnModuleDestroy {
         access: ControlButtonAccess.QUEUE_TURN,
         position: 0,
         color: null,
+        costCredits: 0,
       },
       {
         id: 'default-left',
@@ -344,6 +348,7 @@ export class ControlsService implements OnModuleDestroy {
         access: ControlButtonAccess.QUEUE_TURN,
         position: 1,
         color: null,
+        costCredits: 0,
       },
       {
         id: 'default-backward',
@@ -355,6 +360,7 @@ export class ControlsService implements OnModuleDestroy {
         access: ControlButtonAccess.QUEUE_TURN,
         position: 2,
         color: null,
+        costCredits: 0,
       },
       {
         id: 'default-right',
@@ -366,6 +372,7 @@ export class ControlsService implements OnModuleDestroy {
         access: ControlButtonAccess.QUEUE_TURN,
         position: 3,
         color: null,
+        costCredits: 0,
       },
     ];
   }

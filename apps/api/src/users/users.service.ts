@@ -8,12 +8,56 @@ import {
 import { hash } from 'argon2';
 import type { Prisma } from '@botparty/prisma';
 import { PrismaService } from '../prisma/prisma.service';
+import { WalletService } from '../wallet/wallet.service';
 import { UpdateAdminUserDto, UpdateMeDto } from './users.dto';
 import type { JwtPayload } from '@botparty/shared';
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly walletService: WalletService,
+  ) {}
+
+  private resolveLeaderboardSince(period?: string) {
+    switch (period) {
+      case '7d':
+        return new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      case '30d':
+        return new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      case '90d':
+        return new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+      default:
+        return null;
+    }
+  }
+
+  private countSessionStreak(sessions: Array<{ startedAt: Date }>) {
+    const uniqueDays = [...new Set(
+      sessions.map((session) => {
+        const date = new Date(session.startedAt);
+        return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+      }),
+    )].sort().reverse();
+
+    if (uniqueDays.length === 0) {
+      return 0;
+    }
+
+    let streak = 1;
+    let previous = new Date(`${uniqueDays[0]}T00:00:00.000Z`);
+    for (const day of uniqueDays.slice(1)) {
+      const current = new Date(`${day}T00:00:00.000Z`);
+      const deltaDays = Math.round((previous.getTime() - current.getTime()) / (24 * 60 * 60 * 1000));
+      if (deltaDays !== 1) {
+        break;
+      }
+      streak += 1;
+      previous = current;
+    }
+
+    return streak;
+  }
 
   async findById(id: string) {
     const user = await this.prisma.user.findUnique({
@@ -116,9 +160,12 @@ export class UsersService {
     return user;
   }
 
-  async getLeaderboard(limit = 20) {
-    return this.prisma.user.findMany({
-      take: Math.min(limit, 100),
+  async getLeaderboard(input?: { limit?: number; period?: string }) {
+    const limit = Math.min(input?.limit ?? 20, 100);
+    const since = this.resolveLeaderboardSince(input?.period);
+    const newOperatorThreshold = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const users = await this.prisma.user.findMany({
+      take: limit,
       orderBy: { credits: 'desc' },
       select: {
         id: true,
@@ -126,8 +173,36 @@ export class UsersService {
         displayName: true,
         avatarUrl: true,
         credits: true,
+        createdAt: true,
+        sessions: {
+          where: since ? { startedAt: { gte: since } } : undefined,
+          orderBy: { startedAt: 'desc' },
+          take: 180,
+          select: {
+            startedAt: true,
+          },
+        },
+        robots: {
+          select: {
+            id: true,
+            createdAt: true,
+          },
+        },
       },
     });
+
+    return users.map((user) => ({
+      id: user.id,
+      username: user.username,
+      displayName: user.displayName,
+      avatarUrl: user.avatarUrl,
+      credits: user.credits,
+      createdAt: user.createdAt,
+      recentSessions: user.sessions.length,
+      streakDays: this.countSessionStreak(user.sessions),
+      robotCount: user.robots.length,
+      isNewOperator: user.robots.some((robot) => robot.createdAt >= newOperatorThreshold),
+    }));
   }
 
   async updateMe(userId: string, dto: UpdateMeDto) {
@@ -211,7 +286,7 @@ export class UsersService {
     requester: JwtPayload,
     input: UpdateAdminUserDto,
   ) {
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const [actor, target] = await Promise.all([
         tx.user.findUnique({
           where: { id: requester.sub },
@@ -324,32 +399,85 @@ export class UsersService {
         updates.credits = Math.round(input.credits);
       }
 
-      if (typeof input.balance === 'number' && Number.isFinite(input.balance)) {
-        updates.balance = Math.round(input.balance);
-      }
+      // Balance changes are routed through walletService.adminAdjust below so
+      // every mutation produces an audit-tagged ledger row.
+      const balanceTarget =
+        typeof input.balance === 'number' && Number.isFinite(input.balance)
+          ? Math.round(input.balance)
+          : null;
 
-      if (Object.keys(updates).length === 0) {
+      if (Object.keys(updates).length === 0 && balanceTarget === null) {
         throw new BadRequestException('No valid user changes provided');
       }
 
-      return tx.user.update({
-        where: { id },
-        data: updates,
-        select: {
-          id: true,
-          username: true,
-          displayName: true,
-          avatarUrl: true,
-          email: true,
-          role: true,
-          isActive: true,
-          credits: true,
-          balance: true,
-          lastLoginAt: true,
-          createdAt: true,
-        },
-      });
+      const updated = Object.keys(updates).length > 0
+        ? await tx.user.update({
+            where: { id },
+            data: updates,
+            select: {
+              id: true,
+              username: true,
+              displayName: true,
+              avatarUrl: true,
+              email: true,
+              role: true,
+              isActive: true,
+              credits: true,
+              balance: true,
+              lastLoginAt: true,
+              createdAt: true,
+            },
+          })
+        : await tx.user.findUniqueOrThrow({
+            where: { id },
+            select: {
+              id: true,
+              username: true,
+              displayName: true,
+              avatarUrl: true,
+              email: true,
+              role: true,
+              isActive: true,
+              credits: true,
+              balance: true,
+              lastLoginAt: true,
+              createdAt: true,
+            },
+          });
+
+      return { updated, balanceTarget };
     });
+
+    if (result.balanceTarget !== null && result.balanceTarget !== result.updated.balance) {
+      const delta = result.balanceTarget - result.updated.balance;
+      if (delta !== 0) {
+        await this.walletService.adminAdjust({
+          userId: id,
+          delta,
+          reason: `staff balance set to ${result.balanceTarget}`,
+          requesterId: requester.sub,
+        });
+        const refreshed = await this.prisma.user.findUnique({
+          where: { id },
+          select: {
+            id: true,
+            username: true,
+            displayName: true,
+            avatarUrl: true,
+            email: true,
+            role: true,
+            isActive: true,
+            credits: true,
+            balance: true,
+            lastLoginAt: true,
+            createdAt: true,
+          },
+        });
+        if (refreshed) return refreshed;
+      }
+    }
+
+    return result.updated;
   }
 
   async deleteUserByStaff(id: string, requester: JwtPayload) {

@@ -70,6 +70,19 @@ Quick reference for common production incident scenarios.
 
 ---
 
+## Public Launch Configuration
+
+Before exposing a BotParty instance publicly, confirm these envs are explicitly set:
+
+1. `REQUIRE_EMAIL_VERIFICATION=true` unless you intentionally want open signups without email confirmation.
+2. `METRICS_AUTH_REQUIRED=true` together with strong `METRICS_USERNAME` / `METRICS_PASSWORD`.
+3. `MAX_ROBOTS_PER_OWNER`, `MAX_WEBHOOKS_PER_ROBOT`, `MAX_EXTERNAL_CAMERAS_PER_ROBOT`, and `MAX_ACTIVE_QUEUE_ENTRIES_PER_USER` sized for your infrastructure.
+4. `NEXT_PUBLIC_LEGAL_OPERATOR_NAME`, `NEXT_PUBLIC_LEGAL_OPERATOR_EMAIL`, and `NEXT_PUBLIC_LEGAL_OPERATOR_ADDRESS` so `/imprint`, `/terms`, and `/privacy` render real operator details.
+5. `WEBHOOK_SECRET_ENCRYPTION_KEY` set to a unique high-entropy secret before enabling outbound webhooks.
+6. `RECORDING_RETENTION_DAYS` set to a retention window that matches your privacy policy and moderation workflow.
+
+---
+
 ## Disk Full
 
 **Symptoms:** Logs stop, uploads fail, DB writes fail.
@@ -92,12 +105,52 @@ Production backups are required for PostgreSQL and recommended for Redis snapsho
 3. Keep at least 30 days of backups
 4. Verify backup restore weekly on a staging database
 5. Keep one off-host copy (object storage or remote volume)
+6. Mirror the MinIO buckets (`botparty-recordings`, `botparty-thumbnails`) to separate storage or enable bucket replication, otherwise DB-only restores will not recover media assets
+7. Keep MinIO lifecycle retention (`RECORDING_RETENTION_DAYS`) aligned with the backup retention you promise to users
 
 Example cron entry:
 
 ```bash
 0 */6 * * * cd /srv/botparty && ./scripts/backup-db.sh >> /var/log/botparty-backup.log 2>&1
 ```
+
+---
+
+## OpenAPI Export
+
+The API serves Swagger/OpenAPI at `/api/docs` when `SWAGGER_DOCS=true` and the optional basic-auth credentials are configured.
+
+For release packaging or local regeneration, export the checked-in spec directly from the built API bundle:
+
+```bash
+pnpm openapi:export
+```
+
+CI also uploads `docs/openapi.json` as an artifact and fails if the committed spec drifts from generated output.
+
+---
+
+## Centralized Logs (optional Loki profile)
+
+BotParty ships an optional compose profile for centralized Docker log collection with Loki + Promtail.
+
+Start it with:
+
+```bash
+docker compose --profile observability-logs up -d loki promtail
+```
+
+What it does:
+
+1. `promtail` tails Docker container JSON logs from `/var/lib/docker/containers`.
+2. `loki` stores the aggregated stream on the internal compose network.
+3. You can point Grafana or another Loki-compatible viewer at `http://loki:3100`.
+
+Operational notes:
+
+1. This profile expects a Docker host with readable `/var/lib/docker/containers` and `/var/run/docker.sock`.
+2. Keep it disabled on hosts where these mounts are not permitted.
+3. Application logs remain structured Pino output, so no code changes are required to enable collection.
 
 ---
 

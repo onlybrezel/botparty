@@ -4,6 +4,7 @@ import {
   ConflictException,
   Logger,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { JwtService, type JwtSignOptions } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -23,6 +24,40 @@ const MAX_LOGIN_ATTEMPTS = 10;
 const LOGIN_LOCKOUT_SEC = 15 * 60; // 15 minutes
 const MAX_PASSWORD_RESET_REQUESTS = 3;
 const PASSWORD_RESET_WINDOW_SEC = 15 * 60;
+const MAX_EMAIL_VERIFICATION_RESENDS = 3;
+const EMAIL_VERIFICATION_WINDOW_SEC = 15 * 60;
+
+type AuthResult =
+  | {
+      accessToken: string;
+      refreshToken: string;
+      user: {
+        id: string;
+        username: string;
+        displayName: string | null;
+        avatarUrl: string | null;
+        role: string;
+        createdAt: string;
+      };
+      requiresEmailVerification?: false;
+      message?: string;
+    }
+  | {
+      accessToken?: undefined;
+      refreshToken?: undefined;
+      user: {
+        id: string;
+        username: string;
+        displayName: string | null;
+        avatarUrl: string | null;
+        role: string;
+        createdAt: string;
+      };
+      requiresEmailVerification: true;
+      message: string;
+    };
+
+type AuthTokenResult = Extract<AuthResult, { accessToken: string }>;
 
 @Injectable()
 export class AuthService {
@@ -36,7 +71,7 @@ export class AuthService {
     private readonly mail: MailService,
   ) {}
 
-  async register(input: z.infer<typeof registerSchema>) {
+  async register(input: z.infer<typeof registerSchema>): Promise<AuthResult> {
     const data = registerSchema.parse({
       ...input,
       email: input.email.trim().toLowerCase(),
@@ -58,7 +93,7 @@ export class AuthService {
 
     const passwordHash = await hash(data.password, { type: 2 }); // argon2id
 
-    const requireVerification = this.config.get<string>('REQUIRE_EMAIL_VERIFICATION') === 'true';
+    const requireVerification = this.requiresEmailVerification();
     const verificationToken = randomBytes(32).toString('hex');
     const verificationExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
@@ -78,6 +113,11 @@ export class AuthService {
       this.mail.sendEmailVerification(user.email, verificationToken).catch((err: unknown) => {
         this.logger.warn(`Failed to send verification email to ${user.email}`, err);
       });
+      return {
+        user: this.buildSessionUser(user),
+        requiresEmailVerification: true,
+        message: 'Check your inbox to verify your email address before signing in.',
+      };
     }
 
     this.logger.log(`User registered: ${user.username}`);
@@ -109,7 +149,7 @@ export class AuthService {
     return { message: 'Email verified successfully' };
   }
 
-  async login(input: z.infer<typeof loginSchema>) {
+  async login(input: z.infer<typeof loginSchema>): Promise<AuthTokenResult> {
     const data = loginSchema.parse({
       ...input,
       email: input.email.trim().toLowerCase(),
@@ -148,6 +188,11 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
+    if (this.requiresEmailVerification() && !user.emailVerified) {
+      await this.queueEmailVerificationResend(user.id, user.email);
+      throw new ForbiddenException('Email address not verified. Check your inbox for a fresh verification link.');
+    }
+
     // Clear failed attempt counters on successful login
     await this.redis.del(attemptsKey);
     await this.redis.del(lockoutKey);
@@ -162,7 +207,7 @@ export class AuthService {
     return this.generateTokens(user);
   }
 
-  async refreshToken(refreshToken: string | null | undefined) {
+  async refreshToken(refreshToken: string | null | undefined): Promise<AuthTokenResult> {
     if (!refreshToken?.trim()) {
       throw new UnauthorizedException('Invalid refresh token');
     }
@@ -180,8 +225,21 @@ export class AuthService {
         throw new UnauthorizedException('Invalid refresh token');
       }
 
+      if (this.requiresEmailVerification() && !user.emailVerified) {
+        throw new ForbiddenException('Email address not verified');
+      }
+
+      const isCurrentToken = await this.isCurrentRefreshToken(user.id, refreshToken);
+      if (!isCurrentToken) {
+        await this.revokeRefreshTokens(user.id);
+        throw new UnauthorizedException('Refresh token reuse detected');
+      }
+
       return this.generateTokens(user);
-    } catch {
+    } catch (error) {
+      if (error instanceof ForbiddenException || error instanceof UnauthorizedException) {
+        throw error;
+      }
       throw new UnauthorizedException('Invalid refresh token');
     }
   }
@@ -191,6 +249,7 @@ export class AuthService {
       where: { id: userId },
       data: { tokenVersion: { increment: 1 } },
     });
+    await this.redis.del(this.refreshTokenKey(userId));
   }
 
   async resolveValidAccessTokenPayload(accessToken?: string | null): Promise<JwtPayload | null> {
@@ -210,12 +269,18 @@ export class AuthService {
           id: true,
           username: true,
           role: true,
+          emailVerified: true,
           isActive: true,
           tokenVersion: true,
         },
       });
 
-      if (!user || !user.isActive || user.tokenVersion !== payload.tokenVersion) {
+      if (
+        !user
+        || !user.isActive
+        || user.tokenVersion !== payload.tokenVersion
+        || (this.requiresEmailVerification() && !user.emailVerified)
+      ) {
         return null;
       }
 
@@ -312,6 +377,26 @@ export class AuthService {
     return { message: 'If the account exists, a reset email has been sent.' };
   }
 
+  async resendEmailVerification(input: { email: string }) {
+    const email = input.email.trim().toLowerCase();
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+      select: {
+        id: true,
+        email: true,
+        emailVerified: true,
+        isActive: true,
+      },
+    });
+
+    if (!user || !user.isActive || user.emailVerified) {
+      return { message: 'If the account exists, a verification email has been sent.' };
+    }
+
+    await this.queueEmailVerificationResend(user.id, user.email);
+    return { message: 'If the account exists, a verification email has been sent.' };
+  }
+
   async resetPassword(input: ResetPasswordInput) {
     const data = resetPasswordSchema.parse(input);
     const tokenHash = this.hashResetToken(data.token);
@@ -345,7 +430,15 @@ export class AuthService {
     return { message: 'Password reset successful' };
   }
 
-  private generateTokens(user: { id: string; username: string; role: string; tokenVersion: number }) {
+  private async generateTokens(user: {
+    id: string;
+    username: string;
+    role: string;
+    tokenVersion: number;
+    displayName?: string | null;
+    avatarUrl?: string | null;
+    createdAt?: Date;
+  }): Promise<AuthTokenResult> {
     const jwtPayload: JwtPayload = {
       sub: user.id,
       username: user.username,
@@ -356,6 +449,7 @@ export class AuthService {
     const refreshPayload: RefreshTokenPayload = {
       sub: user.id,
       tokenVersion: user.tokenVersion,
+      jti: randomBytes(16).toString('hex'),
     };
 
     const accessToken = this.jwt.sign(jwtPayload);
@@ -364,19 +458,68 @@ export class AuthService {
       secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
       expiresIn: asJwtExpiresIn(refreshExpiresIn),
     } satisfies JwtSignOptions);
+    await this.storeRefreshToken(user.id, refreshTokenValue);
 
     return {
       accessToken,
       refreshToken: refreshTokenValue,
-      user: {
-        id: user.id,
-        username: user.username,
-        role: user.role,
-      },
+      user: this.buildSessionUser(user),
     };
   }
 
+  private buildSessionUser(user: {
+    id: string;
+    username: string;
+    role: string;
+    displayName?: string | null;
+    avatarUrl?: string | null;
+    createdAt?: Date;
+  }) {
+    return {
+      id: user.id,
+      username: user.username,
+      displayName: user.displayName ?? null,
+      avatarUrl: user.avatarUrl ?? null,
+      role: user.role,
+      createdAt: user.createdAt?.toISOString() ?? new Date().toISOString(),
+    };
+  }
+
+  private requiresEmailVerification() {
+    return this.config.get<string>('REQUIRE_EMAIL_VERIFICATION') === 'true';
+  }
+
+  private async queueEmailVerificationResend(userId: string, email: string) {
+    const resendKey = `auth:email-verification:resend:${email}`;
+    const resendAttempts = await this.redis.incr(resendKey);
+    if (resendAttempts === 1) {
+      await this.redis.expire(resendKey, EMAIL_VERIFICATION_WINDOW_SEC);
+    }
+    if (resendAttempts > MAX_EMAIL_VERIFICATION_RESENDS) {
+      this.logger.warn(`Email verification resend rate limit exceeded for ${email}`);
+      return;
+    }
+
+    const token = randomBytes(32).toString('hex');
+    const expiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        emailVerificationToken: token,
+        emailVerificationExpiry: expiry,
+      },
+    });
+
+    this.mail.sendEmailVerification(email, token).catch((error: unknown) => {
+      this.logger.warn(`Failed to send verification email to ${email}: ${(error as Error).message}`);
+    });
+  }
+
   private hashResetToken(token: string) {
+    return createHash('sha256').update(token).digest('hex');
+  }
+
+  private hashRefreshToken(token: string) {
     return createHash('sha256').update(token).digest('hex');
   }
 
@@ -386,5 +529,25 @@ export class AuthService {
 
   private passwordResetUserKey(userId: string) {
     return `auth:password-reset:user:${userId}`;
+  }
+
+  private refreshTokenKey(userId: string) {
+    return `auth:refresh-token:${userId}`;
+  }
+
+  private async storeRefreshToken(userId: string, refreshToken: string) {
+    const payload = this.jwt.verify<RefreshTokenPayload & { exp?: number }>(refreshToken, {
+      secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
+    });
+    const ttlSec = typeof payload.exp === 'number' ? Math.max(1, payload.exp - Math.floor(Date.now() / 1000)) : 7 * 24 * 60 * 60;
+    await this.redis.set(this.refreshTokenKey(userId), this.hashRefreshToken(refreshToken), 'EX', ttlSec);
+  }
+
+  private async isCurrentRefreshToken(userId: string, refreshToken: string) {
+    const storedHash = await this.redis.get(this.refreshTokenKey(userId));
+    if (!storedHash) {
+      return false;
+    }
+    return storedHash === this.hashRefreshToken(refreshToken);
   }
 }

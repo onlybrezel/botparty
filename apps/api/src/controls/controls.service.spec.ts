@@ -73,9 +73,9 @@ describe('ControlsService', () => {
   it('filters moderator and owner controls by requester permissions', async () => {
     prisma.robot.findUnique.mockResolvedValue({ ownerId: 'owner-1' });
     jest.spyOn(service, 'getEnabledButtonsForRobot').mockResolvedValue([
-      { id: '1', label: 'Forward', command: 'forward', hotKey: 'w', icon: null, cooldownMs: 100, access: ControlButtonAccess.EVERYONE, position: 0, color: null },
-      { id: '2', label: 'Kick', command: 'kick', hotKey: null, icon: null, cooldownMs: 0, access: ControlButtonAccess.MODERATOR, position: 1, color: null },
-      { id: '3', label: 'Secret', command: 'secret', hotKey: null, icon: null, cooldownMs: 0, access: ControlButtonAccess.OWNER, position: 2, color: null },
+      { id: '1', label: 'Forward', command: 'forward', hotKey: 'w', icon: null, cooldownMs: 100, access: ControlButtonAccess.EVERYONE, position: 0, color: null, costCredits: 0 },
+      { id: '2', label: 'Kick', command: 'kick', hotKey: null, icon: null, cooldownMs: 0, access: ControlButtonAccess.MODERATOR, position: 1, color: null, costCredits: 0 },
+      { id: '3', label: 'Secret', command: 'secret', hotKey: null, icon: null, cooldownMs: 0, access: ControlButtonAccess.OWNER, position: 2, color: null, costCredits: 0 },
     ]);
 
     const moderatorButtons = await service.getVisibleButtons('robot-1', {

@@ -105,8 +105,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/privacy" className="transition hover:text-[var(--foreground)]">
                 Privacy Policy
               </Link>
+              <Link href="/imprint" className="transition hover:text-[var(--foreground)]">
+                Imprint
+              </Link>
               <Link href="/cookies" className="transition hover:text-[var(--foreground)]">
                 Cookie Notice
+              </Link>
+              <Link href="/status" className="transition hover:text-[var(--foreground)]">
+                Status
               </Link>
               <Link href="/docs/robot-setup" className="transition hover:text-[var(--foreground)]">
                 Robot Setup

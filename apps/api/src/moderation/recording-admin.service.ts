@@ -9,6 +9,7 @@ import {
 import { StreamableFile } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GetObjectCommand, ListObjectsV2Command, S3Client } from '@aws-sdk/client-s3';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { basename } from 'node:path';
 import { Readable } from 'node:stream';
 import { PrismaService } from '../prisma/prisma.service';
@@ -27,17 +28,27 @@ type RecordingFileSummary = {
   robotId: string | null;
   cameraId: string | null;
   recordedAt: string | null;
+  playbackPath: string;
+  playbackExpiresAt: string;
 };
 
 @Injectable()
 export class RecordingAdminService {
   private readonly logger = new Logger(RecordingAdminService.name);
+  private readonly playbackSigningKey: string;
+  private readonly playbackTtlSec: number;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly livekit: LivekitService,
     private readonly config: ConfigService,
-  ) {}
+  ) {
+    this.playbackSigningKey =
+      this.config.get<string>('RECORDING_SIGNING_SECRET')?.trim()
+      || this.config.get<string>('JWT_SECRET')?.trim()
+      || 'botparty-recording-signing-fallback';
+    this.playbackTtlSec = Number(this.config.get<string>('RECORDING_SIGNED_URL_TTL_SEC') ?? '300');
+  }
 
   async getAdminRobotRecordingStatus(robotId: string, requesterId: string) {
     await this._assertAdmin(requesterId);
@@ -98,6 +109,68 @@ export class RecordingAdminService {
     throw new NotFoundException('Recording not found');
   }
 
+  async streamSignedAdminRecording(
+    fileName: string,
+    expiresRaw: string | undefined,
+    signature: string | undefined,
+  ): Promise<StreamableFile> {
+    const safeName = basename(fileName);
+    if (!safeName.endsWith('.mp4')) {
+      throw new BadRequestException('Only .mp4 recordings are supported');
+    }
+
+    this._assertSignedPlaybackAccess(safeName, expiresRaw, signature);
+
+    const objectFile = await this._readObjectRecording(safeName);
+    if (objectFile) {
+      return objectFile;
+    }
+
+    throw new NotFoundException('Recording not found');
+  }
+
+  async findReplayCandidatesForSession(input: {
+    robotId: string;
+    startedAt: Date;
+    endedAt?: Date | null;
+    recordingUrl?: string | null;
+    limit?: number;
+  }) {
+    if (!this._objectStorageConfig()) {
+      return [];
+    }
+
+    const explicitFileName = input.recordingUrl ? basename(input.recordingUrl) : null;
+    const timeWindowStart = input.startedAt.getTime() - 15 * 60 * 1000;
+    const timeWindowEnd = (input.endedAt?.getTime() ?? input.startedAt.getTime() + 4 * 60 * 60 * 1000) + 15 * 60 * 1000;
+    const files = await this._listObjectStorageRecordings();
+
+    return files
+      .filter((file) => {
+        if (explicitFileName && file.fileName === explicitFileName) {
+          return true;
+        }
+        if (file.robotId !== input.robotId) {
+          return false;
+        }
+        if (!file.recordedAt) {
+          return false;
+        }
+        const recordedAtMs = Date.parse(file.recordedAt);
+        return Number.isFinite(recordedAtMs) && recordedAtMs >= timeWindowStart && recordedAtMs <= timeWindowEnd;
+      })
+      .sort((left, right) => {
+        if (explicitFileName) {
+          if (left.fileName === explicitFileName) return -1;
+          if (right.fileName === explicitFileName) return 1;
+        }
+        const leftDelta = left.recordedAt ? Math.abs(Date.parse(left.recordedAt) - input.startedAt.getTime()) : Number.MAX_SAFE_INTEGER;
+        const rightDelta = right.recordedAt ? Math.abs(Date.parse(right.recordedAt) - input.startedAt.getTime()) : Number.MAX_SAFE_INTEGER;
+        return leftDelta - rightDelta;
+      })
+      .slice(0, Math.max(1, Math.min(input.limit ?? 3, 5)));
+  }
+
   private async _assertAdmin(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
@@ -155,6 +228,7 @@ export class RecordingAdminService {
             robotId: parsed.robotId,
             cameraId: parsed.cameraId,
             recordedAt: parsed.recordedAt,
+            ...this._buildSignedPlaybackMetadata(fileName),
           };
 
           const current = files.get(fileName);
@@ -323,5 +397,49 @@ export class RecordingAdminService {
       Number(second),
     );
     return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+  }
+
+  private _buildSignedPlaybackMetadata(fileName: string) {
+    const safeName = basename(fileName);
+    const expires = Math.floor(Date.now() / 1000) + this.playbackTtlSec;
+    const signature = this._signPlaybackAccess(safeName, expires);
+
+    return {
+      playbackPath:
+        `/api/v1/moderation/admin/recordings/${encodeURIComponent(safeName)}/signed`
+        + `?expires=${expires}&signature=${signature}`,
+      playbackExpiresAt: new Date(expires * 1000).toISOString(),
+    };
+  }
+
+  private _assertSignedPlaybackAccess(
+    fileName: string,
+    expiresRaw: string | undefined,
+    signature: string | undefined,
+  ) {
+    const expires = Number(expiresRaw);
+    if (!Number.isInteger(expires) || expires <= Math.floor(Date.now() / 1000)) {
+      throw new ForbiddenException('Recording link expired');
+    }
+    if (!signature?.trim()) {
+      throw new ForbiddenException('Recording signature missing');
+    }
+
+    const expected = this._signPlaybackAccess(fileName, expires);
+    const expectedBuffer = Buffer.from(expected, 'hex');
+    const actualBuffer = Buffer.from(signature, 'hex');
+    const valid =
+      actualBuffer.length === expectedBuffer.length
+      && timingSafeEqual(actualBuffer, expectedBuffer);
+
+    if (!valid) {
+      throw new ForbiddenException('Recording signature invalid');
+    }
+  }
+
+  private _signPlaybackAccess(fileName: string, expires: number) {
+    return createHmac('sha256', this.playbackSigningKey)
+      .update(`${fileName}:${expires}`)
+      .digest('hex');
   }
 }

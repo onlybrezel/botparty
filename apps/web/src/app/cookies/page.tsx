@@ -32,7 +32,7 @@ export default function CookieNoticePage() {
   return (
     <div className="mx-auto max-w-4xl px-4 py-10 sm:px-6 lg:px-8">
       <div className="mb-8">
-        <p className="text-xs uppercase tracking-[0.22em] text-emerald-300">Legal</p>
+        <p className="text-xs uppercase tracking-[0.22em] text-emerald-700 dark:text-emerald-300">Legal</p>
         <h1 className="mt-2 text-3xl font-black tracking-tight">Cookie Notice</h1>
         <p className="mt-3 max-w-2xl text-sm text-[var(--muted-foreground)]">
           BotParty uses essential browser storage so live rooms, guest access, dashboards, and session continuity work reliably.
@@ -59,6 +59,7 @@ export default function CookieNoticePage() {
 
       <div className="mt-6 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5 text-sm leading-7 text-[var(--muted-foreground)]">
         <p>BotParty currently relies on essential and functional storage to operate live rooms and account features.</p>
+        <p className="mt-3">You can accept or decline non-essential categories from the cookie banner and review the current consent state later in Settings.</p>
         <p className="mt-3">If analytics, advertising, or third-party tracking are introduced later, this notice should be expanded and any required consent flow should be added before those technologies are enabled.</p>
       </div>
     </div>

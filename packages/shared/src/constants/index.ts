@@ -43,6 +43,14 @@ export enum TransactionType {
   FEATURED_ROBOT = 'FEATURED_ROBOT',
   BATTLE_ENTRY = 'BATTLE_ENTRY',
   REWARD = 'REWARD',
+  BUTTON_SPEND = 'BUTTON_SPEND',
+  BUTTON_PAYOUT = 'BUTTON_PAYOUT',
+  DONATION_SENT = 'DONATION_SENT',
+  DONATION_RECEIVED = 'DONATION_RECEIVED',
+  PLATFORM_FEE = 'PLATFORM_FEE',
+  ADMIN_ADJUSTMENT = 'ADMIN_ADJUSTMENT',
+  REFUND = 'REFUND',
+  CHARGEBACK = 'CHARGEBACK',
 }
 
 // ─── Session Status ──────────────────────────────────
@@ -138,6 +146,10 @@ export const WS_EVENTS = {
   ERROR: 'error',
   ROOM_JOIN: 'room:join',
   ROBOT_ACTIONS: 'robot:actions',
+
+  // Wallet
+  WALLET_UPDATE: 'wallet:update',                    // Live balance / ledger event
+  WALLET_INSUFFICIENT_FUNDS: 'wallet:insufficient',  // Sent when a paid action is rejected
 } as const;
 
 export const WS_PROTOCOL_VERSION = 1;
@@ -184,4 +196,14 @@ export const LIMITS = {
   WS_EVENT_RATE_WINDOW_MS: 1000, // Sliding window for generic WS event rate limiting
   WS_EVENT_RATE_LIMIT: 30,       // Max events per window (normal users & guests)
   WS_EVENT_RATE_LIMIT_ADMIN: 60, // Max events per window (admin / mod / robot)
+
+  // ─── Wallet & Billing ──────────────────────────────
+  MIN_DONATION_CREDITS: 1,
+  MAX_DONATION_CREDITS: 100_000,
+  DONATIONS_PER_HOUR: 30,
+  DONATIONS_DAILY_CAP_CREDITS: 200_000,
+  MAX_BUTTON_COST_CREDITS: 100_000,
+  MAX_PAYOUT_REQUEST_CREDITS: 1_000_000,
+  MIN_PAYOUT_REQUEST_CREDITS: 1_000,
+  DEFAULT_PLATFORM_FEE_BPS: 1_000, // 10%
 } as const;

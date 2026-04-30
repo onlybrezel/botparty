@@ -23,6 +23,12 @@ Spiritually inspired by LetsRobot.tv and Remo.tv. Built from scratch with a mode
 
 ---
 
+## Security
+
+- Responsible disclosure policy: [SECURITY.md](SECURITY.md)
+
+---
+
 ## 🏗 Architecture
 
 ```
@@ -256,12 +262,9 @@ Copy `fullchain.pem` and `privkey.pem` into `docker/nginx/ssl/`, then run `bash 
 
 ## What's missing / planned
 
-- [ ] Session recording & replay
-- [ ] Analytics dashboard for robot hosts
 - [ ] Voting queue balancing and ranking improvements
 - [ ] Full ROS2 integration
-- [ ] Mobile touch controls
-- [ ] Leaderboard / community features
+- [ ] Community extensions beyond the current leaderboard
 - [ ] Credit/priority system beyond the schema
 
 ---
@@ -269,6 +272,9 @@ Copy `fullchain.pem` and `privkey.pem` into `docker/nginx/ssl/`, then run `bash 
 ## Contributing
 
 PRs welcome. Open an issue first if it's a bigger change.
+
+- Contribution guide: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Current release notes: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 

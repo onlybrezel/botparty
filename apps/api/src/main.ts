@@ -2,17 +2,19 @@ import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { WsAdapter } from '@nestjs/platform-ws';
-import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import { SwaggerModule } from '@nestjs/swagger';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import helmet, { type FastifyHelmetOptions } from '@fastify/helmet';
 import type { FastifyPluginAsync } from 'fastify';
 import type { IncomingMessage } from 'http';
-import { timingSafeEqual, randomUUID } from 'crypto';
-import { AppModule } from './app.module';
+import { randomUUID } from 'crypto';
+import { AppModule } from './bootstrap/app.module';
 import { loadFileBackedEnv } from './common/env-file';
+import { hasBasicAuthCredentials, isAuthorizedBasicAuth } from './common/http-basic-auth';
 import { initSentry } from './common/sentry';
 import { initTracing, shutdownTracing } from './common/tracing';
 import { AllExceptionsFilter } from './filters/all-exceptions.filter';
+import { createSwaggerDocumentConfig } from './openapi/swagger-config';
 
 function readOrigin(raw: string | undefined): string | null {
   const value = raw?.trim();
@@ -61,33 +63,6 @@ function isProtectedSwaggerPath(url: string | undefined): boolean {
   return url === '/docs' || url.startsWith('/docs/') || url === '/docs-json';
 }
 
-function secureEquals(left: string, right: string): boolean {
-  const leftBuffer = Buffer.from(left);
-  const rightBuffer = Buffer.from(right);
-  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
-}
-
-function decodeBasicAuth(header: string | undefined): { username: string; password: string } | null {
-  if (!header?.startsWith('Basic ')) {
-    return null;
-  }
-
-  try {
-    const decoded = Buffer.from(header.slice('Basic '.length), 'base64').toString('utf8');
-    const separatorIndex = decoded.indexOf(':');
-    if (separatorIndex < 0) {
-      return null;
-    }
-
-    return {
-      username: decoded.slice(0, separatorIndex),
-      password: decoded.slice(separatorIndex + 1),
-    };
-  } catch {
-    return null;
-  }
-}
-
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
   loadFileBackedEnv(process.env, logger);
@@ -109,6 +84,14 @@ async function bootstrap() {
       minLength: 32,
       bannedValues: ['secret_that_is_at_least_32_characters_long'],
     });
+
+    const metricsAuthMode = process.env.METRICS_AUTH_REQUIRED?.trim().toLowerCase();
+    const metricsAuthRequired =
+      metricsAuthMode === 'true' || (metricsAuthMode !== 'false' && process.env.NODE_ENV === 'production');
+    if (metricsAuthRequired) {
+      assertRequiredSecret(process.env, 'METRICS_USERNAME');
+      assertRequiredSecret(process.env, 'METRICS_PASSWORD', { minLength: 12 });
+    }
   } catch (error) {
     if (process.env.NODE_ENV === 'production') {
       throw error;
@@ -122,7 +105,7 @@ async function bootstrap() {
     AppModule,
     new FastifyAdapter({
       bodyLimit: Number(process.env.FASTIFY_BODY_LIMIT ?? 5 * 1024 * 1024),
-      genReqId: (req: IncomingMessage) => {
+      genReqId: (req: { headers: Record<string, string | string[] | undefined> }) => {
         const fromHeader = req.headers['x-correlation-id'];
         if (typeof fromHeader === 'string' && fromHeader.trim()) {
           return fromHeader.trim();
@@ -141,6 +124,7 @@ async function bootstrap() {
       // Docker bridge, RFC-1918).  Override via TRUST_PROXY env var if needed.
       trustProxy: process.env.TRUST_PROXY ?? 'loopback, linklocal, uniquelocal',
     }),
+    { rawBody: true },
   );
 
   // ─── WebSocket adapter (ws, not socket.io) ────────
@@ -164,7 +148,7 @@ async function bootstrap() {
       contentSecurityPolicy: {
         directives: {
           defaultSrc: ["'self'"],
-          scriptSrc: ["'self'"],
+          scriptSrc: ["'self'", "'unsafe-inline'"],
           styleSrc: ["'self'", "'unsafe-inline'"],
           imgSrc: ["'self'", 'data:', 'blob:'],
           connectSrc,
@@ -217,39 +201,26 @@ async function bootstrap() {
       }
 
       app.getHttpAdapter().getInstance().addHook('onRequest', async (request, reply) => {
-        if (!isProtectedSwaggerPath(request.raw.url)) {
-          return;
-        }
+          if (!isProtectedSwaggerPath(request.raw.url)) {
+            return;
+          }
 
-        const credentials = decodeBasicAuth(request.headers.authorization);
-        const authorized =
-          credentials !== null
-          && secureEquals(credentials.username, swaggerUser)
-          && secureEquals(credentials.password, swaggerPassword);
-
-        if (authorized) {
-          return;
-        }
+          if (
+            hasBasicAuthCredentials(swaggerUser, swaggerPassword)
+            && isAuthorizedBasicAuth(request.headers.authorization, {
+              username: swaggerUser,
+              password: swaggerPassword,
+            })
+          ) {
+            return;
+          }
 
         reply.header('www-authenticate', 'Basic realm="BotParty API Docs"');
         reply.code(401).send({ message: 'Authentication required' });
       });
     }
 
-    const config = new DocumentBuilder()
-      .setTitle('BotParty API')
-      .setDescription('Real-time robot teleoperation platform API')
-      .setVersion('0.1.3')
-      .addBearerAuth()
-      .addTag('auth', 'Authentication & authorization')
-      .addTag('users', 'User management')
-      .addTag('robots', 'Robot management')
-      .addTag('sessions', 'Session management')
-      .addTag('queue', 'Queue system')
-      .addTag('livekit', 'LiveKit token generation')
-      .build();
-
-    const document = SwaggerModule.createDocument(app, config);
+    const document = SwaggerModule.createDocument(app, createSwaggerDocumentConfig());
     SwaggerModule.setup('docs', app, document);
     logger.log('📖 Swagger docs available at /docs');
   }

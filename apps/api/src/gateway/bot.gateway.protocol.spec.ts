@@ -14,6 +14,7 @@ import { RedisService } from '../redis/redis.service';
 import { ModerationService } from '../moderation/moderation.service';
 import { ControlsService } from '../controls/controls.service';
 import { AuthService } from '../auth/auth.service';
+import { WalletService } from '../wallet/wallet.service';
 
 describe('BotGateway protocol exchange', () => {
   let gateway: BotGateway;
@@ -142,6 +143,15 @@ describe('BotGateway protocol exchange', () => {
           useValue: {
             get: jest.fn().mockReturnValue('http://localhost:3000'),
             getOrThrow: jest.fn().mockReturnValue('robot-secret'),
+          } as any,
+        },
+        {
+          provide: WalletService,
+          useValue: {
+            transfer: jest.fn().mockResolvedValue({ status: 'ok' }),
+            credit: jest.fn(),
+            debit: jest.fn(),
+            getBalance: jest.fn().mockResolvedValue(0),
           } as any,
         },
       ],

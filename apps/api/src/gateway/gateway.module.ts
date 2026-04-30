@@ -7,9 +7,10 @@ import { RobotsModule } from '../robots/robots.module';
 import { ModerationModule } from '../moderation/moderation.module';
 import { AuthModule } from '../auth/auth.module';
 import { ControlsModule } from '../controls/controls.module';
+import { WalletModule } from '../wallet/wallet.module';
 
 @Module({
-  imports: [LivekitModule, SessionsModule, QueueModule, RobotsModule, ModerationModule, AuthModule, ControlsModule],
+  imports: [LivekitModule, SessionsModule, QueueModule, RobotsModule, ModerationModule, AuthModule, ControlsModule, WalletModule],
   providers: [BotGateway],
   exports: [BotGateway],
 })

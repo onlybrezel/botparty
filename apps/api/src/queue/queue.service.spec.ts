@@ -48,6 +48,10 @@ const mockRobotsService = {
   resolveGuestActorId: jest.fn().mockReturnValue(null),
 };
 
+const mockConfig = {
+  get: jest.fn(),
+};
+
 describe('QueueService', () => {
   let service: QueueService;
 
@@ -63,6 +67,7 @@ describe('QueueService', () => {
     mockRedis.hset.mockResolvedValue(1);
     mockRedis.expire.mockResolvedValue(1);
     mockRedis.pipeline.mockImplementation(() => createPipeline());
+    mockConfig.get.mockReturnValue(undefined);
 
 
     // Directly instantiate with mocked deps to avoid NestJS DI token issues
@@ -70,6 +75,7 @@ describe('QueueService', () => {
       mockPrisma as never,
       mockRedis as never,
       mockRobotsService as never,
+      mockConfig as never,
     );
   });
 
@@ -102,6 +108,24 @@ describe('QueueService', () => {
       mockPrisma.queueEntry.findUnique.mockResolvedValueOnce({ id: 'existing' });
 
       await expect(service.join('robot-1', 'user-1')).rejects.toThrow(ConflictException);
+    });
+
+    it('rejects join attempts when the per-user queue cap is reached', async () => {
+      mockConfig.get.mockImplementation((key: string) =>
+        key === 'MAX_ACTIVE_QUEUE_ENTRIES_PER_USER' ? '1' : undefined,
+      );
+      service = new QueueService(
+        mockPrisma as never,
+        mockRedis as never,
+        mockRobotsService as never,
+        mockConfig as never,
+      );
+      mockRobotsService.getAccessPolicy.mockResolvedValueOnce({ control: 'ENABLED' });
+      mockRobotsService.findById.mockResolvedValueOnce({ status: 'ONLINE' });
+      mockRobotsService.validateRoomAccess.mockResolvedValueOnce(true);
+      mockPrisma.queueEntry.count.mockResolvedValueOnce(1);
+
+      await expect(service.join('robot-1', 'user-1')).rejects.toThrow(BadRequestException);
     });
 
     it('creates a new queue entry, clears stale ballots, and publishes a join event', async () => {

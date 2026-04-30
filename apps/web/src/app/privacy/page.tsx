@@ -1,4 +1,7 @@
 import type { Metadata } from 'next';
+import { getLegalConfig } from '@/lib/legal';
+
+export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
   title: 'Privacy Policy',
@@ -21,15 +24,23 @@ function Section({
 }
 
 export default function PrivacyPage() {
+  const legal = getLegalConfig();
+
   return (
     <div className="mx-auto max-w-4xl px-4 py-10 sm:px-6 lg:px-8">
       <div className="mb-8">
-        <p className="text-xs uppercase tracking-[0.22em] text-sky-300">Legal</p>
+        <p className="text-xs uppercase tracking-[0.22em] text-sky-700 dark:text-sky-300">Legal</p>
         <h1 className="mt-2 text-3xl font-black tracking-tight">Privacy Policy</h1>
         <p className="mt-3 max-w-2xl text-sm text-[var(--muted-foreground)]">
           BotParty handles live robot streams, queue state, chat, moderation, and account data. This page explains what we store and why.
         </p>
       </div>
+
+      {!legal.isConfigured ? (
+        <div className="mb-5 rounded-2xl border border-amber-500/40 bg-amber-100 text-amber-950 p-4 text-sm dark:bg-amber-500/10 dark:text-amber-100">
+          Final operator details are still missing for this deployment. Configure the `NEXT_PUBLIC_LEGAL_*` variables before public launch.
+        </div>
+      ) : null}
 
       <div className="space-y-5">
         <Section title="What we collect">
@@ -58,8 +69,13 @@ export default function PrivacyPage() {
           <p>We keep data only as long as it is needed for account operation, safety, abuse handling, billing, diagnostics, or legal obligations.</p>
         </Section>
 
-        <Section title="Contact and updates">
-          <p>This policy should be adapted to the operator of the deployed BotParty instance, including contact address and any jurisdiction-specific disclosures.</p>
+        <Section title="Controller and contact">
+          <p><strong className="text-[var(--foreground)]">Operator:</strong> {legal.operatorName}</p>
+          <p><strong className="text-[var(--foreground)]">Address:</strong> {legal.operatorAddress}</p>
+          <p>
+            <strong className="text-[var(--foreground)]">Privacy contact:</strong>{' '}
+            <a className="underline" href={`mailto:${legal.operatorEmail}`}>{legal.operatorEmail}</a>
+          </p>
           <p>When data practices change materially, this page should be updated together with the related product behavior.</p>
         </Section>
       </div>

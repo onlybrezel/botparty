@@ -100,8 +100,14 @@ export class UsersController {
 
   @Get('leaderboard')
   @ApiOperation({ summary: 'Get credits leaderboard' })
-  async getLeaderboard(@Query('limit') limit?: string) {
-    return this.usersService.getLeaderboard(limit ? Number(limit) : 20);
+  async getLeaderboard(
+    @Query('limit') limit?: string,
+    @Query('period') period?: string,
+  ) {
+    return this.usersService.getLeaderboard({
+      limit: limit ? Number(limit) : 20,
+      period,
+    });
   }
 
   @Get(':username')

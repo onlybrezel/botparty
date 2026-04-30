@@ -24,7 +24,7 @@ export default function RobotError({ error, reset }: ErrorProps) {
       )}
       <button
         onClick={reset}
-        className="mt-6 rounded-lg bg-[var(--primary)] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[var(--primary-hover)] transition-colors"
+        className="mt-6 rounded-lg bg-[var(--primary)] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[var(--primary-hover)]"
       >
         Try again
       </button>

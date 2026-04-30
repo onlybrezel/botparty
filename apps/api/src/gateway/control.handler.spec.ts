@@ -24,8 +24,11 @@ describe('ControlHandler', () => {
     };
     const controlsService = {
       getEnabledButtonsForRobot: jest.fn().mockResolvedValue([
-        { command: 'forward', access: ControlButtonAccess.QUEUE_TURN, cooldownMs: 120 },
+        { command: 'forward', access: ControlButtonAccess.QUEUE_TURN, cooldownMs: 120, costCredits: 0 },
       ]),
+    };
+    const walletService = {
+      transfer: jest.fn(),
     };
 
     return {
@@ -35,12 +38,14 @@ describe('ControlHandler', () => {
         moderationService as never,
         queueService as never,
         controlsService as never,
+        walletService as never,
       ),
       ctx,
       robotsService,
       moderationService,
       queueService,
       controlsService,
+      walletService,
     };
   }
 
@@ -129,7 +134,7 @@ describe('ControlHandler', () => {
     expect(ctx.broadcastToRoom).toHaveBeenCalledWith(
       ROBOT_ID,
       WS_EVENTS.CROWD_INPUT,
-      { userId: 'user-1', username: 'alpha', command: 'forward' },
+      { userId: 'user-1', username: 'alpha', command: 'forward', costCredits: 0 },
       'viewer-1',
     );
     expect(robotClient.send).toHaveBeenCalledWith(

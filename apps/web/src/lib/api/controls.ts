@@ -42,6 +42,7 @@ export class ControlsApi {
       position?: number;
       isEnabled?: boolean;
       color?: string;
+      costCredits?: number;
     },
   ) {
     return this.req<ControlButtonRecord>(`/controls/robot/${robotId}`, {
@@ -62,6 +63,7 @@ export class ControlsApi {
       position?: number;
       isEnabled?: boolean;
       color?: string | null;
+      costCredits?: number;
     },
   ) {
     return this.req<ControlButtonRecord>(`/controls/${buttonId}`, {

@@ -36,9 +36,11 @@ export class AuthController {
     @Body() body: { username: string; email: string; password: string; displayName?: string },
     @Res({ passthrough: true }) reply: FastifyReply,
   ) {
-    const tokens = await this.authService.register(body);
-    this.applyAuthCookies(reply, tokens.accessToken, tokens.refreshToken);
-    return { accessToken: tokens.accessToken, user: tokens.user };
+    const result = await this.authService.register(body);
+    if (result.accessToken && result.refreshToken) {
+      this.applyAuthCookies(reply, result.accessToken, result.refreshToken);
+    }
+    return result;
   }
 
   @Get('csrf')
@@ -143,6 +145,15 @@ export class AuthController {
   @ApiOperation({ summary: 'Verify email address with one-time token' })
   async verifyEmail(@Query('token') token: string) {
     return this.authService.verifyEmail(token);
+  }
+
+  @Post('verify-email/resend')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(CsrfOriginGuard)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Resend an email verification link' })
+  async resendVerifyEmail(@Body() body: { email: string }) {
+    return this.authService.resendEmailVerification(body);
   }
 
   private applyAuthCookies(reply: FastifyReply, accessToken: string, refreshToken: string) {

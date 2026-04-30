@@ -3,11 +3,12 @@
 import type { FormEvent } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { BellRing, Palette, Save, ShieldAlert, UserRound, Eye, EyeOff, Trash2 } from 'lucide-react';
+import { BellRing, Palette, Save, ShieldAlert, UserRound, Eye, EyeOff, Trash2, Cookie } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/store';
 import { pushToast } from '@/lib/toast';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Dialog } from '@/components/ui/dialog';
 import { usePreferences } from '@/lib/preferences';
@@ -18,6 +19,7 @@ export default function SettingsPage() {
   const { accessToken, hasHydrated } = auth;
   const {
     theme,
+    cookieConsent,
     dashboardMaskToken,
     keyboardTabSwitchOnlyWhenEmpty,
     queuePositionNotifications,
@@ -76,6 +78,16 @@ export default function SettingsPage() {
     }
     return 'Enable desktop notifications to get queue updates when another tab is active.';
   }, [notificationPermission]);
+
+  const cookieConsentSummary = useMemo(() => {
+    if (cookieConsent === 'accepted') {
+      return 'You accepted the cookie notice. BotParty still only uses essential browser storage today.';
+    }
+    if (cookieConsent === 'declined') {
+      return 'You declined optional acknowledgement. Only essential browser storage remains active.';
+    }
+    return 'You have not responded to the cookie notice yet.';
+  }, [cookieConsent]);
 
   const handleSaveProfile = async (event: FormEvent) => {
     event.preventDefault();
@@ -242,6 +254,31 @@ export default function SettingsPage() {
                 </Badge>
               </button>
             ))}
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-5">
+          <h2 className="mb-4 flex items-center gap-2 text-lg font-bold">
+            <Cookie className="h-5 w-5 text-emerald-300" />
+            Cookie Notice
+          </h2>
+          <p className="mb-4 text-sm text-[var(--muted-foreground)]">{cookieConsentSummary}</p>
+          <div className="mb-4 flex flex-wrap gap-2">
+            <Badge tone={cookieConsent === 'accepted' ? 'success' : cookieConsent === 'declined' ? 'warning' : 'default'}>
+              {cookieConsent === 'accepted'
+                ? 'Accepted'
+                : cookieConsent === 'declined'
+                  ? 'Declined'
+                  : 'Not decided'}
+            </Badge>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="secondary" onClick={() => updatePreference('cookieConsent', 'declined')}>
+              Decline optional acknowledgement
+            </Button>
+            <Button type="button" onClick={() => updatePreference('cookieConsent', 'accepted')}>
+              Accept
+            </Button>
           </div>
         </div>
 
