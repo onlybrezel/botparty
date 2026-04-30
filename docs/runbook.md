@@ -317,6 +317,7 @@ A linear checklist for cutting a production deploy. Do not skip steps.
 3. **Secrets**
    - All values from `.env.example` set; no `devkey`, no `change_me_*`.
    - `WEBHOOK_SECRET_ENCRYPTION_KEY` set (≥ 32 chars).
+   - For Docker/Kubernetes secret mounts, `WEBHOOK_SECRET_ENCRYPTION_KEY_FILE` can point to the mounted file path.
    - `STRIPE_*`/`PAYPAL_*` only set if billing is enabled — once set, the boot
      guard will require the respective webhook secret.
 4. **Migrations**
