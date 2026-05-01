@@ -7,7 +7,9 @@ import { useEffect, useRef, useState } from 'react';
 import { Menu, X } from 'lucide-react';
 import { AUTH_SYNC_STORAGE_KEY, useAuth } from '@/lib/store';
 import { api } from '@/lib/api';
+import { LocaleSwitcher } from '@/components/locale-switcher';
 import { Badge } from '@/components/ui/badge';
+import { localeFromPathname, localizePath } from '@/lib/i18n';
 import { usePreferences } from '@/lib/preferences';
 
 export default function Nav() {
@@ -122,18 +124,24 @@ export default function Nav() {
     };
   }, [accessToken, mounted, pathname]);
 
-  const isActive = (href: string) => pathname === href || pathname.startsWith(href + '/');
+  const locale = localeFromPathname(pathname || '/');
+  const localized = (href: string) => localizePath(href, locale);
+  const isActive = (href: string) => {
+    const target = localized(href);
+    return pathname === target || pathname.startsWith(`${target}/`);
+  };
   const navLinks = [
-    { href: '/', label: 'Home', active: pathname === '/' },
+    { href: '/', label: 'Home', active: pathname === '/' || pathname === `/${locale}` },
     { href: '/explore', label: 'Explore', active: isActive('/explore') },
     { href: '/leaderboard', label: 'Leaderboard', active: isActive('/leaderboard') },
+    { href: '/pricing', label: 'Pricing', active: isActive('/pricing') },
   ];
 
   return (
     <header className="sticky top-0 z-50 border-b border-[var(--border)] bg-[var(--background)]/92 backdrop-blur-md">
       <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         {/* Logo */}
-        <Link href="/" className="flex items-center gap-2 text-lg font-bold tracking-tight">
+        <Link href={localized('/')} className="flex items-center gap-2 text-lg font-bold tracking-tight">
           <span className="flex h-7 w-7 items-center justify-center overflow-hidden rounded-lg shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
             <Image
               src="/brand/icon-64.png"
@@ -159,7 +167,7 @@ export default function Nav() {
           {navLinks.map((item) => (
             <Link
               key={item.href}
-              href={item.href}
+              href={localized(item.href)}
               className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
                 item.active
                   ? 'bg-[var(--muted)] text-[var(--foreground)]'
@@ -177,6 +185,7 @@ export default function Nav() {
           >
             Robot Setup
           </a>
+          <LocaleSwitcher />
         </nav>
 
         {/* Auth */}
@@ -195,7 +204,7 @@ export default function Nav() {
           ) : accessToken && username ? (
             <div className="relative flex items-center gap-2" ref={dropdownRef}>
               <Link
-                href="/wallet"
+                href={localized('/wallet')}
                 className="hidden items-center gap-1 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-300 transition hover:bg-amber-500/20 sm:inline-flex"
                 title="Wallet"
               >
@@ -223,14 +232,14 @@ export default function Nav() {
                   className="absolute right-0 top-full mt-1 w-44 rounded-xl border border-[var(--border)] bg-[var(--card)] py-1 shadow-lg shadow-black/40 animate-fade-in"
                 >
                   <Link
-                    href="/dashboard"
+                    href={localized('/dashboard')}
                     onClick={() => setDropdownOpen(false)}
                     className="block px-4 py-2 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition"
                   >
                     Robots Dashboard
                   </Link>
                   <Link
-                    href="/wallet"
+                    href={localized('/wallet')}
                     onClick={() => setDropdownOpen(false)}
                     className="block px-4 py-2 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition"
                   >
@@ -238,7 +247,7 @@ export default function Nav() {
                   </Link>
                   {(role === 'ADMIN' || role === 'MOD') && (
                     <Link
-                      href="/mod"
+                      href={localized('/mod')}
                       onClick={() => setDropdownOpen(false)}
                       className="block px-4 py-2 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition"
                     >
@@ -246,14 +255,14 @@ export default function Nav() {
                     </Link>
                   )}
                   <Link
-                    href="/settings"
+                    href={localized('/settings')}
                     onClick={() => setDropdownOpen(false)}
                     className="block px-4 py-2 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition"
                   >
                     Settings
                   </Link>
                   <Link
-                    href="/sessions"
+                    href={localized('/sessions')}
                     onClick={() => setDropdownOpen(false)}
                     className="block px-4 py-2 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition"
                   >
@@ -297,11 +306,12 @@ export default function Nav() {
             </div>
           ) : (
             <div className="hidden items-center gap-2 sm:flex">
+              <LocaleSwitcher compact />
               <span className="hidden rounded-lg border border-[var(--border)] bg-[var(--card)] px-2.5 py-1 text-xs font-medium text-[var(--muted-foreground)] sm:inline-flex">
                 {guestLabel}
               </span>
               <Link
-                href="/login"
+                href={localized('/login')}
                 className="rounded-lg bg-[var(--primary)] px-4 py-1.5 text-sm font-semibold text-white transition hover:bg-[var(--primary-hover)]"
               >
                 Sign in
@@ -317,7 +327,7 @@ export default function Nav() {
             {navLinks.map((item) => (
               <Link
                 key={item.href}
-                href={item.href}
+                href={localized(item.href)}
                 className={`rounded-xl px-4 py-3 text-sm font-medium transition-colors ${
                   item.active
                     ? 'bg-[var(--muted)] text-[var(--foreground)]'
@@ -338,6 +348,9 @@ export default function Nav() {
           </nav>
 
           <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
+            <div className="mb-4">
+              <LocaleSwitcher />
+            </div>
             {!mounted ? (
               <div className="h-10 w-full rounded-xl bg-[var(--muted)] animate-pulse" />
             ) : accessToken && username ? (
@@ -352,21 +365,21 @@ export default function Nav() {
                   </div>
                 </div>
                 <div className="flex flex-col gap-2">
-                  <Link href="/dashboard" className="rounded-xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--foreground)]">
+                  <Link href={localized('/dashboard')} className="rounded-xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--foreground)]">
                     Robots Dashboard
                   </Link>
-                  <Link href="/wallet" className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm font-medium text-amber-200">
+                  <Link href={localized('/wallet')} className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm font-medium text-amber-200">
                     Wallet{balance !== null ? ` · ${balance.toLocaleString()} cr` : ''}
                   </Link>
                   {(role === 'ADMIN' || role === 'MOD') && (
-                    <Link href="/mod" className="rounded-xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--foreground)]">
+                    <Link href={localized('/mod')} className="rounded-xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--foreground)]">
                       Mod Dashboard
                     </Link>
                   )}
-                  <Link href="/settings" className="rounded-xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--foreground)]">
+                  <Link href={localized('/settings')} className="rounded-xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--foreground)]">
                     Settings
                   </Link>
-                  <Link href="/sessions" className="rounded-xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--foreground)]">
+                  <Link href={localized('/sessions')} className="rounded-xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--foreground)]">
                     Sessions
                   </Link>
                   <button
@@ -390,7 +403,7 @@ export default function Nav() {
                   {guestLabel}
                 </p>
                 <Link
-                  href="/login"
+                  href={localized('/login')}
                   className="block rounded-xl bg-[var(--primary)] px-4 py-3 text-center text-sm font-semibold text-white"
                 >
                   Sign in

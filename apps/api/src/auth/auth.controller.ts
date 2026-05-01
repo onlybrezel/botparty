@@ -22,7 +22,18 @@ import {
 import { CsrfOriginGuard } from './guards/csrf-origin.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
-import type { JwtPayload } from '@botparty/shared';
+import {
+  forgotPasswordSchema,
+  loginSchema,
+  registerSchema,
+  resetPasswordSchema,
+  type ForgotPasswordInput,
+  type JwtPayload,
+  type LoginInput,
+  type RegisterInput,
+  type ResetPasswordInput,
+} from '@botparty/shared';
+import { ZodValidationPipe } from '../common/zod-validation.pipe';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -36,7 +47,7 @@ export class AuthController {
   @UseGuards(CsrfOriginGuard)
   @ApiOperation({ summary: 'Register a new user' })
   async register(
-    @Body() body: { username: string; email: string; password: string; displayName?: string },
+    @Body(new ZodValidationPipe(registerSchema)) body: RegisterInput,
     @Res({ passthrough: true }) reply: FastifyReply,
   ) {
     const result = await this.authService.register(body);
@@ -73,7 +84,7 @@ export class AuthController {
   @UseGuards(CsrfOriginGuard)
   @ApiOperation({ summary: 'Login with email/password' })
   async login(
-    @Body() body: { email: string; password: string },
+    @Body(new ZodValidationPipe(loginSchema)) body: LoginInput,
     @Res({ passthrough: true }) reply: FastifyReply,
   ) {
     const tokens = await this.authService.login(body);
@@ -148,7 +159,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @UseGuards(CsrfOriginGuard)
   @ApiOperation({ summary: 'Request a password reset email' })
-  async forgotPassword(@Body() body: { email: string }) {
+  async forgotPassword(@Body(new ZodValidationPipe(forgotPasswordSchema)) body: ForgotPasswordInput) {
     return this.authService.requestPasswordReset(body);
   }
 
@@ -156,7 +167,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @UseGuards(CsrfOriginGuard)
   @ApiOperation({ summary: 'Reset password with token' })
-  async resetPassword(@Body() body: { token: string; password: string }) {
+  async resetPassword(@Body(new ZodValidationPipe(resetPasswordSchema)) body: ResetPasswordInput) {
     return this.authService.resetPassword(body);
   }
 
@@ -173,7 +184,7 @@ export class AuthController {
   @UseGuards(CsrfOriginGuard)
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @ApiOperation({ summary: 'Resend an email verification link' })
-  async resendVerifyEmail(@Body() body: { email: string }) {
+  async resendVerifyEmail(@Body(new ZodValidationPipe(forgotPasswordSchema)) body: ForgotPasswordInput) {
     return this.authService.resendEmailVerification(body);
   }
 

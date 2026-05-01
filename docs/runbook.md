@@ -338,9 +338,26 @@ A linear checklist for cutting a production deploy. Do not skip steps.
    - Cron pulls `./scripts/backup-db.sh` once per day; verify a sample restore
      into a staging DB at least once per quarter (see Backup/Restore below).
 8. **Rollback plan**
-   - Keep the previous image tag pinned in `docker-compose.yml`.
-   - Restore script ready (see Backup/Restore below).
-   - Operator on call has access to MinIO bucket and Postgres dumps.
+    - Keep the previous image tag pinned in `docker-compose.yml`.
+    - Restore script ready (see Backup/Restore below).
+    - Operator on call has access to MinIO bucket and Postgres dumps.
+
+### Release images and tags
+
+BotParty publishes release images from Git tags.
+
+1. Create and push a SemVer tag such as `v0.1.4`.
+2. GitHub Actions workflow `.github/workflows/release.yml` builds `ghcr.io/<owner>/botparty-api:<tag>` and `ghcr.io/<owner>/botparty-web:<tag>`.
+3. The same workflow also pushes the rolling tags `<major>.<minor>`, `<version>`, and `latest`.
+4. Images are signed with keyless Cosign using GitHub OIDC. Verify with:
+
+   ```bash
+   cosign verify ghcr.io/<owner>/botparty-api:v0.1.4 \
+     --certificate-identity-regexp 'https://github.com/.+/.+/.github/workflows/release.yml@.+' \
+     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+   ```
+
+5. Compose defaults to GHCR image references via `IMAGE_REGISTRY`, `IMAGE_NAMESPACE`, and `APP_VERSION`. Local `docker compose up --build` still works and simply retags the locally built image under the same name.
 
 ---
 

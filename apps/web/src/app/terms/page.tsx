@@ -42,6 +42,10 @@ export default function TermsPage() {
         </div>
       ) : null}
 
+      <div className="mb-5 rounded-2xl border border-sky-500/30 bg-sky-500/10 p-4 text-sm text-sky-100">
+        This page is a product-ready template, not legal advice. The operator should adapt it to the target market, tax setup, and consumer law before launch.
+      </div>
+
       <div className="space-y-5">
         <Section title="Use of the service">
           <p>BotParty provides live robot video, queueing, chat, moderation, and remote control features. You may only use the service in ways that are lawful, safe, and consistent with the platform rules.</p>
@@ -66,6 +70,23 @@ export default function TermsPage() {
         <Section title="Availability and changes">
           <p>BotParty is a realtime platform and may change over time. Features, limits, and access rules may be updated, suspended, or removed to maintain stability, fairness, or safety.</p>
           <p>We do not guarantee uninterrupted availability, low latency, or compatibility with every robot setup or network environment.</p>
+        </Section>
+
+        <Section title="Credits, digital delivery, and payment handling">
+          <p>BotParty sells prepaid digital credits. Credits are delivered only after the selected payment provider confirms settlement through a verified webhook.</p>
+          <p>Displayed prices, accepted payment providers, tax handling, and minimum package sizes may change over time. If a payment fails, expires, or is cancelled, no credits are delivered.</p>
+          <p>Credits may be consumed by platform features such as robot interactions, placements, or other operator-defined paid mechanics. Credits do not represent stored fiat money unless local law requires otherwise.</p>
+        </Section>
+
+        <Section title="Refund and chargeback template">
+          <p>For digital credit purchases, refunds are generally evaluated case by case. The operator may refuse refunds once credits have been delivered and materially consumed, unless mandatory law says otherwise.</p>
+          <p>If a payment is refunded, disputed, or charged back, the matching BotParty credits may be removed, locked, or set negative until the balance is reconciled.</p>
+          <p>Recommended operator policy: refund duplicate payments, obvious technical failures, and undelivered credit purchases promptly; document exceptions for abuse, fraud, or already-consumed digital goods.</p>
+        </Section>
+
+        <Section title="EU consumer withdrawal template">
+          <p>If the operator serves EU consumers, digital content withdrawal rights may apply until performance begins. The operator should collect explicit consent that delivery starts immediately and that the withdrawal right may expire once credits are delivered.</p>
+          <p>Suggested checkout consent text: “I consent to immediate delivery of digital credits and acknowledge that my statutory withdrawal right may expire once performance begins.”</p>
         </Section>
 
         <Section title="Liability and governing law">

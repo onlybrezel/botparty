@@ -1,4 +1,4 @@
-import { Logger } from '@nestjs/common';
+import type { Logger } from '@nestjs/common';
 
 let sentryEnabled = false;
 let sentryClient: { captureException: (error: unknown) => void } | null = null;

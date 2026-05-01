@@ -11,10 +11,10 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { Role } from '@botparty/shared';
-import type { JwtPayload } from '@botparty/shared';
+import { payoutRequestSchema, Role, type JwtPayload, type PayoutRequestInput } from '@botparty/shared';
 import { PayoutsService } from './payouts.service';
-import { CreatePayoutRequestDto, RejectPayoutDto } from './payouts.dto';
+import { RejectPayoutDto } from './payouts.dto';
+import { ZodValidationPipe } from '../common/zod-validation.pipe';
 
 @ApiTags('payouts')
 @Controller('payouts')
@@ -25,7 +25,7 @@ export class PayoutsController {
 
   @Post()
   @ApiOperation({ summary: 'Submit a payout request' })
-  async create(@CurrentUser() user: JwtPayload, @Body() dto: CreatePayoutRequestDto) {
+  async create(@CurrentUser() user: JwtPayload, @Body(new ZodValidationPipe(payoutRequestSchema)) dto: PayoutRequestInput) {
     return this.payouts.createRequest({
       userId: user.sub,
       amount: dto.amount,

@@ -799,7 +799,7 @@ AnalyticsEvents, RobotWebhook, SwarmGroup (reserviert), RobotAllowedUser.
     laufen auf `node-version: '24'`. Engines + Dockerfiles sind bereits
     auf 24.
 
-- [ ] **Release-Workflow mit Image-Push und SemVer-Tagging**
+- [x] **Release-Workflow mit Image-Push und SemVer-Tagging**
   - Priorität: P1
   - Kategorie: DevOps
   - Problem: Es gibt keinen Workflow für Image-Push (`docker push`) oder
@@ -812,6 +812,11 @@ AnalyticsEvents, RobotWebhook, SwarmGroup (reserviert), RobotAllowedUser.
     `docker-compose.yml` (Image-Referenz).
   - Akzeptanz: Tag `v0.1.4` produziert signierte (cosign) Images.
   - Aufwand: mittel.
+  - **Umsetzung:** `.github/workflows/release.yml` erstellt mit Semver-Tag-Trigger,
+    Multi-Arch-Build (amd64/arm64), Cosign-Signierung, SBOM + Provenance. Images
+    mit `APP_VERSION` Tag gepusht zu GHCR. `docker-compose.yml` und
+    `docker/web/Dockerfile` aktualisiert für versioniertes Build-Arg. GHCR-Pfade
+    in `README.md` + `docs/runbook.md` dokumentiert.
 
 - [x] **Production-Checkliste / Runbook ergänzen**
   - Priorität: P1
@@ -839,7 +844,7 @@ AnalyticsEvents, RobotWebhook, SwarmGroup (reserviert), RobotAllowedUser.
 
 ### Codequalität / Refactor
 
-- [ ] **`moderation.service.ts` aufteilen**
+- [x] **`moderation.service.ts` aufteilen**
   - Priorität: P2
   - Kategorie: Codequalität
   - Problem: 992 LOC, Mehrere Verantwortlichkeiten (Moderate, Audit-Log,
@@ -849,15 +854,25 @@ AnalyticsEvents, RobotWebhook, SwarmGroup (reserviert), RobotAllowedUser.
   - Betroffene Dateien: `apps/api/src/moderation/*`.
   - Akzeptanz: Datei < 400 LOC, Tests grün.
   - Aufwand: groß.
+  - **Umsetzung:** `moderation-audit.service.ts` (Audit-Log-Management),
+    `moderation-overview.service.ts` (Admin-Overview-Daten). Haupt-Service auf
+    275 LOC reduziert, Moderation/Enforce/Moderator-Logik gekapselt. Module
+    aktualisiert. Tests grün.
 
-- [ ] **`runtime-telemetry.service.ts` aufteilen**
+- [x] **`runtime-telemetry.service.ts` aufteilen**
   - Priorität: P2
   - Kategorie: Codequalität
   - Problem: 804 LOC.
   - Ziel: Split nach Datenquelle (Gateway, cAdvisor, LiveKit, DB).
   - Aufwand: groß.
+  - **Umsetzung:** 5 Sub-Services erstellt: `runtime-telemetry-gateway.service.ts`
+    (WS), `runtime-telemetry-cadvisor.service.ts` (Metriken),
+    `runtime-telemetry-livekit.service.ts` (Video/Egress),
+    `runtime-telemetry-db.service.ts` (Persistierung),
+    `RuntimeTelemetryOrchestratorService` (Koordination). Haupt-File auf 160 LOC
+    reduziert. Typecheck und Tests grün.
 
-- [ ] **`robots.controller.ts` und `robots.service.ts` modularisieren**
+- [x] **`robots.controller.ts` und `robots.service.ts` modularisieren**
   - Priorität: P2
   - Kategorie: Codequalität
   - Problem: 587 + 545 LOC. Multiple Subcontroller-Verantwortlichkeiten
@@ -883,7 +898,7 @@ AnalyticsEvents, RobotWebhook, SwarmGroup (reserviert), RobotAllowedUser.
 
 ### Tests / QA
 
-- [ ] **Billing-Webhook-Idempotenz und Refund-Pfade testen**
+- [x] **Billing-Webhook-Idempotenz und Refund-Pfade testen**
   - Priorität: P1
   - Kategorie: QA
   - Problem: Keine Spec für `BillingService` gefunden; Stripe-/PayPal-
@@ -894,6 +909,11 @@ AnalyticsEvents, RobotWebhook, SwarmGroup (reserviert), RobotAllowedUser.
   - Betroffene Dateien: `apps/api/src/billing/`.
   - Akzeptanz: Tests decken `paid → refunded → chargeback` ab.
   - Aufwand: mittel.
+  - **Umsetzung:** `billing.service.spec.ts` erstellt mit Tests für:
+    - One-time Checkout: Credit-Settlement + Replay-Idempotenz
+    - Refund/Chargeback: Korrekte Umkehrung der Transaktion
+    - Webhook-Event-Replay mit synthetischen Event-IDs
+    - PayPal + Stripe Provider-Mock. Alle Tests grün.
 
 - [ ] **Cross-Instance-Test des WS-Gateways**
   - Priorität: P1
@@ -950,28 +970,27 @@ AnalyticsEvents, RobotWebhook, SwarmGroup (reserviert), RobotAllowedUser.
   - Akzeptanz: Bei aktivem `Robot.recordSessions` ist Banner präsent.
   - Aufwand: klein.
 
-- [ ] **Field-Level-Validation in Login/Reset/Register**
+- [x] **Field-Level-Validation in Login/Reset/Register**
   - Priorität: P2
   - Kategorie: UX
   - Problem: `apps/web/src/app/login/page.tsx` zeigt nur globalen
     `error`-String.
   - Ziel: Inline-Fehler an Email/Password/Username, Submit-Button-State.
   - Aufwand: klein.
+  - **Umsetzung:** Login, Forgot-Password, Reset-Password Pages mit Zod-Schemas
+    (aus shared), Controlled Form State, Per-Field Error Messages, Submit-Button
+    Disabled während Request. Real-time Feedback beim Tippen.
 
-- [x] **Empty-State auf Explore wenn keine Roboter**
-  - Priorität: P2
-  - Kategorie: UX (Prüfpunkt)
-  - Problem: Bei leerer DB unklar, was die Seite zeigt.
-  - Ziel: Hilfreiche CTA-Karten („Robot anlegen", „Doku lesen").
-  - Aufwand: klein.
-
-- [ ] **Onboarding-Tutorial nach Account-Erstellung**
+- [x] **Onboarding-Tutorial nach Account-Erstellung**
   - Priorität: P2
   - Kategorie: UX / Produkt
   - Problem: Operator wird auf `/explore` geworfen; kein Hinweis „Erstelle
     deinen ersten Robot".
   - Ziel: Conditional-Banner, wenn 0 Robots im Besitz.
   - Aufwand: klein.
+  - **Umsetzung:** `explore-onboarding-banner.tsx` mit GET `/api/v1/robots`
+    Count. Banner zeigt sich, wenn Nutzer 0 Robots hat, mit CTAs zum
+    Robot-Erstellen und Dokumentation. Bedingt auf `/explore` gemountet.
 
 - [x] **Search/Filter sichtbar im UI**
   - Priorität: P2
@@ -983,7 +1002,7 @@ AnalyticsEvents, RobotWebhook, SwarmGroup (reserviert), RobotAllowedUser.
 
 ### Feature / Produkt
 
-- [ ] **Pricing-/Credits-Seite**
+- [x] **Pricing-/Credits-Seite**
   - Priorität: P1
   - Kategorie: Feature / Produkt
   - Problem: `CREDIT_PACKAGES` API existiert, aber öffentliche Pricing-
@@ -991,13 +1010,21 @@ AnalyticsEvents, RobotWebhook, SwarmGroup (reserviert), RobotAllowedUser.
   - Ziel: `/pricing` oder Sektion auf `/wallet` mit Pakete + Stripe/PayPal-
     Buttons.
   - Aufwand: mittel.
+  - **Umsetzung:** Public `/pricing` Page mit `PricingPageComponent` — zeigt
+    Pakete aus GET `/api/v1/billing/credit-packages`, mit Stripe/PayPal Checkout
+    Buttons, Benefit-Grid, Feature-Vergleich. Authentifizierte Buttons,
+    Loading-State, Error-Handling.
 
-- [ ] **Admin-UI für Webhook-Events**
+- [x] **Admin-UI für Webhook-Events**
   - Priorität: P3
   - Kategorie: Feature
   - Problem: `BillingWebhookEvent` und `RobotWebhook` werden DB-seitig
     gepflegt, aber kein Mod-UI sichtbar.
   - Ziel: Liste/Replay-Funktion in `/mod/payouts` oder neuer Mod-Subroute.
+  - **Umsetzung:** New `/mod/billing/` Route mit Staff-only Webhook Event
+    Listing (GET `/api/v1/billing/admin/webhook-events`), Event Detail View,
+    Replay Button (POST `/api/v1/billing/admin/webhook-events/:eventId/replay`).
+    Provider-Parsing (Stripe/PayPal stored events).
   - Aufwand: mittel.
 
 - [ ] **Subscription/Recurring-Plan**
@@ -1006,10 +1033,15 @@ AnalyticsEvents, RobotWebhook, SwarmGroup (reserviert), RobotAllowedUser.
   - Problem: Nur Einmal-Käufe. Subscriptions vermutlich gewünscht.
   - Aufwand: groß.
 
-- [ ] **i18n-Foundation (Next.js i18n routing)**
+- [x] **i18n-Foundation (Next.js i18n routing)**
   - Priorität: P3
   - Kategorie: Feature
   - Aufwand: groß.
+  - **Umsetzung:** `apps/web/src/middleware.ts` mit Locale-Rewrite (/de/* →
+    /, x-botparty-locale Header + Cookie). `apps/web/src/lib/i18n.ts` mit
+    Locale-Utilities. `layout.tsx` setzt <html lang>. Locale-Switcher
+    Component, Locale-aware Nav-Links. Foundation-only: Keine Full-Translation
+    Rollout; Ready für zukünftige Kataloge.
 
 ### Performance
 
@@ -1045,31 +1077,29 @@ AnalyticsEvents, RobotWebhook, SwarmGroup (reserviert), RobotAllowedUser.
 
 ### Doku / Compliance
 
-- [ ] **Datenfluss-Beschreibung für DSGVO**
+- [x] **Datenfluss-Beschreibung für DSGVO**
   - Priorität: P1
   - Kategorie: Compliance
   - Problem: Privacy-Seite ist generisch.
   - Ziel: Kapitel mit Tabelle „Datum → Zweck → Speicherort → Aufbewahrung".
   - Aufwand: mittel.
+  - **Umsetzung:** `apps/web/src/app/privacy/page.tsx` erweitert mit GDPR
+    Datenfluss-Tabelle (Account-Daten, Robot-Steuerung, Aufnahmen, Webhooks,
+    Analytics, Logs) mit Speicherorten, Aufbewahrungsfristen, Rechtliche
+    Grundlagen. Benutzer-/Operator-Perspektive.
 
-- [x] **Vollständige `.env.example`**
-  - Priorität: P1
-  - Kategorie: Doku
-  - Aufwand: klein.
-
-- [x] **Production-Migrationsanleitung**
-  - Priorität: P1
-  - Kategorie: Doku
-  - Umsetzung: Abschnitt „Production Migration Procedure" in
-    `docs/runbook.md` (Backup → `migrate deploy` → Verify → Rollback).
-
-- [ ] **AGB/Refund-Policy-Templates**
+- [x] **AGB/Refund-Policy-Templates**
   - Priorität: P2
   - Kategorie: Compliance
   - Problem: Terms-Seite existiert als Skeleton.
   - Ziel: Bezahlrelevante Inhalte (Widerruf, Lieferung digitale Produkte,
     Refund-Bedingungen) — als Vorlage, nicht als Rechtsrat.
   - Aufwand: mittel.
+  - **Umsetzung:** `apps/web/src/app/terms/page.tsx` erweitert mit Payment Terms
+    (Stripe/PayPal), Refund Policy (14-Tag-Widerrufsrecht, Nicht-Anwendung für
+    augenblicklich bereitgestellte Dienste), Subscription Cancellation, Data
+    Deletion, Dispute Handling. Config-bereit für Mandanten-spezifische
+    Anpassung.
 
 - [x] **OpenAPI-Drift-Check fixt-laufen lassen**
   - Priorität: P3

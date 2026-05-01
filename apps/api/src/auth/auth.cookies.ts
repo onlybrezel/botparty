@@ -1,4 +1,4 @@
-import { ConfigService } from '@nestjs/config';
+import type { ConfigService } from '@nestjs/config';
 
 const DEFAULT_ACCESS_COOKIE_NAME = 'bp_access';
 const DEFAULT_REFRESH_COOKIE_NAME = 'bp_refresh';

@@ -11,6 +11,7 @@ import type { CheckoutSession, PaymentProvider, VerifiedWebhookEvent } from './p
 @Injectable()
 export class PaypalProvider implements PaymentProvider {
   readonly name = 'paypal' as const;
+  readonly capabilities = { recurringCheckout: false, billingPortal: false };
   private readonly logger = new Logger(PaypalProvider.name);
   private readonly clientId: string | null;
   private readonly clientSecret: string | null;
@@ -137,10 +138,32 @@ export class PaypalProvider implements PaymentProvider {
       event_type: string;
       resource: Record<string, unknown>;
     };
+    return this.parseEvent(event);
+  }
 
+  parseStoredWebhookEvent(record: { eventId: string; eventType: string; payload: unknown }): VerifiedWebhookEvent | null {
+    if (!record.payload || typeof record.payload !== 'object') {
+      return null;
+    }
+    const payload = record.payload as {
+      id?: string;
+      event_type?: string;
+      resource?: Record<string, unknown>;
+    };
+    if (!payload.id || !payload.event_type || !payload.resource) {
+      return null;
+    }
+    return this.parseEvent(payload as { id: string; event_type: string; resource: Record<string, unknown> });
+  }
+
+  private parseEvent(event: {
+    id: string;
+    event_type: string;
+    resource: Record<string, unknown>;
+  }): VerifiedWebhookEvent {
     let type: VerifiedWebhookEvent['type'] = 'unknown';
     let intentId: string | null = null;
-    let providerRef = event.id;
+    const providerRef = event.id;
     let amountCents = 0;
     let currency = 'EUR';
 
@@ -181,13 +204,21 @@ export class PaypalProvider implements PaymentProvider {
       type,
       intentId,
       providerRef,
+      customerRef: null,
       amountCents,
       currency,
       rawPayload: event,
     };
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async createSubscriptionCheckout(): Promise<never> {
+    throw new BadRequestException('PayPal recurring subscriptions are not yet supported');
+  }
+
+  async createBillingPortalSession(): Promise<never> {
+    throw new BadRequestException('PayPal billing portal is not yet supported');
+  }
+
   private _hmac(secret: string, payload: string) {
     return createHmac('sha256', secret).update(payload).digest('hex');
   }

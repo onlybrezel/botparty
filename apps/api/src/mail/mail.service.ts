@@ -18,10 +18,19 @@ const EMAIL_STYLES = `
   .token { font-family: monospace; font-size: 13px; background: #262626; padding: 8px 12px; border-radius: 6px; word-break: break-all; color: #a3a3a3; }
 `;
 
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
 function htmlWrapper(title: string, body: string): string {
   return `<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>${EMAIL_STYLES}</style></head>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title><style>${EMAIL_STYLES}</style></head>
 <body><div class="wrapper"><div class="card">
 <div class="logo">BotParty</div>
 ${body}
@@ -52,6 +61,7 @@ export class MailService {
   async sendEmailVerification(email: string, token: string) {
     const verifyUrl = new URL('/verify-email', this.appUrl);
     verifyUrl.searchParams.set('token', token);
+    const safeVerifyUrl = escapeHtml(verifyUrl.toString());
 
     if (!this.transport) {
       this.logger.warn(`SMTP not configured; email verification link for ${email}: ${verifyUrl.toString()}`);
@@ -61,10 +71,10 @@ export class MailService {
     const html = htmlWrapper('Verify your BotParty email', `
       <h1>Verify your email address</h1>
       <p>Thanks for signing up for BotParty. Click the button below to verify your email address and activate your account.</p>
-      <a href="${verifyUrl.toString()}" class="btn">Verify email address</a>
+      <a href="${safeVerifyUrl}" class="btn">Verify email address</a>
       <hr class="divider">
       <p>Or copy this link into your browser:</p>
-      <p class="token">${verifyUrl.toString()}</p>
+      <p class="token">${safeVerifyUrl}</p>
       <p>This link expires in 24 hours. If you did not create a BotParty account, you can safely ignore this email.</p>
     `);
 
@@ -86,6 +96,7 @@ export class MailService {
     const resetUrl = new URL('/reset-password', this.appUrl);
     // Keep sensitive token out of URL query and Referer logs.
     resetUrl.hash = `token=${encodeURIComponent(token)}`;
+    const safeResetUrl = escapeHtml(resetUrl.toString());
 
     if (!this.transport) {
       this.logger.warn(`SMTP is not configured; password reset link for ${email}: ${resetUrl.toString()}`);
@@ -95,10 +106,10 @@ export class MailService {
     const html = htmlWrapper('Reset your BotParty password', `
       <h1>Reset your password</h1>
       <p>A password reset was requested for your BotParty account. Click the button below to set a new password.</p>
-      <a href="${resetUrl.toString()}" class="btn">Set new password</a>
+      <a href="${safeResetUrl}" class="btn">Set new password</a>
       <hr class="divider">
       <p>Or copy this link into your browser:</p>
-      <p class="token">${resetUrl.toString()}</p>
+      <p class="token">${safeResetUrl}</p>
       <p>This link expires in 1 hour. If you did not request a password reset, you can safely ignore this email.</p>
     `);
 
@@ -123,11 +134,12 @@ export class MailService {
     }
 
     const loginUrl = new URL('/login', this.appUrl).toString();
+    const safeLoginUrl = escapeHtml(loginUrl);
     const html = htmlWrapper('BotParty login temporarily locked', `
       <h1>Login temporarily locked</h1>
       <p>We detected too many failed login attempts for your account.</p>
-      <p>Your login is temporarily blocked for about <strong>${lockoutMinutes} minutes</strong>.</p>
-      <a href="${loginUrl}" class="btn">Open BotParty login</a>
+      <p>Your login is temporarily blocked for about <strong>${escapeHtml(String(lockoutMinutes))} minutes</strong>.</p>
+      <a href="${safeLoginUrl}" class="btn">Open BotParty login</a>
       <hr class="divider">
       <p>If this was not you, reset your password immediately after the lockout ends.</p>
     `);

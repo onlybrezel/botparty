@@ -24,6 +24,7 @@ RUN --mount=type=cache,id=pnpm-store-web,target=/pnpm/store \
 FROM node:24-alpine AS builder
 RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
 WORKDIR /app
+ARG NEXT_PUBLIC_APP_VERSION=dev
 
 # Restore workspace config so pnpm --filter resolves correctly.
 COPY --from=deps /app/.npmrc /app/pnpm-workspace.yaml /app/package.json ./
@@ -39,6 +40,7 @@ RUN pnpm --filter @botparty/shared build
 # Persist Next.js SWC/webpack cache between builds via cache mount.
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NEXT_SKIP_TYPECHECK=1
+ENV NEXT_PUBLIC_APP_VERSION=${NEXT_PUBLIC_APP_VERSION}
 RUN --mount=type=cache,id=next-build-cache,target=/app/apps/web/.next/cache \
     pnpm --filter @botparty/web build
 
@@ -49,6 +51,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
+ENV NEXT_PUBLIC_APP_VERSION=${NEXT_PUBLIC_APP_VERSION}
 # Bind to all interfaces so the 127.0.0.1 health check works inside Docker.
 ENV HOSTNAME=0.0.0.0
 

@@ -1,5 +1,6 @@
-import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { ModerationActionType, WS_EVENTS } from '@botparty/shared';
+import { ModerationAuditService } from './moderation-audit.service';
 import { ModerationService } from './moderation.service';
 
 function createPipeline() {
@@ -40,15 +41,24 @@ function buildService() {
     lrange: jest.fn().mockResolvedValue([]),
     pipeline: jest.fn().mockReturnValue(pipeline),
   };
+  const auditService = new ModerationAuditService(prisma as never, redis as never);
+  const overviewService = {
+    getAdminOverview: jest.fn(),
+    getAdminRuntimeOverview: jest.fn(),
+    enqueueStaffRobotAction: jest.fn(),
+    getAdminRobotRecordingStatus: jest.fn(),
+    startAdminRobotRecording: jest.fn(),
+    stopAdminRobotRecording: jest.fn(),
+    listAdminRecordings: jest.fn(),
+    streamAdminRecording: jest.fn(),
+    streamSignedAdminRecording: jest.fn(),
+  };
 
   const service = new ModerationService(
     prisma as never,
     redis as never,
-    {} as never,
-    {} as never,
-    {} as never,
-    {} as never,
-    {} as never,
+    auditService as never,
+    overviewService as never,
   );
 
   return { service, prisma, redis, pipeline };

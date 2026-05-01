@@ -5,12 +5,16 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { DeleteObjectsCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
+import { ConfigService } from '@nestjs/config';
 import { hash } from 'argon2';
 import type { Prisma } from '@botparty/prisma';
+import { basename } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { WalletService } from '../wallet/wallet.service';
 import { UpdateAdminUserDto, UpdateMeDto } from './users.dto';
 import type { JwtPayload } from '@botparty/shared';
+import { createS3CompatibleStorageClient, resolveS3CompatibleStorageConfig } from '../common/s3-compatible-storage';
 import { PlatformUserService } from '../wallet/platform-user.service';
 
 @Injectable()
@@ -19,6 +23,7 @@ export class UsersService {
     private readonly prisma: PrismaService,
     private readonly walletService: WalletService,
     private readonly platformUser: PlatformUserService,
+    private readonly config: ConfigService,
   ) {}
 
   private resolveLeaderboardSince(period?: string) {
@@ -540,6 +545,12 @@ export class UsersService {
   }
 
   async deleteOwnAccount(userId: string) {
+    const ownedRobots = await this.prisma.robot.findMany({
+      where: { ownerId: userId },
+      select: { id: true },
+    });
+    await this.deleteOwnedRecordings(ownedRobots.map((robot) => robot.id));
+
     await this.prisma.$transaction(async (tx) => {
       const user = await tx.user.findUnique({
         where: { id: userId },
@@ -553,6 +564,57 @@ export class UsersService {
       }
       await tx.user.delete({ where: { id: userId } });
     });
+  }
+
+  private async deleteOwnedRecordings(robotIds: string[]) {
+    if (robotIds.length === 0) {
+      return;
+    }
+
+    const storage = resolveS3CompatibleStorageConfig(this.config, 'LIVEKIT_RECORDINGS_S3_');
+    if (!storage) {
+      return;
+    }
+
+    const client = createS3CompatibleStorageClient(storage);
+    const robotPrefixes = new Set(robotIds.map((robotId) => `robot-${robotId}`));
+    const keysToDelete: string[] = [];
+    let continuationToken: string | undefined;
+
+    do {
+      const listed = await client.send(
+        new ListObjectsV2Command({
+          Bucket: storage.bucket,
+          ContinuationToken: continuationToken,
+        }),
+      );
+
+      for (const entry of listed.Contents ?? []) {
+        const key = entry.Key?.trim();
+        if (!key) {
+          continue;
+        }
+        const fileName = basename(key);
+        if ([...robotPrefixes].some((prefix) => fileName.startsWith(prefix))) {
+          keysToDelete.push(key);
+        }
+      }
+
+      continuationToken = listed.IsTruncated ? listed.NextContinuationToken ?? undefined : undefined;
+    } while (continuationToken);
+
+    for (let index = 0; index < keysToDelete.length; index += 1000) {
+      const chunk = keysToDelete.slice(index, index + 1000).map((key) => ({ Key: key }));
+      await client.send(
+        new DeleteObjectsCommand({
+          Bucket: storage.bucket,
+          Delete: {
+            Objects: chunk,
+            Quiet: true,
+          },
+        }),
+      );
+    }
   }
 
   private async ensureAnotherActiveAdminExists(tx: Prisma.TransactionClient, excludedUserId: string) {

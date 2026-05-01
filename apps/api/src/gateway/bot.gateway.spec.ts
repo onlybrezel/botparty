@@ -1,4 +1,5 @@
-import { Test, TestingModule } from '@nestjs/testing';
+import type { TestingModule } from '@nestjs/testing';
+import { Test } from '@nestjs/testing';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { BotGateway } from './bot.gateway';
@@ -10,6 +11,7 @@ import { ModerationService } from '../moderation/moderation.service';
 import { ControlsService } from '../controls/controls.service';
 import { AuthService } from '../auth/auth.service';
 import { WalletService } from '../wallet/wallet.service';
+import { LivekitService } from '../livekit/livekit.service';
 
 describe('BotGateway', () => {
   let gateway: BotGateway;
@@ -22,6 +24,7 @@ describe('BotGateway', () => {
   let controlsService: jest.Mocked<ControlsService>;
   let jwtService: jest.Mocked<JwtService>;
   let configService: jest.Mocked<ConfigService>;
+  let livekitService: jest.Mocked<LivekitService>;
 
   beforeEach(async () => {
     const mockRedisClient = {
@@ -54,6 +57,7 @@ describe('BotGateway', () => {
         exec: jest.fn().mockResolvedValue([null, null, [null, 0], null]),
       }),
       quit: jest.fn().mockResolvedValue('OK'),
+      eval: jest.fn().mockResolvedValue(1),
     };
 
     module = await Test.createTestingModule({
@@ -64,6 +68,7 @@ describe('BotGateway', () => {
           useValue: {
             findById: jest.fn(),
             getAccessPolicy: jest.fn(),
+            updateStatus: jest.fn().mockResolvedValue(undefined),
           } as any,
         },
         {
@@ -81,6 +86,7 @@ describe('BotGateway', () => {
             join: jest.fn(),
             leave: jest.fn(),
             getStatus: jest.fn(),
+            clearQueue: jest.fn().mockResolvedValue(undefined),
           } as any,
         },
         {
@@ -101,6 +107,7 @@ describe('BotGateway', () => {
             zadd: jest.fn().mockResolvedValue(1),
             zcard: jest.fn().mockResolvedValue(0),
             expire: jest.fn().mockResolvedValue(1),
+            eval: jest.fn().mockResolvedValue(1),
           } as any,
         },
         {
@@ -145,6 +152,12 @@ describe('BotGateway', () => {
             getBalance: jest.fn().mockResolvedValue(0),
           } as any,
         },
+        {
+          provide: LivekitService,
+          useValue: {
+            stopRoomRecording: jest.fn().mockResolvedValue({ active: false, outputs: [] }),
+          } as any,
+        },
       ],
     }).compile();
 
@@ -157,6 +170,7 @@ describe('BotGateway', () => {
     controlsService = module.get(ControlsService) as jest.Mocked<ControlsService>;
     jwtService = module.get(JwtService) as jest.Mocked<JwtService>;
     configService = module.get(ConfigService) as jest.Mocked<ConfigService>;
+    livekitService = module.get(LivekitService) as jest.Mocked<LivekitService>;
   });
 
   afterEach(async () => {
@@ -207,6 +221,22 @@ describe('BotGateway', () => {
 
       await gateway.handleDisconnect(mockSocket);
       // Should clean up client state without throwing
+    });
+
+    it('stops active room recording when a robot socket disconnects', async () => {
+      const robotSocket = {
+        id: 'robot-socket-1',
+        robotId: 'robot-1',
+        isRobot: true,
+        readyState: 1,
+        close: jest.fn(),
+      } as any;
+
+      await gateway.handleConnection(robotSocket, {});
+      (gateway as any).runtime.robotClients.set('robot-1', robotSocket);
+      await gateway.handleDisconnect(robotSocket);
+
+      expect(livekitService.stopRoomRecording).toHaveBeenCalledWith('robot-1');
     });
   });
 

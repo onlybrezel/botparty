@@ -42,6 +42,19 @@ export interface PayoutRequestRecord {
   user?: { id: string; username: string; email: string };
 }
 
+export interface BillingWebhookEventRecord {
+  id: string;
+  provider: string;
+  eventId: string;
+  eventType: string;
+  intentId: string | null;
+  providerRef: string | null;
+  amountCents: number;
+  currency: string | null;
+  processedAt: string;
+  payload: Record<string, unknown> | null;
+}
+
 export interface EarningsSummary {
   lifetimeCredits: number;
   eventCount: number;
@@ -118,5 +131,16 @@ export class WalletApi {
 
   markPayoutPaid(id: string) {
     return this.req<PayoutRequestRecord>(`/payouts/${id}/mark-paid`, { method: 'POST' });
+  }
+
+  listBillingWebhookEvents() {
+    return this.req<{ items: BillingWebhookEventRecord[] }>('/billing/admin/webhook-events');
+  }
+
+  replayBillingWebhookEvent(id: string) {
+    return this.req<{ status: string }>(`/billing/admin/webhook-events/${id}/replay`, {
+      method: 'POST',
+      body: '{}',
+    });
   }
 }

@@ -226,7 +226,7 @@ services:
     build:
       context: .
       dockerfile: docker/api/Dockerfile
-    image: botparty-api:${APP_VERSION:-latest}
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-onlybrezel}/botparty-api:${APP_VERSION:-latest}
     container_name: botparty-api
     restart: on-failure:10
     expose:
@@ -325,7 +325,9 @@ services:
     build:
       context: .
       dockerfile: docker/web/Dockerfile
-    image: botparty-web:${APP_VERSION:-latest}
+      args:
+        NEXT_PUBLIC_APP_VERSION: ${NEXT_PUBLIC_APP_VERSION:-dev}
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-onlybrezel}/botparty-web:${APP_VERSION:-latest}
     container_name: botparty-web
     restart: on-failure:10
     environment:

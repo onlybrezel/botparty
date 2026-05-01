@@ -1,10 +1,10 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { TransactionType } from '@botparty/prisma';
 import { DonationService } from './donation.service';
-import { WalletService } from './wallet.service';
-import { PlatformUserService } from './platform-user.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { RedisService } from '../redis/redis.service';
+import type { WalletService } from './wallet.service';
+import type { PlatformUserService } from './platform-user.service';
+import type { PrismaService } from '../prisma/prisma.service';
+import type { RedisService } from '../redis/redis.service';
 
 const platformId = '00000000-0000-0000-0000-00000000fee5';
 const donorId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';

@@ -1,6 +1,20 @@
 import { z } from 'zod';
 import { LIMITS } from '../constants/index.js';
 
+export function isValidTimezone(value: string): boolean {
+  const timezone = value.trim();
+  if (!timezone) {
+    return false;
+  }
+
+  try {
+    Intl.DateTimeFormat('en-US', { timeZone: timezone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const robotStreamCameraSchema = z.object({
   id: z.string().min(1).max(64),
   label: z.string().min(1).max(64).optional(),
@@ -19,6 +33,12 @@ const robotSlugSchema = z
   );
 
 const robotScheduleDateTimeSchema = z.string().datetime({ offset: true });
+const robotTimezoneSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(64)
+  .refine((value) => isValidTimezone(value), 'Timezone must be a valid IANA timezone');
 
 function validateRobotScheduleRange(
   data: { scheduleStart?: string | null; scheduleEnd?: string | null },
@@ -114,7 +134,7 @@ const robotWriteSchema = z.object({
     .optional(),
   scheduleStart: robotScheduleDateTimeSchema.nullable().optional(),
   scheduleEnd: robotScheduleDateTimeSchema.nullable().optional(),
-  timezone: z.string().trim().min(1).max(64).default('UTC'),
+  timezone: robotTimezoneSchema.default('UTC'),
 });
 
 export const createRobotSchema = robotWriteSchema.superRefine(validateRobotScheduleRange);
@@ -156,6 +176,13 @@ export const donationRequestSchema = z.object({
 export const checkoutRequestSchema = z.object({
   provider: z.enum(['stripe', 'paypal']),
   packageId: z.string().min(1).max(64),
+  successUrl: z.string().url().max(512).optional(),
+  cancelUrl: z.string().url().max(512).optional(),
+});
+
+export const subscriptionCheckoutRequestSchema = z.object({
+  provider: z.enum(['stripe']),
+  planId: z.string().min(1).max(64),
   successUrl: z.string().url().max(512).optional(),
   cancelUrl: z.string().url().max(512).optional(),
 });

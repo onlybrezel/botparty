@@ -11,6 +11,7 @@ import type {
   queueJoinSchema,
   donationRequestSchema,
   checkoutRequestSchema,
+  subscriptionCheckoutRequestSchema,
   payoutRequestSchema,
 } from '../schemas/index.js';
 import type { Role, RobotVisibility, RobotAccessMode, QueueMode, RobotStatus, ControlButtonAccess, TransactionType } from '../constants/index.js';
@@ -33,6 +34,7 @@ export type QueueJoinInput = z.infer<typeof queueJoinSchema>;
 // ─── Wallet & Billing ────────────────────────────────
 export type DonationRequest = z.infer<typeof donationRequestSchema>;
 export type CheckoutRequest = z.infer<typeof checkoutRequestSchema>;
+export type SubscriptionCheckoutRequest = z.infer<typeof subscriptionCheckoutRequestSchema>;
 export type PayoutRequestInput = z.infer<typeof payoutRequestSchema>;
 
 export interface WalletTransactionRecord {
@@ -71,6 +73,19 @@ export interface CreditPackage {
   amountCents: number;
   currency: string;
   bonus?: number;
+}
+
+export interface RecurringSubscriptionPlan {
+  id: string;
+  label: string;
+  description: string | null;
+  credits: number;
+  amountCents: number;
+  currency: string;
+  bonus?: number;
+  interval: 'month';
+  intervalCount: number;
+  supportedProviders: Array<'stripe'>;
 }
 
 export interface CheckoutResponse {

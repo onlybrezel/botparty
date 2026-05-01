@@ -1,13 +1,15 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
-import type { Prisma } from '@botparty/prisma';
+import { Prisma } from '@botparty/prisma';
 
 // AnalyticsEvent rows older than this are deleted during maintenance sweeps.
 const ANALYTICS_RETENTION_DAYS = Number(process.env.ANALYTICS_RETENTION_DAYS ?? 90);
 // How often the cleanup job runs (default: every 6 hours).
 const CLEANUP_INTERVAL_MS = Number(process.env.CLEANUP_INTERVAL_MS ?? 6 * 60 * 60 * 1000);
 const ROBOT_STREAM_KEY_MAX_AGE_DAYS = Number(process.env.ROBOT_STREAM_KEY_MAX_AGE_DAYS ?? 90);
+const ADMIN_AUDIT_LOG_RETENTION_DAYS = Number(process.env.ADMIN_AUDIT_LOG_RETENTION_DAYS ?? 180);
+const LEDGER_RECONCILIATION_LOOKBACK_DAYS = Number(process.env.LEDGER_RECONCILIATION_LOOKBACK_DAYS ?? 30);
 
 @Injectable()
 export class MaintenanceService implements OnModuleInit, OnModuleDestroy {
@@ -50,6 +52,18 @@ export class MaintenanceService implements OnModuleInit, OnModuleDestroy {
       await this._rotateExpiredRobotStreamKeys();
     } catch (err) {
       this.logger.warn('Robot stream key rotation sweep failed', err);
+    }
+
+    try {
+      await this._purgeOldAdminAuditLogs();
+    } catch (err) {
+      this.logger.warn('Admin audit log cleanup failed', err);
+    }
+
+    try {
+      await this._reconcileLedgerGroups();
+    } catch (err) {
+      this.logger.warn('Ledger reconciliation sweep failed', err);
     }
   }
 
@@ -112,6 +126,54 @@ export class MaintenanceService implements OnModuleInit, OnModuleDestroy {
 
     if (rotated > 0) {
       this.logger.log(`Rotated ${rotated} robot stream key(s) older than ${ROBOT_STREAM_KEY_MAX_AGE_DAYS} days`);
+    }
+  }
+
+  private async _purgeOldAdminAuditLogs() {
+    if (!Number.isFinite(ADMIN_AUDIT_LOG_RETENTION_DAYS) || ADMIN_AUDIT_LOG_RETENTION_DAYS <= 0) {
+      return;
+    }
+
+    const cutoff = new Date(Date.now() - ADMIN_AUDIT_LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+    const result = await this.prisma.adminAuditLog.deleteMany({
+      where: { createdAt: { lt: cutoff } },
+    });
+
+    if (result.count > 0) {
+      this.logger.log(
+        `Purged ${result.count} admin audit log entr${result.count === 1 ? 'y' : 'ies'} older than ${ADMIN_AUDIT_LOG_RETENTION_DAYS} days`,
+      );
+    }
+  }
+
+  private async _reconcileLedgerGroups() {
+    if (!Number.isFinite(LEDGER_RECONCILIATION_LOOKBACK_DAYS) || LEDGER_RECONCILIATION_LOOKBACK_DAYS <= 0) {
+      return;
+    }
+
+    const cutoff = new Date(Date.now() - LEDGER_RECONCILIATION_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
+    const mismatches = await this.prisma.$queryRaw<Array<{ ledgerGroupId: string; netAmount: number; entryCount: number }>>(
+      Prisma.sql`
+        SELECT
+          "ledgerGroupId"::text AS "ledgerGroupId",
+          COALESCE(SUM(amount), 0)::int AS "netAmount",
+          COUNT(*)::int AS "entryCount"
+        FROM transactions
+        WHERE "ledgerGroupId" IS NOT NULL
+          AND "createdAt" >= ${cutoff}
+        GROUP BY "ledgerGroupId"
+        HAVING COALESCE(SUM(amount), 0) <> 0
+        ORDER BY MAX("createdAt") DESC
+        LIMIT 100
+      `,
+    );
+
+    if (mismatches.length > 0) {
+      for (const mismatch of mismatches) {
+        this.logger.warn(
+          `Ledger reconciliation mismatch for ${mismatch.ledgerGroupId}: net=${mismatch.netAmount}, entries=${mismatch.entryCount}`,
+        );
+      }
     }
   }
 

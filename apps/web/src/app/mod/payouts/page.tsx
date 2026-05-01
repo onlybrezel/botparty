@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { api } from '@/lib/api';
@@ -67,13 +68,21 @@ export default function ModPayoutsPage() {
     <main className="mx-auto max-w-4xl px-4 py-8">
       <header className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Payouts</h1>
-        <button
-          type="button"
-          onClick={() => void reload()}
-          className="rounded-md border border-[var(--border)] px-3 py-1.5 text-sm hover:bg-[var(--muted)]"
-        >
-          Refresh
-        </button>
+        <div className="flex gap-2">
+          <Link
+            href="/mod/billing"
+            className="rounded-md border border-[var(--border)] px-3 py-1.5 text-sm hover:bg-[var(--muted)]"
+          >
+            Billing events
+          </Link>
+          <button
+            type="button"
+            onClick={() => void reload()}
+            className="rounded-md border border-[var(--border)] px-3 py-1.5 text-sm hover:bg-[var(--muted)]"
+          >
+            Refresh
+          </button>
+        </div>
       </header>
 
       {error && (

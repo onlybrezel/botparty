@@ -138,6 +138,7 @@ export class GatewayRuntimeSupport {
       clearTurnState(robotId: string): Promise<void>;
       clearQueue(robotId: string): Promise<unknown>;
       updateRobotStatus(robotId: string, status: 'OFFLINE'): Promise<unknown>;
+      stopRoomRecording(robotId: string): Promise<unknown>;
     },
   ) {
     this.clients.delete(client.id);
@@ -167,6 +168,7 @@ export class GatewayRuntimeSupport {
     void context.clearTurnState(client.robotId);
     void context.clearQueue(client.robotId).catch(() => {});
     void context.updateRobotStatus(client.robotId, 'OFFLINE').catch(() => {});
+    void context.stopRoomRecording(client.robotId).catch(() => {});
     this.broadcastToRoom(client.robotId, WS_EVENTS.ROBOT_STATUS, { status: 'OFFLINE' });
     this.logger.log(`Robot disconnected: ${client.robotId}`);
   }

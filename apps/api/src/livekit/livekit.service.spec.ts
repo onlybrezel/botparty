@@ -1,5 +1,6 @@
-import { EncodedFileOutput, TrackType } from '@livekit/protocol';
-import { ConfigService } from '@nestjs/config';
+import type { EncodedFileOutput} from '@livekit/protocol';
+import { TrackType } from '@livekit/protocol';
+import type { ConfigService } from '@nestjs/config';
 import { LivekitService } from './livekit.service';
 
 const roomService = {

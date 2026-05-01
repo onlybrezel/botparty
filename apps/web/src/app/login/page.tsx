@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { loginSchema, registerSchema } from '@botparty/shared';
 import { api } from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/store';
@@ -12,6 +13,33 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
 type Mode = 'login' | 'register';
+type AuthField = 'username' | 'email' | 'password';
+
+type AuthDraft = {
+  username: string;
+  email: string;
+  password: string;
+};
+
+function collectFieldErrors(mode: Mode, draft: AuthDraft) {
+  const result = (mode === 'login' ? loginSchema : registerSchema).safeParse({
+    ...(mode === 'register' ? { username: draft.username } : {}),
+    email: draft.email,
+    password: draft.password,
+  });
+
+  if (result.success) {
+    return {} as Partial<Record<AuthField, string>>;
+  }
+
+  return result.error.issues.reduce<Partial<Record<AuthField, string>>>((acc, issue) => {
+    const path = issue.path[0];
+    if ((path === 'username' || path === 'email' || path === 'password') && !acc[path]) {
+      acc[path] = issue.message;
+    }
+    return acc;
+  }, {});
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -21,29 +49,66 @@ export default function LoginPage() {
   const [mode, setMode] = useState<Mode>('login');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [touched, setTouched] = useState<Partial<Record<AuthField, boolean>>>({});
+  const [draft, setDraft] = useState<AuthDraft>({
+    username: '',
+    email: '',
+    password: '',
+  });
   const resetSucceeded = searchParams.get('reset') === 'success';
+  const fieldErrors = useMemo(() => collectFieldErrors(mode, draft), [draft, mode]);
+  const visibleFieldErrors = useMemo(
+    () =>
+      Object.entries(fieldErrors).reduce<Partial<Record<AuthField, string>>>((acc, [field, message]) => {
+        if (touched[field as AuthField] || loading) {
+          acc[field as AuthField] = message;
+        }
+        return acc;
+      }, {}),
+    [fieldErrors, loading, touched],
+  );
+  const canSubmit = useMemo(() => {
+    if (loading) {
+      return false;
+    }
+    if (!draft.email.trim() || !draft.password) {
+      return false;
+    }
+    if (mode === 'register' && !draft.username.trim()) {
+      return false;
+    }
+    return Object.keys(fieldErrors).length === 0;
+  }, [draft.email, draft.password, draft.username, fieldErrors, loading, mode]);
 
-  const usernameRef = useRef<HTMLInputElement>(null);
-  const emailRef = useRef<HTMLInputElement>(null);
-  const passwordRef = useRef<HTMLInputElement>(null);
+  function updateField(field: AuthField, value: string) {
+    setDraft((current) => ({ ...current, [field]: value }));
+  }
+
+  function touchField(field: AuthField) {
+    setTouched((current) => ({ ...current, [field]: true }));
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setTouched({ username: true, email: true, password: true });
     setError(null);
+    if (Object.keys(fieldErrors).length > 0) {
+      return;
+    }
     setLoading(true);
 
-    const email = emailRef.current!.value.trim();
-    const password = passwordRef.current!.value;
+    const email = draft.email.trim();
+    const password = draft.password;
 
-      try {
-        if (mode === 'login') {
-          const { accessToken, user } = await api.auth.login({ email, password });
-          if (!accessToken) {
-            throw new Error('Login response did not include an access token.');
-          }
-          api.setToken(accessToken);
-          login({
-            accessToken,
+    try {
+      if (mode === 'login') {
+        const { accessToken, user } = await api.auth.login({ email, password });
+        if (!accessToken) {
+          throw new Error('Login response did not include an access token.');
+        }
+        api.setToken(accessToken);
+        login({
+          accessToken,
           username: user.username,
           userId: user.id,
           displayName: user.displayName,
@@ -51,37 +116,37 @@ export default function LoginPage() {
         });
 
         router.push('/explore');
-        } else {
-          const username = usernameRef.current!.value.trim();
-          const result = await api.auth.register({ username, email, password });
-          if (result.accessToken) {
-            api.setToken(result.accessToken);
-            login({
-              accessToken: result.accessToken,
-              username: result.user.username,
-              userId: result.user.id,
-              displayName: result.user.displayName,
-              role: result.user.role,
-            });
-            router.push('/explore');
-            return;
-          }
-
-          router.push(`/verify-email?email=${encodeURIComponent(email)}&sent=1`);
-        }
-      } catch (err) {
-        if (
-          mode === 'login'
-          && err instanceof ApiError
-          && err.status === 403
-          && err.message.toLowerCase().includes('verify')
-        ) {
-          router.push(`/verify-email?email=${encodeURIComponent(email)}`);
+      } else {
+        const username = draft.username.trim();
+        const result = await api.auth.register({ username, email, password });
+        if (result.accessToken) {
+          api.setToken(result.accessToken);
+          login({
+            accessToken: result.accessToken,
+            username: result.user.username,
+            userId: result.user.id,
+            displayName: result.user.displayName,
+            role: result.user.role,
+          });
+          router.push('/explore?onboarding=welcome');
           return;
         }
-        setError(err instanceof Error ? err.message : 'Something went wrong');
-      } finally {
-        setLoading(false);
+
+        router.push(`/verify-email?email=${encodeURIComponent(email)}&sent=1`);
+      }
+    } catch (err) {
+      if (
+        mode === 'login'
+        && err instanceof ApiError
+        && err.status === 403
+        && err.message.toLowerCase().includes('verify')
+      ) {
+        router.push(`/verify-email?email=${encodeURIComponent(email)}`);
+        return;
+      }
+      setError(err instanceof Error ? err.message : 'Something went wrong');
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -191,7 +256,6 @@ export default function LoginPage() {
                 <div className="space-y-1.5">
                   <Label htmlFor="username">Username</Label>
                   <Input
-                    ref={usernameRef}
                     id="username"
                     type="text"
                     required
@@ -200,20 +264,37 @@ export default function LoginPage() {
                     pattern="[a-zA-Z0-9_-]+"
                     autoComplete="username"
                     placeholder="cool_maker_42"
+                    value={draft.username}
+                    onChange={(event) => updateField('username', event.target.value)}
+                    onBlur={() => touchField('username')}
+                    aria-invalid={Boolean(visibleFieldErrors.username)}
+                    className={visibleFieldErrors.username ? 'border-[var(--destructive)] focus-visible:ring-[var(--destructive)]' : undefined}
                   />
+                  {visibleFieldErrors.username ? (
+                    <p className="text-xs text-[var(--destructive)]">{visibleFieldErrors.username}</p>
+                  ) : (
+                    <p className="text-xs text-[var(--muted-foreground)]">3-32 chars, letters, numbers, `_` or `-`.</p>
+                  )}
                 </div>
               )}
 
               <div className="space-y-1.5">
                 <Label htmlFor="email">Email</Label>
                 <Input
-                  ref={emailRef}
                   id="email"
                   type="email"
                   required
                   autoComplete={mode === 'login' ? 'email' : 'new-email'}
                   placeholder="you@example.com"
+                  value={draft.email}
+                  onChange={(event) => updateField('email', event.target.value)}
+                  onBlur={() => touchField('email')}
+                  aria-invalid={Boolean(visibleFieldErrors.email)}
+                  className={visibleFieldErrors.email ? 'border-[var(--destructive)] focus-visible:ring-[var(--destructive)]' : undefined}
                 />
+                {visibleFieldErrors.email ? (
+                  <p className="text-xs text-[var(--destructive)]">{visibleFieldErrors.email}</p>
+                ) : null}
               </div>
 
               <div className="space-y-1.5">
@@ -229,14 +310,23 @@ export default function LoginPage() {
                   )}
                 </div>
                 <Input
-                  ref={passwordRef}
                   id="password"
                   type="password"
                   required
                   minLength={8}
                   autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
                   placeholder="********"
+                  value={draft.password}
+                  onChange={(event) => updateField('password', event.target.value)}
+                  onBlur={() => touchField('password')}
+                  aria-invalid={Boolean(visibleFieldErrors.password)}
+                  className={visibleFieldErrors.password ? 'border-[var(--destructive)] focus-visible:ring-[var(--destructive)]' : undefined}
                 />
+                {visibleFieldErrors.password ? (
+                  <p className="text-xs text-[var(--destructive)]">{visibleFieldErrors.password}</p>
+                ) : mode === 'register' ? (
+                  <p className="text-xs text-[var(--muted-foreground)]">Use at least 8 characters.</p>
+                ) : null}
               </div>
 
               {error && (
@@ -245,7 +335,7 @@ export default function LoginPage() {
                 </div>
               )}
 
-              <Button type="submit" disabled={loading} className="mt-2 h-11 w-full text-sm">
+              <Button type="submit" disabled={!canSubmit} className="mt-2 h-11 w-full text-sm">
                 {loading ? (
                   <span className="flex items-center justify-center gap-2">
                     <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">

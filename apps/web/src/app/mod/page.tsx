@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import { Shield, RefreshCw, Activity, Server, Users, Bot, UserRound, Siren, ChevronRight, Ban } from 'lucide-react';
+import { isValidTimezone } from '@botparty/shared';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/store';
 import { pushToast } from '@/lib/toast';
@@ -145,6 +146,10 @@ const validateRobotDraftSchedule = (draft: RobotDraft) => {
 
   if (!draft.timezone.trim()) {
     return 'Timezone is required when scheduling is enabled.';
+  }
+
+  if (!isValidTimezone(draft.timezone)) {
+    return 'Timezone must be a valid IANA timezone.';
   }
 
   return null;

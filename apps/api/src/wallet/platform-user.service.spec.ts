@@ -1,4 +1,4 @@
-import { ConfigService } from '@nestjs/config';
+import type { ConfigService } from '@nestjs/config';
 import { PlatformUserService } from './platform-user.service';
 
 const PLATFORM_ID = '00000000-0000-0000-0000-00000000fee5';

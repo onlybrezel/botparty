@@ -4,18 +4,21 @@ import {
   Get,
   Headers,
   HttpCode,
+  Param,
   Post,
   Req,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { FastifyRequest } from 'fastify';
+import { checkoutRequestSchema, Role, type CheckoutRequest, type JwtPayload } from '@botparty/shared';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Public } from '../auth/decorators/public.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import type { JwtPayload } from '@botparty/shared';
 import { BillingService } from './billing.service';
-import { CheckoutDto } from './billing.dto';
+import { ZodValidationPipe } from '../common/zod-validation.pipe';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { RolesGuard } from '../auth/guards/roles.guard';
 
 type FastifyRequestWithRawBody = FastifyRequest & { rawBody?: Buffer | string };
 
@@ -42,12 +45,32 @@ export class BillingController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create a credit purchase checkout session' })
-  async checkout(@CurrentUser() user: JwtPayload, @Body() dto: CheckoutDto) {
+  async checkout(@CurrentUser() user: JwtPayload, @Body(new ZodValidationPipe(checkoutRequestSchema)) dto: CheckoutRequest) {
     return this.billing.createCheckout({
       userId: user.sub,
       provider: dto.provider,
       packageId: dto.packageId,
+      successUrl: dto.successUrl,
+      cancelUrl: dto.cancelUrl,
     });
+  }
+
+  @Get('admin/webhook-events')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MOD)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'List billing webhook events for staff review' })
+  listWebhookEvents() {
+    return this.billing.listWebhookEvents();
+  }
+
+  @Post('admin/webhook-events/:eventId/replay')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MOD)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Replay a stored billing webhook event' })
+  replayWebhookEvent(@Param('eventId') eventId: string) {
+    return this.billing.replayWebhookEvent(eventId);
   }
 
   @Post('webhooks/stripe')

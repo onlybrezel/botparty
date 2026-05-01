@@ -29,13 +29,50 @@ export class BillingService {
     return CREDIT_PACKAGES;
   }
 
+  async listWebhookEvents(limit = 100) {
+    const events = await this.prisma.billingWebhookEvent.findMany({
+      orderBy: [{ processedAt: 'desc' }, { id: 'desc' }],
+      take: Math.max(1, Math.min(limit, 200)),
+    });
+
+    return {
+      items: events.map((event) => {
+        const provider = this.getProvider(event.provider);
+        const parsed = provider.parseStoredWebhookEvent({
+          eventId: event.eventId,
+          eventType: event.eventType,
+          payload: event.payload,
+        });
+
+        return {
+          id: event.id,
+          provider: event.provider,
+          eventId: event.eventId,
+          eventType: event.eventType,
+          intentId: parsed?.intentId ?? null,
+          providerRef: parsed?.providerRef ?? null,
+          amountCents: parsed?.amountCents ?? 0,
+          currency: parsed?.currency ?? null,
+          processedAt: event.processedAt.toISOString(),
+          payload: event.payload as Prisma.JsonValue,
+        };
+      }),
+    };
+  }
+
   private getProvider(name: string): PaymentProvider {
     if (name === 'stripe') return this.stripe;
     if (name === 'paypal') return this.paypal;
     throw new BadRequestException('Unknown payment provider');
   }
 
-  async createCheckout(input: { userId: string; provider: string; packageId: string }) {
+  async createCheckout(input: {
+    userId: string;
+    provider: string;
+    packageId: string;
+    successUrl?: string;
+    cancelUrl?: string;
+  }) {
     const pkg = findPackage(input.packageId);
     if (!pkg) throw new NotFoundException('Unknown credit package');
 
@@ -58,8 +95,8 @@ export class BillingService {
     const baseUrl = this.config.get<string>('PUBLIC_WEB_URL') ?? 'http://localhost:3000';
     const session = await provider.createCheckout({
       intent,
-      successUrl: `${baseUrl}/wallet?status=success`,
-      cancelUrl: `${baseUrl}/wallet?status=cancelled`,
+      successUrl: input.successUrl?.trim() || `${baseUrl}/wallet?status=success`,
+      cancelUrl: input.cancelUrl?.trim() || `${baseUrl}/wallet?status=cancelled`,
     });
 
     await this.prisma.billingIntent.update({
@@ -84,13 +121,45 @@ export class BillingService {
     return this.processVerifiedEvent('paypal', event);
   }
 
-  private async processVerifiedEvent(provider: 'stripe' | 'paypal', event: VerifiedWebhookEvent) {
-    // Event-level dedup: bail early if we've already processed this provider event.
-    const dupe = await this.prisma.billingWebhookEvent.findUnique({
-      where: { provider_eventId: { provider, eventId: event.eventId } },
+  async replayWebhookEvent(id: string) {
+    const stored = await this.prisma.billingWebhookEvent.findUnique({
+      where: { id },
     });
-    if (dupe) {
-      return { status: 'duplicate' };
+    if (!stored) {
+      throw new NotFoundException('Webhook event not found');
+    }
+
+    const provider = this.getProvider(stored.provider);
+    const parsed = provider.parseStoredWebhookEvent({
+      eventId: stored.eventId,
+      eventType: stored.eventType,
+      payload: stored.payload,
+    });
+    if (!parsed) {
+      throw new BadRequestException('Stored webhook payload cannot be replayed');
+    }
+
+    return this.processVerifiedEvent(provider.name, parsed, {
+      ignoreDuplicateCheck: true,
+      replayTag: `replay:${stored.id}:${Date.now()}`,
+    });
+  }
+
+  private async processVerifiedEvent(
+    provider: 'stripe' | 'paypal',
+    event: VerifiedWebhookEvent,
+    options: { ignoreDuplicateCheck?: boolean; replayTag?: string } = {},
+  ) {
+    const persistedEventId =
+      options.ignoreDuplicateCheck ? `${event.eventId}:${options.replayTag ?? 'replay'}` : event.eventId;
+    // Event-level dedup: bail early if we've already processed this provider event.
+    if (!options.ignoreDuplicateCheck) {
+      const dupe = await this.prisma.billingWebhookEvent.findUnique({
+        where: { provider_eventId: { provider, eventId: event.eventId } },
+      });
+      if (dupe) {
+        return { status: 'duplicate' };
+      }
     }
 
     if (event.type === 'unknown' || !event.intentId) {
@@ -99,7 +168,7 @@ export class BillingService {
         .create({
           data: {
             provider,
-            eventId: event.eventId,
+            eventId: persistedEventId,
             eventType: event.type,
             payload: event.rawPayload as Prisma.InputJsonValue,
             processedAt: new Date(),
@@ -123,7 +192,7 @@ export class BillingService {
         this.logger.error(
           `Webhook amount mismatch for ${intent.id}: expected ${intent.amountCents}, got ${event.amountCents}`,
         );
-        await this.recordEvent(provider, event);
+        await this.recordEvent(provider, event, persistedEventId);
         return { status: 'amount_mismatch' };
       }
 
@@ -139,7 +208,7 @@ export class BillingService {
         await tx.billingWebhookEvent.create({
           data: {
             provider,
-            eventId: event.eventId,
+            eventId: persistedEventId,
             eventType: event.type,
             payload: event.rawPayload as Prisma.InputJsonValue,
             processedAt: new Date(),
@@ -179,7 +248,7 @@ export class BillingService {
         where: { id: intent.id, status: BillingIntentStatus.PENDING },
         data: { status: BillingIntentStatus.FAILED, updatedAt: new Date() },
       });
-      await this.recordEvent(provider, event);
+      await this.recordEvent(provider, event, persistedEventId);
       return { status: 'failed' };
     }
 
@@ -191,7 +260,7 @@ export class BillingService {
         where: { id: intent.id },
         data: { status: newStatus, updatedAt: new Date() },
       });
-      await this.recordEvent(provider, event);
+      await this.recordEvent(provider, event, persistedEventId);
       // Reverse the credit. Balance may go negative; account-freeze handled separately.
       await this.wallet.debit(intent.userId, intent.creditsAmount, txType, {
         description: `${event.type} of intent ${intent.id}`,
@@ -205,12 +274,16 @@ export class BillingService {
     return { status: 'noop' };
   }
 
-  private async recordEvent(provider: 'stripe' | 'paypal', event: VerifiedWebhookEvent) {
+  private async recordEvent(
+    provider: 'stripe' | 'paypal',
+    event: VerifiedWebhookEvent,
+    persistedEventId = event.eventId,
+  ) {
     await this.prisma.billingWebhookEvent
       .create({
         data: {
           provider,
-          eventId: event.eventId,
+          eventId: persistedEventId,
           eventType: event.type,
           payload: event.rawPayload as Prisma.InputJsonValue,
           processedAt: new Date(),

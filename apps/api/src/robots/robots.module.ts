@@ -14,6 +14,11 @@ import { RobotCameraService } from './robot-camera.service';
 import { RobotActionQueueService } from './robot-action-queue.service';
 import { RobotPublicOverviewService } from './robot-public-overview.service';
 import { RobotsController } from './robots.controller';
+import { RobotRuntimeService } from './robot-runtime.service';
+import { RobotRuntimeController } from './robot-runtime.controller';
+import { RobotWebhooksController } from './robot-webhooks.controller';
+import { RobotCamerasController } from './robot-cameras.controller';
+import { RobotSecretsController } from './robot-secrets.controller';
 import { LivekitModule } from '../livekit/livekit.module';
 import { JwtModule } from '@nestjs/jwt';
 import { WalletModule } from '../wallet/wallet.module';
@@ -38,8 +43,15 @@ import { WalletModule } from '../wallet/wallet.module';
     RobotCameraService,
     RobotActionQueueService,
     RobotPublicOverviewService,
+    RobotRuntimeService,
   ],
-  controllers: [RobotsController],
+  controllers: [
+    RobotsController,
+    RobotRuntimeController,
+    RobotWebhooksController,
+    RobotCamerasController,
+    RobotSecretsController,
+  ],
   exports: [
     RobotsService,
     RobotTelemetryService,

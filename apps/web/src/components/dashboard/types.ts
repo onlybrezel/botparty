@@ -1,7 +1,7 @@
 import type { ControlButtonRecord } from '@/lib/api';
 import type { RobotManaged } from '@/lib/api';
 import type { ControlButtonAccess } from '@botparty/shared';
-import { ControlButtonAccess as ControlButtonAccessEnum } from '@botparty/shared';
+import { ControlButtonAccess as ControlButtonAccessEnum, isValidTimezone } from '@botparty/shared';
 
 export type RemoteActionType =
   | 'restart_video'
@@ -278,6 +278,10 @@ export function validateRobotFormSchedule(form: RobotFormState) {
 
   if (!form.timezone.trim()) {
     return 'Timezone is required when scheduling is enabled.';
+  }
+
+  if (!isValidTimezone(form.timezone)) {
+    return 'Timezone must be a valid IANA timezone.';
   }
 
   return null;

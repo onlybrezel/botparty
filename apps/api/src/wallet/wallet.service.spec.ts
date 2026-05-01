@@ -1,7 +1,7 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { TransactionType } from '@botparty/prisma';
 import { WalletService } from './wallet.service';
-import { PlatformUserService } from './platform-user.service';
+import type { PlatformUserService } from './platform-user.service';
 
 describe('WalletService (validation paths)', () => {
   const platformId = '00000000-0000-0000-0000-00000000fee5';

@@ -71,6 +71,12 @@ enum BillingIntentStatus {
   FAILED
   REFUNDED
   CHARGEBACK
+  CANCELED
+}
+
+enum BillingPurchaseType {
+  ONE_TIME
+  SUBSCRIPTION
 }
 
 enum PayoutRequestStatus {
@@ -273,6 +279,8 @@ model BillingIntent {
   user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   provider       String              @db.VarChar(16)       // 'stripe' | 'paypal'
   providerRef    String?             @db.VarChar(128)      // checkout/session/order/intent id once known
+  providerCustomerRef String?        @db.VarChar(128)
+  purchaseType   BillingPurchaseType @default(ONE_TIME)
   packageId      String              @db.VarChar(64)
   amountCents    Int
   currency       String              @db.VarChar(8)
@@ -285,7 +293,7 @@ model BillingIntent {
   updatedAt      DateTime            @updatedAt
 
   @@unique([provider, providerRef])
-  @@index([userId, status])
+  @@index([userId, purchaseType, status])
   @@index([status, createdAt])
   @@map("billing_intents")
 }

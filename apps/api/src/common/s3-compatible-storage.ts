@@ -1,5 +1,5 @@
 import { S3Client } from '@aws-sdk/client-s3';
-import { ConfigService } from '@nestjs/config';
+import type { ConfigService } from '@nestjs/config';
 
 export type S3CompatibleStorageConfig = {
   bucket: string;

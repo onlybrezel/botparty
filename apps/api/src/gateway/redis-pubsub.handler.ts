@@ -1,6 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { WS_EVENTS } from '@botparty/shared';
-import Redis from 'ioredis';
+import type Redis from 'ioredis';
 import type { QueueService } from '../queue/queue.service';
 import type { RedisService } from '../redis/redis.service';
 

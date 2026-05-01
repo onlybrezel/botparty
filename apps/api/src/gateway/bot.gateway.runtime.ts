@@ -20,6 +20,7 @@ import { ModerationService } from '../moderation/moderation.service';
 import { ControlsService } from '../controls/controls.service';
 import { AuthService } from '../auth/auth.service';
 import { WalletService } from '../wallet/wallet.service';
+import { LivekitService } from '../livekit/livekit.service';
 import type { WsClient } from './gateway-types';
 import { ChatHandler } from './chat.handler';
 import { ControlHandler } from './control.handler';
@@ -65,6 +66,7 @@ export class BotGateway
     private readonly controlsService: ControlsService,
     private readonly configService: ConfigService,
     private readonly walletService: WalletService,
+    private readonly livekitService: LivekitService,
   ) {
     this.runtime = new GatewayRuntimeSupport(
       this.redis,
@@ -178,6 +180,7 @@ export class BotGateway
       clearTurnState: (robotId) => this.clearTurnState(robotId),
       clearQueue: (robotId) => this.queueService.clearQueue(robotId),
       updateRobotStatus: (robotId, status) => this.robotsService.updateStatus(robotId, status),
+      stopRoomRecording: (robotId) => this.livekitService.stopRoomRecording(robotId),
     });
   }
 

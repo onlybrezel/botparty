@@ -1,9 +1,11 @@
 import type { Metadata } from 'next';
+import { cookies, headers } from 'next/headers';
 import Link from 'next/link';
 import Script from 'next/script';
 import { Inter } from 'next/font/google';
 import './globals.css';
 import { CookieBanner } from '@/components/cookie-banner';
+import { BOTPARTY_LOCALE_COOKIE, defaultLocale, isSupportedLocale, localizePath } from '@/lib/i18n';
 import Nav from '@/components/nav';
 import { ServiceWorkerRegistration } from '@/components/service-worker-registration';
 import { SentryBrowser } from '@/components/sentry-browser';
@@ -56,9 +58,15 @@ export const metadata: Metadata = {
   manifest: '/manifest.webmanifest',
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const headerStore = await headers();
+  const cookieStore = await cookies();
+  const headerLocale = headerStore.get('x-botparty-locale');
+  const cookieLocale = cookieStore.get(BOTPARTY_LOCALE_COOKIE)?.value;
+  const locale = isSupportedLocale(headerLocale) ? headerLocale : isSupportedLocale(cookieLocale) ? cookieLocale : defaultLocale;
+
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang={locale} suppressHydrationWarning>
       <head>
         <Script id="theme-bootstrap" strategy="beforeInteractive">
           {`(() => {
@@ -99,22 +107,22 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <p className="font-semibold text-[var(--foreground)]">BotParty</p>
             </div>
             <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs">
-              <Link href="/terms" className="transition hover:text-[var(--foreground)]">
+              <Link href={localizePath('/terms', locale)} className="transition hover:text-[var(--foreground)]">
                 Terms of Service
               </Link>
-              <Link href="/privacy" className="transition hover:text-[var(--foreground)]">
+              <Link href={localizePath('/privacy', locale)} className="transition hover:text-[var(--foreground)]">
                 Privacy Policy
               </Link>
-              <Link href="/imprint" className="transition hover:text-[var(--foreground)]">
+              <Link href={localizePath('/imprint', locale)} className="transition hover:text-[var(--foreground)]">
                 Imprint
               </Link>
-              <Link href="/cookies" className="transition hover:text-[var(--foreground)]">
+              <Link href={localizePath('/cookies', locale)} className="transition hover:text-[var(--foreground)]">
                 Cookie Notice
               </Link>
-              <Link href="/status" className="transition hover:text-[var(--foreground)]">
+              <Link href={localizePath('/status', locale)} className="transition hover:text-[var(--foreground)]">
                 Status
               </Link>
-              <Link href="/docs/robot-setup" className="transition hover:text-[var(--foreground)]">
+              <Link href={localizePath('/docs/robot-setup', locale)} className="transition hover:text-[var(--foreground)]">
                 Robot Setup
               </Link>
             </div>

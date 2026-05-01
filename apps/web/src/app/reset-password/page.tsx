@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { passwordSchema } from '@botparty/shared';
 import { api } from '@/lib/api';
 
 export default function ResetPasswordPage() {
@@ -16,6 +17,16 @@ export default function ResetPasswordPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [touched, setTouched] = useState<{ password?: boolean; confirmPassword?: boolean; token?: boolean }>({});
+  const passwordResult = passwordSchema.safeParse(password);
+  const passwordError =
+    touched.password && !passwordResult.success
+      ? passwordResult.error.issues[0]?.message ?? 'Password must be at least 8 characters'
+      : null;
+  const confirmError =
+    touched.confirmPassword && password !== confirmPassword ? 'Passwords do not match' : null;
+  const tokenError = touched.token && !token ? 'Missing password reset token' : null;
+  const canSubmit = Boolean(token) && passwordResult.success && password === confirmPassword && !loading;
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -32,14 +43,15 @@ export default function ResetPasswordPage() {
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setTouched({ token: true, password: true, confirmPassword: true });
 
     if (!token) {
       setError('Missing password reset token');
       return;
     }
 
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters');
+    if (!passwordResult.success) {
+      setError(passwordResult.error.issues[0]?.message ?? 'Password must be at least 8 characters');
       return;
     }
 
@@ -84,9 +96,16 @@ export default function ResetPasswordPage() {
               autoComplete="new-password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm outline-none transition focus:border-[var(--primary)]"
+              onBlur={() => setTouched((current) => ({ ...current, password: true }))}
+              aria-invalid={Boolean(passwordError)}
+              className={`mt-1 w-full rounded-lg border bg-[var(--background)] px-3 py-2 text-sm outline-none transition ${
+                passwordError
+                  ? 'border-[var(--destructive)] focus:border-[var(--destructive)]'
+                  : 'border-[var(--border)] focus:border-[var(--primary)]'
+              }`}
               placeholder="At least 8 characters"
             />
+            {passwordError ? <p className="mt-1 text-xs text-[var(--destructive)]">{passwordError}</p> : null}
           </div>
 
           <div>
@@ -101,10 +120,19 @@ export default function ResetPasswordPage() {
               autoComplete="new-password"
               value={confirmPassword}
               onChange={(event) => setConfirmPassword(event.target.value)}
-              className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm outline-none transition focus:border-[var(--primary)]"
+              onBlur={() => setTouched((current) => ({ ...current, confirmPassword: true }))}
+              aria-invalid={Boolean(confirmError)}
+              className={`mt-1 w-full rounded-lg border bg-[var(--background)] px-3 py-2 text-sm outline-none transition ${
+                confirmError
+                  ? 'border-[var(--destructive)] focus:border-[var(--destructive)]'
+                  : 'border-[var(--border)] focus:border-[var(--primary)]'
+              }`}
               placeholder="Repeat password"
             />
+            {confirmError ? <p className="mt-1 text-xs text-[var(--destructive)]">{confirmError}</p> : null}
           </div>
+
+          {tokenError ? <p className="text-xs text-[var(--destructive)]">{tokenError}</p> : null}
 
           {error && (
             <div className="rounded-lg border border-[var(--destructive)]/40 bg-[var(--destructive)]/10 px-3 py-2 text-sm text-[var(--destructive)]">
@@ -120,7 +148,7 @@ export default function ResetPasswordPage() {
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={!canSubmit}
             className="rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-70"
           >
             {loading ? 'Saving...' : 'Update password'}

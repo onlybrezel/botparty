@@ -9,14 +9,15 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import type { Request } from 'express';
+import type { FastifyRequest } from 'fastify';
 import { TransactionType } from '@botparty/prisma';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import type { JwtPayload } from '@botparty/shared';
+import { donationRequestSchema, type DonationRequest, type JwtPayload } from '@botparty/shared';
 import { WalletService } from './wallet.service';
 import { DonationService } from './donation.service';
-import { DonationDto, ListTransactionsQueryDto } from './wallet.dto';
+import { ListTransactionsQueryDto } from './wallet.dto';
+import { ZodValidationPipe } from '../common/zod-validation.pipe';
 
 @ApiTags('wallet')
 @Controller('wallet')
@@ -65,9 +66,9 @@ export class WalletController {
   @ApiOperation({ summary: 'Donate credits to a robot owner' })
   async donate(
     @CurrentUser() user: JwtPayload,
-    @Body() dto: DonationDto,
+    @Body(new ZodValidationPipe(donationRequestSchema)) dto: DonationRequest,
     @Headers('idempotency-key') idempotencyKey: string | undefined,
-    @Req() req: Request,
+    @Req() req: FastifyRequest,
   ) {
     return this.donations.donate({
       donorId: user.sub,

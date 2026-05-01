@@ -4,6 +4,7 @@ import type { PublicRobotOverview, RobotPublic } from '@botparty/shared';
 import RobotCard from '@/components/robot-card';
 import { Bot } from 'lucide-react';
 import { ExploreFilters } from './explore-filters';
+import { ExploreOnboardingBanner } from './explore-onboarding-banner';
 import { ExploreAutoRefresh } from './explore-refresh';
 import { getServerApiUrl } from '@/lib/server-api-url';
 
@@ -89,6 +90,7 @@ export default async function ExplorePage({
   return (
     <div className="mx-auto max-w-7xl px-4 py-6 sm:py-8">
       <ExploreAutoRefresh />
+      <ExploreOnboardingBanner />
       {/* Header */}
       <div className="mb-6 flex flex-col gap-3 sm:mb-7 sm:flex-row sm:items-end sm:justify-between">
         <div>

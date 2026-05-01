@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
+import { emailSchema } from '@botparty/shared';
 import { api } from '@/lib/api';
 
 export default function ForgotPasswordPage() {
@@ -9,9 +10,17 @@ export default function ForgotPasswordPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [touched, setTouched] = useState(false);
+  const emailResult = emailSchema.safeParse(email.trim());
+  const emailError = touched && !emailResult.success ? emailResult.error.issues[0]?.message ?? 'Invalid email' : null;
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setTouched(true);
+    if (!emailResult.success) {
+      setError(null);
+      return;
+    }
     setLoading(true);
     setError(null);
     setMessage(null);
@@ -46,9 +55,16 @@ export default function ForgotPasswordPage() {
               autoComplete="email"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
-              className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm outline-none transition focus:border-[var(--primary)]"
+              onBlur={() => setTouched(true)}
+              aria-invalid={Boolean(emailError)}
+              className={`mt-1 w-full rounded-lg border bg-[var(--background)] px-3 py-2 text-sm outline-none transition ${
+                emailError
+                  ? 'border-[var(--destructive)] focus:border-[var(--destructive)]'
+                  : 'border-[var(--border)] focus:border-[var(--primary)]'
+              }`}
               placeholder="you@example.com"
             />
+            {emailError ? <p className="mt-1 text-xs text-[var(--destructive)]">{emailError}</p> : null}
           </div>
 
           {error && (
@@ -65,7 +81,7 @@ export default function ForgotPasswordPage() {
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || !email.trim() || !emailResult.success}
             className="rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-70"
           >
             {loading ? 'Sending reset link...' : 'Send reset link'}

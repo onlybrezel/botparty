@@ -207,7 +207,7 @@ Then:
 docker compose up -d --build
 ```
 
-The API container runs `prisma db push` and seeds the database on first start. Check logs with `docker compose logs -f api`.
+The API container runs `prisma migrate deploy` and then seeds an empty database when `SEED_ADMIN_PASSWORD` is provided. Check logs with `docker compose logs -f api`.
 
 For faster iteration you can build or start only the parts you changed:
 
@@ -231,6 +231,29 @@ The setup wizard walks through this, but the short version:
 ### SSL with your own certs
 
 Copy `fullchain.pem` and `privkey.pem` into `docker/nginx/ssl/`, then run `bash setup-env.sh` and choose "Own certificates".
+
+### Tagged releases via GHCR
+
+Release images are published from SemVer git tags:
+
+```bash
+git tag v0.1.4
+git push origin v0.1.4
+```
+
+This triggers `.github/workflows/release.yml`, which publishes:
+
+- `ghcr.io/<owner>/botparty-api:v0.1.4`
+- `ghcr.io/<owner>/botparty-web:v0.1.4`
+
+`docker-compose.yml` already uses registry-based image names through `IMAGE_REGISTRY`, `IMAGE_NAMESPACE`, and `APP_VERSION`, so production hosts can deploy a pinned release with:
+
+```bash
+export IMAGE_NAMESPACE=onlybrezel
+export APP_VERSION=v0.1.4
+docker compose pull api web
+docker compose up -d api web nginx
+```
 
 ---
 

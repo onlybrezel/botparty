@@ -8,20 +8,41 @@ export interface CheckoutSession {
 
 export interface VerifiedWebhookEvent {
   eventId: string;
-  type: 'completed' | 'failed' | 'refunded' | 'chargeback' | 'unknown';
+  type: 'completed' | 'failed' | 'refunded' | 'chargeback' | 'canceled' | 'unknown';
   intentId: string | null;
   providerRef: string;
+  customerRef: string | null;
   amountCents: number;
   currency: string;
   rawPayload: unknown;
 }
 
+export interface ProviderCapabilities {
+  recurringCheckout: boolean;
+  billingPortal: boolean;
+}
+
 export interface PaymentProvider {
   readonly name: 'stripe' | 'paypal';
+  readonly capabilities: ProviderCapabilities;
   createCheckout(input: {
     intent: BillingIntent;
     successUrl: string;
     cancelUrl: string;
   }): Promise<CheckoutSession>;
+  createSubscriptionCheckout(input: {
+    intent: BillingIntent;
+    successUrl: string;
+    cancelUrl: string;
+  }): Promise<CheckoutSession>;
+  createBillingPortalSession(input: {
+    customerRef: string;
+    returnUrl: string;
+  }): Promise<{ redirectUrl: string }>;
   verifyWebhook(rawBody: Buffer, headers: Record<string, string | string[] | undefined>): Promise<VerifiedWebhookEvent>;
+  parseStoredWebhookEvent(record: {
+    eventId: string;
+    eventType: string;
+    payload: unknown;
+  }): VerifiedWebhookEvent | null;
 }
