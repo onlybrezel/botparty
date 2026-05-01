@@ -430,10 +430,12 @@ model AdminAuditLog {
   targetId   String?  @db.Uuid
   payload    Json?
   createdAt  DateTime @default(now())
+  expiresAt  DateTime @default(dbgenerated("now() + interval '90 days'")) // Retain for 90 days
 
   @@index([actorId, createdAt])
   @@index([action, createdAt])
   @@index([targetType, targetId, createdAt])
+  @@index([expiresAt]) // For pruning job to efficiently find expired entries
   @@map("admin_audit_logs")
 }
 

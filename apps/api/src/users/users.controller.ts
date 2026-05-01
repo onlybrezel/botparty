@@ -18,7 +18,8 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Role } from '@botparty/shared';
 import type { JwtPayload } from '@botparty/shared';
-import { UpdateAdminUserDto, UpdateMeDto } from './users.dto';
+import { ZodValidationPipe } from '../common/zod-validation.pipe';
+import { updateMeSchema, updateAdminUserSchema } from './users.schema';
 
 @ApiTags('users')
 @Controller('users')
@@ -45,7 +46,10 @@ export class UsersController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update current user profile' })
-  async updateMe(@CurrentUser() user: JwtPayload, @Body() dto: UpdateMeDto) {
+  async updateMe(
+    @CurrentUser() user: JwtPayload,
+    @Body(new ZodValidationPipe(updateMeSchema)) dto: any,
+  ) {
     return this.usersService.updateMe(user.sub, dto);
   }
 
@@ -81,7 +85,7 @@ export class UsersController {
   async updateAdminUser(
     @Param('id') id: string,
     @CurrentUser() requester: JwtPayload,
-    @Body() body: UpdateAdminUserDto,
+    @Body(new ZodValidationPipe(updateAdminUserSchema)) body: any,
   ) {
     return this.usersService.updateUserByStaff(id, requester, body);
   }

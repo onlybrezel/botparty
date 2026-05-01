@@ -12,7 +12,7 @@ import type { Prisma } from '@botparty/prisma';
 import { basename } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { WalletService } from '../wallet/wallet.service';
-import { UpdateAdminUserDto, UpdateMeDto } from './users.dto';
+import { UpdateMeInput, UpdateAdminUserInput } from './users.schema';
 import type { JwtPayload } from '@botparty/shared';
 import { createS3CompatibleStorageClient, resolveS3CompatibleStorageConfig } from '../common/s3-compatible-storage';
 import { PlatformUserService } from '../wallet/platform-user.service';
@@ -213,7 +213,7 @@ export class UsersService {
     }));
   }
 
-  async updateMe(userId: string, dto: UpdateMeDto) {
+  async updateMe(userId: string, dto: UpdateMeInput) {
     const updates: { displayName?: string | null; avatarUrl?: string | null } = {};
 
     if (dto.displayName !== undefined) {
@@ -296,7 +296,7 @@ export class UsersService {
   async updateUserByStaff(
     id: string,
     requester: JwtPayload,
-    input: UpdateAdminUserDto,
+    input: UpdateAdminUserInput,
   ) {
     const result = await this.prisma.$transaction(async (tx) => {
       const [actor, target] = await Promise.all([
@@ -497,47 +497,54 @@ export class UsersService {
   }
 
   async deleteUserByStaff(id: string, requester: JwtPayload) {
+    const target = await this.prisma.user.findUnique({
+      where: { id },
+      select: { id: true, role: true, isActive: true },
+    });
+
+    if (!target) {
+      throw new NotFoundException('User not found');
+    }
+
+    if (this.platformUser.isPlatformUser(target.id)) {
+      throw new ForbiddenException('Cannot delete the platform user');
+    }
+
+    if (target.id === requester.sub) {
+      throw new ForbiddenException('You cannot delete your own account from the staff dashboard');
+    }
+
+    // Fetch actor and validate permissions
+    const actor = await this.prisma.user.findUnique({
+      where: { id: requester.sub },
+      select: { id: true, role: true, isActive: true },
+    });
+
+    if (!actor || !actor.isActive) {
+      throw new ForbiddenException('Staff account is inactive');
+    }
+
+    const actorIsAdmin = actor.role === 'ADMIN';
+    const targetIsStaff = target.role === 'ADMIN' || target.role === 'MOD';
+
+    if (!actorIsAdmin) {
+      if (targetIsStaff) {
+        throw new ForbiddenException('Mods can only delete regular user accounts');
+      }
+    }
+
+    // Fetch owned robots and clean up recordings BEFORE deleting user
+    const ownedRobots = await this.prisma.robot.findMany({
+      where: { ownerId: target.id },
+      select: { id: true },
+    });
+    await this.deleteOwnedRecordings(ownedRobots.map((robot) => robot.id));
+
+    // Now delete the user
     await this.prisma.$transaction(async (tx) => {
-      const [actor, target] = await Promise.all([
-        tx.user.findUnique({
-          where: { id: requester.sub },
-          select: { id: true, role: true, isActive: true },
-        }),
-        tx.user.findUnique({
-          where: { id },
-          select: { id: true, role: true, isActive: true },
-        }),
-      ]);
-
-      if (!actor || !actor.isActive) {
-        throw new ForbiddenException('Staff account is inactive');
-      }
-
-      if (!target) {
-        throw new NotFoundException('User not found');
-      }
-
-      if (this.platformUser.isPlatformUser(target.id)) {
-        throw new ForbiddenException('Cannot delete the platform user');
-      }
-
-      if (target.id === actor.id) {
-        throw new ForbiddenException('You cannot delete your own account from the staff dashboard');
-      }
-
-      const actorIsAdmin = actor.role === 'ADMIN';
-      const targetIsStaff = target.role === 'ADMIN' || target.role === 'MOD';
-
-      if (!actorIsAdmin) {
-        if (targetIsStaff) {
-          throw new ForbiddenException('Mods can only delete regular user accounts');
-        }
-      }
-
       if (target.role === 'ADMIN') {
         await this.ensureAnotherActiveAdminExists(tx, target.id);
       }
-
       await tx.user.delete({
         where: { id: target.id },
       });

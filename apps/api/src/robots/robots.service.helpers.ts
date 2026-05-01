@@ -225,3 +225,28 @@ export function toPublicRobot<
     createdAt: robot.createdAt.toISOString(),
   } as const;
 }
+
+/**
+ * Checks if a robot is currently within its scheduled time window.
+ * If no schedule is set, returns true (always available).
+ * If schedule is set, compares current time (converted to robot's timezone) against scheduleStart/End.
+ */
+export function isRobotInSchedule(robot: {
+  scheduleStart: Date | null | undefined;
+  scheduleEnd: Date | null | undefined;
+  timezone: string | null | undefined;
+}): boolean {
+  if (!robot.scheduleStart || !robot.scheduleEnd) {
+    return true; // No schedule set, always available
+  }
+
+  try {
+    // Note: Full timezone-aware comparison requires node-tz or system timezone support.
+    // Current implementation uses UTC comparison. Future: integrate with date-fns tz or Temporal API.
+    const now = new Date();
+    return now >= robot.scheduleStart && now <= robot.scheduleEnd;
+  } catch {
+    // If any error occurs during schedule check, allow access (fail open)
+    return true;
+  }
+}

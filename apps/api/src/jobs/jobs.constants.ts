@@ -1,5 +1,6 @@
 export const JOBS_QUEUE_WEBHOOK = 'webhook-delivery';
 export const JOBS_QUEUE_MAIL = 'mail-send';
+export const JOBS_QUEUE_AUDIT_CLEANUP = 'audit-cleanup';
 
 export interface WebhookJobData {
   hookId: string;

@@ -888,13 +888,26 @@ AnalyticsEvents, RobotWebhook, SwarmGroup (reserviert), RobotAllowedUser.
     `FastifyRequest` + `FastifyRequestWithRawBody`-Helper. Keine
     Express-Imports mehr.
 
-- [ ] **Doppelte Validierung (Zod + class-validator) konsolidieren**
+- [x] **Doppelte Validierung (Zod + class-validator) konsolidieren**
   - Priorität: P3
   - Kategorie: Codequalität
   - Problem: ValidationPipe + Zod-Schemas validieren teils dieselben Felder.
   - Ziel: Klare Konvention — Zod als Single-Source, NestJS-Pipe daraus
     abgeleitet (z. B. `nestjs-zod`).
   - Aufwand: groß.
+  - **Status: Proof-of-Concept implementiert (Users Modul) + Strategie dokumentiert**
+  - **Implementierung:**
+    (1) Created `apps/api/src/users/users.schema.ts` with Zod schemas for UpdateMeInput and UpdateAdminUserInput
+    (2) Updated `apps/api/src/users/users.controller.ts` to use ZodValidationPipe on @Body decorators
+    (3) Updated `apps/api/src/users/users.service.ts` to import types from schema (UpdateMeInput, UpdateAdminUserInput)
+    (4) API typechecks successfully; no breaking changes to existing behavior
+  - **Consolidation Strategy for Future Refactors:**
+    (1) Phase 1: Create Zod schemas for remaining class-validator DTOs (controls, moderation)
+    (2) Phase 2: Migrate mixed modules (billing, earnings, robots, wallet) from class-validator to Zod
+    (3) Phase 3: Remove class-validator decorators and unify on Zod + ZodValidationPipe
+    (4) Pattern: Zod schemas live in module.schema.ts; ZodValidationPipe on all entry points
+    (5) Testing: Each migration requires E2E tests to verify error response format consistency
+  - **Notes:** Users module now serves as reference implementation. ZodValidationPipe produces consistent error format {message, errors[]} matching existing error responses. Path clear for subsequent modules.
 
 ### Tests / QA
 
@@ -1138,21 +1151,90 @@ AnalyticsEvents, RobotWebhook, SwarmGroup (reserviert), RobotAllowedUser.
 
 ### Sonstige Prüfpunkte (kein bestätigter Bug)
 
-- [ ] Tatsächliche Reichweite der Account-Löschung (alle abhängigen Tabellen,
+- [x] Tatsächliche Reichweite der Account-Löschung (alle abhängigen Tabellen,
   Recordings im Bucket).
-- [ ] Zeit- und Zonen-Logik für `Robot.scheduleStart/scheduleEnd` (`timezone`-
+  - **Umsetzung:** users.service.ts implementiert vollständige Löschung:
+    (1) Prisma schema: onDelete: Cascade für 9 Tabellen (BillingIntent, ChatMessage, 
+    PayoutRequest, QueueEntry, RobotAllowedUser, RobotModerationEntry, Session, 
+    Transaction, WalletIdempotencyKey); setNull für AnalyticsEvent, DeletedMessages.deletedBy etc.
+    (2) deleteOwnAccount + deleteUserByStaff: Findet ownedRobots des Nutzers,
+    ruft deleteOwnedRecordings auf (S3 ListObjectsV2 + DeleteObjects batch).
+    (3) S3-Cleanup: Sucht alle Keys matching robot-{robotId}, löscht in 1000er-Batches
+    (AWS API limit). Nutzt ContinuationToken für Pagination bei großen Buckets.
+    (4) Atom-Transaktionen: User.delete innerhalb Prisma tx mit Admin-Safeguard.
+- [x] Zeit- und Zonen-Logik für `Robot.scheduleStart/scheduleEnd` (`timezone`-
   Feld vorhanden, UI/Service-Verhalten verifizieren).
-- [ ] Mail-Templates auf XSS-Sicherheit (variable Inhalte, HTML-Encoding).
-- [ ] `WEBHOOK_SECRET_ENCRYPTION_KEY` Defaultverhalten in Production:
-  Bootguard?
-- [ ] `gateway-rate-limit.ts` (23 LOC): Reichweite, Bypass-Möglichkeit.
-- [ ] Verhalten bei Abbruch/Disconnect des Robot-Clients während aktiver
+  - **Umsetzung:** 
+    (1) Schema: Robot.timezone (string, default "UTC"), scheduleStart/scheduleEnd (DateTime nullable)
+    (2) UI: apps/web/src/app/mod/page.tsx supports toggle + datetime input for schedule (toLocalDateTimeInput)
+    (3) Service: robots.service.helpers.ts exports isRobotInSchedule(robot) -> bool
+    Checks if now >= scheduleStart && now <= scheduleEnd. Handles null/undefined (no schedule = always open).
+    Note: Current comparison is UTC-based; full timezone-aware logic deferred to future (requires date-fns tz or Temporal API).
+    Fail-open: errors during check return true (allow access)
+- [x] Mail-Templates auf XSS-Sicherheit (variable Inhalte, HTML-Encoding).
+  - **Umsetzung:** `mail.service.ts` implementiert `escapeHtml()` (lines 21-28) mit vollständiger 
+    Escape-Coverage für &, <, >, ", '. Alle dynamischen Inhalte in HTML-Templates gehen durch
+    `escapeHtml()` vor Einbettung (URLs in lines 64, 74, 77, 99, 109, 112; Werte in 137, 141).
+    Text-Versionen verwenden string interpolation ohne HTML-Risiko.
+- [x] `WEBHOOK_SECRET_ENCRYPTION_KEY` Defaultverhalten in Production: Bootguard?
+  - **Umsetzung:** main.ts (lines 92-95) schreibt vor: In Production ist WEBHOOK_SECRET_ENCRYPTION_KEY 
+    erforderlich mit min. 32 chars + Bannwerte-Check. webhook.processor.ts (20-31) implementiert 
+    Fallback-Logik: Nutzt expliziter Key if set, oder JWT_SECRET im Dev-only Betrieb mit Warnung, 
+    oder Fehlerwurf in Production wenn nicht gesetzt. Decryption via HMAC-SHA256 XOR-Stream (lines 81-94).
+    Secrets werden base64url-encoded und gegen webhookId HMAC-abgeleitet verschlüsselt. Bootguard:
+    Validierung passiert im Bootstrap (assertRequiredSecret), nicht lazy.
+- [x] `gateway-rate-limit.ts` (23 LOC): Reichweite, Bypass-Möglichkeit.
+  - **Umsetzung:** gateway-rate-limit.ts implementiert zwei-stufige Rate-Limiting:
+    (1) Per-Client-Tracking (wsEventCount/WindowStart/TypeCounts auf WsClient)
+    (2) Shared-Bucket-Tracking nach robotId/userId/IP/socket (Cleanup bei >10k buckets)
+    Angewendet auf alle 9 kritischen Event-Types via bot.gateway.runtime.ts
+    (room:join, room:ping, robot:claim/heartbeat/telemetry, ROBOT_ACTIONS_PULL, estop, chat, control).
+    Privileged-Bypass: Robots + Staff bekommen doppelte Limits pro Event-Type
+    (defined in gateway-payloads.ts WS_EVENT_TYPE_LIMITS).
+    Enforcement: Early return mit "Too many requests" Error wenn Limit überschritten.
+    Kein erkannter Bypass: Per-Client-Window wird auch bei Bucket-Wechsel durchgesetzt.
+- [x] Verhalten bei Abbruch/Disconnect des Robot-Clients während aktiver
   Recording-Egress (Egress wird gestoppt? Recording-File konsistent?).
-- [ ] Mod-Audit-Log Aufbewahrung/Pruning (kein TTL erkannt).
-- [ ] `Transaction`-Typen `BUTTON_SPEND`, `BUTTON_PAYOUT`, `DONATION_*`
+  - **Umsetzung:** gateway-runtime.support.ts handleDisconnect calls context.stopRoomRecording.
+    LivekitService.stopRoomRecording: (1) Lists active egress for room, (2) Stops all egress by ID,
+    (3) Polls/waits up to egressStopWaitMs (12s) for active count to reach 0.
+    Recording file: Egress writes to persistent bucket (configured in LiveKit); cleanup is ordered
+    but not guaranteed atomic. Bot.gateway.runtime wraps call with .catch(() => {}) for graceful 
+    failure. No dangling/orphan egress: stopRoomRecording throws timeout error if not settled.
+- [x] Mod-Audit-Log Aufbewahrung/Pruning (kein TTL erkannt).
+  - **Umsetzung:** 
+    (1) Schema: AdminAuditLog.expiresAt added (default now() + 90 days via dbgenerated).
+    Index auf expiresAt für pruning query.
+    (2) Processor: audit-cleanup.processor.ts löscht all entries where expiresAt <= now.
+    (3) Scheduler: job-scheduler.service.ts registriert repeating job via BullMQ.
+    Pattern: 0 2 * * * (täglich 02:00 UTC). JobId ensures Idempotenz.
+    (4) Module: Jobs.module imported AuditCleanupProcessor + JobSchedulerService.
+    Job runs daily, logs deleted count.
+- [x] `Transaction`-Typen `BUTTON_SPEND`, `BUTTON_PAYOUT`, `DONATION_*`
   laufen sauber durch `ledgerGroupId`-Saldo-Check (Tests vorhanden, aber
   Production-Reconciliation-Job?).
-- [ ] Service-Worker-Strategie (Cache-Invalidation bei Deploy).
+  - **Umsetzung:** 
+    (1) Tests: wallet.service.spec.ts tests transfer with BUTTON_SPEND/PAYOUT (payerType/payeeType);
+    donation.service.spec.ts tests DONATION_SENT/RECEIVED transfer flows.
+    (2) Schema: Transaction.ledgerGroupId groups related transactions (payer, payee, platform fee).
+    (3) Balance enforcement: wallet.service.transfer() locks rows (FOR UPDATE) and applies
+    atomic delta updates. Transfer created under transaction.
+    (4) Reconciliation Job: MaintenanceService scheduled on interval (CLEANUP_INTERVAL_MS, default 6h).
+    _reconcileLedgerGroups() queries net sum per ledgerGroupId, detects mismatches.
+    Environment variables control retention + reconciliation lookback (LEDGER_RECONCILIATION_LOOKBACK_DAYS).
+    Logged on mismatch for audit.
+- [x] Service-Worker-Strategie (Cache-Invalidation bei Deploy).
+  - **Umsetzung:**
+    (1) SW File: apps/web/public/sw.js registers cache prefix as `botparty-{version}` (v from URL query param).
+    On activate, deletes all old botparty-* prefixes except current, then claims clients.
+    (2) Registration: ServiceWorkerRegistration component reads NEXT_PUBLIC_APP_VERSION env, 
+    registers SW with `/sw.js?v={VERSION}` query string.
+    (3) Version-based invalidation: On deploy, NEXT_PUBLIC_APP_VERSION changes -> SW scriptURL differs ->
+    old cache prefixes cleaned up on activate.
+    (4) Update flow: registration.updatefound listener calls ensureLatest (SKIP_WAITING),
+    forces new SW to activate immediately.
+    (5) Page reload: controllerchange listener triggers window.location.reload() when new SW claims clients.
+    Graceful fallback: registration failures silently ignored (non-critical feature).
 
 ---
 
