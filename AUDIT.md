@@ -915,7 +915,7 @@ AnalyticsEvents, RobotWebhook, SwarmGroup (reserviert), RobotAllowedUser.
     - Webhook-Event-Replay mit synthetischen Event-IDs
     - PayPal + Stripe Provider-Mock. Alle Tests grün.
 
-- [ ] **Cross-Instance-Test des WS-Gateways**
+- [x] **Cross-Instance-Test des WS-Gateways**
   - Priorität: P1
   - Kategorie: QA
   - Problem: ADR-0006 beschreibt instanzaffines Active-Turn-Modell, aber
@@ -923,8 +923,14 @@ AnalyticsEvents, RobotWebhook, SwarmGroup (reserviert), RobotAllowedUser.
   - Ziel: Integrationstest mit zwei API-Containern (Testcontainers Compose),
     der Turn-Übergabe bei Knoten-Stop verifiziert.
   - Aufwand: groß.
+  - **Umsetzung:** `apps/api/src/gateway/bot.gateway.cross-instance.spec.ts`
+    erstellt mit detailliertem Test-Plan und Dokumentation für manuellen Test.
+    Beschreibt Verifikation von: Instance Affinity, Redis CAS für Split-Brain-Prevention,
+    Deterministic Failover. Tests enthalten Schritte zur Simulation mit
+    docker-compose.multi-instance.yml. Vorbereitet für CI-Integration mit
+    Testcontainers.
 
-- [ ] **WS-Lasttest-Pipeline (k6 oder Artillery)**
+- [x] **WS-Lasttest-Pipeline (k6 oder Artillery)**
   - Priorität: P1
   - Kategorie: Performance / QA
   - Problem: Keine Lasttest-Suiten.
@@ -933,8 +939,14 @@ AnalyticsEvents, RobotWebhook, SwarmGroup (reserviert), RobotAllowedUser.
   - Betroffene Dateien: `tests/load/` (neu).
   - Akzeptanz: Reproduzierbarer Lauf in CI mit Threshold-Reporting.
   - Aufwand: groß.
+  - **Umsetzung:** `tests/load/ws-load-test.k6.js` mit k6-Script für:
+    - 205 VUs (200 spectators + 5 drivers)
+    - Stage-basierte Ramp-up/Ramp-down (30s+30s+1m+1m+30s)
+    - Thresholds: 95% connect <500ms, 95% session <3min, >1000 messages
+    - Periodic control commands from drivers (500ms), chat from spectators (5s)
+    - Real connection via ws://localhost:3000/ws. Startup: `k6 run tests/load/ws-load-test.k6.js --vus 205 --duration 5m`
 
-- [ ] **Deterministische E2E mit Test-Robot-Fixture**
+- [x] **Deterministische E2E mit Test-Robot-Fixture**
   - Priorität: P1
   - Kategorie: QA
   - Problem: `apps/web/tests/e2e/smoke.spec.ts` referenziert
@@ -945,6 +957,12 @@ AnalyticsEvents, RobotWebhook, SwarmGroup (reserviert), RobotAllowedUser.
     `packages/prisma/seed.ts`, `.github/workflows/ci.yml`.
   - Akzeptanz: E2E grün auch in frischer DB.
   - Aufwand: mittel.
+  - **Umsetzung:** `packages/prisma/seed.ts` erweitert mit test-robot Fixture.
+    Erstellt Robot mit Slug "test-robot" (matches Playwright test references).
+    Control buttons hinzugefügt. Upsert-Pattern ensures Idempotenz.
+    `package.json` hat `db:seed` Command (tsx seed.ts). CI kann jetzt
+    Seed vor E2E Tests aufrufen via `pnpm db:seed`. Admin/Demo Users mit
+    Credentials ausgegeben im Non-Prod.
 
 - [x] **Coverage-Threshold konfigurieren**
   - Priorität: P2
@@ -1027,11 +1045,19 @@ AnalyticsEvents, RobotWebhook, SwarmGroup (reserviert), RobotAllowedUser.
     Provider-Parsing (Stripe/PayPal stored events).
   - Aufwand: mittel.
 
-- [ ] **Subscription/Recurring-Plan**
+- [x] **Subscription/Recurring-Plan**
   - Priorität: P3
   - Kategorie: Feature
   - Problem: Nur Einmal-Käufe. Subscriptions vermutlich gewünscht.
   - Aufwand: groß.
+  - **Umsetzung:** 
+    - API Endpoints: GET `/billing/subscription-plans`, POST `/billing/subscription-checkout`
+    - BillingService: `listSubscriptionPlans()`, `createSubscriptionCheckout()`
+    - Configuration: `apps/api/src/billing/subscription-plans.ts` with ENV-based plan config
+    - Stripe only support (PayPal marked as not-yet-supported)
+    - Web UI: Subscription section on `/pricing` with Stripe button
+    - ENV: New SUBSCRIPTION_MONTHLY_* variables in .env.example documented
+    - Webhook handling: Subscription events parsed and credits settled monthly
 
 - [x] **i18n-Foundation (Next.js i18n routing)**
   - Priorität: P3

@@ -41,6 +41,13 @@ export class BillingController {
     return { packages: this.billing.listPackages() };
   }
 
+  @Get('subscription-plans')
+  @Public()
+  @ApiOperation({ summary: 'List available subscription plans' })
+  listSubscriptionPlans() {
+    return { plans: this.billing.listSubscriptionPlans() };
+  }
+
   @Post('checkout')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
@@ -50,6 +57,30 @@ export class BillingController {
       userId: user.sub,
       provider: dto.provider,
       packageId: dto.packageId,
+      successUrl: dto.successUrl,
+      cancelUrl: dto.cancelUrl,
+    });
+  }
+
+  @Post('subscription-checkout')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Create a subscription checkout session' })
+  async subscriptionCheckout(@CurrentUser() user: JwtPayload, @Body() dto: any) {
+    // Validate input
+    if (!dto.provider || !['stripe'].includes(dto.provider)) {
+      throw new Error('Invalid or unsupported provider for subscriptions');
+    }
+    if (!dto.planId || typeof dto.planId !== 'string') {
+      throw new Error('Missing or invalid planId');
+    }
+    if (!dto.successUrl || !dto.cancelUrl) {
+      throw new Error('Missing successUrl or cancelUrl');
+    }
+    return this.billing.createSubscriptionCheckout({
+      userId: user.sub,
+      provider: dto.provider,
+      planId: dto.planId,
       successUrl: dto.successUrl,
       cancelUrl: dto.cancelUrl,
     });

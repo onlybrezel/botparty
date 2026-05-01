@@ -205,6 +205,50 @@ async function main() {
   }
   console.log(`  ✅ Control buttons: ${defaultButtons.length} added per demo robot`);
 
+  // Create test-robot fixture for E2E tests (always with same slug)
+  const testRobot = await prisma.robot.upsert({
+    where: { slug: 'test-robot' },
+    update: {
+      ownerId: admin.id,
+      name: 'Test Robot',
+      description: 'E2E test fixture robot for Playwright tests.',
+      visibility: 'PUBLIC',
+      accessMode: 'OPEN',
+      queueMode: 'FIRST_COME',
+      maxTurnTime: 60000,
+      tags: ['test', 'e2e'],
+    },
+    create: {
+      name: 'Test Robot',
+      slug: 'test-robot',
+      description: 'E2E test fixture robot for Playwright tests.',
+      ownerId: admin.id,
+      streamKey: randomBytes(32).toString('hex'),
+      claimToken: randomBytes(32).toString('hex'),
+      visibility: 'PUBLIC',
+      accessMode: 'OPEN',
+      queueMode: 'FIRST_COME',
+      maxTurnTime: 60000,
+      tags: ['test', 'e2e'],
+    },
+  });
+  // Add control buttons to test robot
+  await prisma.controlButton.deleteMany({ where: { robotId: testRobot.id } });
+  await prisma.controlButton.createMany({
+    data: defaultButtons.map((btn) => ({
+      robotId: testRobot.id,
+      label: btn.label,
+      command: btn.command,
+      hotKey: btn.hotKey,
+      icon: btn.icon,
+      cooldownMs: btn.cooldownMs,
+      access: 'QUEUE_TURN' as const,
+      position: btn.position,
+      isEnabled: true,
+    })),
+  });
+  console.log(`  ✅ Test robot: ${testRobot.name} (${testRobot.slug}) for E2E fixtures`);
+
   console.log('\n🎉 Seed complete!');
   if (!isProduction) {
     console.log('\n📋 Login credentials:');
@@ -218,6 +262,7 @@ async function main() {
   if (userBot) {
     console.log(`   User Bot URL:  /robot/${userBot.slug}`);
   }
+  console.log(`   Test Robot URL: /robot/${testRobot.slug}`);
   console.log(`   Admin Bot URL: /robot/${adminBot.slug}`);
   console.log(`   Web:     ${appUrl}`);
 }

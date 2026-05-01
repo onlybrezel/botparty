@@ -21,6 +21,8 @@ export function PricingPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [buyingId, setBuyingId] = useState<string | null>(null);
+  const [subscriptionPlans, setSubscriptionPlans] = useState<any[]>([]);
+  const [subscriptionLoading, setSubscriptionLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -48,6 +50,32 @@ export function PricingPage() {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    fetch('/api/v1/billing/subscription-plans')
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled) {
+          setSubscriptionPlans(data.plans || []);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSubscriptionPlans([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setSubscriptionLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const handleBuy = useCallback(async (pkg: CreditPackage, provider: 'stripe' | 'paypal') => {
     if (!accessToken) {
       return;
@@ -63,6 +91,36 @@ export function PricingPage() {
       }
     } catch (checkoutError) {
       setError(checkoutError instanceof Error ? checkoutError.message : 'Could not start checkout');
+    } finally {
+      setBuyingId(null);
+    }
+  }, [accessToken]);
+
+  const handleSubscribe = useCallback(async (planId: string) => {
+    if (!accessToken) {
+      return;
+    }
+
+    setBuyingId(`${planId}:stripe`);
+    setError(null);
+    try {
+      api.setToken(accessToken);
+      const response = await fetch('/api/v1/billing/subscription-checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({
+          provider: 'stripe',
+          planId,
+          successUrl: `${window.location.origin}/wallet?status=subscription-success`,
+          cancelUrl: `${window.location.origin}/wallet?status=cancelled`,
+        }),
+      });
+      const data = await response.json();
+      if (data.redirectUrl) {
+        window.location.href = data.redirectUrl;
+      }
+    } catch (subError) {
+      setError(subError instanceof Error ? subError.message : 'Could not start subscription');
     } finally {
       setBuyingId(null);
     }
@@ -200,6 +258,60 @@ export function PricingPage() {
           </div>
         )}
       </section>
+
+      {subscriptionPlans.length > 0 && (
+        <section className="mt-12">
+          <div className="mb-4">
+            <h2 className="text-2xl font-black tracking-tight">Monthly subscriptions</h2>
+            <p className="mt-1 text-sm text-[var(--muted-foreground)]">
+              Auto-renew every month. Cancel anytime from your account.
+            </p>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            {subscriptionPlans.map((plan: any) => (
+              <article
+                key={plan.id}
+                className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-sm"
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h3 className="text-lg font-bold">{plan.label}</h3>
+                    <p className="mt-1 text-sm text-[var(--muted-foreground)]">{plan.description}</p>
+                    <p className="mt-2 text-sm font-semibold text-emerald-300">
+                      {formatCredits(plan.credits)} credits/month {plan.bonus ? `+ ${formatCredits(plan.bonus)} bonus` : ''}
+                    </p>
+                  </div>
+                  <div className="text-right text-xl font-black">
+                    {formatMoney(plan.amountCents, plan.currency)}
+                    <p className="text-sm font-normal text-[var(--muted-foreground)]">/{plan.interval}</p>
+                  </div>
+                </div>
+
+                <div className="mt-5">
+                  {accessToken ? (
+                    <button
+                      type="button"
+                      onClick={() => void handleSubscribe(plan.id)}
+                      disabled={buyingId === `${plan.id}:stripe`}
+                      className="w-full rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {buyingId === `${plan.id}:stripe` ? 'Starting Stripe...' : 'Subscribe with card'}
+                    </button>
+                  ) : (
+                    <Link
+                      href="/login"
+                      className="block rounded-xl bg-emerald-500 px-4 py-2.5 text-center text-sm font-semibold text-white transition hover:bg-emerald-600"
+                    >
+                      Sign in to subscribe
+                    </Link>
+                  )}
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

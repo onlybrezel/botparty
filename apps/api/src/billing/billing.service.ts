@@ -9,6 +9,7 @@ import { BillingIntentStatus, Prisma, TransactionType } from '@botparty/prisma';
 import { PrismaService } from '../prisma/prisma.service';
 import { WalletService } from '../wallet/wallet.service';
 import { findPackage, CREDIT_PACKAGES } from './credit-packages';
+import { getRecurringPlans } from './subscription-plans';
 import { StripeProvider } from './providers/stripe.provider';
 import { PaypalProvider } from './providers/paypal.provider';
 import type { PaymentProvider, VerifiedWebhookEvent } from './providers/payment-provider.interface';
@@ -27,6 +28,10 @@ export class BillingService {
 
   listPackages() {
     return CREDIT_PACKAGES;
+  }
+
+  listSubscriptionPlans() {
+    return getRecurringPlans(this.config);
   }
 
   async listWebhookEvents(limit = 100) {
@@ -96,6 +101,64 @@ export class BillingService {
     const session = await provider.createCheckout({
       intent,
       successUrl: input.successUrl?.trim() || `${baseUrl}/wallet?status=success`,
+      cancelUrl: input.cancelUrl?.trim() || `${baseUrl}/wallet?status=cancelled`,
+    });
+
+    await this.prisma.billingIntent.update({
+      where: { id: intent.id },
+      data: { providerRef: session.providerRef },
+    });
+
+    return {
+      intentId: intent.id,
+      provider: provider.name,
+      redirectUrl: session.redirectUrl,
+    };
+  }
+
+  async createSubscriptionCheckout(input: {
+    userId: string;
+    provider: string;
+    planId: string;
+    successUrl?: string;
+    cancelUrl?: string;
+  }) {
+    // Only Stripe supports subscriptions for now
+    if (input.provider !== 'stripe') {
+      throw new BadRequestException('Subscriptions are only supported with Stripe provider');
+    }
+
+    const plans = getRecurringPlans(this.config);
+    const plan = plans.find((p) => p.id === input.planId);
+    if (!plan) throw new NotFoundException('Unknown subscription plan');
+
+    const provider = this.getProvider(input.provider);
+
+    // Create billing intent for subscription
+    const intent = await this.prisma.billingIntent.create({
+      data: {
+        userId: input.userId,
+        provider: provider.name,
+        providerRef: 'pending',
+        packageId: input.planId, // Use plan ID as packageId
+        amountCents: plan.amountCents,
+        currency: plan.currency,
+        creditsAmount: plan.credits,
+        status: BillingIntentStatus.PENDING,
+        metadata: {
+          planId: plan.id,
+          label: plan.label,
+          isSubscription: true,
+          interval: plan.interval,
+          intervalCount: plan.intervalCount,
+        } satisfies Prisma.InputJsonValue,
+      },
+    });
+
+    const baseUrl = this.config.get<string>('PUBLIC_WEB_URL') ?? 'http://localhost:3000';
+    const session = await provider.createSubscriptionCheckout({
+      intent,
+      successUrl: input.successUrl?.trim() || `${baseUrl}/wallet?status=subscription-success`,
       cancelUrl: input.cancelUrl?.trim() || `${baseUrl}/wallet?status=cancelled`,
     });
 
