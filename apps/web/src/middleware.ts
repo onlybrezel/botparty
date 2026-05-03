@@ -18,13 +18,11 @@ export function middleware(request: NextRequest) {
   requestHeaders.set('x-botparty-locale', effectiveLocale);
 
   const applyLocaleCookie = (response: NextResponse) => {
-    if (cookieLocale !== effectiveLocale) {
-      response.cookies.set(BOTPARTY_LOCALE_COOKIE, effectiveLocale, {
-        path: '/',
-        sameSite: 'lax',
-        maxAge: 60 * 60 * 24 * 365,
-      });
-    }
+    response.cookies.set(BOTPARTY_LOCALE_COOKIE, effectiveLocale, {
+      path: '/',
+      sameSite: 'lax',
+      maxAge: 60 * 60 * 24 * 365,
+    });
     return response;
   };
 

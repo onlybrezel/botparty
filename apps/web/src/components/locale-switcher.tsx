@@ -2,7 +2,8 @@
 
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { localeFromPathname, localizeHref, supportedLocales } from '@/lib/i18n';
+import { localizeHref, supportedLocales } from '@/lib/i18n';
+import { useLocale } from '@/lib/use-locale';
 
 type LocaleSwitcherProps = {
   compact?: boolean;
@@ -11,7 +12,7 @@ type LocaleSwitcherProps = {
 export function LocaleSwitcher({ compact = false }: LocaleSwitcherProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const locale = localeFromPathname(pathname || '/');
+  const locale = useLocale();
   const search = searchParams.toString();
 
   return (

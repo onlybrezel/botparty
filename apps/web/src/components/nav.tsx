@@ -9,7 +9,8 @@ import { AUTH_SYNC_STORAGE_KEY, useAuth } from '@/lib/store';
 import { api } from '@/lib/api';
 import { LocaleSwitcher } from '@/components/locale-switcher';
 import { Badge } from '@/components/ui/badge';
-import { localeFromPathname, localizePath } from '@/lib/i18n';
+import { localizePath } from '@/lib/i18n';
+import { useLocale } from '@/lib/use-locale';
 import { usePreferences } from '@/lib/preferences';
 
 export default function Nav() {
@@ -124,7 +125,7 @@ export default function Nav() {
     };
   }, [accessToken, mounted, pathname]);
 
-  const locale = localeFromPathname(pathname || '/');
+  const locale = useLocale();
   const localized = (href: string) => localizePath(href, locale);
   const isActive = (href: string) => {
     const target = localized(href);
@@ -185,7 +186,7 @@ export default function Nav() {
           >
             Robot Setup
           </a>
-          <LocaleSwitcher />
+          {/* <LocaleSwitcher /> */}
         </nav>
 
         {/* Auth */}
@@ -306,7 +307,7 @@ export default function Nav() {
             </div>
           ) : (
             <div className="hidden items-center gap-2 sm:flex">
-              <LocaleSwitcher compact />
+              {/* <LocaleSwitcher compact /> */}
               <span className="hidden rounded-lg border border-[var(--border)] bg-[var(--card)] px-2.5 py-1 text-xs font-medium text-[var(--muted-foreground)] sm:inline-flex">
                 {guestLabel}
               </span>
@@ -349,7 +350,7 @@ export default function Nav() {
 
           <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
             <div className="mb-4">
-              <LocaleSwitcher />
+              {/* <LocaleSwitcher /> */}
             </div>
             {!mounted ? (
               <div className="h-10 w-full rounded-xl bg-[var(--muted)] animate-pulse" />

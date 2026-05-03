@@ -25,12 +25,6 @@ export function getLegalConfig(): LegalConfig {
   const supportUrl = readEnv('NEXT_PUBLIC_LEGAL_SUPPORT_URL') || null;
   const isConfigured = Boolean(operatorName && operatorEmail && operatorAddress);
 
-  if (process.env.NODE_ENV === 'production' && !isConfigured) {
-    throw new Error(
-      'Missing required legal configuration. Set NEXT_PUBLIC_LEGAL_OPERATOR_NAME, NEXT_PUBLIC_LEGAL_OPERATOR_EMAIL, and NEXT_PUBLIC_LEGAL_OPERATOR_ADDRESS.',
-    );
-  }
-
   return {
     operatorName: operatorName || 'Self-hosted BotParty operator',
     operatorEmail: operatorEmail || 'legal@localhost.invalid',

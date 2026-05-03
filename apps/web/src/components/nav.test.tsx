@@ -9,6 +9,7 @@ const syncTokenFromStoreMock = vi.fn();
 
 vi.mock('next/navigation', () => ({
   usePathname: () => usePathnameMock(),
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 vi.mock('next/link', () => ({
@@ -41,6 +42,18 @@ vi.mock('@/lib/store', () => ({
     logout: vi.fn(),
     role: null,
   }),
+}));
+
+vi.mock('@/lib/use-locale', () => ({
+  useLocale: () => 'en',
+}));
+
+vi.mock('@/lib/i18n', () => ({
+  supportedLocales: ['en', 'de'],
+  defaultLocale: 'en',
+  localizeHref: (pathname: string) => pathname,
+  localizePath: (pathname: string) => pathname,
+  isSupportedLocale: (locale: string) => ['en', 'de'].includes(locale),
 }));
 
 describe('Nav', () => {
