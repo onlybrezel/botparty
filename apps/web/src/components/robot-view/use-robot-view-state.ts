@@ -596,6 +596,7 @@ export function useRobotViewState(robot: RobotPublic) {
         currentViewerId,
         initialRobotStatus: robot.status,
         refreshViewerToken,
+        hasLivekitCreds: () => livekitCreds !== null,
         wsRef,
         activeMotionKeysRef,
         reconnectRetryAfterRef,
@@ -617,7 +618,7 @@ export function useRobotViewState(robot: RobotPublic) {
         setInQueue,
         setReconnectNotice,
       }),
-    [currentViewerId, refreshViewerToken, robot.status],
+    [currentViewerId, livekitCreds, refreshViewerToken, robot.status],
   );
 
   // ─── Controls ─────────────────────────────────────────────────────────────

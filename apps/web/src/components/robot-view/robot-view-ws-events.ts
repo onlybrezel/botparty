@@ -23,6 +23,7 @@ type RobotWsEventHandlerParams = {
   currentViewerId: string;
   initialRobotStatus: RobotPublic['status'];
   refreshViewerToken: (forceRemount?: boolean) => Promise<void>;
+  hasLivekitCreds: () => boolean;
   wsRef: MutableRefObject<WebSocket | null>;
   activeMotionKeysRef: MutableRefObject<Set<string>>;
   reconnectRetryAfterRef: MutableRefObject<number | null>;
@@ -268,7 +269,7 @@ export function createRobotWsEventHandler(params: RobotWsEventHandlerParams) {
           params.setQueue([]);
           params.setActiveSession(null);
           params.setInQueue(false);
-        } else if (status === 'ONLINE' || status === 'BUSY') {
+        } else if ((status === 'ONLINE' || status === 'BUSY') && !params.hasLivekitCreds()) {
           void params.refreshViewerToken(true);
         }
         break;

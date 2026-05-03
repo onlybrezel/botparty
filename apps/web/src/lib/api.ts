@@ -110,39 +110,47 @@ class ApiClient {
     if (this.refreshPromise) return this.refreshPromise;
 
     this.refreshPromise = (async () => {
-      const csrfToken = await this.ensureCsrfToken();
-      const refreshRes = await fetch(`${this.baseUrl}/auth/refresh`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
-        },
-        body: '{}',
-        credentials: 'include',
-      });
+      try {
+        const csrfToken = await this.ensureCsrfToken();
+        const refreshRes = await fetch(`${this.baseUrl}/auth/refresh`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
+          },
+          body: '{}',
+          credentials: 'include',
+        });
 
-      if (!refreshRes.ok) {
-        useAuth.getState().logout();
-        this.setToken(null);
+        if (!refreshRes.ok) {
+          if (refreshRes.status === 401 || refreshRes.status === 403) {
+            useAuth.getState().logout();
+            this.setToken(null);
+          }
+          return null;
+        }
+
+        const refreshed = (await refreshRes.json()) as AuthSessionResponse;
+        if (!refreshed.accessToken) {
+          useAuth.getState().logout();
+          this.setToken(null);
+          return null;
+        }
+        this.setToken(refreshed.accessToken);
+        useAuth.getState().login({
+          accessToken: refreshed.accessToken,
+          username: refreshed.user.username,
+          userId: refreshed.user.id,
+          displayName: refreshed.user.displayName,
+          role: refreshed.user.role,
+        });
+
+        return refreshed.accessToken;
+      } catch {
+        // Temporary network / proxy / CSRF bootstrap issues should not look
+        // like an explicit sign-out. A later retry can still recover cleanly.
         return null;
       }
-
-      const refreshed = (await refreshRes.json()) as AuthSessionResponse;
-      if (!refreshed.accessToken) {
-        useAuth.getState().logout();
-        this.setToken(null);
-        return null;
-      }
-      this.setToken(refreshed.accessToken);
-      useAuth.getState().login({
-        accessToken: refreshed.accessToken,
-        username: refreshed.user.username,
-        userId: refreshed.user.id,
-        displayName: refreshed.user.displayName,
-        role: refreshed.user.role,
-      });
-
-      return refreshed.accessToken;
     })().finally(() => {
       this.refreshPromise = null;
     });

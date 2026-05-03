@@ -14,6 +14,7 @@ export function RobotCardGrid({ robots, onSelect }: Props) {
       {robots.map((robot) => {
         const seed = robot.slug.split('').reduce((s, ch) => s + ch.charCodeAt(0), 0);
         const hue = seed % 360;
+        const isUnoptimizedThumbnail = robot.thumbnailUrl?.startsWith('http') ?? false;
         return (
           <button
             key={robot.id}
@@ -31,6 +32,7 @@ export function RobotCardGrid({ robots, onSelect }: Props) {
                   src={robot.thumbnailUrl}
                   alt={robot.name}
                   fill
+                  unoptimized={isUnoptimizedThumbnail}
                   sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
                   className="object-cover"
                 />

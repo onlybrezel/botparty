@@ -28,6 +28,93 @@ import {
   draftFromControl,
 } from '@/components/dashboard/types';
 
+async function waitForRenderableVideoFrame(
+  video: HTMLVideoElement,
+  timeoutMs = 4000,
+): Promise<boolean> {
+  if (
+    video.videoWidth > 0 &&
+    video.videoHeight > 0 &&
+    video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
+  ) {
+    return true;
+  }
+
+  return await new Promise<boolean>((resolve) => {
+    let settled = false;
+    let timeoutId: number | null = null;
+    let animationFrameId: number | null = null;
+    let frameRequestId: number | null = null;
+
+    const hasRenderableFrame = () =>
+      video.videoWidth > 0 &&
+      video.videoHeight > 0 &&
+      video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
+
+    const finish = (value: boolean) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
+      if (animationFrameId !== null) {
+        window.cancelAnimationFrame(animationFrameId);
+      }
+      if (frameRequestId !== null && 'cancelVideoFrameCallback' in video) {
+        (
+          video as HTMLVideoElement & {
+            cancelVideoFrameCallback?: (handle: number) => void;
+          }
+        ).cancelVideoFrameCallback?.(frameRequestId);
+      }
+
+      video.removeEventListener('loadeddata', checkReady);
+      video.removeEventListener('playing', checkReady);
+      video.removeEventListener('resize', checkReady);
+      resolve(value);
+    };
+
+    const checkReady = () => {
+      if (hasRenderableFrame()) {
+        finish(true);
+      }
+    };
+
+    timeoutId = window.setTimeout(() => finish(hasRenderableFrame()), timeoutMs);
+    video.addEventListener('loadeddata', checkReady);
+    video.addEventListener('playing', checkReady);
+    video.addEventListener('resize', checkReady);
+
+    if ('requestVideoFrameCallback' in video) {
+      frameRequestId = (
+        video as HTMLVideoElement & {
+          requestVideoFrameCallback: (callback: () => void) => number;
+        }
+      ).requestVideoFrameCallback(() => {
+        checkReady();
+      });
+    } else {
+      const poll = () => {
+        if (settled) {
+          return;
+        }
+        if (hasRenderableFrame()) {
+          finish(true);
+          return;
+        }
+        animationFrameId = window.requestAnimationFrame(poll);
+      };
+
+      animationFrameId = window.requestAnimationFrame(poll);
+    }
+
+    checkReady();
+  });
+}
+
 export function useDashboardPage() {
   const router = useRouter();
   const { accessToken, hasHydrated, username } = useAuth();
@@ -97,6 +184,8 @@ export function useDashboardPage() {
   });
   const [preview, setPreview] = useState<{ token: string; url: string } | null>(null);
   const [previewVersion, setPreviewVersion] = useState(0);
+  const selectedRobotId = selectedRobot?.id ?? null;
+  const selectedRobotStatus = selectedRobot?.status ?? null;
   const [controlButtons, setControlButtons] = useState<ControlButtonRecord[]>([]);
   const [controlsLoading, setControlsLoading] = useState(false);
   const [creatingControl, setCreatingControl] = useState(false);
@@ -340,7 +429,7 @@ export function useDashboardPage() {
 
   const refreshPreview = useCallback(
     async (forceRemount = false) => {
-      if (!selectedRobot || !accessToken || selectedRobot.status !== 'ONLINE') {
+      if (!selectedRobotId || !accessToken || selectedRobotStatus !== 'ONLINE') {
         setPreview(null);
         return;
       }
@@ -349,22 +438,26 @@ export function useDashboardPage() {
       }
 
       previewRefreshInFlightRef.current = true;
-      setPreview(null);
       try {
         api.setToken(accessToken);
-        const { token, livekitUrl } = await api.robots.getViewerToken(selectedRobot.id, false);
+        const { token, livekitUrl } = await api.robots.getViewerToken(selectedRobotId, false);
         setPreview({ token, url: process.env.NEXT_PUBLIC_LIVEKIT_URL ?? livekitUrl });
         if (forceRemount) {
           setPreviewVersion((value) => value + 1);
         }
       } catch {
-        setPreview(null);
+        // Keep the current preview alive on transient refresh failures.
       } finally {
         previewRefreshInFlightRef.current = false;
       }
     },
-    [accessToken, selectedRobot],
+    [accessToken, selectedRobotId, selectedRobotStatus],
   );
+
+  useEffect(() => {
+    setPreview(null);
+    setPreviewVersion(0);
+  }, [selectedRobotId]);
 
   useEffect(() => {
     void refreshPreview(false);
@@ -379,15 +472,15 @@ export function useDashboardPage() {
     if (
       !restartVideoWasPending ||
       restartVideoIsPending ||
-      !selectedRobot ||
+      !selectedRobotId ||
       !accessToken ||
-      selectedRobot.status !== 'ONLINE'
+      selectedRobotStatus !== 'ONLINE'
     ) {
       return;
     }
 
     void refreshPreview(true);
-  }, [pendingActionTypes, selectedRobot?.id, selectedRobot?.status, accessToken]);
+  }, [pendingActionTypes, selectedRobotId, selectedRobotStatus, accessToken, refreshPreview]);
 
   useEffect(() => {
     if (!accessToken || !selectedRobot) {
@@ -768,9 +861,17 @@ export function useDashboardPage() {
       }
 
       const video = previewContainerRef.current?.querySelector('video') ?? null;
-      if (!video || video.videoWidth <= 0 || video.videoHeight <= 0) {
+      if (!video) {
         if (!silent) {
           pushToast('No live camera frame is available yet.', 'error', 2600);
+        }
+        return;
+      }
+
+      const frameReady = await waitForRenderableVideoFrame(video);
+      if (!frameReady || video.videoWidth <= 0 || video.videoHeight <= 0) {
+        if (!silent) {
+          pushToast('No rendered live camera frame is available yet.', 'error', 2600);
         }
         return;
       }
