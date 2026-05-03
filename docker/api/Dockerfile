@@ -32,6 +32,7 @@ RUN pnpm --filter @botparty/shared build
 # ─── build-api: generate Prisma + compile API ─
 FROM deps AS build-api
 COPY packages/prisma/ packages/prisma/
+COPY packages/shared/ packages/shared/
 COPY apps/api/        apps/api/
 COPY --from=build-shared /app/packages/shared/dist packages/shared/dist
 RUN pnpm --filter @botparty/prisma db:generate
