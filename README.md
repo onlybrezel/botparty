@@ -1,8 +1,10 @@
 # BotParty
 
-Self-hosted robot teleoperation platform. Plug in a Raspberry Pi (or anything that runs Python), register it, and people can drive it from a browser.
+Self-hosted robot teleoperation platform.
 
-Spiritually inspired by LetsRobot.tv and Remo.tv. Built from scratch with a modern stack because it was time.
+Plug in a Raspberry Pi (or any Linux box with Python and a camera), claim it from the dashboard, and let people drive it live from a browser.
+
+Inspired by LetsRobot.tv and Remo.tv. Written with a modern stack when the time felt right.
 
 ---
 
@@ -112,7 +114,7 @@ Use `nvm use`, `asdf`, or `mise` before installing dependencies. This repository
 ### Local development
 
 ```bash
-git clone https://github.com/your-org/botparty.git
+git clone https://github.com/onlybrezel/botparty.git
 cd botparty
 nvm use
 pnpm install
@@ -155,41 +157,30 @@ pnpm dev
 
 ## Robot client (Raspberry Pi)
 
-The robot client lives in its own repository: **botparty-client**.
-If you are working in this workspace, the current local checkout is:
+The robot client is in a separate repo: [botparty-client](https://github.com/onlybrezel/botparty-client).
 
-`/home/julien/workspace/botparty-client`
+A typical local setup (adjust paths to your checkout):
 
 ```bash
-cd /home/julien/workspace/botparty-client
+cd /path/to/botparty-client
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -e ".[all]"
 cp config.example.yaml config.yaml
+# edit claim_token, hardware.type, video.type etc.
 python -m botparty_robot
 ```
 
-Important config values:
+Key config:
 
-- `claim_token` → copy from the robot dashboard
-- `api_url` → same base URL as `APP_URL` in `.env`
-- `livekit_url` → same value as `NEXT_PUBLIC_LIVEKIT_URL`
+- `server.claim_token` from the dashboard (or `BOTPARTY_CLAIM_TOKEN` env)
+- `server.api_url` / `livekit_url` matching your instance
+- `hardware.type` (start with `none` for video tests)
+- `video.type` ( `ffmpeg` recommended, it auto-manages the low-latency streamer)
 
-**USB camera**: works out of the box (`device: "/dev/video0"`)
+See the client repo README and docs for full install script, Raspberry Pi gotchas, custom hardware, multi-camera, TTS etc.
 
-**Pi Camera Module**:
-- use the `ffmpeg_libcamera` video profile from the `botparty-client` docs
-- on current Raspberry Pi OS that is the supported camera-module path, not `device: "picamera2"`
-
-**Custom hardware**:
-- copy `botparty_robot/hardware/hardware_custom_example.py` to `hardware_custom.py`
-- then set `hardware.type: "custom"` in `config.yaml`
-- current custom adapters subclass `BaseHardware`, not `BaseHandler`
-
-For the current robot-client setup and config examples, use the docs in the `botparty-client` repo:
-- `/home/julien/workspace/botparty-client/README.md`
-- `/home/julien/workspace/botparty-client/docs/installation.md`
-- `/home/julien/workspace/botparty-client/docs/hardware/custom.md`
+The one-command installer there also sets up a systemd service if you want.
 
 ---
 
@@ -209,7 +200,7 @@ docker compose up -d --build
 
 The API container runs `prisma migrate deploy` and then seeds an empty database when `SEED_ADMIN_PASSWORD` is provided. Check logs with `docker compose logs -f api`.
 
-For faster iteration you can build or start only the parts you changed:
+For faster iteration, build or start only changed parts:
 
 ```bash
 pnpm docker:build:api
@@ -283,12 +274,12 @@ docker compose up -d api web nginx
 
 ---
 
-## What's missing / planned
+## Open areas
 
-- [ ] Voting queue balancing and ranking improvements
-- [ ] Full ROS2 integration
-- [ ] Community extensions beyond the current leaderboard
-- [ ] Credit/priority system beyond the schema
+- Better queue balancing and voting
+- ROS2 integration
+- More community / leaderboard features
+- Credit and priority queue system (schema is there, UI and billing wiring missing)
 
 ---
 
