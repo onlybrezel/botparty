@@ -50,8 +50,8 @@ flowchart TD
 In practice we see:
 - ~150 ms end-to-end video latency on a decent connection
 - ~50 ms control round-trip when running locally
-```
 ---
+
 
 ## 📁 Project Structure
 
