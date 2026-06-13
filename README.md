@@ -31,35 +31,26 @@ Inspired by LetsRobot.tv and Remo.tv. Written with a modern stack when the time 
 
 ---
 
-## 🏗 Architecture
+## Architecture
 
-```
-┌─────────────┐     ┌──────────────┐     ┌──────────────────┐
-│   Next.js   │────▶│  NestJS API  │────▶│   PostgreSQL 16  │
-│  Frontend   │     │  (Fastify 5) │     └──────────────────┘
-│  (React 19) │     │              │────▶│   Redis 7        │
-└──────┬──────┘     └──────┬───────┘     └──────────────────┘
-       │                   │
-       │    WebSocket      │  LiveKit Token
-       │    (Signaling)    │  Generation
-       │                   │
-       ▼                   ▼
-┌──────────────────────────────────┐
-│         LiveKit SFU              │
-│         (Video only)             │
-│   < 150ms video latency          │
-│   < 50ms control latency         │
-└──────────────┬───────────────────┘
-               │
-               ▼
-┌──────────────────────────┐
-│   Python Robot Client    │
-│   (Raspberry Pi/Jetson)  │
-│   Camera -> LiveKit      │
-│   Gateway -> Motors      │
-└──────────────────────────┘
+The system is deliberately split: browser frontend, backend API, real-time media via LiveKit, and the Python client that actually drives the hardware.
+
+```mermaid
+flowchart TD
+    Web[Next.js + React<br/>Frontend] -->|HTTPS + WS| API[NestJS / Fastify<br/>API]
+    API --> DB[(PostgreSQL)]
+    API --> Redis[(Redis)]
+    API -- LiveKit tokens --> LK[LiveKit SFU]
+    Web -- Signaling --> LK
+    LK -- Video --> Client[Python Client<br/>Raspberry Pi / Jetson]
+    Client -- Camera --> LK
+    Client -- Commands --> API
 ```
 
+In practice we see:
+- ~150 ms end-to-end video latency on a decent connection
+- ~50 ms control round-trip when running locally
+```
 ---
 
 ## 📁 Project Structure
