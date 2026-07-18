@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ModerationActionType, WS_EVENTS } from '@botparty/shared';
 import { ModerationAuditService } from './moderation-audit.service';
 import { ModerationService } from './moderation.service';
@@ -103,7 +103,7 @@ describe('ModerationService moderation flows', () => {
         { targetUserId: 'target-1', action: ModerationActionType.BAN },
         'viewer-1',
       ),
-    ).rejects.toThrow(ForbiddenException);
+    ).rejects.toThrow(NotFoundException);
   });
 
   it('creates an active ban entry and publishes a websocket moderation event', async () => {

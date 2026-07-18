@@ -86,8 +86,8 @@ export default function SettingsPage() {
         pushToast('Failed to load profile.', 'error');
       })
       .finally(() => setLoading(false));
-    void api.notifications.preferences().then(setNotificationPreferences).catch(() => undefined);
-    void api.analytics.consent().then((consent) => updatePreference('productAnalyticsEnabled', consent.productAnalyticsEnabled)).catch(() => undefined);
+    void api.notifications.preferences().then(setNotificationPreferences).catch((error: unknown) => console.error('Failed to load notification preferences', error));
+    void api.analytics.consent().then(({ productAnalyticsEnabled }) => updatePreference('productAnalyticsEnabled', productAnalyticsEnabled)).catch((error: unknown) => console.error('Failed to load analytics consent', error));
   }, [accessToken, hasHydrated, router, updatePreference]);
 
   const notificationSummary = useMemo(() => {

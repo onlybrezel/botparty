@@ -1,5 +1,6 @@
 import path from 'path';
 import type { NextConfig } from 'next';
+import bundleAnalyzer from '@next/bundle-analyzer';
 
 const API_URL = process.env.API_URL ?? 'http://localhost:4000';
 
@@ -109,22 +110,9 @@ const nextConfig: NextConfig = {
   },
 };
 
-// Wrap with @next/bundle-analyzer when ANALYZE=true. Loaded lazily so the
-// dependency stays optional in CI/runtime images.
-function withOptionalAnalyzer(config: NextConfig): NextConfig {
-  if (process.env.ANALYZE !== 'true') return config;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const withBundleAnalyzer = require('@next/bundle-analyzer')({
-      enabled: true,
-      openAnalyzer: false,
-    });
-    return withBundleAnalyzer(config);
-  } catch {
-    // eslint-disable-next-line no-console
-    console.warn('[next.config] ANALYZE=true but @next/bundle-analyzer is not installed');
-    return config;
-  }
-}
+const withBundleAnalyzer = bundleAnalyzer({
+  enabled: process.env.ANALYZE === 'true',
+  openAnalyzer: false,
+});
 
-export default withOptionalAnalyzer(nextConfig);
+export default withBundleAnalyzer(nextConfig);

@@ -1,5 +1,3 @@
-import { ConfigService } from '@nestjs/config';
-import { JwtService } from '@nestjs/jwt';
 import { SessionsController } from './sessions.controller';
 
 describe('SessionsController', () => {
@@ -9,7 +7,7 @@ describe('SessionsController', () => {
     findByRobotForRequester: jest.Mock;
     getActiveSessionForRequester: jest.Mock;
   };
-  let jwtService: { verify: jest.Mock };
+  let authService: { resolveValidAccessTokenPayload: jest.Mock };
   let configService: { getOrThrow: jest.Mock };
   let controller: SessionsController;
 
@@ -20,9 +18,9 @@ describe('SessionsController', () => {
       findByRobotForRequester: jest.fn(),
       getActiveSessionForRequester: jest.fn(),
     };
-    jwtService = { verify: jest.fn() };
+    authService = { resolveValidAccessTokenPayload: jest.fn() };
     configService = { getOrThrow: jest.fn().mockReturnValue('secret') };
-    controller = new SessionsController(sessionsService as never, jwtService as never, configService as never);
+    controller = new SessionsController(sessionsService as never, authService as never, configService as never);
   });
 
   it('returns the authenticated user session history with numeric limits', async () => {
@@ -44,7 +42,7 @@ describe('SessionsController', () => {
   });
 
   it('resolves requester identity from bearer auth for robot session history', async () => {
-    jwtService.verify.mockReturnValue({ sub: 'user-1' });
+    authService.resolveValidAccessTokenPayload.mockResolvedValue({ sub: 'user-1' });
     sessionsService.findByRobotForRequester.mockResolvedValue([{ id: 'session-1' }]);
 
     const sessions = await controller.getByRobot('robot-1', '10', 'Bearer token-123', undefined, 'room-token', 'guest-1');
@@ -54,14 +52,41 @@ describe('SessionsController', () => {
   });
 
   it('returns null requester identity when auth verification fails', async () => {
-    jwtService.verify.mockImplementation(() => {
-      throw new Error('bad token');
-    });
+    authService.resolveValidAccessTokenPayload.mockResolvedValue(null);
     sessionsService.getActiveSessionForRequester.mockResolvedValue({ id: 'active-1' });
 
     const session = await controller.getActiveSession('robot-1', 'Bearer bad-token');
 
     expect(sessionsService.getActiveSessionForRequester).toHaveBeenCalledWith('robot-1', null, undefined, undefined);
     expect(session).toEqual({ id: 'active-1' });
+  });
+
+  it.each(['0', '-1', '201', '2.5', 'not-a-number'])(
+    'rejects invalid session history limit %s',
+    async (limit) => {
+      await expect(controller.getMySessions({ sub: 'user-1' } as never, limit)).rejects.toMatchObject({
+        status: 400,
+      });
+      expect(sessionsService.findByUser).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not trust a revoked signed access token for requester-scoped history', async () => {
+    authService.resolveValidAccessTokenPayload.mockResolvedValue(null);
+    sessionsService.findByRobotForRequester.mockResolvedValue([]);
+
+    await controller.getByRobot(
+      '00000000-0000-4000-8000-000000000001',
+      '10',
+      'Bearer revoked-token',
+    );
+
+    expect(sessionsService.findByRobotForRequester).toHaveBeenCalledWith(
+      '00000000-0000-4000-8000-000000000001',
+      null,
+      10,
+      undefined,
+      undefined,
+    );
   });
 });

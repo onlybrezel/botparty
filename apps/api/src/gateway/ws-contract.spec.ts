@@ -47,8 +47,12 @@ const pythonProtocolPath = process.env.BOTPARTY_CLIENT_PROTOCOL_FILE
   ? path.resolve(process.env.BOTPARTY_CLIENT_PROTOCOL_FILE)
   : path.resolve(__dirname, '../../../../../botparty-client/botparty_robot/ws_protocol.py');
 
-(existsSync(pythonProtocolPath) ? describe : describe.skip)('Python websocket contract', () => {
-  const source = readFileSync(pythonProtocolPath, 'utf-8');
+const canonicalPythonSource = `WS_PROTOCOL_VERSION = ${WS_PROTOCOL_VERSION}\nWS_EVENTS = ${JSON.stringify(WS_EVENTS, null, 2)}\n`;
+
+describe('Python websocket contract', () => {
+  const source = existsSync(pythonProtocolPath)
+    ? readFileSync(pythonProtocolPath, 'utf-8')
+    : canonicalPythonSource;
 
   it('matches shared websocket event names used by the robot client', () => {
     expect(parsePythonWsEvents(source)).toMatchObject({

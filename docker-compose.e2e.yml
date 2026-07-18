@@ -1,0 +1,28 @@
+services:
+  postgres:
+    ports: !reset []
+  redis:
+    ports: !reset []
+  minio:
+    ports: !reset []
+  livekit:
+    ports: !reset []
+  livekit-ingress:
+    ports: !reset []
+  migrate:
+    environment:
+      NODE_ENV: development
+  api:
+    ports: !reset []
+    environment:
+      NODE_ENV: development
+      APP_URL: http://nginx
+      PUBLIC_WEB_URL: http://nginx
+      CORS_ORIGIN: http://nginx
+      AUTH_COOKIE_SECURE: "false"
+      LIVEKIT_PUBLIC_URL: ws://nginx/rtc
+      THUMBNAIL_PUBLIC_BASE_URL: http://nginx/storage/botparty-thumbnails
+  web:
+    ports: !reset []
+  nginx:
+    ports: !reset []

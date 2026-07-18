@@ -2,11 +2,17 @@
 
 ## Setup
 
-1. Install Node 24+ and pnpm 9.15+.
-2. Run `pnpm install`.
-3. Copy `.env.example` to `.env` and set the required secrets.
-4. Apply migrations with `pnpm --filter @botparty/prisma db:migrate:prod` and start local infra with `docker compose up -d postgres redis livekit-config livekit`.
-5. Start the apps with `pnpm dev`.
+1. Install Docker Engine, the Docker Compose plugin, Node 24, and pnpm 9.15.
+2. Run `pnpm install` for editor tooling and the containerized browser runner.
+3. Run `bash setup-env.sh` and choose the local development configuration.
+4. Start the Docker development stack:
+
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+   ```
+
+The one-shot `migrate` service owns schema changes and seed convergence. API replicas do not run
+migrations during startup. See `DEVELOPER_GUIDE.md` for module ownership and common workflows.
 
 ## Validation
 
@@ -15,6 +21,7 @@
 - `pnpm --filter @botparty/api test`
 - `pnpm --filter @botparty/web test`
 - `pnpm build`
+- `pnpm test:e2e:docker`
 
 ## Engineering rules
 

@@ -1,4 +1,4 @@
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { NotFoundException } from '@nestjs/common';
 
 /**
  * Returns true when the given role is staff-level (admin or moderator).
@@ -9,18 +9,18 @@ export function isStaffRole(role: string | null | undefined): boolean {
 }
 
 /**
- * Throws ForbiddenException unless the user is the robot owner.
+ * Conceals both missing and foreign robots behind the same response.
  */
 export function assertRobotOwner(
   robot: { id: string; ownerId: string } | null | undefined,
   userId: string,
 ) {
   if (!robot) throw new NotFoundException('Robot not found');
-  if (robot.ownerId !== userId) throw new ForbiddenException('Not your robot');
+  if (robot.ownerId !== userId) throw new NotFoundException('Robot not found');
 }
 
 /**
- * Throws ForbiddenException unless the user is the robot owner OR has a staff role.
+ * Conceals foreign robots unless the user is the owner or site staff.
  */
 export function assertStaffOrRobotOwner(
   robot: { id: string; ownerId: string } | null | undefined,
@@ -29,6 +29,6 @@ export function assertStaffOrRobotOwner(
   if (!robot) throw new NotFoundException('Robot not found');
   if (!user) throw new NotFoundException('User not found');
   if (robot.ownerId !== user.id && !isStaffRole(user.role)) {
-    throw new ForbiddenException('Access denied');
+    throw new NotFoundException('Robot not found');
   }
 }

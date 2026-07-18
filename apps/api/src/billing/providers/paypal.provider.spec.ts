@@ -14,9 +14,11 @@ function provider(values: Record<string, string | undefined> = {}) {
   return new PaypalProvider({ get: jest.fn((key: string) => values[key]) } as never);
 }
 
-function jsonResponse(value: unknown, ok = true) {
+function jsonResponse(value: unknown, ok = true, status = ok ? 200 : 400) {
   return {
     ok,
+    status,
+    headers: { get: jest.fn().mockReturnValue(null) },
     json: jest.fn().mockResolvedValue(value),
     text: jest.fn().mockResolvedValue(JSON.stringify(value)),
   } as never;
@@ -254,5 +256,40 @@ describe('PaypalProvider', () => {
     await expect(provider(configured).captureApprovedOrder('order-2', 'intent-1')).rejects.toThrow(
       'PayPal capture was not completed',
     );
+  });
+
+  it('retries a transient provider response before succeeding', async () => {
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({}, false, 500))
+      .mockResolvedValueOnce(jsonResponse({ access_token: 'token', expires_in: 3600 }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'order-1', purchase_units: [] }));
+
+    await expect(
+      provider({ ...configured, PAYPAL_RETRY_BASE_MS: '10' }).captureApprovedOrder('order-1', 'intent-1'),
+    ).rejects.toThrow('PayPal capture was not completed');
+    expect(global.fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it('fails predictably after a bounded network timeout sequence', async () => {
+    global.fetch = jest.fn().mockRejectedValue(new DOMException('timed out', 'TimeoutError'));
+
+    await expect(
+      provider({ ...configured, PAYPAL_MAX_RETRIES: '1', PAYPAL_RETRY_BASE_MS: '10' }).createCheckout({
+        intent: intent as never,
+        successUrl: 'https://example.test/success',
+        cancelUrl: 'https://example.test/cancel',
+      }),
+    ).rejects.toMatchObject({ status: 503, message: 'PayPal is temporarily unavailable' });
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects invalid webhook JSON before contacting PayPal', async () => {
+    global.fetch = jest.fn();
+
+    await expect(provider(configured).verifyWebhook(Buffer.from('{'), {})).rejects.toThrow(
+      'PayPal webhook payload is invalid JSON',
+    );
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 });

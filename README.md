@@ -72,7 +72,6 @@ botparty/
 │   │   └── src/
 │   │       ├── app/        # App Router pages
 │   │       └── lib/        # API client, utils
-│   └── robot-client/       # Python robot client (moved to botparty-client repo)
 ├── packages/
 │   ├── shared/             # Shared types, Zod schemas, constants
 │   ├── prisma/             # Prisma schema + client
@@ -116,38 +115,18 @@ Create a local configuration and file-based secrets:
 bash setup-env.sh
 ```
 
-Choose the local development option. Then start the database, cache, and LiveKit:
-
-```bash
-docker compose up -d postgres redis livekit-config livekit
-```
-
-Generate the Prisma client and apply the versioned migrations:
-
-```bash
-pnpm db:generate
-pnpm --filter @botparty/prisma db:migrate:prod
-```
-
-Start the apps with hot reload:
-
-```bash
-pnpm dev
-```
-
-To run the same hot-reload setup fully in containers:
+Choose the local development option, then start the complete stack in Docker with hot reload and development-mode mail handling:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 ```
 
-The API dev container applies committed migrations and converges the idempotent seed before starting its watcher. `pnpm dev:smoke` builds an isolated stack, checks both health endpoints and verifies that API and Web reload after a mounted source change.
+The one-shot migration container applies committed migrations and converges the idempotent seed before the API watcher starts. `pnpm dev:smoke` builds an isolated stack, checks both health endpoints and verifies that API and Web reload after a mounted source change.
 
 - Frontend: http://localhost:3000
 - API: http://localhost:4000
 - Swagger: http://localhost:4000/docs (dev only)
-- Generated API client docs: `pnpm docs:api-client` -> `docs/api-client.md`
-- Generated TypeScript client: `pnpm generate:ts-api-client` -> `apps/web/src/lib/generated/openapi-client`
+- Generated API reference: `pnpm docs:api-client` -> `docs/api-client.md`
 - LiveKit: ws://localhost:7880
 
 ---
@@ -195,7 +174,9 @@ Then:
 docker compose up -d --build
 ```
 
-The API container runs `prisma migrate deploy` and then seeds an empty database when `SEED_ADMIN_PASSWORD` is provided. Check logs with `docker compose logs -f api`.
+The one-shot `migrate` container applies committed migrations and the idempotent seed before API replicas start. API replicas never modify the schema during startup. Check the result with `docker compose ps` and `docker compose logs migrate api`.
+
+The production path requires a reachable SMTP server and complete operator details. For local hot reload use both Compose files shown under “Local development”; the generated local configuration intentionally does not claim production email delivery.
 
 For faster iteration, build or start only changed parts:
 
@@ -218,7 +199,7 @@ The setup wizard walks through this, but the short version:
 
 ### SSL with your own certs
 
-Copy `fullchain.pem` and `privkey.pem` into `docker/nginx/ssl/`, then run `bash setup-env.sh` and choose "Own certificates".
+Copy `fullchain.pem` and `privkey.pem` into `docker/nginx/ssl/`, then run `bash setup-env.sh` and choose "Own certificates". The setup sets both files to mode `0640` and the host group recorded in `BOTPARTY_SECRET_GID`; nginx receives only that supplementary group and remains non-root.
 
 ### Tagged releases via GHCR
 

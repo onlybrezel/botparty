@@ -1,4 +1,9 @@
-import { ConflictException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { QueueService } from './queue.service';
 
 const mockPrisma = {
@@ -59,6 +64,13 @@ describe('QueueService', () => {
     mockPrisma.queueEntry.updateMany.mockResolvedValue({ count: 0 });
     mockRobotsService.validateRoomAccess.mockResolvedValue(true);
     mockRobotsService.resolveGuestActorId.mockReturnValue(null);
+    mockRobotsService.findById.mockResolvedValue({
+      id: 'robot-1',
+      visibility: 'PUBLIC',
+      accessMode: 'OPEN',
+      status: 'ONLINE',
+    });
+    mockRobotsService.getAccessPolicy.mockResolvedValue({ control: 'ENABLED' });
     mockRedis.set.mockResolvedValue('OK');
     mockRedis.hgetall.mockResolvedValue({});
     mockRedis.hset.mockResolvedValue(1);
@@ -215,14 +227,27 @@ describe('QueueService', () => {
   });
 
   describe('getQueueForRequester', () => {
-    it('requires room verification for private rooms when no actor can be resolved', async () => {
+    it('does not disclose private queues when no actor can be resolved', async () => {
       mockRobotsService.findById.mockResolvedValueOnce({
         id: 'robot-1',
         visibility: 'PRIVATE',
         accessMode: 'OPEN',
       });
 
-      await expect(service.getQueueForRequester('robot-1', null)).rejects.toThrow(ForbiddenException);
+      await expect(service.getQueueForRequester('robot-1', null)).rejects.toThrow(NotFoundException);
+    });
+
+    it('does not disclose private queues to authenticated foreign users', async () => {
+      mockRobotsService.findById.mockResolvedValueOnce({
+        id: 'robot-1',
+        visibility: 'PRIVATE',
+        accessMode: 'OPEN',
+      });
+      mockRobotsService.validateRoomAccess.mockResolvedValueOnce(false);
+
+      await expect(
+        service.getQueueForRequester('robot-1', 'foreign-user'),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('allows verified guest viewers to read the queue in restricted rooms', async () => {
@@ -258,10 +283,17 @@ describe('QueueService', () => {
     });
 
     it('throws ForbiddenException when room access verification fails', async () => {
-      mockPrisma.robot.findUnique.mockResolvedValueOnce({ queueMode: 'VOTING' });
+      mockPrisma.robot.findUnique.mockResolvedValueOnce({ queueMode: 'VOTING', visibility: 'PUBLIC' });
       mockRobotsService.validateRoomAccess.mockResolvedValueOnce(false);
 
       await expect(service.vote('robot-1', 'user-2', 'user-1')).rejects.toThrow(ForbiddenException);
+    });
+
+    it('does not disclose a private voting queue when room access fails', async () => {
+      mockPrisma.robot.findUnique.mockResolvedValueOnce({ queueMode: 'VOTING', visibility: 'PRIVATE' });
+      mockRobotsService.validateRoomAccess.mockResolvedValueOnce(false);
+
+      await expect(service.vote('robot-1', 'user-2', 'user-1')).rejects.toThrow(NotFoundException);
     });
 
     it('returns null when the target user is no longer in the queue', async () => {

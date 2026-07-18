@@ -1,9 +1,9 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { RobotAccessService } from './robot-access.service';
-import type { RobotActionPayload } from './robots.service';
+import type { RobotActionPayload } from './robots.types';
 
 @Injectable()
 export class RobotActionQueueService {
@@ -16,7 +16,7 @@ export class RobotActionQueueService {
   async enqueueAction(robotId: string, ownerId: string, payload: RobotActionPayload) {
     const robot = await this.findRobot(robotId);
     if (robot.ownerId !== ownerId) {
-      throw new ForbiddenException('Not your robot');
+      throw new NotFoundException('Robot not found');
     }
 
     return this.enqueueActionForExistingRobot(robot.id, payload);
@@ -30,7 +30,7 @@ export class RobotActionQueueService {
   async getPendingActions(robotId: string, ownerId: string) {
     const robot = await this.findRobot(robotId);
     if (robot.ownerId !== ownerId) {
-      throw new ForbiddenException('Not your robot');
+      throw new NotFoundException('Robot not found');
     }
 
     return {

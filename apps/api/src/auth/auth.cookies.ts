@@ -91,7 +91,7 @@ export function extractBearerToken(authorization?: string): string | null {
   return token.length > 0 ? token : null;
 }
 
-export function parseDurationMs(raw: string | undefined, fallbackMs: number): number {
+function parseDurationMs(raw: string | undefined, fallbackMs: number): number {
   if (!raw) {
     return fallbackMs;
   }

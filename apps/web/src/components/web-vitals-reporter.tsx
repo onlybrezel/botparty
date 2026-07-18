@@ -29,7 +29,9 @@ function reportWebVital(metric: WebVitalMetric) {
     rating: metric.rating,
     path: normalizedMetricPath(window.location.pathname),
     navigationType: metric.navigationType,
-  }).catch(() => undefined);
+  }).catch((error: unknown) => {
+    console.error('Failed to report web vital', error);
+  });
 }
 
 export function WebVitalsReporter() {

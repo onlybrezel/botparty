@@ -12,7 +12,7 @@ export class AuditCleanupProcessor extends WorkerHost {
     super();
   }
 
-  async process(job: Job): Promise<void> {
+  async process(_job: Job): Promise<void> {
     const now = new Date();
     const deleted = await this.prisma.adminAuditLog.deleteMany({
       where: {

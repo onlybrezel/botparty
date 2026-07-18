@@ -234,7 +234,6 @@ describe('WalletPage', () => {
     render(<WalletPage />);
     await screen.findAllByText('Credits purchased');
     const amount = screen.getByRole('spinbutton');
-    const destination = screen.getByPlaceholderText('name@example.com');
     fireEvent.submit(amount.closest('form')!);
     expect(await screen.findByText('Invalid amount')).toBeInTheDocument();
 

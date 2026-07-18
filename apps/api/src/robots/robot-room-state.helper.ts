@@ -4,7 +4,7 @@ import type { PrismaService } from '../prisma/prisma.service';
 import type { RedisService } from '../redis/redis.service';
 import type { RobotAccessService } from './robot-access.service';
 import type { ChatPersistenceService } from './chat-persistence.service';
-import type { ChatHistoryMessage, ChatHistoryPage } from './robots.service';
+import type { ChatHistoryMessage, ChatHistoryPage } from './robots.types';
 
 const REALTIME_ROBOT_CACHE_TTL_SEC = 30;
 const PUBLIC_OVERVIEW_CACHE_KEY = 'robots:public-overview';
@@ -92,15 +92,10 @@ export class RobotRoomStateHelper {
   }): Promise<ChatHistoryPage> {
     const robot = await this.prisma.robot.findUnique({
       where: { id: input.robotId },
-      select: { id: true },
+      select: { id: true, visibility: true },
     });
     if (!robot) {
       throw new NotFoundException('Robot not found');
-    }
-
-    const access = await this.access.getAccessPolicy(input.robotId);
-    if (access.chat === 'DISABLED') {
-      throw new ForbiddenException('Chat is disabled for this room');
     }
 
     const actorId = input.requesterUserId
@@ -113,7 +108,15 @@ export class RobotRoomStateHelper {
       roomAccessToken: input.roomAccessToken,
     });
     if (!canAccessRoom) {
+      if (robot.visibility === 'PRIVATE') {
+        throw new NotFoundException('Robot not found');
+      }
       throw new ForbiddenException('Room access verification required');
+    }
+
+    const access = await this.access.getAccessPolicy(input.robotId);
+    if (access.chat === 'DISABLED') {
+      throw new ForbiddenException('Chat is disabled for this room');
     }
 
     if (access.chat === 'AUTHENTICATED' && !input.requesterUserId) {

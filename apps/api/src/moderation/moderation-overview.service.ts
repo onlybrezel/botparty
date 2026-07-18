@@ -2,7 +2,8 @@ import { ForbiddenException, Injectable, StreamableFile } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RecordingAdminService } from './recording-admin.service';
 import { RuntimeTelemetryService } from './runtime-telemetry.service';
-import { RobotsService, type RobotActionPayload } from '../robots/robots.service';
+import { RobotsService } from '../robots/robots.service';
+import type { RobotActionPayload } from '../robots/robots.types';
 import { isStaffRole } from '../common/robot-access';
 
 @Injectable()

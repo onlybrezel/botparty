@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
         env:
           POSTGRES_USER: botparty
           POSTGRES_PASSWORD: botparty_ci
@@ -84,6 +84,9 @@ jobs:
       - name: Check environment documentation parity
         run: pnpm env:check
 
+      - name: Check literal dotenv loading
+        run: sh scripts/test-dotenv-loader.sh
+
       - name: Check web module architecture budgets
         run: pnpm architecture:check
 
@@ -97,9 +100,10 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Validate Prometheus configuration and rules
         run: |
-          docker run --rm --entrypoint /bin/promtool -v "$PWD/docker/prometheus:/etc/prometheus:ro" prom/prometheus:v3.5.0 check config /etc/prometheus/prometheus.yml
-          docker run --rm --entrypoint /bin/promtool -v "$PWD/docker/prometheus:/etc/prometheus:ro" prom/prometheus:v3.5.0 check rules /etc/prometheus/alerts.yml
-          docker run --rm --entrypoint /bin/promtool -v "$PWD/docker/prometheus:/etc/prometheus:ro" -w /etc/prometheus prom/prometheus:v3.5.0 test rules alerts.test.yml
+          image='prom/prometheus:v3.13.1@sha256:3c42b892cf723fa54d2f262c37a0e1f80aa8c8ddb1da7b9b0df9455a35a7f893'
+          docker run --rm --entrypoint /bin/promtool -v "$PWD/docker/prometheus:/etc/prometheus:ro" "$image" check config /etc/prometheus/prometheus.yml
+          docker run --rm --entrypoint /bin/promtool -v "$PWD/docker/prometheus:/etc/prometheus:ro" "$image" check rules /etc/prometheus/alerts.yml
+          docker run --rm --entrypoint /bin/promtool -v "$PWD/docker/prometheus:/etc/prometheus:ro" -w /etc/prometheus "$image" test rules alerts.test.yml
       - name: Validate Alertmanager configuration
         run: |
           sh -n docker/alertmanager/entrypoint.sh
@@ -107,7 +111,7 @@ jobs:
           docker run --rm \
             -v "$PWD/docker/alertmanager:/etc/alertmanager:ro" \
             -v /tmp/alertmanager_webhook_url:/run/secrets/alertmanager_webhook_url:ro \
-            --entrypoint /bin/sh prom/alertmanager:v0.28.1 \
+            --entrypoint /bin/sh prom/alertmanager:v0.28.1@sha256:27c475db5fb156cab31d5c18a4251ac7ed567746a2483ff264516437a39b15ba \
             /etc/alertmanager/entrypoint.sh --check
 
   dev-compose:
@@ -131,7 +135,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
         env:
           POSTGRES_USER: botparty
           POSTGRES_PASSWORD: botparty_ci
@@ -143,7 +147,7 @@ jobs:
           --health-timeout 2s
           --health-retries 20
       redis:
-        image: redis:7-alpine
+        image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
         ports: [6379:6379]
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -234,7 +238,7 @@ jobs:
     needs: lint-and-typecheck
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
         env:
           POSTGRES_USER: botparty
           POSTGRES_PASSWORD: botparty_ci
@@ -247,7 +251,7 @@ jobs:
           --health-timeout 2s
           --health-retries 20
       redis:
-        image: redis:7-alpine
+        image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
         ports:
           - 6379:6379
     steps:
@@ -362,6 +366,15 @@ jobs:
           path: apps/web/.lighthouseci
           if-no-files-found: error
 
+  production-docker-e2e:
+    name: Production Docker E2E
+    runs-on: ubuntu-latest
+    needs: lint-and-typecheck
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Build the release images and run the isolated browser suite
+        run: ./scripts/test-e2e-docker.sh
+
   build:
     name: Build
     runs-on: ubuntu-latest
@@ -373,6 +386,7 @@ jobs:
         observability-config,
         queue-benchmark,
         lint-and-typecheck,
+        production-docker-e2e,
         test,
         coverage,
         e2e,
@@ -427,12 +441,10 @@ jobs:
           LIVEKIT_API_SECRET: test-livekit-secret-that-is-at-least-32-chars
 
       - name: Regenerate client contracts
-        run: |
-          pnpm docs:api-client
-          pnpm generate:ts-api-client
+        run: pnpm docs:api-client
 
       - name: Check OpenAPI drift
-        run: git diff --exit-code -- docs/openapi.json docs/api-client.md apps/web/src/lib/generated/openapi-client
+        run: git diff --exit-code -- docs/openapi.json docs/api-client.md
 
       - name: Upload OpenAPI artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

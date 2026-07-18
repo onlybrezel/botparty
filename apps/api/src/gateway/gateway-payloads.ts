@@ -41,12 +41,6 @@ export const emergencyStopSchema = z.object({
   robotId: z.string().uuid(),
 }).strict();
 
-export const controlAckSchema = z.object({
-  commandId: z.string().uuid(),
-  status: z.enum(['ACK', 'NACK']),
-  message: z.string().max(256).optional(),
-}).strict();
-
 export const emptyPayloadSchema = z.undefined().or(z.object({}).strict());
 
 export const WS_EVENT_TYPE_LIMITS: Record<string, { normal: number; privileged: number }> = {

@@ -1,6 +1,8 @@
 import { register } from 'prom-client';
 import { PayloadTooLargeException } from '@nestjs/common';
 import { HealthController } from './health.controller';
+import { HealthMetricsService } from './health-metrics.service';
+import { HealthService } from './health.service';
 
 function createReply() {
   return {
@@ -10,15 +12,48 @@ function createReply() {
   };
 }
 
-function createConfig(values: Record<string, string | undefined> = {}) {
+function createConfig(values: Record<string, string | boolean | undefined> = {}) {
   return {
     get: jest.fn((key: string) => values[key]),
   };
 }
 
+function createController(
+  prisma: ConstructorParameters<typeof HealthService>[0],
+  redis: ConstructorParameters<typeof HealthService>[1],
+  gateway: ConstructorParameters<typeof HealthMetricsService>[1],
+  config: ConstructorParameters<typeof HealthService>[2],
+  livekitService: ConstructorParameters<typeof HealthService>[3],
+  mailService: ConstructorParameters<typeof HealthService>[4],
+  featureFlags: ConstructorParameters<typeof HealthService>[5],
+  readPrisma: ConstructorParameters<typeof HealthService>[6],
+) {
+  const health = new HealthService(
+    prisma,
+    redis,
+    config,
+    livekitService,
+    mailService,
+    featureFlags,
+    readPrisma,
+  );
+  const metrics = new HealthMetricsService(health, gateway);
+  return new HealthController(health, metrics, config);
+}
+
 const livekit = { listRooms: jest.fn().mockResolvedValue([]) };
-const mail = { isEnabled: jest.fn().mockReturnValue(true) };
+const mail = {
+  isEnabled: jest.fn().mockReturnValue(true),
+  isAvailable: jest.fn().mockReturnValue(true),
+};
 const features = { isEnabled: jest.fn().mockReturnValue(false) };
+function createReadPrisma(client: unknown, isReplicaConfigured = false, available = true) {
+  return {
+    client,
+    isReplicaConfigured,
+    isAvailable: jest.fn().mockResolvedValue(available),
+  };
+}
 
 describe('HealthController.metrics', () => {
   beforeEach(() => {
@@ -74,7 +109,7 @@ describe('HealthController.metrics', () => {
       }),
     };
 
-    const controller = new HealthController(
+    const controller = createController(
       prisma as never,
       redis as never,
       gateway as never,
@@ -82,6 +117,7 @@ describe('HealthController.metrics', () => {
       livekit as never,
       mail as never,
       features as never,
+      createReadPrisma(prisma) as never,
     );
     const reply = createReply();
 
@@ -138,7 +174,7 @@ describe('HealthController.metrics', () => {
       }),
     };
 
-    const controller = new HealthController(
+    const controller = createController(
       prisma as never,
       redis as never,
       gateway as never,
@@ -146,6 +182,7 @@ describe('HealthController.metrics', () => {
       livekit as never,
       mail as never,
       features as never,
+      createReadPrisma(prisma, true, false) as never,
     );
     const reply = createReply();
 
@@ -166,7 +203,7 @@ describe('HealthController.metrics', () => {
       getRuntimeMetricsSnapshot: jest.fn(),
     };
 
-    const controller = new HealthController(
+    const controller = createController(
       {
         $queryRaw: jest.fn(),
         queueEntry: { count: jest.fn() },
@@ -176,12 +213,14 @@ describe('HealthController.metrics', () => {
       gateway as never,
       createConfig({
         NODE_ENV: 'production',
+        METRICS_AUTH_REQUIRED: true,
         METRICS_USERNAME: 'metrics',
         METRICS_PASSWORD: 'super-secret-password',
       }) as never,
       livekit as never,
       mail as never,
       features as never,
+      createReadPrisma({}) as never,
     );
     const reply = createReply();
 
@@ -194,7 +233,7 @@ describe('HealthController.metrics', () => {
   });
 
   it('accepts CSP violation reports without throwing', () => {
-    const controller = new HealthController(
+    const controller = createController(
       {
         $queryRaw: jest.fn(),
         queueEntry: { count: jest.fn() },
@@ -206,6 +245,7 @@ describe('HealthController.metrics', () => {
       livekit as never,
       mail as never,
       features as never,
+      createReadPrisma({}) as never,
     );
 
     expect(
@@ -215,5 +255,151 @@ describe('HealthController.metrics', () => {
     expect(() =>
       controller.cspReport({ 'csp-report': { 'violated-directive': 'ü'.repeat(9_000) } }),
     ).toThrow(PayloadTooLargeException);
+  });
+});
+
+describe('HealthController readiness', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('is ready only when schema, database, redis, video, and storage are available', async () => {
+    const prisma = {
+      $queryRaw: jest
+        .fn()
+        .mockResolvedValueOnce([{ ok: 1 }])
+        .mockResolvedValueOnce([{ total: 10n, pending: 0n }]),
+    };
+    const redis = { ping: jest.fn().mockResolvedValue('PONG') };
+    jest.spyOn(global, 'fetch').mockResolvedValue({ ok: true } as Response);
+    const controller = createController(
+      prisma as never,
+      redis as never,
+      { getRuntimeMetricsSnapshot: jest.fn() } as never,
+      createConfig({ THUMBNAIL_S3_ENDPOINT: 'http://minio:9000' }) as never,
+      livekit as never,
+      mail as never,
+      features as never,
+      createReadPrisma(prisma) as never,
+    );
+
+    await expect(controller.check()).resolves.toMatchObject({
+      status: 'healthy',
+      checks: {
+        discovery: 'ok',
+        migrations: 'ok',
+        auth: 'ok',
+        control: 'ok',
+        video: 'ok',
+        storage: 'ok',
+      },
+    });
+  });
+
+  it('rejects readiness when no completed migration exists or storage is unavailable', async () => {
+    const prisma = {
+      $queryRaw: jest
+        .fn()
+        .mockResolvedValueOnce([{ ok: 1 }])
+        .mockResolvedValueOnce([{ total: 0n, pending: 0n }]),
+    };
+    jest.spyOn(global, 'fetch').mockResolvedValue({ ok: false } as Response);
+    const controller = createController(
+      prisma as never,
+      { ping: jest.fn().mockResolvedValue('PONG') } as never,
+      { getRuntimeMetricsSnapshot: jest.fn() } as never,
+      createConfig({ THUMBNAIL_S3_ENDPOINT: 'http://minio:9000' }) as never,
+      livekit as never,
+      mail as never,
+      features as never,
+      createReadPrisma(prisma) as never,
+    );
+    const reply = createReply();
+
+    await controller.ready(reply as never);
+
+    expect(reply.code).toHaveBeenCalledWith(503);
+    expect(reply.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'degraded',
+        checks: expect.objectContaining({ migrations: 'error', storage: 'error' }),
+      }),
+    );
+  });
+
+  it('returns degraded within the dependency deadline when database checks hang', async () => {
+    jest.useFakeTimers();
+    const never = new Promise<never>(() => undefined);
+    const prisma = { $queryRaw: jest.fn().mockReturnValue(never) };
+    jest.spyOn(global, 'fetch').mockResolvedValue({ ok: true } as Response);
+    const controller = createController(
+      prisma as never,
+      { ping: jest.fn().mockResolvedValue('PONG') } as never,
+      { getRuntimeMetricsSnapshot: jest.fn() } as never,
+      createConfig({ THUMBNAIL_S3_ENDPOINT: 'http://minio:9000' }) as never,
+      livekit as never,
+      mail as never,
+      features as never,
+      createReadPrisma(prisma) as never,
+    );
+    const reply = createReply();
+
+    const readiness = controller.ready(reply as never);
+    await jest.advanceTimersByTimeAsync(2_000);
+    await readiness;
+
+    expect(reply.code).toHaveBeenCalledWith(503);
+    expect(reply.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'degraded',
+        checks: expect.objectContaining({ discovery: 'error', migrations: 'error' }),
+      }),
+    );
+    jest.useRealTimers();
+  });
+});
+
+describe('HealthService public stats', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('coalesces concurrent refreshes and reuses the short-lived public snapshot', async () => {
+    jest.useFakeTimers({ now: new Date('2026-07-18T12:00:00.000Z') });
+    const database = {
+      user: { count: jest.fn().mockResolvedValue(10) },
+      robot: {
+        count: jest.fn().mockResolvedValueOnce(20).mockResolvedValueOnce(3),
+        aggregate: jest.fn().mockResolvedValue({ _sum: { viewerCount: 40 } }),
+      },
+      queueEntry: { count: jest.fn().mockResolvedValue(5) },
+      session: { count: jest.fn().mockResolvedValue(6) },
+    };
+    const health = new HealthService(
+      database as never,
+      {} as never,
+      createConfig() as never,
+      livekit as never,
+      mail as never,
+      features as never,
+      createReadPrisma(database) as never,
+    );
+
+    const [first, concurrent] = await Promise.all([
+      health.getPublicStats(),
+      health.getPublicStats(),
+    ]);
+    const cached = await health.getPublicStats();
+
+    expect(concurrent).toBe(first);
+    expect(cached).toBe(first);
+    expect(database.user.count).toHaveBeenCalledTimes(1);
+    expect(database.robot.count).toHaveBeenCalledTimes(2);
+
+    await jest.advanceTimersByTimeAsync(5_001);
+    await health.getPublicStats();
+
+    expect(database.user.count).toHaveBeenCalledTimes(2);
+    expect(database.robot.count).toHaveBeenCalledTimes(4);
   });
 });

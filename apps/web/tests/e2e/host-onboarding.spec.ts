@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 const ADMIN_EMAIL = 'admin@botparty.test';
-const ADMIN_PASSWORD = 'e2e-admin-password-at-least-16';
+const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? 'e2e-admin-password-at-least-16';
 
 async function signIn(page: import('@playwright/test').Page) {
   await page.goto('/login');

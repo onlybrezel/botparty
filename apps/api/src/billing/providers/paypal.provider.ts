@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { BillingIntent } from '@botparty/prisma';
 import type { CheckoutSession, PaymentProvider, VerifiedWebhookEvent } from './payment-provider.interface';
@@ -15,7 +15,12 @@ export class PaypalProvider implements PaymentProvider {
   private readonly clientSecret: string | null;
   private readonly webhookId: string | null;
   private readonly apiBase: string;
+  private readonly requestTimeoutMs: number;
+  private readonly maxRetries: number;
+  private readonly retryBaseMs: number;
   private cachedToken: { token: string; expiresAt: number } | null = null;
+  private consecutiveTransientFailures = 0;
+  private circuitOpenUntil = 0;
 
   constructor(private readonly config: ConfigService) {
     this.clientId = this.config.get<string>('PAYPAL_CLIENT_ID') ?? null;
@@ -23,6 +28,9 @@ export class PaypalProvider implements PaymentProvider {
     this.webhookId = this.config.get<string>('PAYPAL_WEBHOOK_ID') ?? null;
     const env = (this.config.get<string>('PAYPAL_ENV') ?? 'sandbox').toLowerCase();
     this.apiBase = env === 'live' ? 'https://api-m.paypal.com' : 'https://api-m.sandbox.paypal.com';
+    this.requestTimeoutMs = this.readBoundedInteger('PAYPAL_REQUEST_TIMEOUT_MS', 8_000, 500, 30_000);
+    this.maxRetries = this.readBoundedInteger('PAYPAL_MAX_RETRIES', 2, 0, 4);
+    this.retryBaseMs = this.readBoundedInteger('PAYPAL_RETRY_BASE_MS', 250, 10, 5_000);
     if (!this.clientId || !this.clientSecret) {
       this.logger.warn('PayPal disabled: PAYPAL_CLIENT_ID/SECRET not set');
     }
@@ -39,7 +47,7 @@ export class PaypalProvider implements PaymentProvider {
       return this.cachedToken.token;
     }
     const auth = Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64');
-    const res = await fetch(`${this.apiBase}/v1/oauth2/token`, {
+    const res = await this.request('/v1/oauth2/token', {
       method: 'POST',
       headers: {
         Authorization: `Basic ${auth}`,
@@ -64,7 +72,7 @@ export class PaypalProvider implements PaymentProvider {
     const token = await this.getAccessToken();
     const { intent, successUrl, cancelUrl } = input;
     const amountValue = (intent.amountCents / 100).toFixed(2);
-    const res = await fetch(`${this.apiBase}/v2/checkout/orders`, {
+    const res = await this.request('/v2/checkout/orders', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -89,8 +97,7 @@ export class PaypalProvider implements PaymentProvider {
       }),
     });
     if (!res.ok) {
-      const text = await res.text();
-      this.logger.error(`PayPal create order failed: ${text}`);
+      this.logger.error(`PayPal create order failed with HTTP ${res.status}`);
       throw new BadRequestException('PayPal order creation failed');
     }
     const json = (await res.json()) as {
@@ -98,6 +105,9 @@ export class PaypalProvider implements PaymentProvider {
       links: Array<{ rel: string; href: string }>;
     };
     const approve = json.links.find((l) => l.rel === 'approve' || l.rel === 'payer-action');
+    if (!json.id || !approve?.href) {
+      throw new BadRequestException('PayPal returned an incomplete checkout response');
+    }
     return {
       intentId: intent.id,
       providerRef: json.id,
@@ -112,8 +122,14 @@ export class PaypalProvider implements PaymentProvider {
     if (!this.isConfigured() || !this.webhookId) {
       throw new BadRequestException('PayPal webhook is not configured');
     }
+    let webhookEvent: unknown;
+    try {
+      webhookEvent = JSON.parse(rawBody.toString('utf8'));
+    } catch {
+      throw new BadRequestException('PayPal webhook payload is invalid JSON');
+    }
     const token = await this.getAccessToken();
-    const verifyRes = await fetch(`${this.apiBase}/v1/notifications/verify-webhook-signature`, {
+    const verifyRes = await this.request('/v1/notifications/verify-webhook-signature', {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -123,15 +139,18 @@ export class PaypalProvider implements PaymentProvider {
         transmission_sig: headers['paypal-transmission-sig'],
         transmission_time: headers['paypal-transmission-time'],
         webhook_id: this.webhookId,
-        webhook_event: JSON.parse(rawBody.toString('utf8')),
+        webhook_event: webhookEvent,
       }),
     });
+    if (!verifyRes.ok) {
+      throw new BadRequestException('PayPal webhook verification unavailable');
+    }
     const verifyJson = (await verifyRes.json()) as { verification_status: string };
     if (verifyJson.verification_status !== 'SUCCESS') {
       throw new BadRequestException('PayPal webhook signature verification failed');
     }
 
-    const event = JSON.parse(rawBody.toString('utf8')) as {
+    const event = webhookEvent as {
       id: string;
       event_type: string;
       resource: Record<string, unknown>;
@@ -234,7 +253,7 @@ export class PaypalProvider implements PaymentProvider {
 
   async captureApprovedOrder(orderId: string, intentId: string): Promise<VerifiedWebhookEvent> {
     const token = await this.getAccessToken();
-    const response = await fetch(`${this.apiBase}/v2/checkout/orders/${encodeURIComponent(orderId)}/capture`, {
+    const response = await this.request(`/v2/checkout/orders/${encodeURIComponent(orderId)}/capture`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -258,6 +277,10 @@ export class PaypalProvider implements PaymentProvider {
     if (!capture?.id || capture.status !== 'COMPLETED') {
       throw new BadRequestException('PayPal capture was not completed');
     }
+    const amountCents = Math.round(Number(capture.amount?.value ?? Number.NaN) * 100);
+    if (!Number.isSafeInteger(amountCents) || amountCents <= 0 || !capture.amount?.currency_code) {
+      throw new BadRequestException('PayPal capture returned an invalid amount');
+    }
     return {
       eventId: `capture:${capture.id}`,
       type: 'completed',
@@ -267,9 +290,63 @@ export class PaypalProvider implements PaymentProvider {
       subscriptionRef: null,
       relatedProviderRef: payload.id,
       customerRef: null,
-      amountCents: Math.round(Number(capture.amount?.value ?? 0) * 100),
-      currency: (capture.amount?.currency_code ?? 'EUR').toUpperCase(),
+      amountCents,
+      currency: capture.amount.currency_code.toUpperCase(),
       rawPayload: payload,
     };
+  }
+
+  private async request(path: string, init: RequestInit): Promise<Response> {
+    if (Date.now() < this.circuitOpenUntil) {
+      throw new ServiceUnavailableException('PayPal is temporarily unavailable');
+    }
+
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= this.maxRetries; attempt += 1) {
+      try {
+        const response = await fetch(`${this.apiBase}${path}`, {
+          ...init,
+          signal: AbortSignal.timeout(this.requestTimeoutMs),
+        });
+        const transient = response.status === 429 || response.status >= 500;
+        if (!transient) {
+          this.consecutiveTransientFailures = 0;
+          return response;
+        }
+        lastError = new Error(`PayPal HTTP ${response.status}`);
+        if (attempt === this.maxRetries) break;
+        await this.waitBeforeRetry(response, attempt);
+      } catch (error) {
+        lastError = error;
+        if (attempt === this.maxRetries) break;
+        await this.delay(this.retryBaseMs * (2 ** attempt));
+      }
+    }
+
+    this.consecutiveTransientFailures += 1;
+    if (this.consecutiveTransientFailures >= 5) {
+      this.circuitOpenUntil = Date.now() + 30_000;
+      this.logger.error('PayPal circuit opened for 30 seconds after repeated transient failures');
+    }
+    this.logger.warn(`PayPal request failed after bounded retries: ${String(lastError)}`);
+    throw new ServiceUnavailableException('PayPal is temporarily unavailable');
+  }
+
+  private async waitBeforeRetry(response: Response, attempt: number) {
+    const retryAfterRaw = response.headers?.get?.('retry-after');
+    const retryAfterSeconds = retryAfterRaw ? Number(retryAfterRaw) : Number.NaN;
+    const retryAfterMs = Number.isFinite(retryAfterSeconds)
+      ? Math.min(Math.max(retryAfterSeconds * 1_000, 0), 5_000)
+      : this.retryBaseMs * (2 ** attempt);
+    await this.delay(retryAfterMs);
+  }
+
+  private delay(milliseconds: number) {
+    return new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+  }
+
+  private readBoundedInteger(key: string, fallback: number, minimum: number, maximum: number) {
+    const parsed = Number(this.config.get<string>(key) ?? fallback);
+    return Number.isInteger(parsed) && parsed >= minimum && parsed <= maximum ? parsed : fallback;
   }
 }

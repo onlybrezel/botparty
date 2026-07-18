@@ -60,7 +60,7 @@ export class TurnHandler {
       if (current) {
         await this.clearTurnState(robotId, 'clear');
       }
-      await this.robotsService.updateStatus(robotId, 'ONLINE').catch(() => {});
+      await this.updateRobotStatus(robotId, 'ONLINE');
       this.ctx.broadcastToRoom(robotId, WS_EVENTS.ROBOT_STATUS, { status: 'ONLINE' });
       return;
     }
@@ -76,7 +76,9 @@ export class TurnHandler {
 
       if (!this.ctx.getTurnTimeout(robotId)) {
         const timer = setTimeout(() => {
-          void this.handleTurnTimeout(robotId, nextEntry.userId);
+          void this.handleTurnTimeout(robotId, nextEntry.userId).catch((error) => {
+            this.logger.warn(`Turn timeout failed for robot ${robotId}: ${(error as Error).message}`);
+          });
         }, remainingMs);
         this.ctx.setTurnTimeout(robotId, timer);
       }
@@ -144,7 +146,7 @@ export class TurnHandler {
       });
     }
 
-    await this.robotsService.updateStatus(robotId, 'BUSY').catch(() => {});
+    await this.updateRobotStatus(robotId, 'BUSY');
     this.ctx.broadcastToRoom(robotId, WS_EVENTS.ROBOT_STATUS, { status: 'BUSY' });
     this.ctx.broadcastToRoom(robotId, WS_EVENTS.SESSION_START, {
       sessionId: session.id,
@@ -164,14 +166,18 @@ export class TurnHandler {
     }
 
     const timer = setTimeout(() => {
-      void this.handleTurnTimeout(robotId, nextEntry.userId);
+      void this.handleTurnTimeout(robotId, nextEntry.userId).catch((error) => {
+        this.logger.warn(`Turn timeout failed for robot ${robotId}: ${(error as Error).message}`);
+      });
     }, robot.maxTurnTime);
     this.ctx.setTurnTimeout(robotId, timer);
   }
 
   async handleTurnTimeout(robotId: string, userId: string) {
     await this.clearTurnState(robotId, 'timeout');
-    await this.queueService.leave(robotId, userId).catch(() => {});
+    await this.queueService.leave(robotId, userId).catch((error: unknown) => {
+      this.logger.warn(`Failed to remove timed-out user ${userId} from robot ${robotId}: ${(error as Error).message}`);
+    });
   }
 
   async clearTurnState(robotId: string, reason: 'handoff' | 'timeout' | 'clear' = 'handoff') {
@@ -183,8 +189,12 @@ export class TurnHandler {
     const current = await this.ctx.clearActiveTurn(robotId, expected);
     if (current) {
       this.ctx.sendRobotStop(robotId, `Turn ended: ${reason}`);
-      await this.ctx.revokeController(robotId, current.userId).catch(() => {});
-      await this.sessionsService.end(current.sessionId).catch(() => {});
+      await this.ctx.revokeController(robotId, current.userId).catch((error: unknown) => {
+        this.logger.warn(`Failed to revoke controller ${current.userId} on ${robotId}: ${(error as Error).message}`);
+      });
+      await this.sessionsService.end(current.sessionId).catch((error: unknown) => {
+        this.logger.warn(`Failed to end session ${current.sessionId}: ${(error as Error).message}`);
+      });
       this.ctx.broadcastToRoom(robotId, WS_EVENTS.SESSION_END, {
         sessionId: current.sessionId,
         userId: current.userId,
@@ -196,5 +206,11 @@ export class TurnHandler {
     }
 
     this.ctx.clearTurnTimeout(robotId);
+  }
+
+  private async updateRobotStatus(robotId: string, status: 'ONLINE' | 'BUSY') {
+    await this.robotsService.updateStatus(robotId, status).catch((error: unknown) => {
+      this.logger.warn(`Failed to persist robot ${robotId} status ${status}: ${(error as Error).message}`);
+    });
   }
 }

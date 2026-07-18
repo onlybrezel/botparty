@@ -8,10 +8,19 @@ test('core pages run under the enforced content security policy', async ({ page 
     }
   });
 
-  for (const route of ['/', '/explore', '/robot/test-robot', '/login', '/pricing']) {
+  for (const route of ['/', '/explore', '/robot/admin/test-robot', '/login', '/pricing']) {
     const response = await page.goto(route);
-    expect(response?.headers()['content-security-policy']).toBeTruthy();
+    const csp = response?.headers()['content-security-policy'];
+    const nonce = csp?.match(/'nonce-([^']+)'/)?.[1];
+    expect(nonce).toBeTruthy();
     await expect(page.locator('main')).toBeVisible();
+
+    const frameworkNonces = await page.locator('script[src]').evaluateAll((scripts) =>
+      scripts.map((script) => (script as HTMLScriptElement).nonce),
+    );
+    expect(frameworkNonces.length).toBeGreaterThan(0);
+    expect(frameworkNonces).toContain(nonce);
+    expect(frameworkNonces.filter(Boolean).every((scriptNonce) => scriptNonce === nonce)).toBe(true);
   }
 
   expect(violations).toEqual([]);

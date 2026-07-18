@@ -73,7 +73,6 @@ export default defineConfig({
         'src/**/*.test.{ts,tsx}',
         'src/**/*.stories.{ts,tsx}',
         'src/test/**',
-        'src/lib/generated/**',
         'tests/**',
         '**/node_modules/**',
       ],

@@ -1,16 +1,13 @@
 import { BadRequestException } from '@nestjs/common';
-import type { GuestAccess, RobotAccessPolicy, RobotStreamPolicy } from './robots.service';
+import type {
+  GuestAccess,
+  RobotAccessPolicy,
+  RobotStreamCameraDescriptor,
+  RobotStreamPolicy,
+} from './robots.types';
 import { mergeRobotMetadata, normalizeRobotMetadata } from './robot-metadata.schema';
 import { normalizePublicRobotStatus, normalizePublicViewerCount } from './robot-public-state';
 import { SLUG_PROFANITY_TERMS } from './profanity-terms';
-
-export type RobotStreamCameraDescriptor = {
-  id: string;
-  label?: string;
-  role?: string;
-  enabled?: boolean;
-  publishMode?: string;
-};
 
 const DEFAULT_ACCESS_POLICY: RobotAccessPolicy = {
   video: 'AUTHENTICATED',
@@ -145,6 +142,8 @@ export function sanitizeManagedRobot<
   },
 >(robot: T): Omit<T, 'claimTokenHash' | 'streamKeyHash'> & { claimToken: null; streamKey: null } {
   const { claimTokenHash: _claimTokenHash, streamKeyHash: _streamKeyHash, ...safeRobot } = robot;
+  void _claimTokenHash;
+  void _streamKeyHash;
   return {
     ...safeRobot,
     accessPassword: null,
@@ -249,13 +248,11 @@ export function isRobotInSchedule(robot: {
     return true; // No schedule set, always available
   }
 
-  try {
-    // Note: Full timezone-aware comparison requires node-tz or system timezone support.
-    // Current implementation uses UTC comparison. Future: integrate with date-fns tz or Temporal API.
-    const now = new Date();
-    return now >= robot.scheduleStart && now <= robot.scheduleEnd;
-  } catch {
-    // If any error occurs during schedule check, allow access (fail open)
-    return true;
+  const start = robot.scheduleStart.getTime();
+  const end = robot.scheduleEnd.getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start > end) {
+    return false;
   }
+  const now = Date.now();
+  return now >= start && now <= end;
 }

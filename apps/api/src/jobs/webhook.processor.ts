@@ -77,10 +77,16 @@ export class WebhookProcessor extends WorkerHost {
       }
     } catch (error) {
       this.logger.warn(`Webhook delivery failed for ${hook.id}: ${(error as Error).message}`);
-      await this.prisma.robotWebhook.update({
-        where: { id: hook.id },
-        data: { lastTriggeredAt: new Date(), lastStatusCode: null },
-      }).catch(() => {});
+      try {
+        await this.prisma.robotWebhook.update({
+          where: { id: hook.id },
+          data: { lastTriggeredAt: new Date(), lastStatusCode: null },
+        });
+      } catch (statusError) {
+        this.logger.error(
+          `Failed to persist webhook failure state for ${hook.id}: ${(statusError as Error).message}`,
+        );
+      }
       throw error; // Let BullMQ handle retries
     }
   }

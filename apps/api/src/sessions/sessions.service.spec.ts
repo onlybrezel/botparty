@@ -143,12 +143,34 @@ describe('SessionsService', () => {
   });
 
   it('rejects unauthenticated session-history access', async () => {
-    prisma.robot.findUnique.mockResolvedValue({ id: 'robot-1' });
+    prisma.robot.findUnique.mockResolvedValue({ id: 'robot-1', visibility: 'PUBLIC' });
     robotsService.resolveGuestActorId.mockReturnValue('guest-1');
 
     await expect(service.findByRobotForRequester('robot-1', null)).rejects.toBeInstanceOf(
       ForbiddenException,
     );
+  });
+
+  it('does not disclose private robots through session-history authorization errors', async () => {
+    prisma.robot.findUnique.mockResolvedValue({ id: 'private-robot', visibility: 'PRIVATE' });
+    robotsService.resolveGuestActorId.mockReturnValue('guest-1');
+    robotsService.validateRoomAccess.mockResolvedValue(false);
+
+    await expect(
+      service.findByRobotForRequester('private-robot', null),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      service.findByRobotForRequester('private-robot', 'foreign-user'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('keeps forbidden semantics for inaccessible public session history', async () => {
+    prisma.robot.findUnique.mockResolvedValue({ id: 'public-robot', visibility: 'PUBLIC' });
+    robotsService.validateRoomAccess.mockResolvedValue(false);
+
+    await expect(
+      service.findByRobotForRequester('public-robot', 'user-1'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
   it('rejects session-history access when the robot does not exist', async () => {
@@ -160,7 +182,7 @@ describe('SessionsService', () => {
   });
 
   it('returns requester-scoped robot sessions when room access is valid', async () => {
-    prisma.robot.findUnique.mockResolvedValue({ id: 'robot-1' });
+    prisma.robot.findUnique.mockResolvedValue({ id: 'robot-1', visibility: 'PUBLIC' });
     robotsService.validateRoomAccess.mockResolvedValue(true);
     prisma.session.findMany.mockResolvedValue([{ id: 'session-1' }]);
 

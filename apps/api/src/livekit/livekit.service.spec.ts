@@ -3,6 +3,44 @@ import { TrackType } from '@livekit/protocol';
 import type { ConfigService } from '@nestjs/config';
 import { LivekitService } from './livekit.service';
 
+type RecordingStatus = {
+  active: boolean;
+  activeCount: number;
+  sessions: Array<{ videoTrackId: string | null }>;
+};
+
+type LivekitServiceTestAccess = {
+  egressStopWaitMs: number;
+  waitForActiveEgressCount(roomName: string, expectedCount: number): Promise<void>;
+  buildIngressEndpointUrl(baseUrl: string, streamKey: string): string;
+  sanitizeCameraId(value: string): string;
+  sanitizePathSegment(value: string): string;
+  cameraIdFromParticipantIdentity(identity?: string): string | null;
+  cameraIdFromParticipantIdentityForRobot(robotId: string, identity?: string): string | null;
+  mapRobotWhipIngress(info: unknown): unknown;
+  resolveRecordingTemplate(template: string, roomName: string, cameraId: string | null): string;
+  resolveRecordingObjectKey(roomName: string, cameraId: string | null, sessionId: string): string;
+  buildRecordingFileOutput(
+    filePath: string,
+    storage: {
+      bucket: string;
+      region: string;
+      accessKeyId: string;
+      secretAccessKey: string;
+      forcePathStyle: boolean;
+    },
+  ): EncodedFileOutput;
+  getTrackCompositeVideoTrackId(entry: unknown): string | null;
+  toRecordingStatus(
+    roomName: string,
+    entries: unknown[],
+    active: boolean,
+    cameraNames: Map<string, string>,
+  ): RecordingStatus;
+  toIsoTimestamp(raw?: bigint | number | null): string | null;
+  withTimeout<T>(promise: Promise<T>, action: string): Promise<T>;
+};
+
 const mockRoomService = {
   listRooms: jest.fn(),
   listParticipants: jest.fn(),
@@ -411,8 +449,9 @@ describe('LivekitService', () => {
       await service.stopRoomRecording(robotId);
       expect(prisma.recording.updateMany).not.toHaveBeenCalled();
 
-      (service as any).egressStopWaitMs = 0;
-      await expect((service as any).waitForActiveEgressCount(roomName, 0)).rejects.toThrow(
+      const internal = service as unknown as LivekitServiceTestAccess;
+      internal.egressStopWaitMs = 0;
+      await expect(internal.waitForActiveEgressCount(roomName, 0)).rejects.toThrow(
         'Timed out waiting',
       );
     });
@@ -549,7 +588,7 @@ describe('LivekitService', () => {
 
   describe('pure mapping and timeout behavior', () => {
     it('maps endpoint, identity, and sanitized camera/path variants', () => {
-      const internal = service as any;
+      const internal = service as unknown as LivekitServiceTestAccess;
       expect(internal.buildIngressEndpointUrl('https://host/path/', '/key')).toBe(
         'https://host/path/key',
       );
@@ -582,7 +621,7 @@ describe('LivekitService', () => {
     });
 
     it('resolves camera-safe recording templates with and without camera placeholders', () => {
-      const internal = service as any;
+      const internal = service as unknown as LivekitServiceTestAccess;
       expect(
         internal.resolveRecordingTemplate('records/{room_name}/{time}.mp4', roomName, 'front'),
       ).toBe(`records/${roomName}/front-{time}.mp4`);
@@ -617,7 +656,7 @@ describe('LivekitService', () => {
     });
 
     it('handles non-composite and incomplete recording status entries', () => {
-      const internal = service as any;
+      const internal = service as unknown as LivekitServiceTestAccess;
       expect(internal.getTrackCompositeVideoTrackId({ request: { case: 'roomComposite' } })).toBeNull();
       expect(
         internal.getTrackCompositeVideoTrackId({
@@ -639,7 +678,7 @@ describe('LivekitService', () => {
     });
 
     it('maps timestamps from seconds, milliseconds, microseconds, and nanoseconds', () => {
-      const internal = service as any;
+      const internal = service as unknown as LivekitServiceTestAccess;
       expect(internal.toIsoTimestamp(null)).toBeNull();
       expect(internal.toIsoTimestamp(0)).toBeNull();
       expect(internal.toIsoTimestamp(1_700_000_000)).toBe('2023-11-14T22:13:20.000Z');
@@ -656,7 +695,7 @@ describe('LivekitService', () => {
     it('rejects LiveKit calls that exceed the bounded egress timeout', async () => {
       jest.useFakeTimers();
       const never = new Promise<never>(() => undefined);
-      const timed = (service as any).withTimeout(never, 'test action');
+      const timed = (service as unknown as LivekitServiceTestAccess).withTimeout(never, 'test action');
       const assertion = expect(timed).rejects.toThrow(
         'LiveKit egress timeout (test action) after 12000ms',
       );

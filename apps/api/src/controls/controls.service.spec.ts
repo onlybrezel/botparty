@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ControlButtonAccess, LIMITS, Role } from '@botparty/shared';
 import { ControlsService } from './controls.service';
 
@@ -15,11 +15,12 @@ describe('ControlsService', () => {
       delete: jest.Mock;
       updateMany: jest.Mock;
     };
+    $queryRaw: jest.Mock;
     $transaction: jest.Mock;
   };
   let service: ControlsService;
   let features: { assertEnabled: jest.Mock };
-  let subscriber: { psubscribe: jest.Mock; on: jest.Mock; quit: jest.Mock };
+  let subscriber: { connect: jest.Mock; psubscribe: jest.Mock; on: jest.Mock; quit: jest.Mock };
   const redis = {
     duplicate: jest.fn(),
     publish: jest.fn().mockResolvedValue(1),
@@ -39,14 +40,16 @@ describe('ControlsService', () => {
     prisma = {
       robot: { findUnique: jest.fn() },
       controlButton,
+      $queryRaw: jest.fn().mockResolvedValue([]),
       $transaction: jest.fn(async (input: unknown) => {
         if (typeof input === 'function') {
-          return input({ controlButton, robot: prisma.robot });
+          return input({ controlButton, robot: prisma.robot, $queryRaw: prisma.$queryRaw });
         }
         return Promise.all(input as Promise<unknown>[]);
       }),
     };
     subscriber = {
+      connect: jest.fn().mockResolvedValue(undefined),
       psubscribe: jest.fn().mockResolvedValue(1),
       on: jest.fn(),
       quit: jest.fn().mockResolvedValue('OK'),
@@ -63,11 +66,23 @@ describe('ControlsService', () => {
   });
 
   it('returns no controls when the requester has no room access', async () => {
-    prisma.robot.findUnique.mockResolvedValue({ ownerId: 'owner-1' });
+    prisma.robot.findUnique.mockResolvedValue({ ownerId: 'owner-1', visibility: 'PUBLIC' });
 
     await expect(
       service.getVisibleButtons('robot-1', { userId: 'user-1', role: Role.USER, hasRoomAccess: false }),
     ).resolves.toEqual([]);
+  });
+
+  it('does not disclose private controls when room access is missing', async () => {
+    prisma.robot.findUnique.mockResolvedValue({ ownerId: 'owner-1', visibility: 'PRIVATE' });
+
+    await expect(
+      service.getVisibleButtons('private-robot', {
+        userId: 'foreign-user',
+        role: Role.USER,
+        hasRoomAccess: false,
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('rejects visible controls for an unknown robot and keeps public controls access-gated', async () => {
@@ -241,6 +256,7 @@ describe('ControlsService', () => {
     prisma.robot.findUnique.mockResolvedValue({ id: 'robot-1', ownerId: 'owner-1' });
     prisma.controlButton.count.mockResolvedValue(LIMITS.MAX_CONTROL_BUTTONS);
     await expect(service.create('robot-1', { label: 'Too many', command: 'extra' }, 'owner-1')).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
   });
 
   it('updates and removes owned controls while invalidating every replica', async () => {
@@ -298,10 +314,10 @@ describe('ControlsService', () => {
     await expect(service.remove('missing', 'owner-1')).rejects.toBeInstanceOf(NotFoundException);
   });
 
-  it('rejects control changes from non-owners', async () => {
+  it('does not disclose control ownership to non-owners', async () => {
     prisma.controlButton.findUnique.mockResolvedValue({ id: 'button-1', robotId: 'robot-1' });
     prisma.robot.findUnique.mockResolvedValue({ id: 'robot-1', ownerId: 'owner-1' });
 
-    await expect(service.remove('button-1', 'user-2')).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.remove('button-1', 'user-2')).rejects.toBeInstanceOf(NotFoundException);
   });
 });

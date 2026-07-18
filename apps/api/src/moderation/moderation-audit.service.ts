@@ -212,6 +212,15 @@ function normalizeCompactProfanityText(value: string): string {
   return normalizeProfanityText(value).replace(/[\s_]+/g, '');
 }
 
+function replaceControlCharacters(value: string): string {
+  return Array.from(value, (character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f)
+      ? ' '
+      : character;
+  }).join('');
+}
+
 @Injectable()
 export class ModerationAuditService {
   constructor(
@@ -221,8 +230,7 @@ export class ModerationAuditService {
 
   sanitizeChatContent(raw: string): { sanitized: string; hasIllegalChars: boolean } {
     const normalized = raw.normalize('NFKC');
-    const cleaned = normalized
-      .replace(/[\u0000-\u001F\u007F\u0080-\u009F]/g, ' ') // eslint-disable-line no-control-regex
+    const cleaned = replaceControlCharacters(normalized)
       .replace(/\s+/g, ' ')
       .trim();
 

@@ -21,7 +21,11 @@ function build() {
       updateMany: jest.fn().mockResolvedValue({ count: 0 }),
       update: jest.fn(),
     },
-    notificationPreference: { upsert: jest.fn() },
+    notificationPreference: {
+      upsert: jest.fn(),
+      findUniqueOrThrow: jest.fn(),
+      update: jest.fn(),
+    },
   };
   const mail = { isEnabled: jest.fn().mockReturnValue(true), sendRaw: jest.fn() };
   return { service: new NotificationsService(prisma as never, mail as never), prisma, mail };
@@ -56,6 +60,31 @@ describe('NotificationsService', () => {
     await expect(service.publish({
       userId: 'user-1', kind: 'PAYMENT_FINAL', category: 'FINANCE', title: 'Paid', body: 'Complete', dedupeKey: 'payment:intent-1:paid',
     })).resolves.toEqual({ id: 'existing' });
+  });
+
+  it('returns preferences created by a concurrent first request', async () => {
+    const { service, prisma } = build();
+    prisma.notificationPreference.upsert.mockRejectedValue({ code: 'P2002' });
+    prisma.notificationPreference.findUniqueOrThrow.mockResolvedValue(preference);
+
+    await expect(service.getPreferences('user-1')).resolves.toEqual(preference);
+    expect(prisma.notificationPreference.findUniqueOrThrow).toHaveBeenCalledWith({
+      where: { userId: 'user-1' },
+    });
+  });
+
+  it('applies preference updates after a concurrent first insert', async () => {
+    const { service, prisma } = build();
+    prisma.notificationPreference.upsert.mockRejectedValue({ code: 'P2002' });
+    prisma.notificationPreference.update.mockResolvedValue({ ...preference, inAppEnabled: false });
+
+    await expect(
+      service.updatePreferences('user-1', { inAppEnabled: false }),
+    ).resolves.toEqual({ ...preference, inAppEnabled: false });
+    expect(prisma.notificationPreference.update).toHaveBeenCalledWith({
+      where: { userId: 'user-1' },
+      data: { inAppEnabled: false },
+    });
   });
 
   it('claims and delivers a pending email with a deterministic message id', async () => {

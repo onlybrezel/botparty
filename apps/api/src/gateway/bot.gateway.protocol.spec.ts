@@ -19,6 +19,13 @@ import { WalletService } from '../wallet/wallet.service';
 import { LivekitService } from '../livekit/livekit.service';
 import { FeatureFlagsService } from '../common/feature-flags.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import type { WsClient } from './gateway-types';
+
+type BotGatewayTestAccess = {
+  robotClients: Map<string, WsClient>;
+  clients: Map<string, WsClient>;
+  _revalidateAuthenticatedSockets(): Promise<void>;
+};
 
 describe('BotGateway protocol exchange', () => {
   let gateway: BotGateway;
@@ -51,6 +58,7 @@ describe('BotGateway protocol exchange', () => {
       exec: jest.fn().mockResolvedValue([]),
     };
     const duplicateClient = {
+      connect: jest.fn().mockResolvedValue(undefined),
       on: jest.fn(),
       subscribe: jest.fn().mockResolvedValue(undefined),
       unsubscribe: jest.fn().mockResolvedValue(undefined),
@@ -73,7 +81,7 @@ describe('BotGateway protocol exchange', () => {
             setViewerCount: jest.fn().mockResolvedValue(undefined),
             getRecentChatMessages: jest.fn().mockResolvedValue([]),
             updateStatus: jest.fn().mockResolvedValue(undefined),
-          } as any,
+          },
         },
         {
           provide: SessionsService,
@@ -82,7 +90,7 @@ describe('BotGateway protocol exchange', () => {
             end: jest.fn().mockResolvedValue(undefined),
             findActive: jest.fn(),
             endAllActiveSessions: jest.fn().mockResolvedValue(undefined),
-          } as any,
+          },
         },
         {
           provide: QueueService,
@@ -91,7 +99,7 @@ describe('BotGateway protocol exchange', () => {
             join: jest.fn(),
             leave: jest.fn().mockResolvedValue(undefined),
             getStatus: jest.fn(),
-          } as any,
+          },
         },
         {
           provide: RedisService,
@@ -114,7 +122,7 @@ describe('BotGateway protocol exchange', () => {
             eval: jest.fn().mockResolvedValue(1),
             multi: jest.fn().mockReturnValue(redisChain),
             pipeline: jest.fn().mockReturnValue(redisPipeline),
-          } as any,
+          },
         },
         {
           provide: ModerationService,
@@ -122,33 +130,33 @@ describe('BotGateway protocol exchange', () => {
             getActiveRestriction: jest.fn().mockResolvedValue(null),
             checkProfanity: jest.fn(),
             isBanned: jest.fn(),
-          } as any,
+          },
         },
         {
           provide: ControlsService,
           useValue: {
             getEnabledButtons: jest.fn(),
-          } as any,
+          },
         },
         {
           provide: JwtService,
           useValue: {
             verify: jest.fn(),
             decode: jest.fn(),
-          } as any,
+          },
         },
         {
           provide: AuthService,
           useValue: {
             resolveValidAccessTokenPayload: jest.fn().mockResolvedValue(null),
-          } as any,
+          },
         },
         {
           provide: ConfigService,
           useValue: {
             get: jest.fn().mockReturnValue('http://localhost:3000'),
             getOrThrow: jest.fn().mockReturnValue('robot-secret'),
-          } as any,
+          },
         },
         {
           provide: WalletService,
@@ -157,22 +165,22 @@ describe('BotGateway protocol exchange', () => {
             credit: jest.fn(),
             debit: jest.fn(),
             getBalance: jest.fn().mockResolvedValue(0),
-          } as any,
+          },
         },
         {
           provide: LivekitService,
           useValue: {
             revokeController: jest.fn().mockResolvedValue(undefined),
             stopRoomRecording: jest.fn().mockResolvedValue({ active: false, outputs: [] }),
-          } as any,
+          },
         },
         {
           provide: FeatureFlagsService,
-          useValue: { isEnabled: jest.fn().mockReturnValue(false) } as any,
+          useValue: { isEnabled: jest.fn().mockReturnValue(false) },
         },
         {
           provide: NotificationsService,
-          useValue: { publishSafely: jest.fn().mockResolvedValue(null) } as any,
+          useValue: { publishSafely: jest.fn().mockResolvedValue(null) },
         },
       ],
     }).compile();
@@ -194,7 +202,7 @@ describe('BotGateway protocol exchange', () => {
       send: jest.fn(),
       close: jest.fn(),
       remoteIp: '127.0.0.1',
-    } as any;
+    } as unknown as WsClient;
 
     const result = await gateway.handleRoomJoin(client, {
       robotId,
@@ -218,7 +226,7 @@ describe('BotGateway protocol exchange', () => {
       id: 'robot-1',
       send: jest.fn(),
       close: jest.fn(),
-    } as any;
+    } as unknown as WsClient;
     jwtService.verify.mockReturnValue({
       sub: robotId,
       scope: 'robot',
@@ -252,20 +260,21 @@ describe('BotGateway protocol exchange', () => {
       readyState: 1,
       isRobot: true,
       robotId,
-    } as any;
+    } as unknown as WsClient;
     const replacementClient = {
       id: 'robot-2',
       send: jest.fn(),
       close: jest.fn(),
       readyState: 1,
-    } as any;
+    } as unknown as WsClient;
     jwtService.verify.mockReturnValue({
       sub: robotId,
       scope: 'robot',
       deviceHash: 'a'.repeat(64),
       tokenVersion: 0,
     } as never);
-    (gateway as any).robotClients.set(robotId, existingClient);
+    const internal = gateway as unknown as BotGatewayTestAccess;
+    internal.robotClients.set(robotId, existingClient);
 
     const result = await gateway.handleRobotClaim(replacementClient, {
       robotAuthToken: 'robot-token',
@@ -281,7 +290,7 @@ describe('BotGateway protocol exchange', () => {
     });
     expect(existingClient.close).toHaveBeenCalledWith(1012, 'Replaced by newer robot claim');
     expect(replacementClient.close).not.toHaveBeenCalled();
-    expect((gateway as any).robotClients.get(robotId)).toBe(replacementClient);
+    expect(internal.robotClients.get(robotId)).toBe(replacementClient);
   });
 
   it('closes authenticated sockets whose access token is no longer valid', async () => {
@@ -294,11 +303,12 @@ describe('BotGateway protocol exchange', () => {
       username: 'alpha',
       role: 'USER',
       authAccessToken: 'expired-token',
-    } as any;
+    } as unknown as WsClient;
     authService.resolveValidAccessTokenPayload.mockResolvedValueOnce(null);
 
-    (gateway as any).clients.set(client.id, client);
-    await (gateway as any)._revalidateAuthenticatedSockets();
+    const internal = gateway as unknown as BotGatewayTestAccess;
+    internal.clients.set(client.id, client);
+    await internal._revalidateAuthenticatedSockets();
 
     expect(client.send).toHaveBeenCalledWith(
       JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Invalid session token' } }),

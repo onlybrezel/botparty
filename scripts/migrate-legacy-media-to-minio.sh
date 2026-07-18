@@ -5,8 +5,6 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="$ROOT_DIR/.env"
 DATA_DIR="$ROOT_DIR/data"
-RECORDINGS_DIR="$DATA_DIR/livekit-recordings"
-THUMBNAILS_DIR="$DATA_DIR/robot-thumbnails"
 PROJECT_NAME="${COMPOSE_PROJECT_NAME:-$(basename "$ROOT_DIR")}"
 NETWORK_NAME="${PROJECT_NAME}_frontend"
 
@@ -46,7 +44,7 @@ docker run --rm \
   -e RECORDINGS_BUCKET="$RECORDINGS_BUCKET" \
   -e THUMBNAILS_BUCKET="$THUMBNAILS_BUCKET" \
   -v "$DATA_DIR:/migration:ro" \
-  minio/mc:latest \
+  minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727 \
   -eu -c '
     mc alias set local http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"
 
@@ -68,6 +66,10 @@ docker run --rm \
     fi
 
     echo "recording_objects=$(mc ls local/$RECORDINGS_BUCKET | wc -l)"
-    thumbnail_objects=$(mc ls --recursive "local/$THUMBNAILS_BUCKET/robot-thumbnails" 2>/dev/null | wc -l || true)
+    if thumbnail_listing=$(mc ls --recursive "local/$THUMBNAILS_BUCKET/robot-thumbnails" 2>/dev/null); then
+      thumbnail_objects=$(printf "%s\n" "$thumbnail_listing" | sed '/^$/d' | wc -l)
+    else
+      thumbnail_objects=0
+    fi
     echo "thumbnail_objects=$thumbnail_objects"
   '

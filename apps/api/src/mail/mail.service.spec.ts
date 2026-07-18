@@ -57,9 +57,10 @@ describe('MailService', () => {
 
     await expect(service.onModuleInit()).resolves.toBeUndefined();
     expect(transport.verify).toHaveBeenCalledTimes(1);
+    expect(service.isAvailable()).toBe(true);
   });
 
-  it('makes an unreachable production SMTP transport a startup error', async () => {
+  it('keeps the API running when production SMTP is temporarily unreachable', async () => {
     const transport = {
       verify: jest.fn().mockRejectedValue(new Error('connection refused')),
       sendMail: jest.fn(),
@@ -74,6 +75,26 @@ describe('MailService', () => {
       { add: jest.fn() } as never,
     );
 
-    await expect(service.onModuleInit()).rejects.toThrow('connection refused');
+    await expect(service.onModuleInit()).resolves.toBeUndefined();
+    expect(service.isEnabled()).toBe(true);
+    expect(service.isAvailable()).toBe(false);
+  });
+
+  it('tracks SMTP recovery and later delivery failures', async () => {
+    const transport = {
+      verify: jest.fn().mockRejectedValue(new Error('connection refused')),
+      sendMail: jest.fn().mockResolvedValueOnce({ messageId: 'one' }).mockRejectedValueOnce(new Error('timeout')),
+    };
+    createTransport.mockReturnValue(transport as never);
+    const service = new MailService(
+      config({ NODE_ENV: 'production', SMTP_HOST: 'smtp.example.com' }) as never,
+      { add: jest.fn() } as never,
+    );
+
+    await service.onModuleInit();
+    await service.sendRaw('user@example.com', 'Subject', '<p>Body</p>', 'Body');
+    expect(service.isAvailable()).toBe(true);
+    await expect(service.sendRaw('user@example.com', 'Subject', '<p>Body</p>', 'Body')).rejects.toThrow('timeout');
+    expect(service.isAvailable()).toBe(false);
   });
 });

@@ -3,8 +3,8 @@ import { Prisma } from '@botparty/prisma';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AnalyticsEventInput } from '@botparty/shared';
 
-export const ANALYTICS_SCHEMA_VERSION = 1;
-export const ANALYTICS_RETENTION_DAYS = 90;
+const ANALYTICS_SCHEMA_VERSION = 1;
+const ANALYTICS_RETENTION_DAYS = 90;
 
 @Injectable()
 export class AnalyticsService {

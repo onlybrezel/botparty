@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { RobotCameraService } from './robot-camera.service';
 
 describe('RobotCameraService', () => {
@@ -8,6 +8,8 @@ describe('RobotCameraService', () => {
       findUnique: jest.Mock;
       update: jest.Mock;
     };
+    $queryRaw: jest.Mock;
+    $transaction: jest.Mock;
   };
   let access: {
     parseStreamFromMetadata: jest.Mock;
@@ -18,15 +20,18 @@ describe('RobotCameraService', () => {
   };
 
   beforeEach(() => {
-    prisma = {
-      robot: {
+    const robot = {
         findUnique: jest.fn().mockResolvedValue({
           id: 'robot-1',
           ownerId: 'owner-1',
           metadata: {},
         }),
         update: jest.fn().mockResolvedValue({ id: 'robot-1' }),
-      },
+    };
+    prisma = {
+      robot,
+      $queryRaw: jest.fn().mockResolvedValue([]),
+      $transaction: jest.fn((callback) => callback({ robot, $queryRaw: prisma.$queryRaw })),
     };
     access = {
       parseStreamFromMetadata: jest.fn().mockReturnValue({ targetBitrateKbps: 1200, cameras: [] }),
@@ -46,6 +51,7 @@ describe('RobotCameraService', () => {
     });
 
     expect(access.invalidateCache).toHaveBeenCalledWith('robot-1');
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
     expect(prisma.robot.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: 'robot-1' },
@@ -101,7 +107,7 @@ describe('RobotCameraService', () => {
 
     prisma.robot.findUnique.mockResolvedValueOnce({ id: 'robot-1', ownerId: 'owner-2', metadata: {} });
     await expect(service.upsertExternalStreamCamera('robot-1', 'owner-1', { id: 'front' })).rejects.toThrow(
-      ForbiddenException,
+      NotFoundException,
     );
 
     await expect(service.upsertExternalStreamCamera('robot-1', 'owner-1', { id: '   ' })).rejects.toThrow(

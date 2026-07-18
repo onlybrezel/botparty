@@ -13,7 +13,7 @@ Quick reference for common production incident scenarios.
 2. Check logs: `docker compose logs --tail=50 postgres`
 3. Attempt restart: `docker compose restart postgres`
 4. Do not run `pg_resetwal` against the production volume. Preserve the failed volume for diagnosis.
-5. Select the newest release archive that is inside the six-hour RPO and run `./scripts/restore-drill.sh data/backups/botparty-release-<TIMESTAMP>.tar.gz` first. This validates checksums, PostgreSQL, migrations, schema drift, and object storage in an isolated environment.
+5. Select the newest archive that satisfies the operator-approved recovery-point objective and run `BACKUP_ENCRYPTION_KEY_FILE=/secure/path/backup_encryption_key ./scripts/restore-drill.sh data/backups/botparty-release-<TIMESTAMP>.tar.gz.enc` first. This validates authenticated decryption, checksums, PostgreSQL, migrations, schema drift, object storage, application login, protected data access, and a recording download in an isolated environment.
 6. For a production replacement, provision new PostgreSQL and object-storage volumes, restore the verified archive with the same `pg_restore` and object mirror procedure, then switch the API connection only after the readiness probe passes.
 
 ---
@@ -38,12 +38,9 @@ Quick reference for common production incident scenarios.
 **Steps:**
 1. Check memory: `docker compose exec redis redis-cli info memory | grep used_memory_human`
 2. Check max memory config in [docker/redis/redis.conf](docker/redis/redis.conf)
-3. If OOM: clear volatile keys with SCAN + UNLINK because `FLUSHDB`, `FLUSHALL`, and `KEYS` are disabled in production:
-   ```bash
-   docker compose exec redis sh -lc 'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning --scan | xargs -r -n 200 redis-cli -a "$REDIS_PASSWORD" --no-auth-warning unlink'
-   ```
-4. Restart: `docker compose restart redis`
-5. Redis carries leases, fencing tokens, queue cache, presence, and pub/sub state. Keep AOF enabled and `maxmemory-policy noeviction`; never clear the database as an OOM response. If the instance cannot recover, stop API traffic before restoring Redis or allowing lease reconstruction from PostgreSQL.
+3. Inspect keyspace and allocator pressure without reading values: `docker compose exec redis sh -lc 'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning info keyspace; redis-cli -a "$REDIS_PASSWORD" --no-auth-warning memory doctor'`.
+4. Redis carries leases, fencing tokens, queue state, presence, and pub/sub coordination. Do not delete keys or flush the database to recover memory. Stop API traffic before changing memory limits or restoring Redis so two replicas cannot reconstruct conflicting leases.
+5. After correcting the capacity or host-memory problem, restart Redis with `docker compose restart redis`, confirm AOF loading in the logs, then restore API traffic only after readiness succeeds.
 
 ---
 
@@ -54,7 +51,7 @@ Quick reference for common production incident scenarios.
 **Steps:**
 1. Check logs: `docker compose logs --tail=50 api`
 2. Look for startup errors (JWT secret, DB connection, Redis connection).
-3. Verify env vars: `docker compose exec api env | grep -E 'JWT|DATABASE|REDIS'`
+3. Check required configuration presence without printing values: `docker compose exec -T api node -e "for (const key of ['JWT_SECRET','DATABASE_URL','REDIS_HOST']) console.log(key, process.env[key] ? 'set' : 'missing')"`
 4. Quick restart: `docker compose restart api`
 5. Rebuild if code was updated: `APP_VERSION=$(date +%Y%m%d) docker compose up -d --build api`
 
@@ -85,9 +82,9 @@ The observability profile additionally requires `alertmanager_webhook_url` in th
 **Steps:**
 1. Check disk: `df -h /`
 2. Check recordings volume: `du -sh data/livekit-recordings/`
-3. After migrating any legacy recordings into object storage, you can remove old local leftovers: `find data/livekit-recordings/ -mtime +7 -delete`
-4. Remove old backups: `find data/backups/ -mtime +30 -delete`
-5. Prune Docker: `docker system prune -f`
+3. Identify the largest paths with `du -xhd2 data /var/lib/docker | sort -h | tail -30` and verify whether growth comes from active volumes, logs, or completed archives.
+4. Preview expired release archives with `find data/backups/ -name 'botparty-release-*.tar.gz.enc*' -mtime +<approved-days> -print`. Let `backup-release.sh` apply the explicitly configured `BACKUP_RETENTION_DAYS`; do not delete unverified recovery points during an incident.
+5. Remove only artifacts whose owning workflow and retention policy are known. Docker images, object-storage data, database volumes, and legacy recordings are not interchangeable cleanup targets.
 
 ---
 
@@ -95,11 +92,11 @@ The observability profile additionally requires `alertmanager_webhook_url` in th
 
 The release backup contains a PostgreSQL custom-format dump, the recording and thumbnail buckets, a version manifest, and per-file checksums.
 
-1. Run `./scripts/backup-release.sh` at least every six hours. `backup-db.sh` is a compatibility wrapper for the same command.
-2. Keep encrypted, immutable off-host copies for 30 days by default.
-3. Treat six hours as the RPO and one hour as the RTO unless the deployment sets stricter values.
+1. Schedule `./scripts/backup-release.sh` at an interval derived from the operator-approved recovery-point objective. `backup-db.sh` is a compatibility wrapper for the same command.
+2. Set `BACKUP_RETENTION_DAYS` to the operator-approved retention period. The script default of 30 days is only a technical fallback, not a legal or recovery-policy decision.
+3. Set `RESTORE_RPO_SECONDS` and `RESTORE_RTO_SECONDS` only after the operator has approved measurable objectives. Without these values the drill records age and duration but makes no RPO/RTO claim.
 4. The monthly and release-triggered `restore-drill.yml` workflow restores into fresh isolated services and publishes a machine-readable report.
-5. Alert if the latest successful archive is older than six hours or the scheduled restore drill fails.
+5. Alert when the newest successful archive exceeds the configured schedule plus tolerance, or when the scheduled restore drill fails.
 
 Example cron entry:
 
@@ -157,32 +154,39 @@ Use sequential service rollout to avoid full platform interruption.
    ```
 2. What it does automatically:
    - Runs `git pull --ff-only`
-   - Runs `docker compose pull api web nginx` and `docker compose build api web nginx`
+   - Pulls the versioned API, Web and Nginx images from the configured registry
    - Announces update over websocket with a longer update retry window (`WS_SHUTDOWN_RETRY_AFTER_UPDATE_MS`, default 25s) and waits for drain
-   - Rolls services in order: api -> web -> nginx
+   - Rolls API and then Web; Nginx is validated and reloaded during each traffic handoff but is not replaced
    - Waits for API health gate via Docker container health before continuing
    - Waits short stabilization windows after API and Web rollout (`OPS_POST_API_STABILIZE_SEC`, `OPS_POST_WEB_STABILIZE_SEC`)
-   - If API health fails, automatically rolls back API to the previously running image and aborts before web/nginx update
+   - Starts replacement API/Web replicas beside the old replicas, admits them only after Docker health checks and an Nginx routing proof pass, and keeps the old replicas if either gate fails
+   - Sends `SIGTERM` to admitted old replicas and allows up to `OPS_CONTAINER_STOP_TIMEOUT_SEC` (default 30 seconds) for graceful connection draining before removal
+   - Validates and reloads the bind-mounted Nginx configuration without replacing the listening container
 
-Optional override:
-
-```bash
-OPS_API_HEALTHCHECK_URL=http://127.0.0.1:4000/api/v1/health/live APP_VERSION=<new-tag> ./ops.sh update-zero
-```
-
-Use this only when the API port is actually published to the host.
-3. Manual fallback (if scripted rollout cannot be used):
+3. For a release built from the current checkout instead of a registry, use `APP_VERSION=<new-tag> ./ops.sh update-local`.
+4. Manual fallback (if scripted rollout cannot be used):
    ```bash
    APP_VERSION=<new-tag> docker compose pull api web nginx
-   APP_VERSION=<new-tag> docker compose build api web nginx
-   APP_VERSION=<new-tag> docker compose up -d --no-deps api
-   curl -fsS http://127.0.0.1:4000/api/v1/health/live
-   APP_VERSION=<new-tag> docker compose up -d --no-deps web
-   APP_VERSION=<new-tag> docker compose up -d --no-deps nginx
+   APP_VERSION=<new-tag> docker compose run --rm --no-deps migrate
+   APP_VERSION=<new-tag> docker compose up -d --no-deps --scale api=2 api
+   curl -fsS http://127.0.0.1:8080/api/v1/health/ready
+   APP_VERSION=<new-tag> docker compose up -d --no-deps --scale web=2 web
+   docker compose exec -T nginx nginx -t
+   docker compose exec -T nginx nginx -s reload
    ```
-4. Keep old images until rollback window closes.
+5. Keep old images until the rollback window closes.
 
-For schema changes, run `pnpm db:migrate:prod` before replacing API containers.
+The Compose topology has one host-port-owning Nginx container. The application rollout therefore reloads it in place; it does not make the reverse proxy highly available. Host-level proxy redundancy requires a second host or an external load balancer with an independent virtual IP.
+
+Rollback to a previously verified image tag:
+
+```bash
+APP_VERSION=<previous-tag> ./ops.sh rollback
+```
+
+The command surges and health-gates API and Web exactly like an update, then reloads Nginx. It does not reverse database migrations. Release migrations must therefore remain compatible with the previous application version for the documented rollback window; destructive contract migrations require a later, separately approved release.
+
+Schema migrations are executed once by the dedicated `migrate` container before API replacement. API replicas never run migrations during startup.
 
 ---
 
@@ -206,7 +210,7 @@ BotParty can run multiple API instances behind a load balancer.
 
 ## Prisma Pool Tuning
 
-The production defaults now include `connection_limit=10` and `pool_timeout=30` in generated and compose-provided `DATABASE_URL` values.
+The production defaults include `connection_limit=10`, `pool_timeout=5`, and `connect_timeout=5` in generated `DATABASE_URL` values so connection exhaustion and database outages fail within a bounded interval.
 
 **Tuning rule of thumb:**
 1. Size `connection_limit` per API replica, not for the whole cluster.
@@ -216,7 +220,7 @@ The production defaults now include `connection_limit=10` and `pool_timeout=30` 
 Example:
 
 ```bash
-DATABASE_URL=postgresql://botparty:***@postgres:5432/botparty?schema=public&connection_limit=10&pool_timeout=30&sslmode=disable
+DATABASE_URL=postgresql://botparty:***@postgres:5432/botparty?schema=public&connection_limit=10&pool_timeout=5&connect_timeout=5&sslmode=disable
 ```
 
 ---
@@ -251,6 +255,10 @@ Use the moderation console to end affected sessions. If the console is unavailab
    - Streamer: `/metrics`
 - Grafana dashboard template: `docs/grafana/botparty-observability-overview.json`
 - Setup notes and metric inventory: `docs/observability.md`
+
+## TLS Certificate Expiry
+
+`scripts/backup-release.sh` publishes the certificate presence and expiry timestamp beside the backup metrics. Set `TLS_CERTIFICATE_FILE` when the certificate is not stored at `docker/nginx/ssl/fullchain.pem`. Prometheus warns when no certificate is exposed, rejects an unreadable certificate as critical, and warns 14 days before expiry. Renewal remains the responsibility of the configured ACME client or certificate operator; verify the renewed file and reload nginx before closing the alert.
 
 ---
 
@@ -296,8 +304,10 @@ A linear checklist for cutting a production deploy. Do not skip steps.
      (`livekit.…`), Egress (`egress.…`), MinIO public (`media.…`).
    - TTL ≤ 300s during cut-over.
 2. **TLS**
-   - Run `./scripts/setup-env.sh` (or generate certs out-of-band) to populate
+   - Run `./setup-env.sh` (or generate certs out-of-band) to populate
      `docker/nginx/nginx.ssl.conf` from the template.
+   - Keep `fullchain.pem` and `privkey.pem` at mode `0640` with group
+     `BOTPARTY_SECRET_GID`; the non-root nginx container receives that group.
    - Verify Let's Encrypt staging first, then production.
 3. **Secrets**
    - All values from `.env.example` set; no `devkey`, no `change_me_*`.
@@ -307,7 +317,7 @@ A linear checklist for cutting a production deploy. Do not skip steps.
      guard will require the respective webhook secret.
 4. **Migrations**
    - Create a versioned database-and-object archive (`./scripts/backup-release.sh`).
-   - Bring the API container up; entrypoint runs `prisma migrate deploy`.
+   - Run the one-shot `migrate` service; API replicas never migrate on startup.
    - Confirm `_prisma_migrations` table contains every committed migration.
    - In production the entrypoint refuses to fall back to `prisma db push`.
 5. **Smoke tests**
@@ -320,8 +330,8 @@ A linear checklist for cutting a production deploy. Do not skip steps.
    - Loki / Promtail (if enabled) sees container logs.
    - The configured OpenTelemetry collector receives a trace carrying the release version.
 7. **Backups**
-   - The archive job runs at least every six hours.
-   - The latest scheduled `Backup Restore Drill` workflow completed inside the configured RTO.
+   - The archive job runs at the operator-approved backup interval.
+   - The latest scheduled `Backup Restore Drill` workflow completed successfully and, if an operator-approved RTO is configured, inside that objective.
 8. **Rollback plan**
     - Keep the previous image tag pinned in `docker-compose.yml`.
     - Restore script ready (see Backup/Restore below).
@@ -350,7 +360,9 @@ BotParty publishes release images from Git tags.
 
 ### Backup
 
-`./scripts/backup-release.sh` produces `data/backups/botparty-release-<TIMESTAMP>.tar.gz` and a sidecar SHA-256 checksum. The archive includes a PostgreSQL custom-format dump, object-storage buckets, a release manifest, and file checksums. Archives older than `BACKUP_RETENTION_DAYS` are pruned; the default is 30 days.
+`./scripts/backup-release.sh` produces an authenticated AES-256-GCM archive at `data/backups/botparty-release-<TIMESTAMP>.tar.gz.enc` and a sidecar SHA-256 checksum. The encrypted archive contains a PostgreSQL custom-format dump, object-storage buckets, a release manifest, and per-file checksums. Archives older than `BACKUP_RETENTION_DAYS` are pruned. Set that value explicitly from the approved recovery and retention policy; the script's 30-day default is only a technical fallback.
+
+The command requires `DATABASE_WRITE_URL` or `DATABASE_URL`, `BACKUP_S3_ENDPOINT`, `BACKUP_S3_ACCESS_KEY`, `BACKUP_S3_SECRET_KEY_FILE`, and `BACKUP_ENCRYPTION_KEY_FILE`. Keep the encryption key in a separately protected secret store and include its recovery procedure in the disaster-recovery access plan. Losing the key makes the archive unrecoverable.
 
 Schedule via host cron, e.g.:
 
@@ -358,18 +370,18 @@ Schedule via host cron, e.g.:
 0 */6 * * *  cd /opt/botparty && ./scripts/backup-release.sh >> /var/log/botparty-backup.log 2>&1
 ```
 
-Copy completed archives to encrypted immutable off-host storage. The backup command requires explicit database and S3-compatible object-storage credentials and never falls back to development values.
+Copy completed archives and checksum sidecars to immutable off-host storage. The backup command requires explicit database and S3-compatible object-storage credentials and never falls back to development values.
 
 ### Restore
 
-Use `./scripts/restore-drill.sh <path/to/botparty-release-*.tar.gz>`. `restore-db.sh` is a compatibility wrapper for this isolated drill. The drill:
+Use `BACKUP_ENCRYPTION_KEY_FILE=/secure/path/backup_encryption_key ./scripts/restore-drill.sh <path/to/botparty-release-*.tar.gz.enc>`. `restore-db.sh` is a compatibility wrapper for this isolated drill. Set `RESTORE_API_IMAGE` to the release image being recovered, and provide `RESTORE_TEST_EMAIL` plus `RESTORE_TEST_PASSWORD_FILE` for an administrator contained in the backup. The drill:
 
-1. verifies archive and file checksums;
+1. verifies the encrypted archive checksum and authenticated decryption before extraction;
 2. validates that every required secret file exists without exposing its value;
-3. rejects archives older than `RESTORE_RPO_SECONDS`;
+3. records archive age and, when `RESTORE_RPO_SECONDS` is configured, rejects older archives;
 4. restores PostgreSQL and objects into fresh isolated containers;
-5. deploys migrations, checks schema drift, and performs database and object smoke tests;
-6. fails if elapsed time exceeds `RESTORE_RTO_SECONDS`;
+5. deploys migrations, checks schema drift, starts the release API with fresh Redis, Mailpit, and LiveKit services, and verifies restored login, protected data access, and a byte-identical recording download;
+6. records elapsed time and, when `RESTORE_RTO_SECONDS` is configured, fails if that objective is exceeded;
 7. writes a JSON report under `data/restore-drills/`.
 
 Production recovery uses the verified dump and object tree to populate new volumes before traffic is switched. Never overwrite the failed source volumes during diagnosis.
@@ -385,12 +397,9 @@ Production recovery uses the verified dump and object tree to populate new volum
 4. Merge to `main`. Tag a release (`vX.Y.Z`).
 5. The `release` GitHub workflow builds and pushes
    `ghcr.io/<org>/botparty-api:<version>` and `…-web:<version>`.
-6. On the host:
+6. On the host, use the health-gated release workflow rather than starting all application services in place:
    ```bash
-   ./scripts/backup-release.sh
-   docker compose pull
-   docker compose up -d
-   docker compose logs -f --tail=100 api    # entrypoint runs migrate deploy
+   APP_VERSION=<version> ./ops.sh update
    ```
 7. Verify `_prisma_migrations` row count equals committed migration count.
 8. Run the smoke checklist above.
@@ -403,7 +412,7 @@ Production recovery uses the verified dump and object tree to populate new volum
 ## Logrotation / Log Sink
 
 By default container logs are written to the Docker JSON file driver. The
-Compose stack caps this with `logging.options.max-size=20m,max-file=5` so
+Compose stack caps this with `logging.options.max-size=10m,max-file=5` so
 disk is bounded.
 
 For long-running production hosts, ship logs into Loki:

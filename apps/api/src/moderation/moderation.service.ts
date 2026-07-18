@@ -5,7 +5,7 @@ import { RedisService } from '../redis/redis.service';
 import { ModerateUserDto } from './moderation.dto';
 import { ModerationAuditService } from './moderation-audit.service';
 import { ModerationOverviewService } from './moderation-overview.service';
-import { type RobotActionPayload } from '../robots/robots.service';
+import type { RobotActionPayload } from '../robots/robots.types';
 import { isStaffRole } from '../common/robot-access';
 
 @Injectable()
@@ -33,7 +33,7 @@ export class ModerationService {
 
     const isSiteStaff = isStaffRole(moderator.role);
     if (robot.ownerId !== moderatorId && !isSiteStaff) {
-      throw new ForbiddenException('Only the robot owner or site staff can moderate');
+      throw new NotFoundException('Robot not found');
     }
 
     if (!isGuestTarget && target && target.role === 'ADMIN' && !isSiteStaff) {

@@ -1,5 +1,3 @@
-import { ConfigService } from '@nestjs/config';
-import { JwtService } from '@nestjs/jwt';
 import { QueueController } from './queue.controller';
 
 describe('QueueController', () => {
@@ -9,7 +7,7 @@ describe('QueueController', () => {
     leave: jest.Mock;
     vote: jest.Mock;
   };
-  let jwtService: { verify: jest.Mock };
+  let authService: { resolveValidAccessTokenPayload: jest.Mock };
   let configService: { getOrThrow: jest.Mock };
   let controller: QueueController;
 
@@ -20,13 +18,13 @@ describe('QueueController', () => {
       leave: jest.fn(),
       vote: jest.fn(),
     };
-    jwtService = { verify: jest.fn() };
+    authService = { resolveValidAccessTokenPayload: jest.fn() };
     configService = { getOrThrow: jest.fn().mockReturnValue('secret') };
-    controller = new QueueController(queueService as never, jwtService as never, configService as never);
+    controller = new QueueController(queueService as never, authService as never, configService as never);
   });
 
   it('resolves the requester id from bearer auth when fetching the queue', async () => {
-    jwtService.verify.mockReturnValue({ sub: 'user-1' });
+    authService.resolveValidAccessTokenPayload.mockResolvedValue({ sub: 'user-1' });
     queueService.getQueueForRequester.mockResolvedValue([{ userId: 'user-1' }]);
 
     const queue = await controller.getQueue('robot-1', 'Bearer token-123', undefined, 'room-token', 'guest-1');
@@ -36,9 +34,7 @@ describe('QueueController', () => {
   });
 
   it('falls back to an anonymous requester when auth cannot be resolved', async () => {
-    jwtService.verify.mockImplementation(() => {
-      throw new Error('bad token');
-    });
+    authService.resolveValidAccessTokenPayload.mockResolvedValue(null);
     queueService.getQueueForRequester.mockResolvedValue([]);
 
     await controller.getQueue('robot-1', 'Bearer bad-token');

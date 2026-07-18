@@ -13,10 +13,11 @@ import { isStaffRole } from '../common/robot-access';
 import type {
   RobotAccessPolicy,
   RobotStreamPolicy,
+  RobotStreamCameraDescriptor,
   RoomAccessGrant,
   AllowedUserSummary,
   GuestAccess,
-} from './robots.service';
+} from './robots.types';
 import { normalizeRobotMetadata } from './robot-metadata.schema';
 
 type PolicyCacheEntry = {
@@ -34,14 +35,6 @@ const DEFAULT_ACCESS_POLICY: RobotAccessPolicy = {
 
 const DEFAULT_STREAM_POLICY: RobotStreamPolicy = {
   targetBitrateKbps: null,
-};
-
-type RobotStreamCameraDescriptor = {
-  id: string;
-  label?: string;
-  role?: string;
-  enabled?: boolean;
-  publishMode?: string;
 };
 
 @Injectable()
@@ -83,7 +76,7 @@ export class RobotAccessService implements OnModuleDestroy {
   async getAllowedUsers(robotId: string, ownerId: string): Promise<AllowedUserSummary[]> {
     const robot = await this.prisma.robot.findUnique({ where: { id: robotId }, select: { ownerId: true } });
     if (!robot) throw new NotFoundException('Robot not found');
-    if (robot.ownerId !== ownerId) throw new ForbiddenException('Not your robot');
+    if (robot.ownerId !== ownerId) throw new NotFoundException('Robot not found');
 
     const entries = await this.prisma.robotAllowedUser.findMany({
       where: { robotId },
@@ -105,7 +98,7 @@ export class RobotAccessService implements OnModuleDestroy {
   async addAllowedUser(robotId: string, ownerId: string, username: string): Promise<AllowedUserSummary> {
     const robot = await this.prisma.robot.findUnique({ where: { id: robotId }, select: { ownerId: true } });
     if (!robot) throw new NotFoundException('Robot not found');
-    if (robot.ownerId !== ownerId) throw new ForbiddenException('Not your robot');
+    if (robot.ownerId !== ownerId) throw new NotFoundException('Robot not found');
 
     const normalizedUsername = username.trim();
     if (!normalizedUsername) throw new NotFoundException('Username is required');
@@ -137,7 +130,7 @@ export class RobotAccessService implements OnModuleDestroy {
   async removeAllowedUser(robotId: string, ownerId: string, userId: string) {
     const robot = await this.prisma.robot.findUnique({ where: { id: robotId }, select: { ownerId: true } });
     if (!robot) throw new NotFoundException('Robot not found');
-    if (robot.ownerId !== ownerId) throw new ForbiddenException('Not your robot');
+    if (robot.ownerId !== ownerId) throw new NotFoundException('Robot not found');
 
     await this.prisma.robotAllowedUser.deleteMany({ where: { robotId, userId } });
     return { ok: true };
@@ -162,7 +155,7 @@ export class RobotAccessService implements OnModuleDestroy {
       (isOwner || isStaff || robot.allowedUsers.some((entry) => entry.userId === input.requesterUserId));
 
     if (robot.visibility === 'PRIVATE' && !isOwner && !isStaff) {
-      throw new ForbiddenException('This robot is private');
+      throw new NotFoundException('Robot not found');
     }
 
     if (robot.accessMode === 'ALLOWED_USERS' && !isAllowedUser) {
@@ -404,6 +397,3 @@ export class RobotAccessService implements OnModuleDestroy {
     this.policyCache.delete(robotId);
   }
 }
-
-// Re-export for backwards compat — robots.service still depends on isStaffRole
-export { isStaffRole };

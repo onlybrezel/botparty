@@ -2,7 +2,7 @@
 
 import { VideoTrack, useRoomContext, useTracks } from '@livekit/components-react';
 import { Track, RoomEvent, VideoQuality, type RemoteVideoTrack, type RemoteTrackPublication } from 'livekit-client';
-import type { TrackReference } from '@livekit/components-core';
+import type { TrackReference } from '@livekit/components-react';
 import { Maximize, Minimize, Radio, Volume2, VolumeX } from 'lucide-react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import {

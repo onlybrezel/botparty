@@ -6,8 +6,12 @@ SECRET_DIR="$(mktemp -d)"
 export BOTPARTY_SECRET_DIR="${SECRET_DIR}"
 export LIVEKIT_API_KEY="botparty-secret-smoke"
 
+# Invoked by the EXIT trap below; ShellCheck cannot resolve the string callback.
+# shellcheck disable=SC2317
 cleanup() {
-  docker compose -p "${PROJECT}" down -v --remove-orphans >/dev/null 2>&1 || true
+  if ! docker compose -p "${PROJECT}" down -v --remove-orphans >/dev/null 2>&1; then
+    echo "Warning: failed to remove ${PROJECT} after the secret smoke." >&2
+  fi
   rm -rf "${SECRET_DIR}"
 }
 trap cleanup EXIT
@@ -43,10 +47,10 @@ done
 
 docker compose -p "${PROJECT}" up -d postgres redis minio livekit-config
 for _ in $(seq 1 60); do
-  postgres_state="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${PROJECT}-postgres-1" 2>/dev/null || true)"
-  redis_state="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${PROJECT}-redis-1" 2>/dev/null || true)"
-  minio_state="$(docker inspect -f '{{.State.Status}}' "${PROJECT}-minio-1" 2>/dev/null || true)"
-  config_exit="$(docker inspect -f '{{.State.ExitCode}}' "${PROJECT}-livekit-config-1" 2>/dev/null || true)"
+  postgres_state="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${PROJECT}-postgres-1" 2>/dev/null || printf missing)"
+  redis_state="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${PROJECT}-redis-1" 2>/dev/null || printf missing)"
+  minio_state="$(docker inspect -f '{{.State.Status}}' "${PROJECT}-minio-1" 2>/dev/null || printf missing)"
+  config_exit="$(docker inspect -f '{{.State.ExitCode}}' "${PROJECT}-livekit-config-1" 2>/dev/null || printf missing)"
   if [[ "${postgres_state}" == healthy && "${redis_state}" == healthy && "${minio_state}" == running && "${config_exit}" == 0 ]]; then
     echo 'File-backed Compose secret smoke passed.'
     exit 0

@@ -312,9 +312,15 @@ export class BotGateway
     this.robotDisconnectTimers.set(robotId, setTimeout(() => {
       this.robotDisconnectTimers.delete(robotId);
       if (this.runtime.getOpenRobotClient(robotId)) return;
-      void this.clearTurnState(robotId, 'clear');
-      void this.robotsService.updateStatus(robotId, 'OFFLINE').catch(() => {});
-      void this.livekitService.stopRoomRecording(robotId).catch(() => {});
+      void this.clearTurnState(robotId, 'clear').catch((error: unknown) => {
+        this.logger.warn(`Failed to clear disconnected robot turn ${robotId}: ${(error as Error).message}`);
+      });
+      void this.robotsService.updateStatus(robotId, 'OFFLINE').catch((error: unknown) => {
+        this.logger.warn(`Failed to mark disconnected robot ${robotId} offline: ${(error as Error).message}`);
+      });
+      void this.livekitService.stopRoomRecording(robotId).catch((error: unknown) => {
+        this.logger.warn(`Failed to stop recording for disconnected robot ${robotId}: ${(error as Error).message}`);
+      });
       this.runtime.broadcastToRoom(robotId, WS_EVENTS.ROBOT_STATUS, { status: 'OFFLINE' });
     }, 10_000));
   }

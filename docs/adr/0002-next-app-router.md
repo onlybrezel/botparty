@@ -1,44 +1,22 @@
-# ADR 0002: Frontend Framework Choice (Next.js App Router vs Pages Router)
+# ADR 0002: Next.js App Router
 
 **Status:** Accepted
 **Date:** 2026-04-16
 
 ## Context
 
-Frontend required a React-based framework with:
-- Server-side rendering (SSR) for SEO
-- Incremental Static Regeneration (ISR) for robot listings
-- Type-safe API integration
-- Simple deployment
+The web application needs server-rendered public pages, authenticated interactive views, route-level
+loading/error boundaries, and a production image that can run behind the shared reverse proxy.
 
 ## Decision
 
-We chose **Next.js with App Router** (App Router over Pages Router) for:
-
-1. **Server Components** – Reduce JS bundle, fetch secrets server-side
-2. **Streaming** – Stream UI updates during loading (Suspense)
-3. **Modern pattern** – App Router is the recommended direction for Next.js
-4. **Layout nesting** – Natural component hierarchy via folder structure
-5. **Backward compat** – Pages Router code still works within App Router
+Use Next.js with the App Router. Pages are server components by default; interactive workflows opt
+into client components. Route handlers are limited to web-facing concerns such as the web liveness
+endpoint. API business logic remains in the NestJS application.
 
 ## Consequences
 
-### Positive
-- Smaller client bundles (Server Components + smart code splitting)
-- Better SEO (SSR + static pages)
-- Simpler secrets management (no exposure to browser)
-
-### Negative
-- Less mature ecosystem (fewer middleware examples for App Router)
-- Learning curve for new team members
-- Some third-party libraries not yet App Router-optimized
-
-## Rationale for NOT using Remix / Svelte
-
-- **Remix:** Smaller community, harder hiring; full rewrite cost
-- **Svelte:** Smaller ecosystem; SSR/hydration still more complex than Next.js
-
-## References
-
-- Next.js App Router docs: https://nextjs.org/docs/app
-- Server Components RFC: https://github.com/reactjs/rfcs/blob/main/text/0188-server-components.md
+- Public pages can be rendered without shipping their full implementation to the browser.
+- Client state and effects must stay in explicit client components and hooks.
+- The frontend remains a separate deployable image and depends on the API contract over HTTP and
+  WebSocket, not on backend implementation modules.

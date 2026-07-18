@@ -1,5 +1,6 @@
 import { LIMITS, WS_EVENTS } from '@botparty/shared';
 import { ChatHandler } from './chat.handler';
+import type { WsClient } from './gateway-types';
 
 const ROBOT_ID = '550e8400-e29b-41d4-a716-446655440000';
 const CLIENT_MESSAGE_ID = '8d56b8dc-d747-4e2b-a9ee-6a1f97083c44';
@@ -45,7 +46,7 @@ describe('ChatHandler', () => {
       role: 'USER',
       isGuest: false,
       ...overrides,
-    } as any;
+    } as unknown as WsClient;
   }
 
   it('requires authenticated users when chat access is restricted', async () => {

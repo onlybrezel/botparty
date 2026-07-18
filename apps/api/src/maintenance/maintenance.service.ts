@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@botparty/prisma';
 import { RedisService } from '../redis/redis.service';
 import { Counter, Gauge, register } from 'prom-client';
+import { StorageDeletionService } from '../storage/storage-deletion.service';
 
 // AnalyticsEvent rows older than this are deleted during maintenance sweeps.
 const ANALYTICS_RETENTION_DAYS = Number(process.env.ANALYTICS_RETENTION_DAYS ?? 90);
@@ -39,28 +40,56 @@ const cleanupLastSuccess = (register.getSingleMetric('botparty_retention_cleanup
 @Injectable()
 export class MaintenanceService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(MaintenanceService.name);
+  private _startupTimer: ReturnType<typeof setTimeout> | null = null;
   private _timer: ReturnType<typeof setInterval> | null = null;
   private _viewerCountTimer: ReturnType<typeof setInterval> | null = null;
+  private _lastViewerCountErrorLogAt = 0;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
+    private readonly storageDeletion: StorageDeletionService,
   ) {}
 
   onModuleInit() {
     // Run once shortly after startup, then on the configured interval.
-    const runSoon = setTimeout(() => void this._runCleanup(), 30_000);
+    const runSoon = setTimeout(() => {
+      void this._runCleanup().catch((error) => {
+        this.logger.error(`Maintenance cleanup cycle failed: ${(error as Error).message}`);
+      });
+    }, 30_000);
     runSoon.unref?.();
+    this._startupTimer = runSoon;
 
-    const timer = setInterval(() => void this._runCleanup(), CLEANUP_INTERVAL_MS);
+    const timer = setInterval(() => {
+      void this._runCleanup().catch((error) => {
+        this.logger.error(`Maintenance cleanup cycle failed: ${(error as Error).message}`);
+      });
+    }, CLEANUP_INTERVAL_MS);
     timer.unref?.();
     this._timer = timer;
-    const viewerCountTimer = setInterval(() => void this._flushViewerCounts(), 30_000);
+    const viewerCountTimer = setInterval(() => {
+      void this._flushViewerCounts()
+        .then(() => {
+          this._lastViewerCountErrorLogAt = 0;
+        })
+        .catch((error) => {
+          const now = Date.now();
+          if (now - this._lastViewerCountErrorLogAt >= 60_000) {
+            this._lastViewerCountErrorLogAt = now;
+            this.logger.warn(`Viewer count synchronization failed: ${(error as Error).message}`);
+          }
+        });
+    }, 30_000);
     viewerCountTimer.unref?.();
     this._viewerCountTimer = viewerCountTimer;
   }
 
   onModuleDestroy() {
+    if (this._startupTimer) {
+      clearTimeout(this._startupTimer);
+      this._startupTimer = null;
+    }
     if (this._timer) {
       clearInterval(this._timer);
       this._timer = null;
@@ -72,6 +101,12 @@ export class MaintenanceService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async _runCleanup() {
+    await this._withDistributedLock('maintenance:retention', 30 * 60_000, async () => {
+      await this._runCleanupJobs();
+    });
+  }
+
+  private async _runCleanupJobs() {
     const jobs: Array<[string, () => Promise<void>]> = [
       ['queue', () => this._purgeExpiredQueueEntries()],
       ['analytics', () => this._purgeOldAnalyticsEvents()],
@@ -79,6 +114,12 @@ export class MaintenanceService implements OnModuleInit, OnModuleDestroy {
       ['admin_audit', () => this._purgeOldAdminAuditLogs()],
       ['ledger_reconciliation', () => this._reconcileLedgerGroups()],
       ['content', () => this._enforceContentRetention()],
+      ['storage_deletions', async () => {
+        const processed = await this.storageDeletion.processDue();
+        if (processed > 0) {
+          cleanupRows.inc({ dataset: 'storage_deletions' }, processed);
+        }
+      }],
     ];
     for (const [dataset, job] of jobs) {
       try {
@@ -206,6 +247,12 @@ export class MaintenanceService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async _flushViewerCounts() {
+    await this._withDistributedLock('maintenance:viewer-counts', 25_000, async () => {
+      await this._flushViewerCountsUnlocked();
+    });
+  }
+
+  private async _flushViewerCountsUnlocked() {
     const robots = await this.prisma.robot.findMany({
       where: { status: { in: ['ONLINE', 'BUSY'] } },
       select: { id: true, viewerCount: true },
@@ -251,10 +298,28 @@ export class MaintenanceService implements OnModuleInit, OnModuleDestroy {
       cleanupRows.inc({ dataset: 'moderation_entries' }, deleted.count);
     }
     if (RECORDING_RETENTION_DAYS > 0) {
-      const deleted = await this.prisma.recording.deleteMany({
-        where: { startedAt: { lt: new Date(now - RECORDING_RETENTION_DAYS * 86_400_000) } },
+      const cutoff = new Date(now - RECORDING_RETENTION_DAYS * 86_400_000);
+      const deletedCount = await this.prisma.$transaction(async (tx) => {
+        const expired = await tx.recording.findMany({
+          where: { startedAt: { lt: cutoff } },
+          orderBy: { startedAt: 'asc' },
+          take: 5_000,
+          select: { id: true, objectKey: true },
+        });
+        await this.storageDeletion.enqueue(
+          tx,
+          this.storageDeletion.recordingBucket,
+          expired.map((recording) => recording.objectKey),
+        );
+        if (expired.length === 0) {
+          return 0;
+        }
+        const deleted = await tx.recording.deleteMany({
+          where: { id: { in: expired.map((recording) => recording.id) } },
+        });
+        return deleted.count;
       });
-      cleanupRows.inc({ dataset: 'recording_metadata' }, deleted.count);
+      cleanupRows.inc({ dataset: 'recording_metadata' }, deletedCount);
     }
     await this.prisma.user.updateMany({
       where: { emailVerificationExpiry: { lt: new Date() } },
@@ -290,5 +355,39 @@ export class MaintenanceService implements OnModuleInit, OnModuleDestroy {
     }
 
     return parsed;
+  }
+
+  private async _withDistributedLock(
+    key: string,
+    ttlMs: number,
+    work: () => Promise<void>,
+  ): Promise<boolean> {
+    const token = randomBytes(24).toString('hex');
+    let acquired: string | null;
+    try {
+      acquired = await this.redis.set(key, token, 'PX', ttlMs, 'NX');
+    } catch (error) {
+      this.logger.warn(`Cannot acquire distributed maintenance lock ${key}`, error);
+      return false;
+    }
+    if (acquired !== 'OK') {
+      return false;
+    }
+
+    try {
+      await work();
+      return true;
+    } finally {
+      try {
+        await this.redis.eval(
+          'if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end',
+          1,
+          key,
+          token,
+        );
+      } catch (error) {
+        this.logger.warn(`Cannot release distributed maintenance lock ${key}`, error);
+      }
+    }
   }
 }

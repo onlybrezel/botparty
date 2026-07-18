@@ -6,18 +6,19 @@ import Redis from 'ioredis';
 import { PostgreSqlContainer } from '@testcontainers/postgresql';
 import { GenericContainer } from 'testcontainers';
 
-const runIntegration = process.env.RUN_INTEGRATION_TESTS === '1';
-const describeIf = runIntegration ? describe : describe.skip;
-
-describeIf('Prisma + Redis integration (testcontainers)', () => {
+describe('Prisma + Redis integration (testcontainers)', () => {
   let prisma: PrismaClient | null = null;
   let redis: Redis | null = null;
   let pgContainer: Awaited<ReturnType<PostgreSqlContainer['start']>> | null = null;
   let redisContainer: Awaited<ReturnType<GenericContainer['start']>> | null = null;
 
   beforeAll(async () => {
-    pgContainer = await new PostgreSqlContainer('postgres:16-alpine').start();
-    redisContainer = await new GenericContainer('redis:7-alpine').withExposedPorts(6379).start();
+    pgContainer = await new PostgreSqlContainer(
+      'postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777',
+    ).start();
+    redisContainer = await new GenericContainer(
+      'redis@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99',
+    ).withExposedPorts(6379).start();
 
     const databaseUrl = `${pgContainer.getConnectionUri()}?schema=public`;
     process.env.DATABASE_URL = databaseUrl;
@@ -25,7 +26,7 @@ describeIf('Prisma + Redis integration (testcontainers)', () => {
     const repoRoot = path.resolve(process.cwd(), '../..');
     execFileSync(
       'pnpm',
-      ['--filter', '@botparty/prisma', 'exec', 'prisma', 'db', 'push', '--skip-generate'],
+      ['--filter', '@botparty/prisma', 'db:migrate:prod'],
       {
         cwd: repoRoot,
         env: {

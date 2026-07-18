@@ -13,6 +13,7 @@ import {
   toUpdatePayload,
   validateRobotFormSchedule,
 } from './types';
+import type { RoomMode } from './types';
 
 const robot = {
   id: 'robot-1',
@@ -75,6 +76,14 @@ describe('dashboard domain mappings', () => {
   });
 
   it('maps every room mode in both directions', () => {
+    const roomModes: RoomMode[] = [
+      'PUBLIC',
+      'UNLISTED',
+      'LINK_ONLY',
+      'PASSWORD',
+      'ALLOWED_USERS',
+      'PRIVATE',
+    ];
     expect(detectRoomMode({ visibility: 'PRIVATE', accessMode: 'OPEN' })).toBe('PRIVATE');
     expect(detectRoomMode({ visibility: 'UNLISTED', accessMode: 'OPEN' })).toBe('UNLISTED');
     expect(detectRoomMode({ visibility: 'PUBLIC', accessMode: 'ALLOWED_USERS' })).toBe(
@@ -84,9 +93,7 @@ describe('dashboard domain mappings', () => {
     expect(detectRoomMode({ visibility: 'PUBLIC', accessMode: 'PASSWORD' })).toBe('PASSWORD');
     expect(detectRoomMode({ visibility: 'PUBLIC', accessMode: 'OPEN' })).toBe('PUBLIC');
     expect(
-      ['PUBLIC', 'UNLISTED', 'LINK_ONLY', 'PASSWORD', 'ALLOWED_USERS', 'PRIVATE'].map((mode) =>
-        roomModeToFields(mode as any),
-      ),
+      roomModes.map(roomModeToFields),
     ).toEqual([
       { visibility: 'PUBLIC', accessMode: 'OPEN' },
       { visibility: 'UNLISTED', accessMode: 'OPEN' },

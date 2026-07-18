@@ -39,13 +39,16 @@ export class RedisPubSubHandler {
       return;
     }
 
-    const subscriber = this.redis.duplicate();
+    const subscriber = this.redis.duplicate({ lazyConnect: true });
     this.subscriber = subscriber;
 
     subscriber.on('pmessage', (_pattern, channel, message) => {
-      void this.handleMessage(channel, message);
+      void this.handleMessage(channel, message).catch((error) => {
+        this.logger.warn(`Redis pub/sub message failed on ${channel}: ${(error as Error).message}`);
+      });
     });
 
+    await subscriber.connect();
     await subscriber.psubscribe(...CHANNEL_PATTERNS);
   }
 

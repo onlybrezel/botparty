@@ -216,13 +216,13 @@ describe('WalletService', () => {
     const blocked = build();
     await expect(blocked.service.adminAdjust({ userId: platformId, delta: 1, reason: 'bad', requesterId: 'staff' })).rejects.toBeInstanceOf(ForbiddenException);
 
-    const { service } = build();
-    const credit = jest.spyOn(service, 'credit').mockResolvedValue({} as never);
-    const debit = jest.spyOn(service, 'debit').mockResolvedValue({} as never);
+    const { service, tx } = build();
+    const credit = jest.spyOn(service, 'creditInTransaction').mockResolvedValue({} as never);
+    const debit = jest.spyOn(service, 'debitInTransaction').mockResolvedValue({} as never);
     await service.adminAdjust({ userId, delta: 5, reason: 'grant', requesterId: 'staff' });
     await service.adminAdjust({ userId, delta: -7, reason: 'remove', requesterId: 'staff' });
-    expect(credit).toHaveBeenCalledWith(userId, 5, TransactionType.ADMIN_ADJUSTMENT, expect.any(Object));
-    expect(debit).toHaveBeenCalledWith(userId, 7, TransactionType.ADMIN_ADJUSTMENT, expect.any(Object));
+    expect(credit).toHaveBeenCalledWith(tx, userId, 5, TransactionType.ADMIN_ADJUSTMENT, expect.any(Object));
+    expect(debit).toHaveBeenCalledWith(tx, userId, 7, TransactionType.ADMIN_ADJUSTMENT, expect.any(Object));
   });
 
   it('reports not-found and insufficient-funds outcomes from guarded balance updates', async () => {

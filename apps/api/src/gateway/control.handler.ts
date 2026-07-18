@@ -1,7 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { WS_EVENTS, LIMITS, ControlButtonAccess, controlCommandSchema } from '@botparty/shared';
 import { TransactionType } from '@botparty/prisma';
-import { isStaffRole } from '../common/robot-access';
 import type { ModerationService } from '../moderation/moderation.service';
 import type { RobotsService } from '../robots/robots.service';
 import type { QueueService } from '../queue/queue.service';
@@ -246,7 +245,13 @@ export class ControlHandler {
     }
 
     if (cost > 0 && client.userId && robot.ownerId && client.userId !== robot.ownerId) {
-      const timer = setTimeout(() => void this.compensate(data.commandId, 'ACK_TIMEOUT'), 3_000);
+      const timer = setTimeout(() => {
+        void this.compensate(data.commandId, 'ACK_TIMEOUT').catch((error) => {
+          this.logger.error(
+            `Failed to compensate timed-out control command ${data.commandId}: ${(error as Error).message}`,
+          );
+        });
+      }, 3_000);
       this.pending.set(data.commandId, {
         robotId: robot.id,
         userId: client.userId,

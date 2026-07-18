@@ -1,11 +1,11 @@
 import { timingSafeEqual } from 'crypto';
 
-export type BasicAuthCredentials = {
+type BasicAuthCredentials = {
   username: string;
   password: string;
 };
 
-export function decodeBasicAuth(header: string | undefined): BasicAuthCredentials | null {
+function decodeBasicAuth(header: string | undefined): BasicAuthCredentials | null {
   if (!header?.startsWith('Basic ')) {
     return null;
   }

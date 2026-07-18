@@ -1,4 +1,4 @@
-import { Injectable, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 
@@ -120,8 +120,7 @@ export class RobotTelemetryService {
       where: { id: robotId },
       select: { id: true, ownerId: true },
     });
-    if (!robot) throw new ForbiddenException('Robot not found');
-    if (robot.ownerId !== ownerId) throw new ForbiddenException('Not your robot');
+    if (!robot || robot.ownerId !== ownerId) throw new NotFoundException('Robot not found');
 
     const latestKey = `robot:telemetry:${robotId}:latest`;
     const historyKey = `robot:telemetry:${robotId}:history`;
@@ -149,8 +148,7 @@ export class RobotTelemetryService {
       where: { id: robotId },
       select: { id: true, ownerId: true },
     });
-    if (!robot) throw new ForbiddenException('Robot not found');
-    if (robot.ownerId !== ownerId) throw new ForbiddenException('Not your robot');
+    if (!robot || robot.ownerId !== ownerId) throw new NotFoundException('Robot not found');
 
     const key = `robot:logs:${robotId}`;
     const raw = await this.redis.lrange(key, 0, -1);

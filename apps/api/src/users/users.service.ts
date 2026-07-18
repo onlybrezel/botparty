@@ -5,17 +5,14 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { DeleteObjectsCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
-import { ConfigService } from '@nestjs/config';
 import { hash, verify } from 'argon2';
-import type { Prisma } from '@botparty/prisma';
-import { basename } from 'path';
+import { Prisma } from '@botparty/prisma';
 import { PrismaService } from '../prisma/prisma.service';
 import { WalletService } from '../wallet/wallet.service';
 import { UpdateMeInput, UpdateAdminUserInput } from './users.schema';
 import type { JwtPayload } from '@botparty/shared';
-import { createS3CompatibleStorageClient, resolveS3CompatibleStorageConfig } from '../common/s3-compatible-storage';
 import { PlatformUserService } from '../wallet/platform-user.service';
+import { StorageDeletionService } from '../storage/storage-deletion.service';
 
 @Injectable()
 export class UsersService {
@@ -23,7 +20,7 @@ export class UsersService {
     private readonly prisma: PrismaService,
     private readonly walletService: WalletService,
     private readonly platformUser: PlatformUserService,
-    private readonly config: ConfigService,
+    private readonly storageDeletion: StorageDeletionService,
   ) {}
 
   private resolveLeaderboardSince(period?: string) {
@@ -171,6 +168,7 @@ export class UsersService {
     ]);
 
     const { passwordHash: _passwordHash, ...profile } = account;
+    void _passwordHash;
 
     return {
       exportedAt: new Date().toISOString(),
@@ -352,6 +350,12 @@ export class UsersService {
     input: UpdateAdminUserInput,
   ) {
     const result = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw(Prisma.sql`
+        SELECT id FROM "users"
+        WHERE id IN (${id}::uuid, ${requester.sub}::uuid)
+        ORDER BY id
+        FOR UPDATE
+      `);
       const [actor, target] = await Promise.all([
         tx.user.findUnique({
           where: { id: requester.sub },
@@ -365,38 +369,26 @@ export class UsersService {
             email: true,
             role: true,
             isActive: true,
+            deletedAt: true,
+            balance: true,
           },
         }),
       ]);
 
-      if (!actor || !actor.isActive) {
-        throw new ForbiddenException('Staff account is inactive');
+      if (!actor?.isActive || actor.role !== 'ADMIN') {
+        throw new ForbiddenException('Admin role required');
       }
 
       if (!target) {
         throw new NotFoundException('User not found');
       }
 
-      if (this.platformUser.isPlatformUser(target.id)) {
-        throw new ForbiddenException('Cannot modify the platform user');
+      if (target.deletedAt) {
+        throw new ConflictException('Deleted accounts cannot be modified');
       }
 
-      const actorIsAdmin = actor.role === 'ADMIN';
-      const targetIsStaff = target.role === 'ADMIN' || target.role === 'MOD';
-      const wantsSensitiveChange =
-        input.username !== undefined ||
-        input.email !== undefined ||
-        input.password !== undefined ||
-        input.role !== undefined;
-
-      if (!actorIsAdmin) {
-        if (targetIsStaff) {
-          throw new ForbiddenException('Mods can only manage regular user accounts');
-        }
-
-        if (wantsSensitiveChange) {
-          throw new ForbiddenException('Only admins can change username, email, password, or role');
-        }
+      if (this.platformUser.isPlatformUser(target.id)) {
+        throw new ForbiddenException('Cannot modify the platform user');
       }
 
       const updates: {
@@ -407,7 +399,6 @@ export class UsersService {
         role?: 'ADMIN' | 'MOD' | 'USER';
         isActive?: boolean;
         credits?: number;
-        balance?: number;
         tokenVersion?: { increment: number };
       } = {};
 
@@ -468,8 +459,8 @@ export class UsersService {
         updates.credits = Math.round(input.credits);
       }
 
-      // Balance changes are routed through walletService.adminAdjust below so
-      // every mutation produces an audit-tagged ledger row.
+      // Balance changes remain in this transaction so the profile mutation,
+      // authority check, balance and audit ledger commit atomically.
       const balanceTarget =
         typeof input.balance === 'number' && Number.isFinite(input.balance)
           ? Math.round(input.balance)
@@ -477,6 +468,15 @@ export class UsersService {
 
       if (Object.keys(updates).length === 0 && balanceTarget === null) {
         throw new BadRequestException('No valid user changes provided');
+      }
+
+      if (balanceTarget !== null && balanceTarget !== target.balance) {
+        await this.walletService.adminAdjustInTransaction(tx, {
+          userId: id,
+          delta: balanceTarget - target.balance,
+          reason: `staff balance set to ${balanceTarget}`,
+          requesterId: requester.sub,
+        });
       }
 
       const updated = Object.keys(updates).length > 0
@@ -514,102 +514,55 @@ export class UsersService {
             },
           });
 
-      return { updated, balanceTarget };
+      return updated;
     });
-
-    if (result.balanceTarget !== null && result.balanceTarget !== result.updated.balance) {
-      const delta = result.balanceTarget - result.updated.balance;
-      if (delta !== 0) {
-        await this.walletService.adminAdjust({
-          userId: id,
-          delta,
-          reason: `staff balance set to ${result.balanceTarget}`,
-          requesterId: requester.sub,
-        });
-        const refreshed = await this.prisma.user.findUnique({
-          where: { id },
-          select: {
-            id: true,
-            username: true,
-            displayName: true,
-            avatarUrl: true,
-            email: true,
-            role: true,
-            isActive: true,
-            credits: true,
-            balance: true,
-            lastLoginAt: true,
-            createdAt: true,
-          },
-        });
-        if (refreshed) return refreshed;
-      }
-    }
-
-    return result.updated;
+    return result;
   }
 
   async deleteUserByStaff(id: string, requester: JwtPayload) {
-    const target = await this.prisma.user.findUnique({
-      where: { id },
-      select: { id: true, role: true, isActive: true },
-    });
-
-    if (!target) {
-      throw new NotFoundException('User not found');
-    }
-
-    if (this.platformUser.isPlatformUser(target.id)) {
+    if (this.platformUser.isPlatformUser(id)) {
       throw new ForbiddenException('Cannot delete the platform user');
     }
 
-    if (target.id === requester.sub) {
+    if (id === requester.sub) {
       throw new ForbiddenException('You cannot delete your own account from the staff dashboard');
     }
 
-    // Fetch actor and validate permissions
-    const actor = await this.prisma.user.findUnique({
-      where: { id: requester.sub },
-      select: { id: true, role: true, isActive: true },
-    });
-
-    if (!actor || !actor.isActive) {
-      throw new ForbiddenException('Staff account is inactive');
-    }
-
-    const actorIsAdmin = actor.role === 'ADMIN';
-    const targetIsStaff = target.role === 'ADMIN' || target.role === 'MOD';
-
-    if (!actorIsAdmin) {
-      if (targetIsStaff) {
-        throw new ForbiddenException('Mods can only delete regular user accounts');
-      }
-    }
-
-    // Fetch owned robots and clean up recordings BEFORE deleting user
-    const ownedRobots = await this.prisma.robot.findMany({
-      where: { ownerId: target.id },
-      select: { id: true },
-    });
-    await this.deleteOwnedRecordings(ownedRobots.map((robot) => robot.id));
-
     await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw(Prisma.sql`
+        SELECT id FROM "users"
+        WHERE id IN (${id}::uuid, ${requester.sub}::uuid)
+        ORDER BY id
+        FOR UPDATE
+      `);
+      const [actor, target] = await Promise.all([
+        tx.user.findUnique({
+          where: { id: requester.sub },
+          select: { id: true, role: true, isActive: true },
+        }),
+        tx.user.findUnique({
+          where: { id },
+          select: { id: true, role: true, isActive: true },
+        }),
+      ]);
+      if (!actor?.isActive || actor.role !== 'ADMIN') {
+        throw new ForbiddenException('Admin role required');
+      }
+      if (!target) {
+        throw new NotFoundException('User not found');
+      }
       if (target.role === 'ADMIN') {
         await this.ensureAnotherActiveAdminExists(tx, target.id);
       }
+      await this.enqueueOwnedObjectDeletions(tx, target.id);
       await tx.robot.deleteMany({ where: { ownerId: target.id } });
       await this.anonymizeUser(tx, target.id);
     });
   }
 
   async deleteOwnAccount(userId: string) {
-    const ownedRobots = await this.prisma.robot.findMany({
-      where: { ownerId: userId },
-      select: { id: true },
-    });
-    await this.deleteOwnedRecordings(ownedRobots.map((robot) => robot.id));
-
     await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw(Prisma.sql`SELECT id FROM "users" WHERE id = ${userId}::uuid FOR UPDATE`);
       const user = await tx.user.findUnique({
         where: { id: userId },
         select: { id: true, role: true, isActive: true },
@@ -620,6 +573,7 @@ export class UsersService {
       if (user.role === 'ADMIN') {
         await this.ensureAnotherActiveAdminExists(tx, userId);
       }
+      await this.enqueueOwnedObjectDeletions(tx, userId);
       await tx.robot.deleteMany({ where: { ownerId: userId } });
       await this.anonymizeUser(tx, userId);
     });
@@ -646,55 +600,30 @@ export class UsersService {
     });
   }
 
-  private async deleteOwnedRecordings(robotIds: string[]) {
-    if (robotIds.length === 0) {
-      return;
-    }
-
-    const storage = resolveS3CompatibleStorageConfig(this.config, 'LIVEKIT_RECORDINGS_S3_');
-    if (!storage) {
-      return;
-    }
-
-    const client = createS3CompatibleStorageClient(storage);
-    const robotPrefixes = new Set(robotIds.map((robotId) => `robot-${robotId}`));
-    const keysToDelete: string[] = [];
-    let continuationToken: string | undefined;
-
-    do {
-      const listed = await client.send(
-        new ListObjectsV2Command({
-          Bucket: storage.bucket,
-          ContinuationToken: continuationToken,
-        }),
-      );
-
-      for (const entry of listed.Contents ?? []) {
-        const key = entry.Key?.trim();
-        if (!key) {
-          continue;
-        }
-        const fileName = basename(key);
-        if ([...robotPrefixes].some((prefix) => fileName.startsWith(prefix))) {
-          keysToDelete.push(key);
-        }
-      }
-
-      continuationToken = listed.IsTruncated ? listed.NextContinuationToken ?? undefined : undefined;
-    } while (continuationToken);
-
-    for (let index = 0; index < keysToDelete.length; index += 1000) {
-      const chunk = keysToDelete.slice(index, index + 1000).map((key) => ({ Key: key }));
-      await client.send(
-        new DeleteObjectsCommand({
-          Bucket: storage.bucket,
-          Delete: {
-            Objects: chunk,
-            Quiet: true,
-          },
-        }),
-      );
-    }
+  private async enqueueOwnedObjectDeletions(tx: Prisma.TransactionClient, ownerId: string) {
+    await tx.$queryRaw(Prisma.sql`
+      SELECT id FROM "robots" WHERE "ownerId" = ${ownerId}::uuid FOR UPDATE
+    `);
+    const [recordings, robots] = await Promise.all([
+      tx.recording.findMany({
+        where: { robot: { ownerId } },
+        select: { objectKey: true },
+      }),
+      tx.robot.findMany({ where: { ownerId }, select: { id: true } }),
+    ]);
+    await this.storageDeletion.enqueue(
+      tx,
+      this.storageDeletion.recordingBucket,
+      recordings.map((recording) => recording.objectKey),
+    );
+    await this.storageDeletion.enqueue(
+      tx,
+      this.storageDeletion.thumbnailBucket,
+      [
+        `avatars/${ownerId}/`,
+        ...robots.map((robot) => `robot-thumbnails/${robot.id}/`),
+      ],
+    );
   }
 
   private async ensureAnotherActiveAdminExists(tx: Prisma.TransactionClient, excludedUserId: string) {

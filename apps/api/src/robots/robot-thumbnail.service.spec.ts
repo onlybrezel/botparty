@@ -4,8 +4,12 @@ import {
   ListObjectsV2Command,
   PutObjectCommand,
 } from '@aws-sdk/client-s3';
-import { rm } from 'node:fs/promises';
+import { NotFoundException } from '@nestjs/common';
 import { RobotThumbnailService } from './robot-thumbnail.service';
+
+type RobotThumbnailServiceTestAccess = {
+  _createObjectStorageClient(): { send: jest.Mock };
+};
 
 const VALID_PNG_DATA_URL =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO8B9pUAAAAASUVORK5CYII=';
@@ -13,22 +17,37 @@ const VALID_PNG_DATA_URL =
 describe('RobotThumbnailService', () => {
   let service: RobotThumbnailService;
   let prisma: {
+    $transaction: jest.Mock;
+    $queryRaw: jest.Mock;
+    user: {
+      findUnique: jest.Mock;
+    };
     robot: {
       findUnique: jest.Mock;
       update: jest.Mock;
     };
   };
+  let storageDeletion: { enqueue: jest.Mock };
   let originalEnv: NodeJS.ProcessEnv;
 
   beforeEach(() => {
     originalEnv = { ...process.env };
-    prisma = {
+    const transactionClient = {
+      $queryRaw: jest.fn().mockResolvedValue([]),
+      user: {
+        findUnique: jest.fn(),
+      },
       robot: {
         findUnique: jest.fn(),
         update: jest.fn(),
       },
     };
-    service = new RobotThumbnailService(prisma as never);
+    prisma = {
+      ...transactionClient,
+      $transaction: jest.fn(async (callback: (tx: typeof transactionClient) => Promise<unknown>) => callback(transactionClient)),
+    };
+    storageDeletion = { enqueue: jest.fn().mockResolvedValue(undefined) };
+    service = new RobotThumbnailService(prisma as never, storageDeletion as never);
   });
 
   afterEach(async () => {
@@ -52,7 +71,7 @@ describe('RobotThumbnailService', () => {
     );
   });
 
-  it('uploads thumbnails to S3-compatible storage and returns the public CDN url', async () => {
+  it('uploads thumbnails to private S3-compatible storage and returns the API proxy url', async () => {
     process.env.THUMBNAIL_S3_BUCKET = 'botparty-thumbnails';
     process.env.THUMBNAIL_S3_REGION = 'auto';
     process.env.THUMBNAIL_S3_ENDPOINT = 'https://storage.example.com';
@@ -75,21 +94,51 @@ describe('RobotThumbnailService', () => {
     const send = jest.fn()
       .mockResolvedValueOnce({ Contents: [] })
       .mockResolvedValueOnce({});
-    jest.spyOn(service as any, '_createObjectStorageClient').mockReturnValue({ send } as never);
-    jest.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
-
+    jest
+      .spyOn(service as unknown as RobotThumbnailServiceTestAccess, '_createObjectStorageClient')
+      .mockReturnValue({ send });
     const saved = await service.save('robot-1', 'owner-1', VALID_PNG_DATA_URL);
 
     expect(send).toHaveBeenNthCalledWith(1, expect.any(ListObjectsV2Command));
     expect(send).toHaveBeenNthCalledWith(2, expect.any(PutObjectCommand));
-    expect(saved.thumbnailUrl).toBe('https://cdn.example.com/robot-thumbnails/robot-1/1700000000000.webp');
+    expect(saved.thumbnailUrl).toBe('/api/v1/robots/robot-1/thumbnail-image');
 
     const putInput = send.mock.calls[1]?.[0].input as { CacheControl?: string; ContentType?: string };
     expect(putInput.ContentType).toBe('image/webp');
-    expect(putInput.CacheControl).toBe('public, max-age=31536000, immutable');
+    expect(putInput.CacheControl).toBe('private, no-store');
+    expect(storageDeletion.enqueue).toHaveBeenCalledWith(
+      expect.any(Object),
+      'botparty-thumbnails',
+      [],
+    );
   });
 
-  it('clears existing object-storage thumbnails before removing the database url', async () => {
+  it('removes a newly uploaded object when the database transaction fails', async () => {
+    process.env.THUMBNAIL_S3_BUCKET = 'botparty-thumbnails';
+    process.env.THUMBNAIL_S3_REGION = 'auto';
+    process.env.THUMBNAIL_S3_ACCESS_KEY_ID = 'access-key';
+    process.env.THUMBNAIL_S3_SECRET_ACCESS_KEY = 'secret-key';
+    process.env.THUMBNAIL_PUBLIC_BASE_URL = 'https://cdn.example.com';
+    prisma.robot.findUnique.mockResolvedValue({ id: 'robot-1', ownerId: 'owner-1' });
+    prisma.robot.update.mockRejectedValue(new Error('database unavailable'));
+    const send = jest.fn()
+      .mockResolvedValueOnce({ Contents: [] })
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({ Errors: [] });
+    jest
+      .spyOn(service as unknown as RobotThumbnailServiceTestAccess, '_createObjectStorageClient')
+      .mockReturnValue({ send });
+
+    await expect(service.save('robot-1', 'owner-1', VALID_PNG_DATA_URL)).rejects.toThrow(
+      'database unavailable',
+    );
+
+    expect(send).toHaveBeenNthCalledWith(2, expect.any(PutObjectCommand));
+    expect(send).toHaveBeenNthCalledWith(3, expect.any(DeleteObjectsCommand));
+    expect(storageDeletion.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('hides a cleared thumbnail and queues its exact object key transactionally', async () => {
     process.env.THUMBNAIL_S3_BUCKET = 'botparty-thumbnails';
     process.env.THUMBNAIL_S3_REGION = 'auto';
     process.env.THUMBNAIL_S3_ACCESS_KEY_ID = 'access-key';
@@ -108,14 +157,20 @@ describe('RobotThumbnailService', () => {
     }));
 
     const send = jest.fn()
-      .mockResolvedValueOnce({ Contents: [{ Key: 'robot-thumbnails/robot-1/1700000000000.webp' }] })
-      .mockResolvedValueOnce({});
-    jest.spyOn(service as any, '_createObjectStorageClient').mockReturnValue({ send } as never);
+      .mockResolvedValueOnce({ Contents: [{ Key: 'robot-thumbnails/robot-1/1700000000000.webp' }] });
+    jest
+      .spyOn(service as unknown as RobotThumbnailServiceTestAccess, '_createObjectStorageClient')
+      .mockReturnValue({ send });
 
     const cleared = await service.clear('robot-1', 'owner-1');
 
     expect(send).toHaveBeenNthCalledWith(1, expect.any(ListObjectsV2Command));
-    expect(send).toHaveBeenNthCalledWith(2, expect.any(DeleteObjectsCommand));
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(storageDeletion.enqueue).toHaveBeenCalledWith(
+      expect.any(Object),
+      'botparty-thumbnails',
+      ['robot-thumbnails/robot-1/1700000000000.webp'],
+    );
     expect(cleared.thumbnailUrl).toBeNull();
   });
 
@@ -127,6 +182,9 @@ describe('RobotThumbnailService', () => {
     process.env.THUMBNAIL_PUBLIC_BASE_URL = 'https://cdn.example.com';
 
     prisma.robot.findUnique.mockResolvedValue({
+      id: 'robot-1',
+      ownerId: 'owner-1',
+      visibility: 'PUBLIC',
       thumbnailUrl: 'https://cdn.example.com/robot-thumbnails/robot-1/1700000000000.webp',
     });
 
@@ -135,14 +193,73 @@ describe('RobotThumbnailService', () => {
       Body: { transformToByteArray },
       ContentType: 'image/webp',
     });
-    jest.spyOn(service as any, '_createObjectStorageClient').mockReturnValue({ send } as never);
+    jest
+      .spyOn(service as unknown as RobotThumbnailServiceTestAccess, '_createObjectStorageClient')
+      .mockReturnValue({ send });
 
-    const file = await service.read('robot-1');
+    const file = await service.read('robot-1', null);
 
     expect(send).toHaveBeenCalledWith(expect.any(GetObjectCommand));
     expect(file).toEqual({
       buffer: Buffer.from([1, 2, 3]),
       contentType: 'image/webp',
+      cacheControl: 'public, max-age=3600, stale-while-revalidate=86400',
+    });
+  });
+
+  it('does not disclose private thumbnails to anonymous or foreign users', async () => {
+    process.env.THUMBNAIL_S3_BUCKET = 'botparty-thumbnails';
+    process.env.THUMBNAIL_S3_REGION = 'auto';
+    process.env.THUMBNAIL_S3_ACCESS_KEY_ID = 'access-key';
+    process.env.THUMBNAIL_S3_SECRET_ACCESS_KEY = 'secret-key';
+    process.env.THUMBNAIL_PUBLIC_BASE_URL = 'https://cdn.example.com';
+    prisma.robot.findUnique.mockResolvedValue({
+      id: 'private-robot',
+      ownerId: 'owner-1',
+      visibility: 'PRIVATE',
+      thumbnailUrl: 'https://cdn.example.com/robot-thumbnails/private-robot/image.webp',
+    });
+    prisma.user.findUnique.mockResolvedValue({ role: 'USER' });
+    const send = jest.fn();
+    jest
+      .spyOn(service as unknown as RobotThumbnailServiceTestAccess, '_createObjectStorageClient')
+      .mockReturnValue({ send });
+
+    await expect(service.read('private-robot', null)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.read('private-robot', 'foreign-user')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['owner', 'owner-1', null],
+    ['staff', 'staff-1', { role: 'MOD' }],
+  ])('serves a private thumbnail to its %s', async (_label, requesterId, requester) => {
+    process.env.THUMBNAIL_S3_BUCKET = 'botparty-thumbnails';
+    process.env.THUMBNAIL_S3_REGION = 'auto';
+    process.env.THUMBNAIL_S3_ACCESS_KEY_ID = 'access-key';
+    process.env.THUMBNAIL_S3_SECRET_ACCESS_KEY = 'secret-key';
+    process.env.THUMBNAIL_PUBLIC_BASE_URL = 'https://cdn.example.com';
+    prisma.robot.findUnique.mockResolvedValue({
+      id: 'private-robot',
+      ownerId: 'owner-1',
+      visibility: 'PRIVATE',
+      thumbnailUrl: 'https://cdn.example.com/robot-thumbnails/private-robot/image.webp',
+    });
+    prisma.user.findUnique.mockResolvedValue(requester);
+    const send = jest.fn().mockResolvedValue({
+      Body: { transformToByteArray: jest.fn().mockResolvedValue(Uint8Array.from([7, 8])) },
+      ContentType: 'image/webp',
+    });
+    jest
+      .spyOn(service as unknown as RobotThumbnailServiceTestAccess, '_createObjectStorageClient')
+      .mockReturnValue({ send });
+
+    await expect(service.read('private-robot', requesterId)).resolves.toEqual({
+      buffer: Buffer.from([7, 8]),
+      contentType: 'image/webp',
+      cacheControl: 'private, no-store',
     });
   });
 
@@ -153,7 +270,12 @@ describe('RobotThumbnailService', () => {
     process.env.THUMBNAIL_S3_SECRET_ACCESS_KEY = 'secret-key';
     process.env.THUMBNAIL_PUBLIC_BASE_URL = 'https://cdn.example.com';
 
-    prisma.robot.findUnique.mockResolvedValue({ thumbnailUrl: '/api/v1/robots/robot-1/thumbnail-image?v=123' });
+    prisma.robot.findUnique.mockResolvedValue({
+      id: 'robot-1',
+      ownerId: 'owner-1',
+      visibility: 'PUBLIC',
+      thumbnailUrl: '/api/v1/robots/robot-1/thumbnail-image?v=123',
+    });
 
     const send = jest.fn()
       .mockResolvedValueOnce({
@@ -163,13 +285,16 @@ describe('RobotThumbnailService', () => {
         Body: { transformToByteArray: jest.fn().mockResolvedValue(Uint8Array.from([4, 5, 6])) },
         ContentType: 'image/webp',
       });
-    jest.spyOn(service as any, '_createObjectStorageClient').mockReturnValue({ send } as never);
+    jest
+      .spyOn(service as unknown as RobotThumbnailServiceTestAccess, '_createObjectStorageClient')
+      .mockReturnValue({ send });
 
-    const file = await service.read('robot-1');
+    const file = await service.read('robot-1', null);
 
     expect(file).toEqual({
       buffer: Buffer.from([4, 5, 6]),
       contentType: 'image/webp',
+      cacheControl: 'public, max-age=3600, stale-while-revalidate=86400',
     });
     expect(send).toHaveBeenNthCalledWith(1, expect.any(ListObjectsV2Command));
     expect(send).toHaveBeenNthCalledWith(2, expect.any(GetObjectCommand));

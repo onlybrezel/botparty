@@ -117,7 +117,7 @@ export class UpdateControlButtonDto {
   costCredits?: number;
 }
 
-export class ReorderControlButtonItemDto {
+class ReorderControlButtonItemDto {
   @IsUUID()
   id!: string;
 

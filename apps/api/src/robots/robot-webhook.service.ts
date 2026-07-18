@@ -1,22 +1,20 @@
-import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { ConfigService } from '@nestjs/config';
-import { randomBytes, randomUUID } from 'crypto';
+import { createHash, randomBytes, randomUUID } from 'crypto';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { JOBS_QUEUE_WEBHOOK, type WebhookJobData } from '../jobs/jobs.constants';
 import { assertSafeWebhookTarget } from '../common/webhook-target';
 import { readNonNegativeIntegerEnv } from '../common/config-number';
 import { AeadCipher } from '../common/aead-cipher';
+import { Prisma } from '@botparty/prisma';
 
-export const ROBOT_WEBHOOK_EVENTS = [
-  'robot.online',
-  'robot.offline',
-  'session.started',
-  'session.ended',
-] as const;
-
-export type RobotWebhookEvent = (typeof ROBOT_WEBHOOK_EVENTS)[number];
+type RobotWebhookEvent =
+  | 'robot.online'
+  | 'robot.offline'
+  | 'session.started'
+  | 'session.ended';
 
 type WebhookPayload = Record<string, unknown>;
 
@@ -78,14 +76,6 @@ export class RobotWebhookService {
     input: { url: string; events: RobotWebhookEvent[]; isActive?: boolean },
   ) {
     await this.assertOwner(robotId, ownerId);
-    if (this.maxWebhooksPerRobot > 0) {
-      const existingHooks = await this.prisma.robotWebhook.count({ where: { robotId } });
-      if (existingHooks >= this.maxWebhooksPerRobot) {
-        throw new BadRequestException(
-          `Maximum of ${this.maxWebhooksPerRobot} webhooks allowed per robot`,
-        );
-      }
-    }
     let target: URL;
     try {
       target = await assertSafeWebhookTarget(input.url);
@@ -94,16 +84,27 @@ export class RobotWebhookService {
     }
     const id = randomUUID();
     const plainSecret = randomBytes(32).toString('hex');
-    const hook = await this.prisma.robotWebhook.create({
-      data: {
-        id,
-        robotId,
-        url: target.toString(),
-        events: Array.from(new Set(input.events)),
-        isActive: input.isActive ?? true,
-        secret: this.encryptWebhookSecret(id, plainSecret),
-      },
-    });
+    const hook = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw(Prisma.sql`SELECT id FROM "robots" WHERE id = ${robotId}::uuid FOR UPDATE`);
+      if (this.maxWebhooksPerRobot > 0) {
+        const existingHooks = await tx.robotWebhook.count({ where: { robotId } });
+        if (existingHooks >= this.maxWebhooksPerRobot) {
+          throw new BadRequestException(
+            `Maximum of ${this.maxWebhooksPerRobot} webhooks allowed per robot`,
+          );
+        }
+      }
+      return tx.robotWebhook.create({
+        data: {
+          id,
+          robotId,
+          url: target.toString(),
+          events: Array.from(new Set(input.events)),
+          isActive: input.isActive ?? true,
+          secret: this.encryptWebhookSecret(id, plainSecret),
+        },
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     return {
       id: hook.id,
@@ -138,7 +139,8 @@ export class RobotWebhookService {
       return;
     }
 
-    this.dispatch(robot.id, event, {
+    const dedupeWindow = Math.floor(Date.now() / 30_000);
+    this.dispatch(robot.id, event, `${event}:${robot.id}:${dedupeWindow}`, {
       robot: {
         id: robot.id,
         name: robot.name,
@@ -149,7 +151,7 @@ export class RobotWebhookService {
   }
 
   emitSessionStarted(session: { id: string; robotId: string; userId: string; startedAt: Date }) {
-    this.dispatch(session.robotId, 'session.started', {
+    this.dispatch(session.robotId, 'session.started', `session.started:${session.id}`, {
       session: {
         id: session.id,
         robotId: session.robotId,
@@ -167,7 +169,7 @@ export class RobotWebhookService {
     endedAt: Date | null;
     durationMs: number | null;
   }) {
-    this.dispatch(session.robotId, 'session.ended', {
+    this.dispatch(session.robotId, 'session.ended', `session.ended:${session.id}`, {
       session: {
         id: session.id,
         robotId: session.robotId,
@@ -179,13 +181,27 @@ export class RobotWebhookService {
     });
   }
 
-  private dispatch(robotId: string, event: RobotWebhookEvent, payload: WebhookPayload) {
+  private dispatch(
+    robotId: string,
+    event: RobotWebhookEvent,
+    dedupeKey: string,
+    payload: WebhookPayload,
+  ) {
     queueMicrotask(() => {
-      void this.enqueueWebhookJobs(robotId, event, payload);
+      void this.enqueueWebhookJobs(robotId, event, dedupeKey, payload).catch((error) => {
+        this.logger.error(
+          `Failed to enqueue ${event} webhooks for robot ${robotId}: ${(error as Error).message}`,
+        );
+      });
     });
   }
 
-  private async enqueueWebhookJobs(robotId: string, event: RobotWebhookEvent, payload: WebhookPayload) {
+  private async enqueueWebhookJobs(
+    robotId: string,
+    event: RobotWebhookEvent,
+    dedupeKey: string,
+    payload: WebhookPayload,
+  ) {
     const hooks = await this.prisma.robotWebhook.findMany({
       where: {
         robotId,
@@ -208,6 +224,7 @@ export class RobotWebhookService {
           payload,
         },
         opts: {
+          jobId: `webhook-${hook.id}-${createHash('sha256').update(dedupeKey).digest('hex')}`,
           attempts: 4,
           backoff: { type: 'exponential', delay: 500 },
           removeOnComplete: 1000,
@@ -226,7 +243,7 @@ export class RobotWebhookService {
       throw new NotFoundException('Robot not found');
     }
     if (robot.ownerId !== ownerId) {
-      throw new ForbiddenException('Not your robot');
+      throw new NotFoundException('Robot not found');
     }
   }
 

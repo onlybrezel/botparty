@@ -42,6 +42,7 @@ export class GatewayRuntimeSupport {
   private turnLeaseInterval: ReturnType<typeof setInterval> | null = null;
   private authRevalidationInFlight = false;
   private controlCooldownRedisFallbackActive = false;
+  private lastHeartbeatCoordinationWarningAt = 0;
   private readonly emergencyStopAt = new Map<string, number>();
   private shuttingDown = false;
 
@@ -69,8 +70,8 @@ export class GatewayRuntimeSupport {
         if (client.readyState === WebSocket.OPEN) {
           try {
             client.ping();
-          } catch {
-            // Ignore heartbeat send errors.
+          } catch (error) {
+            this.logger.debug(`WebSocket heartbeat failed for ${client.id}: ${String(error)}`);
           }
         }
       }
@@ -128,8 +129,8 @@ export class GatewayRuntimeSupport {
       this.logger.warn(`Rejected websocket connection from disallowed origin: ${origin}`);
       try {
         client.close(1008, 'Origin not allowed');
-      } catch {
-        // Ignore close failures for rejected sockets.
+      } catch (error) {
+        this.logger.debug(`Failed to close origin-rejected WebSocket: ${String(error)}`);
       }
       return;
     }
@@ -152,7 +153,9 @@ export class GatewayRuntimeSupport {
     this.guestSockets.unregister(client);
 
     if (client.watchingRobotId) {
-      void context.leaveRoom(client);
+      void context.leaveRoom(client).catch((error) => {
+        this.logger.warn(`Failed to leave room for disconnected client ${client.id}: ${(error as Error).message}`);
+      });
     }
 
     if (!client.isRobot || !client.robotId) {
@@ -166,7 +169,9 @@ export class GatewayRuntimeSupport {
     }
 
     this.robotClients.delete(client.robotId);
-    void this.releaseRobotClaimLock(client.robotId, client.id);
+    void this.releaseRobotClaimLock(client.robotId, client.id).catch((error) => {
+      this.logger.warn(`Failed to release robot claim lock ${client.robotId}: ${(error as Error).message}`);
+    });
     if (this.shuttingDown) {
       this.logger.log(`Robot realtime socket closed during shutdown: ${client.robotId}`);
       return;
@@ -194,13 +199,13 @@ export class GatewayRuntimeSupport {
             this.logger.debug(`Closing websocket client with expired or revoked auth: ${client.id}`);
             try {
               client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Invalid session token' } }));
-            } catch {
-              // Ignore send failures while disconnecting invalid sessions.
+            } catch (error) {
+              this.logger.debug(`Failed to notify revoked WebSocket ${client.id}: ${String(error)}`);
             }
             try {
               client.close(1008, 'Invalid session token');
-            } catch {
-              // Ignore close failures while disconnecting invalid sessions.
+            } catch (error) {
+              this.logger.debug(`Failed to close revoked WebSocket ${client.id}: ${String(error)}`);
             }
             continue;
           }
@@ -249,8 +254,8 @@ export class GatewayRuntimeSupport {
 
       try {
         client.send(payload);
-      } catch {
-        // Best effort notification during shutdown.
+      } catch (error) {
+        this.logger.debug(`Failed to notify WebSocket ${client.id} during shutdown: ${String(error)}`);
       }
     }
 
@@ -263,8 +268,8 @@ export class GatewayRuntimeSupport {
 
       try {
         client.close(1012, 'Server restarting');
-      } catch {
-        // Ignore close failures during shutdown.
+      } catch (error) {
+        this.logger.debug(`Failed to close WebSocket ${client.id} during shutdown: ${String(error)}`);
       }
     }
   }
@@ -274,7 +279,9 @@ export class GatewayRuntimeSupport {
     this.redis.publish(
       `ws:room:${robotId}`,
       JSON.stringify({ originId: this.instanceId, event, data }),
-    ).catch(() => {});
+    ).catch((error: unknown) => {
+      this.logger.warn(`Failed to publish room event for ${robotId}: ${(error as Error).message}`);
+    });
   }
 
   broadcastToRoomLocally(robotId: string, event: string, data: unknown, excludeClientId?: string) {
@@ -454,8 +461,21 @@ export class GatewayRuntimeSupport {
   }
 
   recordRobotHeartbeat(robotId: string, clientId: string) {
-    void this.redis.set(`robot:heartbeat:${robotId}`, Date.now().toString(), 'EX', 30);
-    void this.refreshRobotClaimLock(robotId, clientId);
+    void this.redis
+      .set(`robot:heartbeat:${robotId}`, Date.now().toString(), 'EX', 30)
+      .catch((error) => {
+        this.warnHeartbeatCoordinationUnavailable(error as Error);
+      });
+    void this.refreshRobotClaimLock(robotId, clientId).catch((error) => {
+      this.warnHeartbeatCoordinationUnavailable(error as Error);
+    });
+  }
+
+  private warnHeartbeatCoordinationUnavailable(error: Error) {
+    const now = Date.now();
+    if (now - this.lastHeartbeatCoordinationWarningAt < 60_000) return;
+    this.lastHeartbeatCoordinationWarningAt = now;
+    this.logger.warn(`Robot heartbeat coordination unavailable: ${error.message}`);
   }
 
   sendRobotStop(robotId: string, reason: string) {

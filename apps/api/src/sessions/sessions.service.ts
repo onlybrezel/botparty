@@ -67,12 +67,6 @@ export class SessionsService {
     return ended;
   }
 
-  async findByRobot(robotId: string, limit = 50) {
-    throw new ForbiddenException('Use requester-scoped session access');
-
-    return this.findByRobotUnsafe(robotId, limit);
-  }
-
   async findByUser(userId: string, limit = 50) {
     return this.prisma.session.findMany({
       where: { userId },
@@ -133,7 +127,7 @@ export class SessionsService {
     const canView =
       isStaff || session.userId === requesterId || session.robot.ownerId === requesterId;
     if (!canView) {
-      throw new ForbiddenException('Not allowed to view this session');
+      throw new NotFoundException('Session not found');
     }
 
     const replayCandidates = await this.recordingAdminService.findReplayCandidatesForSession({
@@ -161,12 +155,6 @@ export class SessionsService {
       user: session.user,
       replayCandidates,
     };
-  }
-
-  async getActiveSession(robotId: string) {
-    throw new ForbiddenException('Use requester-scoped session access');
-
-    return this.getActiveSessionUnsafe(robotId);
   }
 
   async findByRobotForRequester(
@@ -252,7 +240,7 @@ export class SessionsService {
   ) {
     const robot = await this.prisma.robot.findUnique({
       where: { id: robotId },
-      select: { id: true },
+      select: { id: true, visibility: true },
     });
 
     if (!robot) {
@@ -262,6 +250,9 @@ export class SessionsService {
     const actorId =
       requesterId ?? this.robotsService.resolveGuestActorId(guestSessionId) ?? 'guest:anonymous';
     if (!requesterId) {
+      if (robot.visibility === 'PRIVATE') {
+        throw new NotFoundException('Robot not found');
+      }
       throw new ForbiddenException('Authentication is required to view session history');
     }
     const allowed = await this.robotsService.validateRoomAccess({
@@ -273,6 +264,9 @@ export class SessionsService {
       return;
     }
 
+    if (robot.visibility === 'PRIVATE') {
+      throw new NotFoundException('Robot not found');
+    }
     throw new ForbiddenException('Not allowed to view sessions for this robot');
   }
 }

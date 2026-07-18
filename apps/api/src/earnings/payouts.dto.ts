@@ -1,21 +1,4 @@
-import { IsInt, IsOptional, IsString, MaxLength, Min, Max } from 'class-validator';
-import { LIMITS } from '@botparty/shared';
-
-export class CreatePayoutRequestDto {
-  @IsInt()
-  @Min(LIMITS.MIN_PAYOUT_REQUEST_CREDITS)
-  @Max(LIMITS.MAX_PAYOUT_REQUEST_CREDITS)
-  amount!: number;
-
-  @IsString()
-  @MaxLength(128)
-  destination!: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(1000)
-  notes?: string;
-}
+import { IsString, MaxLength } from 'class-validator';
 
 export class RejectPayoutDto {
   @IsString()

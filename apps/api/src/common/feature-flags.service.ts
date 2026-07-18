@@ -1,7 +1,7 @@
 import { Global, Injectable, Module, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
-export const RELEASE_FEATURES = {
+const RELEASE_FEATURES = {
   BILLING: 'FEATURE_BILLING_ENABLED',
   DONATIONS: 'FEATURE_DONATIONS_ENABLED',
   PAYOUTS: 'FEATURE_PAYOUTS_ENABLED',
@@ -9,7 +9,7 @@ export const RELEASE_FEATURES = {
   SUBSCRIPTIONS: 'FEATURE_SUBSCRIPTIONS_ENABLED',
 } as const;
 
-export type ReleaseFeature = keyof typeof RELEASE_FEATURES;
+type ReleaseFeature = keyof typeof RELEASE_FEATURES;
 
 @Injectable()
 export class FeatureFlagsService {

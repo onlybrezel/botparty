@@ -623,6 +623,30 @@
         ]
       }
     },
+    "/users/{id}/avatar-image": {
+      "get": {
+        "operationId": "UsersController_getAvatar",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Get a platform-hosted user avatar",
+        "tags": [
+          "users"
+        ]
+      }
+    },
     "/users/{username}": {
       "get": {
         "operationId": "UsersController_getByUsername",
@@ -1405,255 +1429,6 @@
         ]
       }
     },
-    "/robots/claim": {
-      "post": {
-        "operationId": "RobotRuntimeController_claim",
-        "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ClaimRobotDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "summary": "Claim a robot and get LiveKit token for hardware client",
-        "tags": [
-          "robots"
-        ]
-      }
-    },
-    "/robots/heartbeat": {
-      "post": {
-        "operationId": "RobotRuntimeController_heartbeat",
-        "parameters": [
-          {
-            "name": "authorization",
-            "required": true,
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "summary": "Heartbeat from robot hardware client",
-        "tags": [
-          "robots"
-        ]
-      }
-    },
-    "/robots/{id}/actions": {
-      "post": {
-        "operationId": "RobotRuntimeController_enqueueAction",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/EnqueueActionDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Enqueue remote robot action (owner only)",
-        "tags": [
-          "robots"
-        ]
-      }
-    },
-    "/robots/{id}/actions/pending": {
-      "get": {
-        "operationId": "RobotRuntimeController_getPendingActions",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "List pending remote robot actions (owner only)",
-        "tags": [
-          "robots"
-        ]
-      }
-    },
-    "/robots/actions/poll": {
-      "post": {
-        "operationId": "RobotRuntimeController_pollActions",
-        "parameters": [
-          {
-            "name": "authorization",
-            "required": true,
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "summary": "Robot polls pending remote actions using robot bearer auth",
-        "tags": [
-          "robots"
-        ]
-      }
-    },
-    "/robots/logs": {
-      "post": {
-        "operationId": "RobotRuntimeController_pushLogs",
-        "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/IngestRobotLogsDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "summary": "Robot uploads temporary diagnostics logs using robot bearer auth",
-        "tags": [
-          "robots"
-        ]
-      }
-    },
-    "/robots/telemetry": {
-      "post": {
-        "operationId": "RobotRuntimeController_pushTelemetry",
-        "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PushTelemetryDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "summary": "Robot uploads temporary runtime telemetry using robot bearer auth",
-        "tags": [
-          "robots"
-        ]
-      }
-    },
-    "/robots/{id}/logs": {
-      "get": {
-        "operationId": "RobotRuntimeController_getLogs",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Get recent temporary robot logs (owner only)",
-        "tags": [
-          "robots"
-        ]
-      }
-    },
-    "/robots/{id}/telemetry": {
-      "get": {
-        "operationId": "RobotRuntimeController_getTelemetry",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Get recent temporary robot telemetry (owner only)",
-        "tags": [
-          "robots"
-        ]
-      }
-    },
     "/robots/{id}/webhooks": {
       "get": {
         "operationId": "RobotWebhooksController_listWebhooks",
@@ -1757,109 +1532,6 @@
         ]
       }
     },
-    "/robots/{id}/ingress-cameras": {
-      "get": {
-        "operationId": "RobotCamerasController_listIngressCameras",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "List WHIP camera ingresses for a robot (owner only)",
-        "tags": [
-          "robots"
-        ]
-      },
-      "post": {
-        "operationId": "RobotCamerasController_createIngressCamera",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateIngressCameraDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Create or update a WHIP camera ingress for OBS/manual streaming (owner only)",
-        "tags": [
-          "robots"
-        ]
-      }
-    },
-    "/robots/{id}/ingress-cameras/{ingressId}": {
-      "delete": {
-        "operationId": "RobotCamerasController_deleteIngressCamera",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "ingressId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Delete an external camera WHIP ingress (owner only)",
-        "tags": [
-          "robots"
-        ]
-      }
-    },
     "/robots/{id}/regenerate-token": {
       "post": {
         "operationId": "RobotSecretsController_regenerateToken",
@@ -1944,271 +1616,6 @@
         "summary": "Ensure a stable invite code exists for a robot (owner only)",
         "tags": [
           "robots"
-        ]
-      }
-    },
-    "/livekit/token/viewer/{robotId}": {
-      "post": {
-        "operationId": "LivekitController_getViewerToken",
-        "parameters": [
-          {
-            "name": "robotId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "control",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "roomAccessToken",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Get LiveKit viewer/controller token",
-        "tags": [
-          "livekit"
-        ]
-      }
-    },
-    "/livekit/token/viewer-public/{robotId}": {
-      "post": {
-        "operationId": "LivekitController_getPublicViewerToken",
-        "parameters": [
-          {
-            "name": "robotId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "guestSessionId",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "roomAccessToken",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "summary": "Get guest LiveKit viewer token (ACL-aware)",
-        "tags": [
-          "livekit"
-        ]
-      }
-    },
-    "/livekit/token/robot/{robotId}": {
-      "post": {
-        "operationId": "LivekitController_getRobotToken",
-        "parameters": [
-          {
-            "name": "robotId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Get LiveKit robot publisher token",
-        "tags": [
-          "livekit"
-        ]
-      }
-    },
-    "/queue/{robotId}": {
-      "get": {
-        "operationId": "QueueController_getQueue",
-        "parameters": [
-          {
-            "name": "robotId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "authorization",
-            "required": true,
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "cookie",
-            "required": true,
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "roomAccessToken",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "guestSessionId",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "summary": "Get queue for a robot",
-        "tags": [
-          "queue"
-        ]
-      }
-    },
-    "/queue/{robotId}/join": {
-      "post": {
-        "operationId": "QueueController_join",
-        "parameters": [
-          {
-            "name": "robotId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Join the control queue",
-        "tags": [
-          "queue"
-        ]
-      }
-    },
-    "/queue/{robotId}/leave": {
-      "delete": {
-        "operationId": "QueueController_leave",
-        "parameters": [
-          {
-            "name": "robotId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Leave the control queue",
-        "tags": [
-          "queue"
-        ]
-      }
-    },
-    "/queue/{robotId}/vote/{targetUserId}": {
-      "post": {
-        "operationId": "QueueController_vote",
-        "parameters": [
-          {
-            "name": "robotId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "targetUserId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Vote for a user in the queue",
-        "tags": [
-          "queue"
         ]
       }
     },
@@ -2763,6 +2170,623 @@
         "summary": "Get profanity counters and recent events for a robot",
         "tags": [
           "moderation"
+        ]
+      }
+    },
+    "/livekit/token/viewer/{robotId}": {
+      "post": {
+        "operationId": "LivekitController_getViewerToken",
+        "parameters": [
+          {
+            "name": "robotId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "control",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "roomAccessToken",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get LiveKit viewer/controller token",
+        "tags": [
+          "livekit"
+        ]
+      }
+    },
+    "/livekit/token/viewer-public/{robotId}": {
+      "post": {
+        "operationId": "LivekitController_getPublicViewerToken",
+        "parameters": [
+          {
+            "name": "robotId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "guestSessionId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "roomAccessToken",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "Get guest LiveKit viewer token (ACL-aware)",
+        "tags": [
+          "livekit"
+        ]
+      }
+    },
+    "/livekit/token/robot/{robotId}": {
+      "post": {
+        "operationId": "LivekitController_getRobotToken",
+        "parameters": [
+          {
+            "name": "robotId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get LiveKit robot publisher token",
+        "tags": [
+          "livekit"
+        ]
+      }
+    },
+    "/robots/{id}/ingress-cameras": {
+      "get": {
+        "operationId": "RobotCamerasController_listIngressCameras",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List WHIP camera ingresses for a robot (owner only)",
+        "tags": [
+          "robots"
+        ]
+      },
+      "post": {
+        "operationId": "RobotCamerasController_createIngressCamera",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateIngressCameraDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create or update a WHIP camera ingress for OBS/manual streaming (owner only)",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/{id}/ingress-cameras/{ingressId}": {
+      "delete": {
+        "operationId": "RobotCamerasController_deleteIngressCamera",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ingressId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete an external camera WHIP ingress (owner only)",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/claim": {
+      "post": {
+        "operationId": "RobotRuntimeController_claim",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClaimRobotDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "Claim a robot and get LiveKit token for hardware client",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/heartbeat": {
+      "post": {
+        "operationId": "RobotRuntimeController_heartbeat",
+        "parameters": [
+          {
+            "name": "authorization",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "Heartbeat from robot hardware client",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/{id}/actions": {
+      "post": {
+        "operationId": "RobotRuntimeController_enqueueAction",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnqueueActionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Enqueue remote robot action (owner only)",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/{id}/actions/pending": {
+      "get": {
+        "operationId": "RobotRuntimeController_getPendingActions",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List pending remote robot actions (owner only)",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/actions/poll": {
+      "post": {
+        "operationId": "RobotRuntimeController_pollActions",
+        "parameters": [
+          {
+            "name": "authorization",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "Robot polls pending remote actions using robot bearer auth",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/logs": {
+      "post": {
+        "operationId": "RobotRuntimeController_pushLogs",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestRobotLogsDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "Robot uploads temporary diagnostics logs using robot bearer auth",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/telemetry": {
+      "post": {
+        "operationId": "RobotRuntimeController_pushTelemetry",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PushTelemetryDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "Robot uploads temporary runtime telemetry using robot bearer auth",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/{id}/logs": {
+      "get": {
+        "operationId": "RobotRuntimeController_getLogs",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get recent temporary robot logs (owner only)",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/{id}/telemetry": {
+      "get": {
+        "operationId": "RobotRuntimeController_getTelemetry",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get recent temporary robot telemetry (owner only)",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/queue/{robotId}": {
+      "get": {
+        "operationId": "QueueController_getQueue",
+        "parameters": [
+          {
+            "name": "robotId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cookie",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "roomAccessToken",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "guestSessionId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Get queue for a robot",
+        "tags": [
+          "queue"
+        ]
+      }
+    },
+    "/queue/{robotId}/join": {
+      "post": {
+        "operationId": "QueueController_join",
+        "parameters": [
+          {
+            "name": "robotId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Join the control queue",
+        "tags": [
+          "queue"
+        ]
+      }
+    },
+    "/queue/{robotId}/leave": {
+      "delete": {
+        "operationId": "QueueController_leave",
+        "parameters": [
+          {
+            "name": "robotId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Leave the control queue",
+        "tags": [
+          "queue"
+        ]
+      }
+    },
+    "/queue/{robotId}/vote/{targetUserId}": {
+      "post": {
+        "operationId": "QueueController_vote",
+        "parameters": [
+          {
+            "name": "robotId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "targetUserId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Vote for a user in the queue",
+        "tags": [
+          "queue"
         ]
       }
     },
@@ -3481,6 +3505,18 @@
         "type": "object",
         "properties": {}
       },
+      "CreateRobotWebhookDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "ModerateUserDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "CreateIngressCameraDto": {
+        "type": "object",
+        "properties": {}
+      },
       "ClaimRobotDto": {
         "type": "object",
         "properties": {}
@@ -3494,18 +3530,6 @@
         "properties": {}
       },
       "PushTelemetryDto": {
-        "type": "object",
-        "properties": {}
-      },
-      "CreateRobotWebhookDto": {
-        "type": "object",
-        "properties": {}
-      },
-      "CreateIngressCameraDto": {
-        "type": "object",
-        "properties": {}
-      },
-      "ModerateUserDto": {
         "type": "object",
         "properties": {}
       },

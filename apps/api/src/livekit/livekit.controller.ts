@@ -1,10 +1,11 @@
-import { Controller, Post, Param, UseGuards, Query, ForbiddenException } from '@nestjs/common';
+import { Controller, Post, Param, UseGuards, Query, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { LivekitService } from './livekit.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Public } from '../auth/decorators/public.decorator';
-import { RobotsService, type GuestAccess } from '../robots/robots.service';
+import { RobotsService } from '../robots/robots.service';
+import type { GuestAccess } from '../robots/robots.types';
 import { QueueService } from '../queue/queue.service';
 import { isStaffRole } from '../common/robot-access';
 import type { JwtPayload } from '@botparty/shared';
@@ -30,17 +31,20 @@ export class LivekitController {
     @Query('roomAccessToken') roomAccessToken?: string,
   ) {
     const robot = await this.robotsService.findById(robotId);
-    const access = this.readVideoAccess(robot.metadata);
-    if (access.video === 'DISABLED') {
-      throw new ForbiddenException('Video is disabled for this robot');
-    }
     const allowed = await this.robotsService.validateRoomAccess({
       robotId,
       actorId: user.sub,
       roomAccessToken,
     });
     if (!allowed) {
+      if (robot.visibility === 'PRIVATE') {
+        throw new NotFoundException('Robot not found');
+      }
       throw new ForbiddenException('Room access verification required');
+    }
+    const access = this.readVideoAccess(robot.metadata);
+    if (access.video === 'DISABLED') {
+      throw new ForbiddenException('Video is disabled for this robot');
     }
 
     const canControl = await this.canIssueDataToken(robotId, user, control === 'true');
@@ -66,7 +70,7 @@ export class LivekitController {
   ) {
     const robot = await this.robotsService.findById(robotId);
     if (robot.visibility === 'PRIVATE') {
-      throw new ForbiddenException('Guest video access is unavailable for private robots');
+      throw new NotFoundException('Robot not found');
     }
 
     const access = this.readVideoAccess(robot.metadata);
@@ -154,13 +158,7 @@ export class LivekitController {
   ) {
     const robot = await this.robotsService.findById(robotId);
 
-    if (!robot) {
-      throw new ForbiddenException('Robot not found');
-    }
-
-    if (robot.ownerId !== user.sub) {
-      throw new ForbiddenException('Not your robot');
-    }
+    if (!robot || robot.ownerId !== user.sub) throw new NotFoundException('Robot not found');
 
     const token = await this.livekitService.generateRobotToken(robot.id, robot.name);
     return {

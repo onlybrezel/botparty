@@ -1,4 +1,4 @@
-/* eslint-disable @next/next/no-img-element */
+import { createElement } from 'react';
 import type { AnchorHTMLAttributes, ImgHTMLAttributes } from 'react';
 import { render, screen } from '@testing-library/react';
 import { QueueMode, RobotAccessMode, RobotStatus, RobotVisibility, Role } from '@botparty/shared';
@@ -14,7 +14,7 @@ vi.mock('next/link', () => ({
 
 vi.mock('next/image', () => ({
   default: ({ priority: _priority, ...props }: ImgHTMLAttributes<HTMLImageElement> & { priority?: boolean }) => (
-    <img {...props} alt={props.alt ?? ''} />
+    createElement('img', { ...props, alt: props.alt ?? '' })
   ),
 }));
 

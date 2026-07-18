@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma, TransactionType } from '@botparty/prisma';
@@ -19,6 +20,8 @@ const DONATION_DAILY_TOTAL_KEY = (userId: string) => `wallet:donations:dailytota
 
 @Injectable()
 export class DonationService {
+  private readonly logger = new Logger(DonationService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
@@ -50,9 +53,12 @@ export class DonationService {
 
     const robot = await this.prisma.robot.findUnique({
       where: { id: robotId },
-      select: { id: true, ownerId: true, name: true },
+      select: { id: true, ownerId: true, name: true, visibility: true },
     });
     if (!robot) throw new NotFoundException('Robot not found');
+    if (robot.visibility === 'PRIVATE' && robot.ownerId !== donorId) {
+      throw new NotFoundException('Robot not found');
+    }
     if (robot.ownerId === donorId) {
       throw new BadRequestException({
         code: 'SELF_DONATION_FORBIDDEN',
@@ -122,7 +128,13 @@ export class DonationService {
 
     if (!transferOutcome.ok) {
       const transferError = transferOutcome.error;
-      await this.rollbackRateLimits(donorId, amount).catch(() => undefined);
+      try {
+        await this.rollbackRateLimits(donorId, amount);
+      } catch (rollbackError) {
+        this.logger.warn(
+          `Failed to roll back donation rate-limit reservation: ${(rollbackError as Error).message}`,
+        );
+      }
       if ((transferError as { code?: string } | null)?.code === 'P2002') {
         const winner = await this.prisma.walletIdempotencyKey.findUnique({
           where: { userId_scope_key: { userId: donorId, scope: 'donation', key: normalizedKey } },

@@ -1,54 +1,24 @@
-# ADR 0003: Database ORM (Prisma vs TypeORM vs Raw SQL)
+# ADR 0003: Prisma for PostgreSQL access
 
 **Status:** Accepted
 **Date:** 2026-04-16
 
 ## Context
 
-Backend needed a database abstraction layer supporting:
-- Type-safe query builder for TypeScript
-- Auto-generated migrations
-- Relationship eager-loading (avoid N+1)
-- Real-time subscriptions (optional)
-- Developer ergonomics
+The API needs typed PostgreSQL access, committed schema migrations, relations, and transactions.
+Correctness-critical paths also need row locks, conditional updates, and database-specific queries.
 
 ## Decision
 
-We chose **Prisma** for:
-
-1. **Type generation** – Automatic TypeScript types from schema
-2. **Developer experience** – Intuitive query API, excellent docs
-3. **Migrations** – Auto-generated, human-readable `.sql` files
-4. **Relations** – Built-in relation loading with `.include()/` select()`
-5. **Community** – Quick evolution, strong Next.js/NestJS support
+Use Prisma Client for normal reads, writes, relations, and transactions. Keep migrations as reviewed
+SQL under `packages/prisma/prisma/migrations`. Use parameterized raw SQL through Prisma only where
+the generated API cannot express an invariant, such as `FOR UPDATE`, guarded balance updates, and
+operational PostgreSQL metrics.
 
 ## Consequences
 
-### Positive
-- Zero boilerplate for CRUD operations
-- Type safety for queries and results
-- Easy schema migrations
-- Great debugging with `DEBUG=prisma:*`
-
-### Negative
-- Vendor lock-in (Prisma-specific QL)
-- Raw queries require breaking out to SQL
-- Subscription features require extra tooling
-
-## Alternatives Considered
-
-- **TypeORM:** More mature, but boilerplate-heavy decorators
-- **Sequelize:** Good ORM, but weaker TS support
-- **Raw SQL + sql-bricks:** Full control, but high maintenance burden
-
-## Migration Path
-
-If we ever needed to switch:
-1. Keep all data access in services (separation of concerns ✓)
-2. New ORM would only affect `*.service.ts` files
-3. API/response types would remain unchanged
-
-## References
-
-- Prisma docs: https://www.prisma.io/docs/
-- Prisma best practices: https://www.prisma.io/docs/guides/performance-and-optimization
+- Generated types keep schema access consistent across services.
+- Raw SQL remains visible at the business operation that requires it and must stay parameterized.
+- A dedicated migration container runs migrations once; API replicas never migrate on startup.
+- Prisma is an infrastructure dependency, not a repository abstraction. Services call it directly
+  unless a helper owns a real cross-cutting invariant.

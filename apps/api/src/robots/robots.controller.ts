@@ -15,7 +15,6 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { JwtService } from '@nestjs/jwt';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { JwtPayload, CreateRobotInput, UpdateRobotInput } from '@botparty/shared';
 import { Role } from '@botparty/shared';
@@ -25,6 +24,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { AuthService } from '../auth/auth.service';
 import { RobotsService } from './robots.service';
 import {
   AddAllowedUserDto,
@@ -38,7 +38,7 @@ import {
 export class RobotsController {
   constructor(
     private readonly robotsService: RobotsService,
-    private readonly jwtService: JwtService,
+    private readonly authService: AuthService,
     private readonly configService: ConfigService,
   ) {}
 
@@ -180,9 +180,18 @@ export class RobotsController {
 
   @Get(':id/thumbnail-image')
   @ApiOperation({ summary: 'Get a robot thumbnail image' })
-  async getThumbnail(@Param('id') id: string, @Res({ passthrough: true }) reply: FastifyReply) {
-    const file = await this.robotsService.readRobotThumbnail(id);
-    reply.header('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
+  async getThumbnail(
+    @Param('id') id: string,
+    @Headers('authorization') authorization: string | undefined,
+    @Headers('cookie') cookieHeader: string | undefined,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    const file = await this.robotsService.readRobotThumbnail(
+      id,
+      await this.resolveRequesterId(authorization, cookieHeader),
+    );
+    reply.header('Cache-Control', file.cacheControl);
+    reply.header('Vary', 'Authorization, Cookie');
     reply.type(file.contentType);
     return file.buffer;
   }
@@ -226,7 +235,7 @@ export class RobotsController {
   ) {
     return this.robotsService.issueRoomAccessGrant({
       robotId: id,
-      requesterUserId: this.resolveRequesterId(authorization, cookieHeader),
+      requesterUserId: await this.resolveRequesterId(authorization, cookieHeader),
       password: body?.password,
       guestSessionId: body?.guestSessionId,
       inviteCode: body?.inviteCode,
@@ -254,7 +263,7 @@ export class RobotsController {
 
     return this.robotsService.getChatHistoryPage({
       robotId: id,
-      requesterUserId: this.resolveRequesterId(authorization, cookieHeader),
+      requesterUserId: await this.resolveRequesterId(authorization, cookieHeader),
       guestSessionId: query.guestSessionId,
       roomAccessToken: query.roomAccessToken,
       before: parsedBefore ?? undefined,
@@ -269,20 +278,13 @@ export class RobotsController {
     return this.robotsService.findByUsernameAndSlug(username, slug);
   }
 
-  private resolveRequesterId(authorization?: string, cookieHeader?: string): string | null {
+  private async resolveRequesterId(authorization?: string, cookieHeader?: string): Promise<string | null> {
     const token =
       extractBearerToken(authorization) ?? parseCookie(cookieHeader, getAccessCookieName(this.configService));
     if (!token) {
       return null;
     }
 
-    try {
-      const payload = this.jwtService.verify<JwtPayload>(token, {
-        secret: this.configService.getOrThrow<string>('JWT_SECRET'),
-      });
-      return payload.sub;
-    } catch {
-      return null;
-    }
+    return (await this.authService.resolveValidAccessTokenPayload(token))?.sub ?? null;
   }
 }

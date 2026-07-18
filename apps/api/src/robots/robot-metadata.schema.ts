@@ -20,7 +20,7 @@ const authSchema = z.object({
   boundDeviceHash: z.string().trim().min(1).optional(),
 });
 
-export const robotMetadataSchema = z.object({
+const robotMetadataSchema = z.object({
   access: z
     .object({
       video: guestAccessSchema.optional(),
@@ -35,7 +35,7 @@ export const robotMetadataSchema = z.object({
   streamKeyIssuedAt: z.string().datetime().optional(),
 }).passthrough();
 
-export type RobotMetadata = z.infer<typeof robotMetadataSchema>;
+type RobotMetadata = z.infer<typeof robotMetadataSchema>;
 
 function asRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {

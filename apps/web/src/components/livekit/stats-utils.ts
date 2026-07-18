@@ -1,4 +1,4 @@
-import type { TrackReference } from '@livekit/components-core';
+import type { TrackReference } from '@livekit/components-react';
 import type { RobotStreamCameraConfig } from '@botparty/shared';
 
 export type SparklineBounds = {
@@ -35,7 +35,7 @@ export type VolumePreference = {
   isMuted: boolean;
 };
 
-export const DEFAULT_VOLUME_PREFERENCE: VolumePreference = {
+const DEFAULT_VOLUME_PREFERENCE: VolumePreference = {
   volume: 100,
   isMuted: false,
 };
@@ -64,19 +64,19 @@ export function formatPercent(value: number | null | undefined) {
   return `${value}%`;
 }
 
-export function prettifyCameraId(id: string) {
+function prettifyCameraId(id: string) {
   return id
     .replace(/[._-]+/g, ' ')
     .trim()
     .replace(/\b\w/g, (part) => part.toUpperCase()) || 'Camera';
 }
 
-export function readTrackName(trackRef: TrackReference) {
+function readTrackName(trackRef: TrackReference) {
   const publication = trackRef.publication as { trackName?: string; name?: string } | undefined;
   return publication?.trackName ?? publication?.name ?? '';
 }
 
-export function readParticipantIdentity(trackRef: TrackReference) {
+function readParticipantIdentity(trackRef: TrackReference) {
   const participant = trackRef.participant as { identity?: string; name?: string } | undefined;
   const publication = trackRef.publication as {
     participant?: { identity?: string; name?: string };
@@ -90,7 +90,7 @@ export function readParticipantIdentity(trackRef: TrackReference) {
   );
 }
 
-export function parseCameraIdFromTrackName(trackName: string) {
+function parseCameraIdFromTrackName(trackName: string) {
   const trimmed = trackName.trim();
   if (!trimmed) {
     return null;
@@ -108,7 +108,7 @@ export function parseCameraIdFromTrackName(trackName: string) {
   return null;
 }
 
-export function parseCameraIdFromParticipantIdentity(identity: string) {
+function parseCameraIdFromParticipantIdentity(identity: string) {
   const trimmed = identity.trim();
   if (!trimmed) {
     return null;
@@ -122,7 +122,7 @@ export function parseCameraIdFromParticipantIdentity(identity: string) {
   return null;
 }
 
-export function parseCameraIdFromParticipantLabel(
+function parseCameraIdFromParticipantLabel(
   identityOrName: string,
   configuredCameras: RobotStreamCameraConfig[] = [],
 ) {

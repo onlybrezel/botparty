@@ -31,12 +31,19 @@ describe('RecordingAdminService', () => {
       },
       session: { findFirst: jest.fn() },
     };
-    configValues = {};
+    configValues = { JWT_SECRET: 'recording-test-signing-secret' };
 
     service = new RecordingAdminService(
       prisma as never,
       {} as never,
-      { get: jest.fn((key: string) => configValues[key]) } as never,
+      {
+        get: jest.fn((key: string) => configValues[key]),
+        getOrThrow: jest.fn((key: string) => {
+          const value = configValues[key];
+          if (!value) throw new Error(`Missing ${key}`);
+          return value;
+        }),
+      } as never,
     );
   });
 
@@ -69,6 +76,13 @@ describe('RecordingAdminService', () => {
         ),
       }),
     ]);
+  });
+
+  it('rejects moderators at the service boundary for admin recordings', async () => {
+    prisma.user.findUnique.mockResolvedValue({ role: 'MOD' });
+
+    await expect(service.listAdminRecordings('moderator-1')).rejects.toThrow('Access denied');
+    expect(prisma.recording.findMany).not.toHaveBeenCalled();
   });
 
   it('streams an indexed recording by its exact object key', async () => {

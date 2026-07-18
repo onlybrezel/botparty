@@ -57,8 +57,11 @@ const configurations = {
   },
 };
 
-mkdirSync(outputDirectory, { recursive: true, mode: 0o700 });
+mkdirSync(outputDirectory, { recursive: true, mode: 0o755 });
 for (const [name, configuration] of Object.entries(configurations)) {
-  writeFileSync(resolve(outputDirectory, name), `${JSON.stringify(configuration, null, 2)}\n`, { mode: 0o600 });
+  // LiveKit, ingress, and egress images use different non-root UIDs. The
+  // dedicated Docker volume is mounted only into those services, so a readable
+  // runtime config is safer than relying on image-specific numeric ownership.
+  writeFileSync(resolve(outputDirectory, name), `${JSON.stringify(configuration, null, 2)}\n`, { mode: 0o644 });
 }
 console.log('LiveKit runtime configuration rendered from secret files.');

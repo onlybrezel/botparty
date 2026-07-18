@@ -1,6 +1,12 @@
 import { ControlButtonAccess, LIMITS, WS_EVENTS } from '@botparty/shared';
 import { InsufficientFundsError } from '../wallet/wallet.service';
 import { ControlHandler } from './control.handler';
+import type { WsClient } from './gateway-types';
+
+type ControlHandlerTestAccess = {
+  pending: Map<string, unknown>;
+  _authorizeCommand(input: Record<string, unknown>): Promise<unknown>;
+};
 
 const ROBOT_ID = '550e8400-e29b-41d4-a716-446655440000';
 const COMMAND_ID = 'd9428888-122b-11e1-b85c-61cd3cbb3210';
@@ -94,7 +100,7 @@ describe('ControlHandler', () => {
       role: 'USER',
       isGuest: false,
       ...overrides,
-    } as any;
+    } as unknown as WsClient;
   }
 
   function payload(overrides: Record<string, unknown> = {}) {
@@ -121,6 +127,8 @@ describe('ControlHandler', () => {
 
   describe('validation and access', () => {
     it('rejects malformed, blank, stale, and future commands', async () => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2026-07-18T12:00:00.000Z'));
       const { handler, ctx } = buildHandler();
       const client = createClient();
 
@@ -376,6 +384,32 @@ describe('ControlHandler', () => {
         }),
       });
     });
+
+    it('compensates an unacknowledged reservation when the bounded ACK timer expires', async () => {
+      jest.useFakeTimers();
+      const { handler, features, tx, walletService } = preparePaid();
+      features.isEnabled.mockReturnValue(true);
+      tx.controlCommand.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({
+          id: COMMAND_ID,
+          robotId: ROBOT_ID,
+          userId: 'user-1',
+          costCredits: 20,
+          ledgerGroupId: 'ledger-1',
+          status: 'PENDING',
+        });
+
+      await handler.handle(createClient(), payload());
+      await jest.advanceTimersByTimeAsync(3_000);
+
+      expect(walletService.compensateReservedControlInTransaction).toHaveBeenCalledTimes(1);
+      expect(tx.controlCommand.update).toHaveBeenCalledWith({
+        where: { id: COMMAND_ID },
+        data: expect.objectContaining({ status: 'COMPENSATED', errorCode: 'ACK_TIMEOUT' }),
+      });
+      handler.shutdown();
+    });
   });
 
   describe('acknowledgement and recovery', () => {
@@ -411,7 +445,7 @@ describe('ControlHandler', () => {
       const { handler, tx, walletService } = buildHandler();
       const viewer = createClient();
       const timer = setTimeout(() => undefined, 60_000);
-      (handler as any).pending.set(COMMAND_ID, {
+      (handler as unknown as ControlHandlerTestAccess).pending.set(COMMAND_ID, {
         robotId: ROBOT_ID,
         userId: 'user-1',
         ownerId: 'owner-1',
@@ -461,7 +495,7 @@ describe('ControlHandler', () => {
       built: ReturnType<typeof buildHandler>,
       overrides: Record<string, unknown> = {},
     ) {
-      return (built.handler as any)._authorizeCommand({
+      return (built.handler as unknown as ControlHandlerTestAccess)._authorizeCommand({
         robot: { id: ROBOT_ID, ownerId: 'owner-1', queueMode: 'FIRST_COME' },
         client: createClient(),
         command: 'forward',

@@ -15,8 +15,7 @@ export function NotificationCenter({ enabled }: { enabled: boolean }) {
 
   const load = useCallback(async () => {
     if (!enabled) return;
-    const result = await api.notifications.list().catch(() => null);
-    if (!result) return;
+    const result = await api.notifications.list();
     setItems(result.items);
     setUnread(result.unreadCount);
     if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
@@ -33,7 +32,9 @@ export function NotificationCenter({ enabled }: { enabled: boolean }) {
 
   useEffect(() => {
     if (!enabled) return;
-    const onFocus = () => void load();
+    const onFocus = () => void load().catch((error: unknown) => {
+      console.error('Failed to refresh notifications', error);
+    });
     window.addEventListener('focus', onFocus);
     return () => {
       window.removeEventListener('focus', onFocus);
@@ -51,7 +52,12 @@ export function NotificationCenter({ enabled }: { enabled: boolean }) {
 
   const markRead = async (item: NotificationRecord) => {
     if (!item.readAt) {
-      await api.notifications.markRead(item.id).catch(() => undefined);
+      try {
+        await api.notifications.markRead(item.id);
+      } catch (error) {
+        console.error('Failed to mark notification as read', error);
+        return;
+      }
       setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, readAt: new Date().toISOString() } : entry));
       setUnread((current) => Math.max(0, current - 1));
     }
@@ -86,6 +92,8 @@ export function NotificationCenter({ enabled }: { enabled: boolean }) {
                 onClick={() => void api.notifications.markAllRead().then(() => {
                   setItems((current) => current.map((item) => ({ ...item, readAt: item.readAt ?? new Date().toISOString() })));
                   setUnread(0);
+                }).catch((error: unknown) => {
+                  console.error('Failed to mark notifications as read', error);
                 })}
               >
                 Mark all read

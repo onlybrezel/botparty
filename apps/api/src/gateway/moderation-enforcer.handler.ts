@@ -42,7 +42,11 @@ export class ModerationEnforcerHandler {
       await this.ctx.clearTurnState(robotId, 'clear');
     }
 
-    await this.queueService.leave(robotId, targetUserId).catch(() => {});
+    await this.queueService.leave(robotId, targetUserId).catch((error: unknown) => {
+      this.logger.warn(
+        `Failed to remove moderated user ${targetUserId} from robot ${robotId}: ${(error as Error).message}`,
+      );
+    });
 
     if (event === WS_EVENTS.MOD_BAN) {
       this.disconnectUserFromRoom(robotId, targetUserId);

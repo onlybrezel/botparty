@@ -1,4 +1,4 @@
-import { ForbiddenException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Role, type JwtPayload } from '@botparty/shared';
 import { LivekitController } from './livekit.controller';
 
@@ -81,7 +81,9 @@ describe('LivekitController access policy', () => {
           false,
         );
       } else {
-        await expect(request).rejects.toBeInstanceOf(ForbiddenException);
+        await expect(request).rejects.toBeInstanceOf(
+          visibility === 'PRIVATE' ? NotFoundException : ForbiddenException,
+        );
         expect(livekit.generateViewerToken).not.toHaveBeenCalled();
       }
 
@@ -161,6 +163,17 @@ describe('LivekitController access policy', () => {
     expect(livekit.generateViewerToken).not.toHaveBeenCalled();
   });
 
+  it('does not disclose private rooms to unauthorized authenticated viewers', async () => {
+    const { controller, robots, livekit } = buildController();
+    robots.findById.mockResolvedValue(robot('PRIVATE'));
+    robots.validateRoomAccess.mockResolvedValue(false);
+
+    await expect(controller.getViewerToken('robot-1', user)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    expect(livekit.generateViewerToken).not.toHaveBeenCalled();
+  });
+
   it('rejects authenticated viewers when video is disabled', async () => {
     const { controller, robots } = buildController();
     robots.findById.mockResolvedValue(robot('PUBLIC', 'OPEN', 'DISABLED'));
@@ -168,7 +181,7 @@ describe('LivekitController access policy', () => {
     await expect(controller.getViewerToken('robot-1', user)).rejects.toThrow(
       'Video is disabled for this robot',
     );
-    expect(robots.validateRoomAccess).not.toHaveBeenCalled();
+    expect(robots.validateRoomAccess).toHaveBeenCalled();
   });
 
   it.each([
@@ -207,8 +220,8 @@ describe('LivekitController access policy', () => {
 
     const denied = buildController();
     denied.robots.findById.mockResolvedValue(robot());
-    await expect(denied.controller.getRobotToken('robot-1', user)).rejects.toThrow(
-      'Not your robot',
+    await expect(denied.controller.getRobotToken('robot-1', user)).rejects.toBeInstanceOf(
+      NotFoundException,
     );
   });
 });

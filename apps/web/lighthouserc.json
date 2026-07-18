@@ -5,6 +5,9 @@
       "startServerReadyPattern": "Ready in|started server on|Local:",
       "startServerReadyTimeout": 120000,
       "puppeteerScript": "./tests/lighthouse/auth.cjs",
+      "puppeteerLaunchOptions": {
+        "args": ["--no-sandbox", "--disable-setuid-sandbox"]
+      },
       "url": [
         "http://127.0.0.1:3000/",
         "http://127.0.0.1:3000/explore",

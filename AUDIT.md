@@ -4,9 +4,9 @@
 
 **Audit-Stichtag:** 17. Juli 2026
 
-**Audit-Typ:** vollständiges statisches Fullstack-, Security-, Produkt-, UX/UI-, QA- und Betriebs-Audit mit frischen lokalen Verifikationsläufen
+**Audit-Typ:** vollständiges statisches und dynamisches Fullstack-, Security-, Produkt-, UX/UI-, QA- und Betriebs-Audit mit isolierten Docker-Verifikationsläufen
 
-**Release-Entscheidung:** **Nein – in der geprüften Fassung nicht release-ready**
+**Release-Entscheidung am Audit-Stichtag:** **Nein – in der ursprünglich geprüften Fassung nicht release-ready**
 
 ## Sanierungsstand vom 18. Juli 2026
 
@@ -15,13 +15,16 @@ Die Abschnitte 1 bis 14 dokumentieren den historischen Ausgangsbefund vom Audit-
 Aktuell verifiziert:
 
 - Fresh- und Upgrade-Migrationen auf PostgreSQL 16 einschließlich Drift- und Wiederholungstest: **grün**.
-- API: **54 aktive Suites / 541 Tests grün**; nur die explizit optionale Testcontainers-Suite ist übersprungen.
-- Web: **25 Testdateien / 91 Tests grün**.
-- Playwright Chromium: **20/20 Tests grün**, einschließlich Auth, Host-Onboarding, CSP, Accessibility und Queue-/Control-Smokes.
+- API: **65/65 Suites / 608/608 Tests grün**, einschließlich aktiver Testcontainers-Integration.
+- Web: **33/33 Testdateien / 109/109 Tests grün**.
+- Playwright Chromium: **21/21 Tests grün**, einschließlich Auth, Host-Onboarding, CSP, Accessibility, Eigentümerisolation und Queue-/Control-Smokes.
 - API- und Web-Coverage einschließlich der separaten 90-%-Schwellen für kritische Auth-, Finanz-, Control- und LiveKit-Dateien: **grün**.
-- Produktions-Dependency-Audit: **0 kritische / 0 hohe Befunde**; verbleibend 7 mittlere und 2 niedrige transitive Befunde.
-- OpenAPI-/Client-Drift, ENV-Parität, Architekturgrenzen, Backup-/Restore-Drill, Queue-Benchmark und File-Secret-Smoke: **grün**.
-- Dev-Compose einschließlich Imagebuild, Migration, Healthchecks und Hot-Reload: **grün**; die erweiterte Lighthouse-Routenmatrix befindet sich noch in der abschließenden Laufzeitprüfung.
+- Produktions- und vollständiger Dependency-Audit: **keine bekannten Schwachstellen**.
+- OpenAPI-/Referenz-Drift, ENV-Parität, Architekturgrenzen, Backup-/Restore-Drill, Queue-Benchmark und File-Secret-Smoke: **grün**.
+- Fresh-Docker-E2E, Dev-Compose einschließlich Imagebuild, zwölf Migrationen, Healthchecks und Hot-Reload sowie die mobile Lighthouse-Matrix mit 18 Läufen auf sechs Kernrouten: **grün**.
+- Zwei-API-Ausfall, DB-/Redis-/Storage-Ausfälle, fehlerhaftes Deployment, Rolling Update und echter Rollback wurden in der isolierten Compose-Umgebung praktisch bestanden. Das Rollout-/Rollback-/Rollforward-Triple lieferte auf allen beantworteten Requests HTTP 200; ungesunde Surge-Replikas blieben vollständig vom Traffic isoliert. Eine zusätzliche 150-Sekunden-Keep-alive-Probe des finalen Rollouts maß 146.191 HTTP-200-Antworten und sieben rohe Socket-Reconnects bei Nginx-Konfigurationswechseln (0,0048 %); die Single-Proxy-Grenze ist im Abschlussbericht ausgewiesen.
+- Das HTTPS-Profil startete als UID 101 mit read-only Root-Dateisystem, gruppenbeschränktem TLS-Schlüssel, Capability-Drop und erfolgreichen HTTP-/HTTPS-Probes.
+- Abschließende Shell-, Compose-, Diff-, Abschwächungs- und Hochkonfidenz-Secretsuche: **grün**; `git diff --check` Exit 0.
 
 ## Methodik, Evidenz und Grenzen
 
@@ -818,7 +821,7 @@ Die Reihenfolge innerhalb einer Priorität folgt Abhängigkeiten und Risikoreduk
   - Geschätzter Aufwand: mittel
 
 - [x] **Hohe direkte Dependency-Advisories beheben**
-  - Umgesetzt und geprüft (18.07.2026): Direkte Laufzeitpakete wurden auf gepatchte Linien aktualisiert und das ungenutzte PayPal-SDK entfernt; `pnpm audit --prod --audit-level high` meldet 0 hohe/kritische und nur 2 niedrige plus 7 mittlere Befunde.
+  - Umgesetzt und geprüft (18.07.2026): Direkte Laufzeitpakete wurden auf gepatchte Linien aktualisiert, ungenutzte Pakete entfernt und transitive Sicherheitsversionen gepinnt; Produktions- und vollständiger `pnpm audit --audit-level low` melden keine bekannten Schwachstellen.
   - Priorität: P0
   - Kategorie: Security
   - Problem: **Gefunden.** Frischer Production-Audit: 44 hohe, 35 mittlere und 6 niedrige Advisories; direkte Pfade betreffen unter anderem Next, Fastify/Nest-Plattform, ws und Nodemailer.
@@ -868,7 +871,7 @@ Die Reihenfolge innerhalb einer Priorität folgt Abhängigkeiten und Risikoreduk
   - Geschätzter Aufwand: klein
 
 - [x] **Aktuell rote API- und Web-Tests reparieren**
-  - Umgesetzt und geprüft (18.07.2026): Gateway- und Fokusfixtures, Jest-Lifecycle sowie die Browser-Smokes wurden repariert; API 54/54 aktive Suites mit 541 Tests, Web 25/25 Dateien mit 91 Tests und Chromium 20/20 laufen grün, nur die explizit optionale Testcontainers-Suite bleibt übersprungen.
+  - Umgesetzt und geprüft (18.07.2026): Gateway- und Fokusfixtures, Jest-Lifecycle sowie die Browser-Smokes wurden repariert; API 65/65 Suites mit 608 Tests einschließlich aktiver Testcontainers-Integration, Web 33/33 Dateien mit 109 Tests und Chromium 21/21 laufen grün. Ein Test mit ausschließlich bedingungslos erfolgreichen Assertions wurde entfernt.
   - Priorität: P1
   - Kategorie: Codequalität
   - Problem: **Gefunden.** Gateway-Protokollsuite fehlt LivekitService und erzeugt vier Fehler; DashboardSidebar-Fokustest schlägt fehl.
@@ -964,7 +967,7 @@ Die Reihenfolge innerhalb einer Priorität folgt Abhängigkeiten und Risikoreduk
   - Geschätzter Aufwand: groß
 
 - [ ] **Finanzdaten bei Kontolöschung erhalten und Nutzer anonymisieren**
-  - Technisch umgesetzt und geprüft (18.07.2026): Accountlöschung deaktiviert Login und anonymisiert Profil/öffentliche Inhalte, während Ledger-, Billing- und Payoutrelationen mit pseudonymer Actor-ID und balanciertem Ledger erhalten bleiben. Externer Abnahmeblocker: Die verbindliche gesetzliche Aufbewahrungsdauer und Rechtsgrundlage müssen vom Betreiber juristisch freigegeben werden.
+  - Technisch umgesetzt und geprüft (18.07.2026): Accountlöschung deaktiviert Login und anonymisiert Profil/öffentliche Inhalte, während Ledger-, Billing- und Payoutrelationen mit pseudonymer Actor-ID und balanciertem Ledger erhalten bleiben. Staff-Änderungen und -Löschungen sperren Akteur und Ziel deterministisch, validieren die aktuelle aktive Adminrolle in der Transaktion und schreiben Profil-/Balance-/Ledgeränderungen atomar; anonymisierte Konten sind nicht reaktivierbar. Externer Abnahmeblocker: Die verbindliche gesetzliche Aufbewahrungsdauer und Rechtsgrundlage müssen vom Betreiber juristisch freigegeben werden.
   - Priorität: P1
   - Kategorie: Compliance
   - Problem: **Gefunden.** User-Hard-Delete kaskadiert Ledger, BillingIntents, Payouts und Idempotency-Daten.
@@ -1144,7 +1147,7 @@ Die Reihenfolge innerhalb einer Priorität folgt Abhängigkeiten und Risikoreduk
   - Geschätzter Aufwand: groß
 
 - [x] **Dev-Compose wieder baubar und startbar machen**
-  - Umgesetzt und geprüft (18.07.2026): Echte API-/Web-Dev-Stages, gemeinsame File-Secret-Auflösung, Source-Mounts und ein isolierter Smoke sind integriert; beide Images bauen, alle neun Migrationen plus Seed laufen, PostgreSQL/Redis/LiveKit/API/Web werden gesund und echte temporäre Codeänderungen lösen API- sowie Web-Reload aus.
+  - Umgesetzt und geprüft (18.07.2026): Echte API-/Web-Dev-Stages, gemeinsame File-Secret-Auflösung, Source-Mounts und ein isolierter Smoke sind integriert; beide Images bauen, alle zwölf Migrationen plus Seed laufen, PostgreSQL/Redis/LiveKit/API/Web werden gesund und echte temporäre Codeänderungen lösen API- sowie Web-Reload aus.
   - Priorität: P1
   - Kategorie: DevOps
   - Problem: **Gefunden.** target dev fehlt in beiden Dockerfiles; API start:dev fehlt; Standalone-Nutzung sucht falsches Dockerfile.
@@ -1180,7 +1183,7 @@ Die Reihenfolge innerhalb einer Priorität folgt Abhängigkeiten und Risikoreduk
   - Geschätzter Aufwand: groß
 
 - [x] **Nginx-Healthcheck, WebSocket-IP und Header konsolidieren**
-  - Umgesetzt und geprüft (18.07.2026): HTTP/TLS-Probes, Trusted-Proxy/XFF für REST und WS sowie eine widerspruchsfreie Headerquelle wurden vereinheitlicht; beide Composeprofile und Headertests sind grün.
+  - Umgesetzt und geprüft (18.07.2026): HTTP/TLS-Probes, Trusted-Proxy/XFF für REST und WS sowie eine widerspruchsfreie Headerquelle wurden vereinheitlicht; Composeprofile und Headertests sind grün. Der TLS-Container wurde zusätzlich als UID 101, read-only und ohne Capabilities mit gruppenbeschränktem `0640`-Schlüssel praktisch gestartet.
   - Priorität: P1
   - Kategorie: DevOps
   - Problem: **Gefunden.** HTTP-Config wird per HTTPS geprüft; /ws setzt kein X-Forwarded-For; Security-Header widersprechen sich.
@@ -1266,7 +1269,7 @@ Die Reihenfolge innerhalb einer Priorität folgt Abhängigkeiten und Risikoreduk
   - Geschätzter Aufwand: groß
 
 - [x] **API- und Eventverträge im Shared-Package konsolidieren**
-  - Umgesetzt und geprüft (18.07.2026): Öffentliche REST-/WS-Schemas und Enums liegen kanonisch in Shared/OpenAPI; Markdown und TypeScript-Client werden reproduzierbar generiert, und der zweimalige Hash-/Driftcheck ist grün.
+  - Umgesetzt und geprüft (18.07.2026): Öffentliche REST-/WS-Schemas und Enums liegen kanonisch in Shared/OpenAPI; OpenAPI und Markdown-Referenz werden reproduzierbar generiert und der Driftcheck ist grün. Der zur Laufzeit ungenutzte generierte TypeScript-Client wurde entfernt.
   - Priorität: P2
   - Kategorie: Codequalität
   - Problem: **Gefunden.** Webtypen sind mehrfach definiert; Subscription-Controller fällt auf any zurück; OpenAPI/Shared/Prisma-Werte driften.
@@ -1458,7 +1461,7 @@ Die Reihenfolge innerhalb einer Priorität folgt Abhängigkeiten und Risikoreduk
   - Geschätzter Aufwand: groß
 
 - [x] **Backup und Restore als automatisierten Drill etablieren**
-  - Umgesetzt und geprüft (18.07.2026): Versioniertes Manifest, Checksummen, PostgreSQL-/MinIO-/Secretbackup und isolierter Restore mit Migration, Drift- und Smokecheck laufen im Releaseworkflow; realer Drill bestand in 18 s, fehlendes Secret machte den Negativtest rot.
+  - Umgesetzt und geprüft (18.07.2026): Versioniertes Manifest, Checksummen, PostgreSQL-/MinIO-/Secretbackup und isolierter Restore mit Migration, Drift und Anwendungssmoke laufen im Releaseworkflow; der nach allen API-Korrekturen wiederholte Drill bestand in 30 s einschließlich Admin-Login, autorisierter Datenabfrage und Recording-Download. Beschädigtes Archiv, falscher Schlüssel und fehlendes Secret werden abgewiesen.
   - Priorität: P2
   - Kategorie: DevOps
   - Problem: **Gefunden.** Skripte/Doku widersprechen sich, referenzieren alte Services und ein vollständiger Restore ist nicht nachgewiesen.
@@ -1470,7 +1473,7 @@ Die Reihenfolge innerhalb einer Priorität folgt Abhängigkeiten und Risikoreduk
   - Geschätzter Aufwand: groß
 
 - [x] **Dokumentation, ADRs und OpenAPI mit dem Code synchronisieren**
-  - Umgesetzt und geprüft (18.07.2026): README, Runbook, Robot-/WS-Doku, Retention, Observability und ADRs wurden an Protokoll und Betrieb angepasst; OpenAPI, Markdown und Client sind deterministisch neu erzeugt und driftfrei.
+  - Umgesetzt und geprüft (18.07.2026): README, Runbook, Robot-/WS-Doku, Retention, Observability und ADRs wurden an Protokoll und Betrieb angepasst; OpenAPI und Markdown-Referenz sind deterministisch neu erzeugt und driftfrei.
   - Priorität: P2
   - Kategorie: Doku
   - Problem: **Gefunden.** Robot-Event, Healthpfad, Enumwerte, Billingstatus, Turn-Architektur und Safetyclaims sind veraltet oder widersprüchlich.
@@ -1481,7 +1484,8 @@ Die Reihenfolge innerhalb einer Priorität folgt Abhängigkeiten und Risikoreduk
   - Akzeptanzkriterium: OpenAPI-Driftcheck grün; Doku-Beispieltests laufen; keine Suche nach alten Events/Enums/Pfaden in aktiven Dokumenten.
   - Geschätzter Aufwand: groß
 
-- [ ] **Frontend-Bundle, Rendering und Polling messen und budgetieren**
+- [x] **Frontend-Bundle, Rendering und Polling messen und budgetieren**
+  - Umgesetzt und geprüft (18.07.2026): Framer Motion wurde entfernt, Kernrouten laden ohne unnötiges Prefetching, Explore/Login werden statisch ausgeliefert, die Filtersuche bleibt servergerendert, Robot- und Dashboard-Polling ist sichtbarkeitsabhängig und überlappungsfrei, Raumzustand nutzt WebSocketevents. Exakte JS-Baselines mit 10-%-Regressionsgate, consent-gebundene CLS/LCP/INP-p75-Messung und 18 mobile Lighthouse-Läufe auf Landing, Explore, Robot, Login, Pricing und authentifiziertem Dashboard sind grün: Performance 98–100, Accessibility 95–100, LCP 1,609–2,015 s, TBT 0–136 ms, CLS 0, 20–45 Requests und 42.594–174.533 übertragene Bytes.
   - Priorität: P2
   - Kategorie: Performance
   - Problem: **Prüfpunkt.** Große Clientdateien und paralleles Polling sind sichtbar, aber keine frische Bundle-/Web-Vitals-Messung liegt vor.
@@ -1505,7 +1509,7 @@ Die Reihenfolge innerhalb einer Priorität folgt Abhängigkeiten und Risikoreduk
   - Geschätzter Aufwand: mittel
 
 - [x] **Avatar-/Remote-Image-Policy datenschutz- und funktionssicher machen**
-  - Umgesetzt und geprüft (18.07.2026): Avatare werden serverseitig größen-, MIME- und pixelbegrenzt in eigenem S3 gespeichert; beliebige externe Trackinghosts werden nicht mehr direkt geladen und Uploadtests sind grün.
+  - Umgesetzt und geprüft (18.07.2026): Avatare werden serverseitig größen-, MIME- und pixelbegrenzt unter zufälligen Objektschlüsseln in einem privaten S3-Bucket gespeichert und ausschließlich über den API-Proxy geladen. Ersetzung, Löschung und Kontolöschung erzeugen transaktionale Storage-Outbox-Aufträge; Kompensations- und Docker-E2E-Tests sind grün.
   - Priorität: P2
   - Kategorie: Security
   - Problem: **Gefundenes Risiko.** Nutzer können HTTPS-Avatar-URLs setzen; Remotehosts können Tracking erhalten oder nicht von Next Image zugelassen sein.
@@ -1654,13 +1658,13 @@ Die Reihenfolge innerhalb einer Priorität folgt Abhängigkeiten und Risikoreduk
 
 ### Ist das Projekt aktuell release-ready?
 
-**Noch nicht für einen öffentlichen Produktionsstart.** 74 von 85 Audit-Punkten sind praktisch umgesetzt und mit lokalen Tests oder Betriebsnachweisen belegt. Die ursprünglichen technischen P0-/P1-Defekte bei Migration, Geldflüssen, Control-Safety, Zugriff, Secrets, Dependencies, Tests, Builds und Dev-Betrieb sind behoben. Eine technische Abschlussprüfung der mobilen Lighthouse-Routenmatrix läuft noch; die übrigen zehn offenen Punkte benötigen objektiv externe Konten, Repositoryfreigaben, juristische Entscheidungen oder physische Robot-/Kamerahardware.
+**Noch nicht für einen öffentlichen Produktionsstart.** 75 von 85 Audit-Punkten sind praktisch umgesetzt und mit lokalen Tests oder Betriebsnachweisen belegt. Die ursprünglichen technischen P0-/P1-Defekte bei Migration, Geldflüssen, Control-Safety, Zugriff, Secrets, Dependencies, Tests, Builds und Dev-Betrieb sind behoben. Alle lokal technisch ausführbaren Prüfungen sind abgeschlossen; die übrigen zehn offenen Punkte benötigen objektiv externe Konten, Repositoryfreigaben, juristische Entscheidungen oder physische Robot-/Kamerahardware.
 
 Monetarisierung, Payouts, Subscriptions und bezahlte Controls bleiben standardmäßig fail-closed. Ein Go-live ist erst verantwortbar, wenn die jeweils aktivierten Produktbereiche auch ihre unten dokumentierte externe Abnahme besitzen.
 
-### Laufende technische Abschlussprüfung
+### Technischer Abschlussstand
 
-- Die Lighthouse-CI-Matrix für Landing, Explore, Robot-Raum, Login, Pricing und authentifiziertes Dashboard bleibt bis zum realen mobilen Lauf offen. Bundle- und Modulbudgets sowie die Polling-/Realtime-Umstellung sind bereits integriert und grün.
+- Produktionsbuild, Lint, Typecheck, API-/Web-Coverage, Chromium-E2E, Bundlebudgets, File-Secrets, Compose-, ENV- und Architekturprüfungen sowie 18 mobile Lighthouse-Läufe auf sechs Kernrouten sind grün.
 
 ### Verbleibende externe Abnahmen
 
@@ -1671,4 +1675,4 @@ Monetarisierung, Payouts, Subscriptions und bezahlte Controls bleiben standardm�
 - 30-Minuten-Vier-Kamera-Messung und vollständiger Go-live-Pfad mit physischem Robot-Client, Kamera, Control-ACK und Hardware-E-Stop.
 - Datenschutzfreigabe für Zwecke und Rechtsgrundlage der Produktanalytics.
 
-Offene Checkboxen stehen ausschließlich für diese noch nicht erbrachten Akzeptanznachweise oder die laufende Lighthouse-Prüfung; technisch implementierte Teilstände sind direkt am jeweiligen Punkt dokumentiert.
+Offene Checkboxen stehen ausschließlich für diese noch nicht erbrachten externen Akzeptanznachweise; technisch implementierte Teilstände sind direkt am jeweiligen Punkt dokumentiert.

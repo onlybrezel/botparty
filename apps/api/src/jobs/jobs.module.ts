@@ -7,6 +7,7 @@ import { AuditCleanupProcessor } from './audit-cleanup.processor';
 import { JobSchedulerService } from './job-scheduler.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { MailModule } from '../mail/mail.module';
+import { QueueObservabilityService } from './queue-observability.service';
 
 @Module({
   imports: [
@@ -18,7 +19,13 @@ import { MailModule } from '../mail/mail.module';
     PrismaModule,
     MailModule,
   ],
-  providers: [WebhookProcessor, MailProcessor, AuditCleanupProcessor, JobSchedulerService],
+  providers: [
+    WebhookProcessor,
+    MailProcessor,
+    AuditCleanupProcessor,
+    JobSchedulerService,
+    QueueObservabilityService,
+  ],
   exports: [BullModule],
 })
 export class JobsModule {}

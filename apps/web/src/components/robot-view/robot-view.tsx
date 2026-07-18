@@ -22,7 +22,7 @@ interface Props {
   robot: RobotPublic;
 }
 
-export function RobotView({ robot }: Props) {
+function RobotView({ robot }: Props) {
   const state = useRobotViewState(robot);
 
   return (

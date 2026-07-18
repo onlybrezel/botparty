@@ -1,4 +1,9 @@
-import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { RobotsService } from './robots.service';
 import { RobotDeviceService } from './robot-device.service';
 import { RobotSlugService } from './robot-slug.service';
@@ -20,7 +25,7 @@ function buildMockPrisma(overrides: Record<string, unknown> = {}) {
     ...restOverrides
   } = overrides;
 
-  return {
+  const prisma = {
     $queryRaw: jest.fn().mockResolvedValue([]),
     robot: {
       findMany: jest.fn().mockResolvedValue([]),
@@ -51,6 +56,12 @@ function buildMockPrisma(overrides: Record<string, unknown> = {}) {
     },
     ...restOverrides,
   };
+  return {
+    ...prisma,
+    $transaction: jest.fn(async (callback: (tx: typeof prisma) => Promise<unknown>) =>
+      callback(prisma),
+    ),
+  };
 }
 
 function buildMockRedis() {
@@ -73,7 +84,10 @@ function buildMockConfig(values: Record<string, string> = {}) {
   };
 }
 
-function buildService(prismaOverrides?: Record<string, unknown>, configValues?: Record<string, string>) {
+function buildService(
+  prismaOverrides?: Record<string, unknown>,
+  configValues?: Record<string, string>,
+) {
   const mockPrisma = buildMockPrisma(prismaOverrides ?? {});
   const mockRedis = buildMockRedis();
   const mockTelemetry = { record: jest.fn(), touch: jest.fn() };
@@ -99,12 +113,25 @@ function buildService(prismaOverrides?: Record<string, unknown>, configValues?: 
   const deviceService = new RobotDeviceService(mockPrisma as never, mockConfig as never);
   const slugService = new RobotSlugService(mockPrisma as never);
   const inviteService = new RobotInviteService(mockPrisma as never);
-  const cameraService = new RobotCameraService(mockPrisma as never, mockAccess as never, mockConfig as never);
+  const cameraService = new RobotCameraService(
+    mockPrisma as never,
+    mockAccess as never,
+    mockConfig as never,
+  );
   const mockPlatformUser = {
     getPlatformUserId: jest.fn().mockReturnValue('00000000-0000-0000-0000-00000000fee5'),
     isPlatformUser: jest.fn((id) => id === '00000000-0000-0000-0000-00000000fee5'),
   } as never;
-  const publicOverviewService = new RobotPublicOverviewService(mockPrisma as never, mockRedis as never, mockPlatformUser as never);
+  const publicOverviewService = new RobotPublicOverviewService(
+    mockPrisma as never,
+    mockRedis as never,
+    mockPlatformUser as never,
+  );
+  const mockStorageDeletion = {
+    recordingBucket: 'botparty-recordings',
+    thumbnailBucket: 'botparty-thumbnails',
+    enqueue: jest.fn().mockResolvedValue(undefined),
+  };
 
   const service = new RobotsService(
     mockPrisma as never,
@@ -123,9 +150,18 @@ function buildService(prismaOverrides?: Record<string, unknown>, configValues?: 
     publicOverviewService,
     mockPlatformUser as never,
     { publishSafely: jest.fn().mockResolvedValue(null) } as never,
+    mockStorageDeletion as never,
   );
 
-  return { service, mockPrisma, mockRedis, mockAccess, mockConfig, mockActionQueue };
+  return {
+    service,
+    mockPrisma,
+    mockRedis,
+    mockAccess,
+    mockConfig,
+    mockActionQueue,
+    mockStorageDeletion,
+  };
 }
 
 // Minimal robot fixture matching the shape returned by prisma includes
@@ -176,8 +212,23 @@ describe('RobotsService.findAll', () => {
   it('passes tag filter through to prisma', async () => {
     const { service, mockPrisma } = buildService();
     await service.findAll({ tag: 'cute' });
-    const callArg = mockPrisma.robot.findMany.mock.calls[0][0] as { where?: { tags?: { has: string } } };
+    const callArg = mockPrisma.robot.findMany.mock.calls[0][0] as {
+      where?: { tags?: { has: string } };
+    };
     expect(callArg.where?.tags).toEqual({ has: 'cute' });
+  });
+
+  it('selects only fields that are part of the public robot contract', async () => {
+    const { service, mockPrisma } = buildService();
+    await service.findAll({});
+    const callArg = mockPrisma.robot.findMany.mock.calls[0][0] as {
+      select?: Record<string, unknown>;
+    };
+
+    expect(callArg.select).toMatchObject({ id: true, owner: expect.any(Object) });
+    expect(callArg.select).not.toHaveProperty('streamKeyHash');
+    expect(callArg.select).not.toHaveProperty('claimTokenHash');
+    expect(callArg.select).not.toHaveProperty('accessPassword');
   });
 });
 
@@ -188,7 +239,10 @@ describe('RobotsService.findAll', () => {
 describe('RobotsService.findBySlug', () => {
   it('throws NotFoundException when no robot matches slug', async () => {
     const { service } = buildService({
-      robot: { findUnique: jest.fn().mockResolvedValue(null), findFirst: jest.fn().mockResolvedValue(null) },
+      robot: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
     });
     await expect(service.findBySlug('missing-slug')).rejects.toThrow(NotFoundException);
   });
@@ -205,7 +259,11 @@ describe('RobotsService.findBySlug', () => {
   });
 
   it('returns public robot data for PUBLIC visibility', async () => {
-    const robot = robotFixture({ visibility: 'PUBLIC', status: 'ONLINE', lastOnlineAt: new Date() });
+    const robot = robotFixture({
+      visibility: 'PUBLIC',
+      status: 'ONLINE',
+      lastOnlineAt: new Date(),
+    });
     const { service } = buildService({
       robot: {
         findUnique: jest.fn().mockResolvedValue(robot),
@@ -253,7 +311,10 @@ describe('RobotsService.findByClaimToken', () => {
 
   it('ignores expiry when max age is 0 (disabled)', async () => {
     const oldDate = new Date(Date.now() - 1000 * 24 * 60 * 60 * 1000);
-    const robot = robotFixture({ metadata: { claimTokenIssuedAt: oldDate.toISOString() }, createdAt: oldDate });
+    const robot = robotFixture({
+      metadata: { claimTokenIssuedAt: oldDate.toISOString() },
+      createdAt: oldDate,
+    });
     const { service } = buildService(
       { robot: { findUnique: jest.fn().mockResolvedValue(robot) } },
       { ROBOT_CLAIM_TOKEN_MAX_AGE_DAYS: '0' },
@@ -282,12 +343,16 @@ describe('RobotsService.validateOrBindRobotDevice', () => {
 
   it('throws ForbiddenException when deviceKey is shorter than 32 chars', async () => {
     const { service } = buildService();
-    await expect(service.validateOrBindRobotDevice('robot-1', 'short')).rejects.toThrow(ForbiddenException);
+    await expect(service.validateOrBindRobotDevice('robot-1', 'short')).rejects.toThrow(
+      ForbiddenException,
+    );
   });
 
   it('throws NotFoundException when robot does not exist', async () => {
     const { service } = buildService({ robot: { findUnique: jest.fn().mockResolvedValue(null) } });
-    await expect(service.validateOrBindRobotDevice('robot-1', validKey)).rejects.toThrow(NotFoundException);
+    await expect(service.validateOrBindRobotDevice('robot-1', validKey)).rejects.toThrow(
+      NotFoundException,
+    );
   });
 
   it('binds device hash on first claim and returns robotId + deviceHash', async () => {
@@ -329,7 +394,9 @@ describe('RobotsService.validateOrBindRobotDevice', () => {
     const { service } = buildService({
       robot: { findUnique: jest.fn().mockResolvedValue(robot), update: jest.fn() },
     });
-    await expect(service.validateOrBindRobotDevice('robot-1', differentKey)).rejects.toThrow(ForbiddenException);
+    await expect(service.validateOrBindRobotDevice('robot-1', differentKey)).rejects.toThrow(
+      ForbiddenException,
+    );
   });
 });
 
@@ -379,14 +446,16 @@ describe('RobotsService.getChatHistoryPage', () => {
       limit: 2,
     });
 
-    expect(mockPrisma.chatMessage.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({
-        robotId: 'robot-1',
-        deletedAt: null,
-        createdAt: { lt: new Date(before) },
+    expect(mockPrisma.chatMessage.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          robotId: 'robot-1',
+          deletedAt: null,
+          createdAt: { lt: new Date(before) },
+        }),
+        take: 3,
       }),
-      take: 3,
-    }));
+    );
     expect(result).toEqual({
       messages: [
         {
@@ -420,17 +489,42 @@ describe('RobotsService.getChatHistoryPage', () => {
     });
     mockAccess.validateRoomAccess.mockResolvedValue(true);
 
-    await expect(service.getChatHistoryPage({
-      robotId: 'robot-1',
-      requesterUserId: null,
-    })).rejects.toThrow(ForbiddenException);
+    await expect(
+      service.getChatHistoryPage({
+        robotId: 'robot-1',
+        requesterUserId: null,
+      }),
+    ).rejects.toThrow(ForbiddenException);
+  });
+
+  it('does not disclose private chat history when room access is denied', async () => {
+    const { service, mockAccess } = buildService({
+      robot: {
+        findUnique: jest.fn().mockResolvedValue({ id: 'private-robot', visibility: 'PRIVATE' }),
+      },
+    });
+    mockAccess.validateRoomAccess.mockResolvedValue(false);
+
+    await expect(
+      service.getChatHistoryPage({
+        robotId: 'private-robot',
+        requesterUserId: 'foreign-user',
+      }),
+    ).rejects.toThrow(NotFoundException);
+    expect(mockAccess.getAccessPolicy).not.toHaveBeenCalled();
   });
 });
 
 describe('RobotsService.getPublicOverview', () => {
   it('returns cached overview data without hitting prisma', async () => {
     const cached = {
-      totals: { publicRobots: 1, liveRobots: 1, featuredRobots: 1, totalViewers: 4, queueEntries: 2 },
+      totals: {
+        publicRobots: 1,
+        liveRobots: 1,
+        featuredRobots: 1,
+        totalViewers: 4,
+        queueEntries: 2,
+      },
       statusBreakdown: { online: 1, busy: 0, offline: 0, maintenance: 0 },
       featured: [],
       liveNow: [],
@@ -486,7 +580,8 @@ describe('RobotsService.getPublicOverview', () => {
       queueEntry: {
         count: jest.fn().mockResolvedValue(4),
       },
-      $queryRaw: jest.fn()
+      $queryRaw: jest
+        .fn()
         .mockResolvedValueOnce([
           {
             publicRobots: 3,
@@ -561,7 +656,12 @@ describe('RobotsService.getPublicOverview', () => {
         },
       },
     });
-    expect(mockRedis.set).toHaveBeenCalledWith('robots:public-overview', JSON.stringify(result), 'EX', 30);
+    expect(mockRedis.set).toHaveBeenCalledWith(
+      'robots:public-overview',
+      JSON.stringify(result),
+      'EX',
+      30,
+    );
   });
 
   it('casts the platform user id to uuid in raw overview queries', async () => {
@@ -720,12 +820,81 @@ describe('RobotsService.findByIdCached', () => {
 // update() ownership check
 // ──────────────────────────────────────────────────────────────
 
+describe('RobotsService.delete object cleanup', () => {
+  it('queues recording keys and the thumbnail prefix before deleting the robot', async () => {
+    const robot = robotFixture({
+      recordings: [{ objectKey: 'sessions/session-1/front.mp4' }],
+    });
+    const { service, mockPrisma, mockStorageDeletion } = buildService({
+      robot: { findUnique: jest.fn().mockResolvedValue(robot) },
+    });
+    mockPrisma.robot.delete.mockResolvedValue(robot);
+
+    await expect(service.delete(robot.id, robot.ownerId)).resolves.toBeUndefined();
+
+    const transactionClient = mockStorageDeletion.enqueue.mock.calls[0]?.[0];
+    expect(transactionClient).toBeDefined();
+    expect(mockStorageDeletion.enqueue).toHaveBeenNthCalledWith(
+      1,
+      transactionClient,
+      'botparty-recordings',
+      ['sessions/session-1/front.mp4'],
+    );
+    expect(mockStorageDeletion.enqueue).toHaveBeenNthCalledWith(
+      2,
+      transactionClient,
+      'botparty-thumbnails',
+      ['robot-thumbnails/robot-1/'],
+    );
+    expect(mockPrisma.robot.delete).toHaveBeenCalledWith({ where: { id: robot.id } });
+  });
+
+  it('conceals a foreign robot without deleting or queueing its objects', async () => {
+    const robot = robotFixture({ recordings: [] });
+    const { service, mockPrisma, mockStorageDeletion } = buildService({
+      robot: { findUnique: jest.fn().mockResolvedValue(robot) },
+    });
+
+    await expect(service.delete(robot.id, 'foreign-user')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+
+    expect(mockStorageDeletion.enqueue).not.toHaveBeenCalled();
+    expect(mockPrisma.robot.delete).not.toHaveBeenCalled();
+  });
+});
+
 describe('RobotsService.update ownership check', () => {
-  it('throws ForbiddenException when caller is not the robot owner', async () => {
+  it('conceals a foreign robot with the same response as a missing robot', async () => {
     const robot = robotFixture({ ownerId: 'owner-1' });
     const { service } = buildService({
       robot: { findUnique: jest.fn().mockResolvedValue(robot) },
     });
-    await expect(service.update('robot-1', 'different-user', {} as never)).rejects.toThrow(ForbiddenException);
+    await expect(service.update('robot-1', 'different-user', {} as never)).rejects.toThrow(
+      NotFoundException,
+    );
+  });
+});
+
+describe('RobotsService private owner isolation', () => {
+  it('uses the same not-found response for a missing and a foreign private robot', async () => {
+    const privateRobot = robotFixture({ visibility: 'PRIVATE', ownerId: 'owner-1' });
+    const foreign = buildService({
+      robot: { findUnique: jest.fn().mockResolvedValue(privateRobot) },
+      user: { findUnique: jest.fn().mockResolvedValue({ role: 'USER' }) },
+    });
+    await expect(
+      foreign.service.findPrivateBySlugForUser('test-robot', 'user-2'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    const missing = buildService({
+      robot: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
+    });
+    await expect(
+      missing.service.findPrivateBySlugForUser('missing-robot', 'user-2'),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 });

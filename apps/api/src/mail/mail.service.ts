@@ -44,6 +44,7 @@ export class MailService implements OnModuleInit {
   private readonly transport: ReturnType<typeof nodemailer.createTransport> | null;
   private readonly fromAddress: string;
   private readonly appUrl: string;
+  private transportAvailable = false;
 
   constructor(
     private readonly config: ConfigService,
@@ -58,6 +59,10 @@ export class MailService implements OnModuleInit {
     return this.transport !== null;
   }
 
+  isAvailable() {
+    return this.transportAvailable;
+  }
+
   async onModuleInit(): Promise<void> {
     if (
       this.config.get<string>('NODE_ENV', process.env.NODE_ENV ?? 'development') !== 'production'
@@ -67,8 +72,14 @@ export class MailService implements OnModuleInit {
     if (!this.transport) {
       throw new Error('SMTP transport is required in production');
     }
-    await this.transport.verify();
-    this.logger.log('SMTP transport verified');
+    try {
+      await this.transport.verify();
+      this.transportAvailable = true;
+      this.logger.log('SMTP transport verified');
+    } catch (error) {
+      this.transportAvailable = false;
+      this.logger.warn(`SMTP transport unavailable during startup: ${this.errorMessage(error)}`);
+    }
   }
 
   async sendEmailVerification(email: string, token: string) {
@@ -189,14 +200,20 @@ export class MailService implements OnModuleInit {
       throw new ServiceUnavailableException('Email delivery is not configured.');
     }
 
-    await this.transport.sendMail({
-      from: from ?? this.fromAddress,
-      to,
-      subject,
-      html,
-      text,
-      messageId,
-    });
+    try {
+      await this.transport.sendMail({
+        from: from ?? this.fromAddress,
+        to,
+        subject,
+        html,
+        text,
+        messageId,
+      });
+      this.transportAvailable = true;
+    } catch (error) {
+      this.transportAvailable = false;
+      throw error;
+    }
   }
 
   private async enqueueMailJob(data: MailJobData): Promise<void> {
@@ -225,5 +242,9 @@ export class MailService implements OnModuleInit {
       secure,
       auth: user ? { user, pass } : undefined,
     });
+  }
+
+  private errorMessage(error: unknown) {
+    return error instanceof Error ? error.message : 'unknown SMTP error';
   }
 }

@@ -10,6 +10,8 @@ import {
   HttpCode,
   HttpStatus,
   Post,
+  ParseUUIDPipe,
+  Res,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { UsersService } from './users.service';
@@ -30,6 +32,7 @@ import {
 } from './users.schema';
 import { Throttle } from '@nestjs/throttler';
 import { UserAvatarService } from './user-avatar.service';
+import type { FastifyReply } from 'fastify';
 
 @ApiTags('users')
 @Controller('users')
@@ -123,7 +126,7 @@ export class UsersController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update user profile/role as staff' })
   async updateAdminUser(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() requester: JwtPayload,
     @Body(new ZodValidationPipe(updateAdminUserSchema)) body: UpdateAdminUserInput,
   ) {
@@ -136,7 +139,7 @@ export class UsersController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Delete user account as staff' })
   async deleteAdminUser(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() requester: JwtPayload,
   ) {
     await this.usersService.deleteUserByStaff(id, requester);
@@ -154,6 +157,18 @@ export class UsersController {
       period,
       metric: metric === 'creator_revenue' ? 'creator_revenue' : 'engagement',
     });
+  }
+
+  @Get(':id/avatar-image')
+  @ApiOperation({ summary: 'Get a platform-hosted user avatar' })
+  async getAvatar(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    const file = await this.avatars.read(id);
+    reply.header('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
+    reply.type(file.contentType);
+    return file.buffer;
   }
 
   @Get(':username')

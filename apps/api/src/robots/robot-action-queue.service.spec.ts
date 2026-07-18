@@ -1,4 +1,4 @@
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { NotFoundException } from '@nestjs/common';
 import { RobotActionQueueService } from './robot-action-queue.service';
 
 describe('RobotActionQueueService', () => {
@@ -35,7 +35,7 @@ describe('RobotActionQueueService', () => {
     access = {
       getStreamPolicy: jest.fn().mockResolvedValue({ targetBitrateKbps: 1200 }),
     };
-    service = new RobotActionQueueService(prisma as any, redis as any, access as any);
+    service = new RobotActionQueueService(prisma as never, redis as never, access as never);
   });
 
   it('deduplicates queued actions by type', async () => {
@@ -104,6 +104,6 @@ describe('RobotActionQueueService', () => {
     );
 
     prisma.robot.findUnique.mockResolvedValueOnce({ id: 'robot-1', ownerId: 'owner-2' });
-    await expect(service.getPendingActions('robot-1', 'owner-1')).rejects.toThrow(ForbiddenException);
+    await expect(service.getPendingActions('robot-1', 'owner-1')).rejects.toThrow(NotFoundException);
   });
 });

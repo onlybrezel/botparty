@@ -1,19 +1,19 @@
-import { Controller, Get, Param, UseGuards, Query, Headers } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Param, ParseUUIDPipe, UseGuards, Query, Headers } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { SessionsService } from './sessions.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { JwtPayload } from '@botparty/shared';
-import { JwtService } from '@nestjs/jwt';
-import { ConfigService } from '@nestjs/config';
 import { extractBearerToken, getAccessCookieName, parseCookie } from '../auth/auth.cookies';
+import { AuthService } from '../auth/auth.service';
+import { ConfigService } from '@nestjs/config';
 
 @ApiTags('sessions')
 @Controller('sessions')
 export class SessionsController {
   constructor(
     private readonly sessionsService: SessionsService,
-    private readonly jwtService: JwtService,
+    private readonly authService: AuthService,
     private readonly configService: ConfigService,
   ) {}
 
@@ -22,21 +22,21 @@ export class SessionsController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get my session history' })
   async getMySessions(@CurrentUser() user: JwtPayload, @Query('limit') limit?: string) {
-    return this.sessionsService.findByUser(user.sub, limit ? Number(limit) : 50);
+    return this.sessionsService.findByUser(user.sub, this.parseLimit(limit));
   }
 
   @Get('my/:sessionId')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get detailed session replay data for the authenticated requester' })
-  async getMySession(@CurrentUser() user: JwtPayload, @Param('sessionId') sessionId: string) {
+  async getMySession(@CurrentUser() user: JwtPayload, @Param('sessionId', ParseUUIDPipe) sessionId: string) {
     return this.sessionsService.findDetailForRequester(sessionId, user.sub);
   }
 
   @Get('robot/:robotId')
   @ApiOperation({ summary: 'Get session history for a robot' })
   async getByRobot(
-    @Param('robotId') robotId: string,
+    @Param('robotId', ParseUUIDPipe) robotId: string,
     @Query('limit') limit?: string,
     @Headers('authorization') authorization?: string,
     @Headers('cookie') cookieHeader?: string,
@@ -45,8 +45,8 @@ export class SessionsController {
   ) {
     return this.sessionsService.findByRobotForRequester(
       robotId,
-      this.resolveRequesterId(authorization, cookieHeader),
-      limit ? Number(limit) : 50,
+      await this.resolveRequesterId(authorization, cookieHeader),
+      this.parseLimit(limit),
       roomAccessToken,
       guestSessionId,
     );
@@ -55,7 +55,7 @@ export class SessionsController {
   @Get('robot/:robotId/active')
   @ApiOperation({ summary: 'Get active session for a robot' })
   async getActiveSession(
-    @Param('robotId') robotId: string,
+    @Param('robotId', ParseUUIDPipe) robotId: string,
     @Headers('authorization') authorization?: string,
     @Headers('cookie') cookieHeader?: string,
     @Query('roomAccessToken') roomAccessToken?: string,
@@ -63,13 +63,13 @@ export class SessionsController {
   ) {
     return this.sessionsService.getActiveSessionForRequester(
       robotId,
-      this.resolveRequesterId(authorization, cookieHeader),
+      await this.resolveRequesterId(authorization, cookieHeader),
       roomAccessToken,
       guestSessionId,
     );
   }
 
-  private resolveRequesterId(authorization?: string, cookieHeader?: string) {
+  private async resolveRequesterId(authorization?: string, cookieHeader?: string) {
     const token =
       extractBearerToken(authorization) ??
       parseCookie(cookieHeader, getAccessCookieName(this.configService));
@@ -77,13 +77,18 @@ export class SessionsController {
       return null;
     }
 
-    try {
-      const payload = this.jwtService.verify<{ sub?: string }>(token, {
-        secret: this.configService.getOrThrow<string>('JWT_SECRET'),
-      });
-      return typeof payload.sub === 'string' ? payload.sub : null;
-    } catch {
-      return null;
+    return (await this.authService.resolveValidAccessTokenPayload(token))?.sub ?? null;
+  }
+
+  private parseLimit(limit?: string) {
+    if (limit === undefined) return 50;
+    if (!/^\d+$/.test(limit)) {
+      throw new BadRequestException('limit must be an integer between 1 and 200');
     }
+    const parsed = Number(limit);
+    if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 200) {
+      throw new BadRequestException('limit must be an integer between 1 and 200');
+    }
+    return parsed;
   }
 }

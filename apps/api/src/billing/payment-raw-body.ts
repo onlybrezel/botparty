@@ -1,9 +1,9 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { Readable } from 'stream';
 
-export const DEFAULT_PAYMENT_WEBHOOK_BODY_LIMIT = 256 * 1024;
+const DEFAULT_PAYMENT_WEBHOOK_BODY_LIMIT = 256 * 1024;
 
-export function isPaymentWebhookPath(url: string) {
+function isPaymentWebhookPath(url: string) {
   return url.startsWith('/api/v1/billing/webhooks/');
 }
 

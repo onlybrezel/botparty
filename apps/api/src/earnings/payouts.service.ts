@@ -191,6 +191,7 @@ export class PayoutsService {
 
   private toPublicRecord<T extends { destination: string; destinationType: PayoutDestinationType; destinationLast4: string }>(request: T) {
     const { destination: _destination, ...safe } = request;
+    void _destination;
     return { ...safe, destination: `${request.destinationType === PayoutDestinationType.IBAN ? 'IBAN' : 'PayPal'} ••••${request.destinationLast4}` };
   }
 

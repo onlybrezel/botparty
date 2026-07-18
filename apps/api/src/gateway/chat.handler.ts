@@ -76,7 +76,9 @@ export class ChatHandler {
             username: client.username ?? 'unknown',
             content: sanitized,
           })
-          .catch(() => {});
+          .catch((error: unknown) => {
+            this.logger.warn(`Failed to record forbidden-symbol moderation event: ${(error as Error).message}`);
+          });
       }
       client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Message blocked by moderation filter' } }));
       return;
@@ -91,7 +93,9 @@ export class ChatHandler {
             username: client.username ?? 'unknown',
             content: sanitized,
           })
-          .catch(() => {});
+          .catch((error: unknown) => {
+            this.logger.warn(`Failed to record profanity moderation event: ${(error as Error).message}`);
+          });
       }
       client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Message blocked by profanity filter' } }));
       return;

@@ -20,10 +20,10 @@ import { CreateControlButtonDto, UpdateControlButtonDto, ReorderControlButtonsDt
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RobotsService } from '../robots/robots.service';
-import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import type { JwtPayload } from '@botparty/shared';
 import { extractBearerToken, getAccessCookieName, parseCookie } from '../auth/auth.cookies';
+import { AuthService } from '../auth/auth.service';
 
 @ApiTags('controls')
 @Controller('controls')
@@ -31,7 +31,7 @@ export class ControlsController {
   constructor(
     private readonly controlsService: ControlsService,
     private readonly robotsService: RobotsService,
-    private readonly jwtService: JwtService,
+    private readonly authService: AuthService,
     private readonly configService: ConfigService,
   ) {}
 
@@ -45,9 +45,8 @@ export class ControlsController {
     @Query('roomAccessToken') roomAccessToken?: string,
     @Query('guestSessionId') guestSessionId?: string,
   ) {
-    const requester = this.resolveRequester(authorization, cookieHeader);
+    const requester = await this.resolveRequester(authorization, cookieHeader);
     const actorId = requester?.sub ?? this.robotsService.resolveGuestActorId(guestSessionId);
-    const access = await this.robotsService.getAccessPolicy(robotId);
     const hasRoomAccess =
       Boolean(actorId) &&
       (await this.robotsService.validateRoomAccess({
@@ -56,6 +55,15 @@ export class ControlsController {
         roomAccessToken,
       }));
 
+    if (!hasRoomAccess) {
+      return this.controlsService.getVisibleButtons(robotId, {
+        userId: requester?.sub ?? null,
+        role: requester?.role ?? null,
+        hasRoomAccess: false,
+      });
+    }
+
+    const access = await this.robotsService.getAccessPolicy(robotId);
     if (access.control === 'DISABLED') {
       return [];
     }
@@ -67,7 +75,7 @@ export class ControlsController {
     return this.controlsService.getVisibleButtons(robotId, {
       userId: requester?.sub ?? null,
       role: requester?.role ?? null,
-      hasRoomAccess,
+      hasRoomAccess: true,
     });
   }
 
@@ -132,7 +140,7 @@ export class ControlsController {
     return this.controlsService.reorder(robotId, dto, userId);
   }
 
-  private resolveRequester(authorization?: string, cookieHeader?: string): JwtPayload | null {
+  private async resolveRequester(authorization?: string, cookieHeader?: string): Promise<JwtPayload | null> {
     const token =
       extractBearerToken(authorization) ??
       parseCookie(cookieHeader, getAccessCookieName(this.configService)) ??
@@ -141,12 +149,6 @@ export class ControlsController {
       return null;
     }
 
-    try {
-      return this.jwtService.verify<JwtPayload>(token, {
-        secret: this.configService.getOrThrow<string>('JWT_SECRET'),
-      });
-    } catch {
-      return null;
-    }
+    return this.authService.resolveValidAccessTokenPayload(token);
   }
 }

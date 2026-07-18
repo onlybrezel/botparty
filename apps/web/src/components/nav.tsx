@@ -9,8 +9,7 @@ import { Menu, X } from 'lucide-react';
 import { AUTH_SYNC_STORAGE_KEY, useAuth } from '@/lib/store';
 import { api } from '@/lib/api';
 import { Badge } from '@/components/ui/badge';
-import { localizePath } from '@/lib/i18n';
-import { useLocale } from '@/lib/use-locale';
+import { defaultLocale, localizePath } from '@/lib/i18n';
 import { usePreferences } from '@/lib/preferences';
 
 const NotificationCenter = dynamic(
@@ -53,7 +52,10 @@ export default function Nav() {
       api.syncTokenFromStore();
       const restored = await api.restoreSession().catch(() => false);
       if (restored) {
-        const consent = await api.analytics.consent().catch(() => null);
+        const consent = await api.analytics.consent().catch((error: unknown) => {
+          console.error('Failed to restore analytics consent', error);
+          return null;
+        });
         updatePreference('productAnalyticsEnabled', Boolean(consent?.productAnalyticsEnabled));
       }
       if (!cancelled) {
@@ -120,7 +122,10 @@ export default function Nav() {
         .then((res) => {
           if (!cancelled) setBalance(res.balance);
         })
-        .catch(() => undefined);
+        .catch((error: unknown) => {
+          if (!cancelled) setBalance(null);
+          console.error('Failed to refresh wallet balance', error);
+        });
     };
     load();
     const onFocus = () => load();
@@ -139,14 +144,13 @@ export default function Nav() {
     };
   }, [accessToken, mounted, pathname]);
 
-  const locale = useLocale();
-  const localized = (href: string) => localizePath(href, locale);
+  const localized = (href: string) => localizePath(href, defaultLocale);
   const isActive = (href: string) => {
     const target = localized(href);
     return pathname === target || pathname.startsWith(`${target}/`);
   };
   const navLinks = [
-    { href: '/', label: 'Home', active: pathname === '/' || pathname === `/${locale}` },
+    { href: '/', label: 'Home', active: pathname === '/' || pathname === `/${defaultLocale}` },
     { href: '/explore', label: 'Explore', active: isActive('/explore') },
     { href: '/leaderboard', label: 'Leaderboard', active: isActive('/leaderboard') },
     { href: '/pricing', label: 'Pricing', active: isActive('/pricing') },
@@ -202,7 +206,6 @@ export default function Nav() {
           >
             Robot Setup
           </a>
-          {/* <LocaleSwitcher /> */}
         </nav>
 
         {/* Auth */}
@@ -325,7 +328,9 @@ export default function Nav() {
                   <div className="my-1 border-t border-[var(--border)]" />
                   <button
                     onClick={() => {
-                      void api.auth.logout().catch(() => undefined).finally(() => {
+                      void api.auth.logout().catch((error: unknown) => {
+                        console.error('Server logout failed; clearing the local session', error);
+                      }).finally(() => {
                         api.setToken(null);
                         logout();
                         setDropdownOpen(false);
@@ -340,7 +345,6 @@ export default function Nav() {
             </div>
           ) : (
             <div className="hidden items-center gap-2 sm:flex">
-              {/* <LocaleSwitcher compact /> */}
               <span className="hidden rounded-lg border border-[var(--border)] bg-[var(--card)] px-2.5 py-1 text-xs font-medium text-[var(--muted-foreground)] sm:inline-flex">
                 {guestLabel}
               </span>
@@ -384,9 +388,6 @@ export default function Nav() {
           </nav>
 
           <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
-            <div className="mb-4">
-              {/* <LocaleSwitcher /> */}
-            </div>
             {!mounted ? (
               <div className="h-10 w-full rounded-xl bg-[var(--muted)] animate-pulse" />
             ) : accessToken && username ? (
@@ -421,7 +422,9 @@ export default function Nav() {
                   <button
                     type="button"
                     onClick={() => {
-                      void api.auth.logout().catch(() => undefined).finally(() => {
+                      void api.auth.logout().catch((error: unknown) => {
+                        console.error('Server logout failed; clearing the local session', error);
+                      }).finally(() => {
                         api.setToken(null);
                         logout();
                         setMenuOpen(false);

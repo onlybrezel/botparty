@@ -6,7 +6,7 @@
 # ----------------------------------------------
 
 # ─── base: pnpm enabled ───────────────────────
-FROM node:24-alpine AS base
+FROM node:24-alpine@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd AS base
 RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
 
 # ─── deps: install ALL workspace deps ─────────
@@ -30,9 +30,13 @@ COPY packages/ packages/
 COPY apps/api/ apps/api/
 COPY docker/api/dev-entrypoint.sh /usr/local/bin/botparty-dev-entrypoint
 COPY docker/api/load-file-secrets.sh /usr/local/lib/botparty-load-file-secrets.sh
+COPY docker/api/load-file-secrets.sh /load-file-secrets.sh
+COPY docker/api/migrate-entrypoint.sh /migrate-entrypoint.sh
+COPY scripts/prepare-prisma-baseline.mjs scripts/prepare-prisma-baseline.mjs
+COPY scripts/migrate-webhook-secrets.mjs scripts/migrate-webhook-secrets.mjs
 RUN pnpm --filter @botparty/prisma db:generate \
  && pnpm --filter @botparty/shared build \
- && chmod +x /usr/local/bin/botparty-dev-entrypoint
+ && chmod +x /usr/local/bin/botparty-dev-entrypoint /migrate-entrypoint.sh
 EXPOSE 4000
 ENTRYPOINT ["botparty-dev-entrypoint"]
 CMD ["pnpm", "--filter", "@botparty/api", "dev"]
@@ -67,7 +71,7 @@ RUN --mount=type=cache,id=pnpm-store-api-prod,target=/pnpm/store \
     pnpm install --frozen-lockfile --prod --store-dir=/pnpm/store
 
 # ─── runner: minimal production image ─────────
-FROM node:24-alpine AS runner
+FROM node:24-alpine@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 
@@ -95,8 +99,9 @@ COPY --from=build-shared --chown=botparty:botparty /app/packages/shared/dist   .
 COPY --from=build-api    --chown=botparty:botparty /app/apps/api/dist           ./apps/api/dist
 
 COPY --chown=botparty:botparty docker/api/entrypoint.sh /entrypoint.sh
+COPY --chown=botparty:botparty docker/api/migrate-entrypoint.sh /migrate-entrypoint.sh
 COPY --chown=botparty:botparty docker/api/load-file-secrets.sh /load-file-secrets.sh
-RUN chmod +x /entrypoint.sh
+RUN chmod +x /entrypoint.sh /migrate-entrypoint.sh
 
 EXPOSE 4000
 ENTRYPOINT ["/entrypoint.sh"]

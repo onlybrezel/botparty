@@ -3,10 +3,9 @@ import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { WsAdapter } from '@nestjs/platform-ws';
 import { SwaggerModule } from '@nestjs/swagger';
-import { Logger, ValidationPipe } from '@nestjs/common';
+import { ConsoleLogger, Logger, ValidationPipe } from '@nestjs/common';
 import helmet, { type FastifyHelmetOptions } from '@fastify/helmet';
 import type { FastifyPluginAsync } from 'fastify';
-import type { IncomingMessage } from 'http';
 import { randomUUID } from 'crypto';
 import { AppModule } from './bootstrap/app.module';
 import { loadFileBackedEnv } from './common/env-file';
@@ -15,6 +14,12 @@ import { initTracing, shutdownTracing } from './common/tracing';
 import { AllExceptionsFilter } from './filters/all-exceptions.filter';
 import { createSwaggerDocumentConfig } from './openapi/swagger-config';
 import { installPaymentRawBodyCapture } from './billing/payment-raw-body';
+import { normalizeCorrelationId } from './common/request-context';
+import {
+  installConcurrentRequestLimit,
+  parseMaxConcurrentLoginRequests,
+  parseMaxConcurrentRequests,
+} from './common/concurrent-request-limit';
 
 function readOrigin(raw: string | undefined): string | null {
   const value = raw?.trim();
@@ -65,6 +70,7 @@ function isProtectedSwaggerPath(url: string | undefined): boolean {
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
+  const instanceId = process.env.INSTANCE_ID?.trim() || randomUUID();
   loadFileBackedEnv(process.env, logger);
   await initTracing(logger);
 
@@ -131,15 +137,12 @@ async function bootstrap() {
     new FastifyAdapter({
       bodyLimit: Number(process.env.FASTIFY_BODY_LIMIT ?? 1024 * 1024),
       genReqId: (req: { headers: Record<string, string | string[] | undefined> }) => {
-        const fromHeader = req.headers['x-correlation-id'];
-        if (typeof fromHeader === 'string' && fromHeader.trim()) {
-          return fromHeader.trim();
-        }
-        return randomUUID();
+        return normalizeCorrelationId(req.headers['x-correlation-id']) ?? randomUUID();
       },
       requestIdHeader: 'x-correlation-id',
       logger: {
         level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
+        base: { instanceId },
         transport:
           process.env.NODE_ENV !== 'production'
             ? { target: 'pino-pretty', options: { colorize: true } }
@@ -149,6 +152,11 @@ async function bootstrap() {
       // Docker bridge, RFC-1918).  Override via TRUST_PROXY env var if needed.
       trustProxy: process.env.TRUST_PROXY ?? 'loopback, linklocal, uniquelocal',
     }),
+    {
+      logger: process.env.NODE_ENV === 'production'
+        ? new ConsoleLogger({ json: true, colors: false, compact: true })
+        : undefined,
+    },
   );
 
   installPaymentRawBodyCapture(
@@ -160,11 +168,20 @@ async function bootstrap() {
   app.useWebSocketAdapter(new WsAdapter(app));
   app.enableShutdownHooks();
 
-  app.getHttpAdapter().getInstance().addHook('onResponse', (request, reply, done) => {
+  app.getHttpAdapter().getInstance().addHook('onRequest', (request, reply, done) => {
     const correlationId = typeof request.id === 'string' ? request.id : randomUUID();
     reply.header('x-correlation-id', correlationId);
+    reply.header('x-instance-id', instanceId);
     done();
   });
+
+  installConcurrentRequestLimit(
+    app.getHttpAdapter().getInstance(),
+    {
+      all: parseMaxConcurrentRequests(process.env.MAX_CONCURRENT_REQUESTS),
+      login: parseMaxConcurrentLoginRequests(process.env.MAX_CONCURRENT_LOGIN_REQUESTS),
+    },
+  );
 
   const helmetRegistration = (async (instance: Parameters<FastifyPluginAsync<FastifyHelmetOptions>>[0]) => {
     const registerHelmet = helmet as unknown as (

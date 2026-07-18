@@ -13,6 +13,8 @@ import type { WsClient } from './gateway-types';
 type QueueSnapshot = Awaited<ReturnType<QueueService['getQueue']>>;
 
 export class RobotRuntimeHandler {
+  private lastHeartbeatPersistenceWarningAt = 0;
+
   constructor(
     private readonly runtime: GatewayRuntimeSupport,
     private readonly robotsService: RobotsService,
@@ -40,8 +42,8 @@ export class RobotRuntimeHandler {
         client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Invalid robot authorization' } }));
         try {
           client.close(1008, 'Invalid robot authorization');
-        } catch {
-          // Ignore close failures for rejected claims.
+        } catch (closeError) {
+          this.runtime.logger.debug(`Failed to close rejected robot socket: ${String(closeError)}`);
         }
         return;
       }
@@ -60,8 +62,8 @@ export class RobotRuntimeHandler {
           );
           try {
             client.close(1008, 'Robot already connected');
-          } catch {
-            // Ignore close failures for rejected claims.
+          } catch (closeError) {
+            this.runtime.logger.debug(`Failed to close duplicate robot socket: ${String(closeError)}`);
           }
           return;
         }
@@ -70,8 +72,8 @@ export class RobotRuntimeHandler {
         this.runtime.robotClients.set(robot.id, client);
         try {
           existingRobotClient.close(1012, 'Replaced by newer robot claim');
-        } catch {
-          // Ignore close failures while replacing the previous socket.
+        } catch (closeError) {
+          this.runtime.logger.debug(`Failed to close replaced robot socket: ${String(closeError)}`);
         }
       } else {
         const claimLockAcquired = await this.runtime.acquireRobotClaimLock(robot.id, client.id);
@@ -85,8 +87,8 @@ export class RobotRuntimeHandler {
           );
           try {
             client.close(1008, 'Robot already connected');
-          } catch {
-            // Ignore close failures for rejected claims.
+          } catch (closeError) {
+            this.runtime.logger.debug(`Failed to close cross-instance duplicate socket: ${String(closeError)}`);
           }
           return;
         }
@@ -126,7 +128,13 @@ export class RobotRuntimeHandler {
   handleHeartbeat(client: WsClient) {
     if (client.robotId) {
       this.runtime.recordRobotHeartbeat(client.robotId, client.id);
-      this.robotsService.touchHeartbeat(client.robotId).catch(() => {});
+      this.robotsService.touchHeartbeat(client.robotId).catch((error: unknown) => {
+        const now = Date.now();
+        if (now - this.lastHeartbeatPersistenceWarningAt >= 60_000) {
+          this.lastHeartbeatPersistenceWarningAt = now;
+          this.runtime.logger.warn(`Robot heartbeat persistence unavailable: ${(error as Error).message}`);
+        }
+      });
     }
     return { event: WS_EVENTS.ROBOT_HEARTBEAT, data: { ts: Date.now() } };
   }
@@ -189,7 +197,8 @@ export class RobotRuntimeHandler {
       }
 
       this.runtime.triggerEmergencyStop(parsed.robotId, `Manual E-STOP by ${client.userId}`);
-    } catch {
+    } catch (error) {
+      this.runtime.logger.warn(`Failed to validate E-STOP access: ${(error as Error).message}`);
       client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Failed to validate E-STOP access' } }));
     }
   }

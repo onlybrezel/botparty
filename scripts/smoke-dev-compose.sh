@@ -32,7 +32,9 @@ export NEXT_PUBLIC_LEGAL_OPERATOR_EMAIL='legal@botparty.test'
 export NEXT_PUBLIC_LEGAL_OPERATOR_ADDRESS='Teststrasse 1, 10115 Berlin'
 
 cleanup() {
-  "${COMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
+  if ! "${COMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1; then
+    echo "Warning: failed to remove ${PROJECT} after the smoke test." >&2
+  fi
   rm -rf "${SECRET_DIR}" "${SOURCE_DIR}"
 }
 trap cleanup EXIT
@@ -66,7 +68,9 @@ wait_for_health() {
   local container="${PROJECT}-${service}-1"
   local state
   for _ in $(seq 1 120); do
-    state="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${container}" 2>/dev/null || true)"
+    if ! state="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${container}" 2>/dev/null)"; then
+      state="missing"
+    fi
     if [[ "${state}" == healthy ]]; then
       return 0
     fi
@@ -94,7 +98,9 @@ wait_for_reload() {
   printf '\n' >> "${source_file}"
   for _ in $(seq 1 30); do
     if [[ -n "${probe_url}" ]]; then
-      curl --fail --silent "${probe_url}" >/dev/null 2>&1 || true
+      if ! curl --fail --silent "${probe_url}" >/dev/null 2>&1; then
+        : # The watcher may be restarting while the probe is used to trigger compilation.
+      fi
     fi
     if docker logs "${container}" 2>&1 \
       | tail -n "+${first_new_line}" \
@@ -141,6 +147,8 @@ fi
 wait_for_health postgres
 wait_for_health redis
 wait_for_health livekit
+
+"${COMPOSE[@]}" run --rm migrate
 
 "${COMPOSE[@]}" up -d --no-deps api
 wait_for_health api

@@ -16,13 +16,7 @@ export class InsufficientFundsError extends BadRequestException {
   }
 }
 
-export class SelfDonationError extends BadRequestException {
-  constructor() {
-    super({ code: 'SELF_DONATION_FORBIDDEN', message: 'You cannot donate to yourself' });
-  }
-}
-
-export interface TransferResult {
+interface TransferResult {
   ledgerGroupId: string;
   payerBalanceAfter: number;
   payeeBalanceAfter: number;
@@ -413,6 +407,18 @@ export class WalletService {
     reason: string;
     requesterId: string;
   }) {
+    return this.runSerializable((tx) => this.adminAdjustInTransaction(tx, input));
+  }
+
+  async adminAdjustInTransaction(
+    tx: Prisma.TransactionClient,
+    input: {
+      userId: string;
+      delta: number;
+      reason: string;
+      requesterId: string;
+    },
+  ) {
     const { userId, delta, reason, requesterId } = input;
     if (!Number.isFinite(delta) || delta === 0) {
       throw new BadRequestException('Adjustment delta must be non-zero');
@@ -423,12 +429,12 @@ export class WalletService {
 
     const meta: Prisma.InputJsonValue = { reason, requesterId, kind: 'admin_adjustment' };
     if (delta > 0) {
-      return this.credit(userId, delta, TransactionType.ADMIN_ADJUSTMENT, {
+      return this.creditInTransaction(tx, userId, delta, TransactionType.ADMIN_ADJUSTMENT, {
         description: `Admin adjustment (+${delta})`,
         metadata: meta,
       });
     }
-    return this.debit(userId, Math.abs(delta), TransactionType.ADMIN_ADJUSTMENT, {
+    return this.debitInTransaction(tx, userId, Math.abs(delta), TransactionType.ADMIN_ADJUSTMENT, {
       description: `Admin adjustment (${delta})`,
       metadata: meta,
     });

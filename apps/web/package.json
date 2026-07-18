@@ -6,7 +6,7 @@
     "dev": "next dev --port 3000",
     "build": "node ../../scripts/validate-public-env.mjs && next build",
     "start": "next start",
-    "lint": "eslint src",
+    "lint": "eslint src --max-warnings=0",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
@@ -30,17 +30,16 @@
     "react-dom": "^19.2.7",
     "tailwind-merge": "^3.0.0",
     "tailwindcss": "^4.0.0",
-    "zod": "^3.24.2",
     "zustand": "^5.0.3"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.11.0",
+    "@botparty/eslint-config": "workspace:*",
     "@botparty/tsconfig": "workspace:*",
     "@lhci/cli": "0.15.1",
     "@next/bundle-analyzer": "^15.5.18",
     "@next/eslint-plugin-next": "^15.5.18",
-    "@playwright/test": "^1.54.2",
-    "puppeteer-core": "24.43.1",
+    "@playwright/test": "1.59.1",
     "@testing-library/jest-dom": "^6.8.0",
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^14.6.1",
@@ -48,10 +47,12 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^5.0.2",
-    "@vitest/coverage-v8": "^3.2.4",
+    "@vitest/coverage-v8": "^3.2.7",
+    "eslint": "^9.22.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "jsdom": "^26.1.0",
+    "postcss": "^8.5.10",
     "typescript": "^5.7.3",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.7"
   }
 }

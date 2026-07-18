@@ -14,22 +14,28 @@ import { WalletService } from '../wallet/wallet.service';
 import { LivekitService } from '../livekit/livekit.service';
 import { FeatureFlagsService } from '../common/feature-flags.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import type { WsClient } from './gateway-types';
+
+type BotGatewayTestAccess = {
+  runtime: { robotClients: Map<string, WsClient> };
+  consumeControlCooldown(
+    client: WsClient,
+    robotId: string,
+    command: string,
+    cooldownMs: number,
+  ): Promise<boolean>;
+};
 
 describe('BotGateway', () => {
   let gateway: BotGateway;
   let module: TestingModule;
-  let robotsService: jest.Mocked<RobotsService>;
-  let sessionsService: jest.Mocked<SessionsService>;
-  let queueService: jest.Mocked<QueueService>;
   let redisService: jest.Mocked<RedisService>;
-  let moderationService: jest.Mocked<ModerationService>;
-  let controlsService: jest.Mocked<ControlsService>;
   let jwtService: jest.Mocked<JwtService>;
-  let configService: jest.Mocked<ConfigService>;
   let livekitService: jest.Mocked<LivekitService>;
 
   beforeEach(async () => {
     const mockRedisClient = {
+      connect: jest.fn().mockResolvedValue(undefined),
       on: jest.fn(),
       subscribe: jest.fn().mockResolvedValue(undefined),
       unsubscribe: jest.fn().mockResolvedValue(undefined),
@@ -71,7 +77,7 @@ describe('BotGateway', () => {
             findById: jest.fn(),
             getAccessPolicy: jest.fn(),
             updateStatus: jest.fn().mockResolvedValue(undefined),
-          } as any,
+          },
         },
         {
           provide: SessionsService,
@@ -80,7 +86,7 @@ describe('BotGateway', () => {
             end: jest.fn(),
             findActive: jest.fn(),
             endAllActiveSessions: jest.fn().mockResolvedValue(undefined),
-          } as any,
+          },
         },
         {
           provide: QueueService,
@@ -89,7 +95,7 @@ describe('BotGateway', () => {
             leave: jest.fn(),
             getStatus: jest.fn(),
             clearQueue: jest.fn().mockResolvedValue(undefined),
-          } as any,
+          },
         },
         {
           provide: RedisService,
@@ -110,40 +116,40 @@ describe('BotGateway', () => {
             zcard: jest.fn().mockResolvedValue(0),
             expire: jest.fn().mockResolvedValue(1),
             eval: jest.fn().mockResolvedValue(1),
-          } as any,
+          },
         },
         {
           provide: ModerationService,
           useValue: {
             checkProfanity: jest.fn(),
             isBanned: jest.fn(),
-          } as any,
+          },
         },
         {
           provide: ControlsService,
           useValue: {
             getEnabledButtons: jest.fn(),
-          } as any,
+          },
         },
         {
           provide: JwtService,
           useValue: {
             verify: jest.fn(),
             decode: jest.fn(),
-          } as any,
+          },
         },
         {
           provide: AuthService,
           useValue: {
             resolveValidAccessTokenPayload: jest.fn().mockResolvedValue(null),
-          } as any,
+          },
         },
         {
           provide: ConfigService,
           useValue: {
             get: jest.fn(),
             getOrThrow: jest.fn(),
-          } as any,
+          },
         },
         {
           provide: WalletService,
@@ -153,35 +159,29 @@ describe('BotGateway', () => {
             debit: jest.fn(),
             getBalance: jest.fn().mockResolvedValue(0),
             listStaleReservedControlIds: jest.fn().mockResolvedValue([]),
-          } as any,
+          },
         },
         {
           provide: LivekitService,
           useValue: {
             revokeController: jest.fn().mockResolvedValue(undefined),
             stopRoomRecording: jest.fn().mockResolvedValue({ active: false, outputs: [] }),
-          } as any,
+          },
         },
         {
           provide: FeatureFlagsService,
-          useValue: { isEnabled: jest.fn().mockReturnValue(false) } as any,
+          useValue: { isEnabled: jest.fn().mockReturnValue(false) },
         },
         {
           provide: NotificationsService,
-          useValue: { publishSafely: jest.fn().mockResolvedValue(null) } as any,
+          useValue: { publishSafely: jest.fn().mockResolvedValue(null) },
         },
       ],
     }).compile();
 
     gateway = module.get<BotGateway>(BotGateway);
-    robotsService = module.get(RobotsService) as jest.Mocked<RobotsService>;
-    sessionsService = module.get(SessionsService) as jest.Mocked<SessionsService>;
-    queueService = module.get(QueueService) as jest.Mocked<QueueService>;
     redisService = module.get(RedisService) as jest.Mocked<RedisService>;
-    moderationService = module.get(ModerationService) as jest.Mocked<ModerationService>;
-    controlsService = module.get(ControlsService) as jest.Mocked<ControlsService>;
     jwtService = module.get(JwtService) as jest.Mocked<JwtService>;
-    configService = module.get(ConfigService) as jest.Mocked<ConfigService>;
     livekitService = module.get(LivekitService) as jest.Mocked<LivekitService>;
   });
 
@@ -201,7 +201,7 @@ describe('BotGateway', () => {
       const mockSocket = {
         id: 'test-socket-1',
         close: jest.fn(),
-      } as any;
+      } as unknown as WsClient;
 
       await gateway.handleConnection(mockSocket, {});
       expect(mockSocket.id).toBeDefined();
@@ -214,7 +214,7 @@ describe('BotGateway', () => {
         on: jest.fn(),
         close: jest.fn(),
         send: jest.fn(),
-      } as any;
+      } as unknown as WsClient;
 
       jwtService.verify.mockReturnValueOnce({ userId: 'user-1', sub: 'user-1' });
 
@@ -227,7 +227,7 @@ describe('BotGateway', () => {
       const mockSocket = {
         id: 'test-socket-3',
         on: jest.fn(),
-      } as any;
+      } as unknown as WsClient;
 
       jwtService.verify.mockReturnValueOnce({ userId: 'user-1', sub: 'user-1' });
       await gateway.handleConnection(mockSocket, {});
@@ -244,10 +244,10 @@ describe('BotGateway', () => {
         isRobot: true,
         readyState: 1,
         close: jest.fn(),
-      } as any;
+      } as unknown as WsClient;
 
       await gateway.handleConnection(robotSocket, {});
-      (gateway as any).runtime.robotClients.set('robot-1', robotSocket);
+      (gateway as unknown as BotGatewayTestAccess).runtime.robotClients.set('robot-1', robotSocket);
       await gateway.handleDisconnect(robotSocket);
       await jest.advanceTimersByTimeAsync(10_000);
 
@@ -269,9 +269,9 @@ describe('BotGateway', () => {
     });
 
     it('stores control cooldowns in redis with a shared TTL gate', async () => {
-      const client = { id: 'viewer-1', userId: 'user-1' } as any;
+      const client = { id: 'viewer-1', userId: 'user-1' } as unknown as WsClient;
 
-      const allowed = await (gateway as any).consumeControlCooldown(
+      const allowed = await (gateway as unknown as BotGatewayTestAccess).consumeControlCooldown(
         client,
         'robot-1',
         'Forward',
@@ -289,25 +289,26 @@ describe('BotGateway', () => {
     });
 
     it('falls back to local cooldown tracking when redis is unavailable', async () => {
-      const client = { id: 'viewer-1', userId: 'user-1' } as any;
+      const client = { id: 'viewer-1', userId: 'user-1' } as unknown as WsClient;
       redisService.set.mockRejectedValueOnce(new Error('redis down'));
       redisService.set.mockRejectedValueOnce(new Error('redis still down'));
       redisService.set.mockResolvedValueOnce('OK');
 
-      const first = await (gateway as any).consumeControlCooldown(
+      const internal = gateway as unknown as BotGatewayTestAccess;
+      const first = await internal.consumeControlCooldown(
         client,
         'robot-1',
         'forward',
         120,
       );
-      const second = await (gateway as any).consumeControlCooldown(
+      const second = await internal.consumeControlCooldown(
         client,
         'robot-1',
         'forward',
         120,
       );
       const metricsDuringFallback = gateway.getRuntimeMetricsSnapshot();
-      const recovered = await (gateway as any).consumeControlCooldown(
+      const recovered = await internal.consumeControlCooldown(
         client,
         'robot-1',
         'left',

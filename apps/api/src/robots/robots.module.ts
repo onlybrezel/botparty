@@ -1,4 +1,4 @@
-import { Module, forwardRef } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { JOBS_QUEUE_WEBHOOK } from '../jobs/jobs.constants';
 import { RobotsService } from './robots.service';
@@ -14,19 +14,16 @@ import { RobotCameraService } from './robot-camera.service';
 import { RobotActionQueueService } from './robot-action-queue.service';
 import { RobotPublicOverviewService } from './robot-public-overview.service';
 import { RobotsController } from './robots.controller';
-import { RobotRuntimeService } from './robot-runtime.service';
-import { RobotRuntimeController } from './robot-runtime.controller';
 import { RobotWebhooksController } from './robot-webhooks.controller';
-import { RobotCamerasController } from './robot-cameras.controller';
 import { RobotSecretsController } from './robot-secrets.controller';
-import { LivekitModule } from '../livekit/livekit.module';
-import { JwtModule } from '@nestjs/jwt';
 import { WalletModule } from '../wallet/wallet.module';
+import { AuthModule } from '../auth/auth.module';
+import { StorageDeletionModule } from '../storage/storage-deletion.module';
 
 @Module({
   imports: [
-    forwardRef(() => LivekitModule),
-    JwtModule,
+    AuthModule,
+    StorageDeletionModule,
     BullModule.registerQueue({ name: JOBS_QUEUE_WEBHOOK }),
     WalletModule,
   ],
@@ -43,15 +40,8 @@ import { WalletModule } from '../wallet/wallet.module';
     RobotCameraService,
     RobotActionQueueService,
     RobotPublicOverviewService,
-    RobotRuntimeService,
   ],
-  controllers: [
-    RobotsController,
-    RobotRuntimeController,
-    RobotWebhooksController,
-    RobotCamerasController,
-    RobotSecretsController,
-  ],
+  controllers: [RobotsController, RobotWebhooksController, RobotSecretsController],
   exports: [
     RobotsService,
     RobotTelemetryService,

@@ -23,7 +23,14 @@ function build() {
     },
   };
   const prisma = {
-    robot: { findUnique: jest.fn().mockResolvedValue({ id: robotId, ownerId, name: 'Bot' }) },
+    robot: {
+      findUnique: jest.fn().mockResolvedValue({
+        id: robotId,
+        ownerId,
+        name: 'Bot',
+        visibility: 'PUBLIC',
+      }),
+    },
     walletIdempotencyKey: { findUnique: jest.fn().mockResolvedValue(null) },
   };
   const redis = {
@@ -67,6 +74,19 @@ describe('DonationService', () => {
     const self = build();
     self.prisma.robot.findUnique.mockResolvedValue({ id: robotId, ownerId: donorId, name: 'Mine' });
     await expect(self.service.donate(valid)).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('does not disclose private robots through donations', async () => {
+    const privateRobot = build();
+    privateRobot.prisma.robot.findUnique.mockResolvedValue({
+      id: robotId,
+      ownerId,
+      name: 'Private Bot',
+      visibility: 'PRIVATE',
+    });
+
+    await expect(privateRobot.service.donate(valid)).rejects.toBeInstanceOf(NotFoundException);
+    expect(privateRobot.prisma.walletIdempotencyKey.findUnique).not.toHaveBeenCalled();
   });
 
   it('returns a completed result for an identical retry without rate-limit or ledger writes', async () => {

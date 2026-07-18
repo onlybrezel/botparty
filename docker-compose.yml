@@ -12,12 +12,19 @@
 #   The API bridges both so it can reach db/redis while nginx proxies to it.
 # ─────────────────────────────────────────────────────
 
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: 5
+
 services:
   # ═══════════════════════════════════════════════════
   # PostgreSQL
   # ═══════════════════════════════════════════════════
   postgres:
-    image: postgres:16-alpine
+    logging: *default-logging
+    image: postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
     restart: on-failure:10
     environment:
       POSTGRES_DB: botparty
@@ -47,7 +54,8 @@ services:
   # Redis
   # ═══════════════════════════════════════════════════
   redis:
-    image: redis:7-alpine
+    logging: *default-logging
+    image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
     restart: on-failure:10
     entrypoint: ["/bin/sh", "-ec"]
     command: ['exec redis-server /usr/local/etc/redis/redis.conf --requirepass "$$(cat /run/secrets/redis_password)"']
@@ -71,7 +79,8 @@ services:
           memory: 384M
 
   minio:
-    image: minio/minio:latest
+    logging: *default-logging
+    image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     restart: on-failure:10
     entrypoint: ["/bin/sh", "-ec"]
     command: ['export MINIO_ROOT_PASSWORD="$$(cat /run/secrets/minio_root_password)"; exec minio server /data --console-address :9001']
@@ -85,6 +94,11 @@ services:
       - ${BOTPARTY_SECRET_DIR:-./docker/secrets}:/run/secrets:ro
     networks:
       - frontend
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 3s
+      timeout: 2s
+      retries: 15
     deploy:
       resources:
         limits:
@@ -92,34 +106,46 @@ services:
           memory: 1024M
 
   minio-init:
-    image: minio/mc:latest
-    restart: on-failure:10
+    logging: *default-logging
+    image: minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    restart: "no"
     entrypoint: /bin/sh
     command:
       - -c
       - |
         minio_password="$$(cat /run/secrets/minio_root_password)"
+        attempts=0
         until mc alias set local http://minio:9000 "${MINIO_ROOT_USER:-botpartyminio}" "$${minio_password}"; do
+          attempts=$$((attempts + 1))
+          if [ "$${attempts}" -ge 30 ]; then
+            echo "minio remained unavailable while applying bucket policies" >&2
+            exit 1
+          fi
           echo "waiting for minio..."
           sleep 2
         done
-        mc mb -p local/${THUMBNAIL_S3_BUCKET:-botparty-thumbnails} || true
-        mc anonymous set download local/${THUMBNAIL_S3_BUCKET:-botparty-thumbnails}
-        mc mb -p local/${LIVEKIT_RECORDINGS_S3_BUCKET:-botparty-recordings} || true
+        mc mb --ignore-existing local/${THUMBNAIL_S3_BUCKET:-botparty-thumbnails}
+        mc anonymous set none local/${THUMBNAIL_S3_BUCKET:-botparty-thumbnails}
+        mc mb --ignore-existing local/${LIVEKIT_RECORDINGS_S3_BUCKET:-botparty-recordings}
         mc anonymous set none local/${LIVEKIT_RECORDINGS_S3_BUCKET:-botparty-recordings}
         if [ "${RECORDING_RETENTION_DAYS:-30}" -gt 0 ] 2>/dev/null; then
-          mc ilm rule add --expire-days "${RECORDING_RETENTION_DAYS:-30}" local/${LIVEKIT_RECORDINGS_S3_BUCKET:-botparty-recordings} || true
+          lifecycle="$$(mc ilm rule ls --json local/${LIVEKIT_RECORDINGS_S3_BUCKET:-botparty-recordings})"
+          case "$${lifecycle}" in
+            *'"Days":${RECORDING_RETENTION_DAYS:-30}'*) echo "recording retention rule already present" ;;
+            *) mc ilm rule add --expire-days "${RECORDING_RETENTION_DAYS:-30}" local/${LIVEKIT_RECORDINGS_S3_BUCKET:-botparty-recordings} ;;
+          esac
         fi
     depends_on:
       minio:
-        condition: service_started
+        condition: service_healthy
     networks:
       - frontend
     volumes:
       - ${BOTPARTY_SECRET_DIR:-./docker/secrets}:/run/secrets:ro
 
   livekit-config:
-    image: node:22-alpine
+    logging: *default-logging
+    image: node@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2
     restart: "no"
     environment:
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?Set LIVEKIT_API_KEY (must not be devkey)}
@@ -136,20 +162,22 @@ services:
   # LiveKit Server (SFU)
   # ═══════════════════════════════════════════════════
   livekit:
-    image: livekit/livekit-server:v1.8
+    logging: *default-logging
+    image: livekit/livekit-server:v1.8@sha256:621fd87bd64a0c83e1f2418ee0323eb920d00acdd73e5f79b303c64f6cc532af
     restart: on-failure:10
     ports:
-      - "7880:7880"
-      - "7881:7881/tcp"
-      - "50000-50100:50000-50100/udp"
+      - "${LIVEKIT_HTTP_HOST_PORT:-7880}:7880"
+      - "${LIVEKIT_TCP_HOST_PORT:-7881}:7881/tcp"
+      - "${LIVEKIT_UDP_HOST_PORT_RANGE:-50000-50100}:50000-50100/udp"
     depends_on:
       livekit-config:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
     networks:
-      - internal
-      - frontend
+      internal:
+      frontend:
+        gw_priority: 1
     volumes:
       - livekit_runtime_config:/run/livekit-config:ro
     command: --config /run/livekit-config/livekit.json
@@ -165,12 +193,13 @@ services:
           memory: 2048M
 
   livekit-ingress:
-    image: livekit/ingress:v1.4
+    logging: *default-logging
+    image: livekit/ingress:v1.4@sha256:04bdc68b56530870e65086a07daac7743f3f049f0be87e0df2b4b7e51f1b9379
     restart: on-failure:10
     ports:
-      - "8080:8080"
-      - "7882:7882/tcp"
-      - "7885:7885/udp"
+      - "${LIVEKIT_INGRESS_WHIP_HOST_PORT:-8080}:8080"
+      - "${LIVEKIT_INGRESS_TCP_HOST_PORT:-7882}:7882/tcp"
+      - "${LIVEKIT_INGRESS_UDP_HOST_PORT:-7885}:7885/udp"
     environment:
       INGRESS_CONFIG_FILE: /run/livekit-config/ingress.json
     depends_on:
@@ -179,10 +208,11 @@ services:
       redis:
         condition: service_healthy
       livekit:
-        condition: service_started
+        condition: service_healthy
     networks:
-      - internal
-      - frontend
+      internal:
+      frontend:
+        gw_priority: 1
     volumes:
       - livekit_runtime_config:/run/livekit-config:ro
     healthcheck:
@@ -197,7 +227,8 @@ services:
           memory: 1536M
 
   livekit-egress:
-    image: livekit/egress:v1.8
+    logging: *default-logging
+    image: livekit/egress:v1.8@sha256:553fe2115f66b5c570a282c17f884f77f46e9fc9e7ae997a948d9d453dd6777e
     restart: on-failure:10
     environment:
       EGRESS_CONFIG_FILE: /run/livekit-config/egress.json
@@ -207,12 +238,15 @@ services:
       redis:
         condition: service_healthy
       livekit:
-        condition: service_started
+        condition: service_healthy
       minio:
-        condition: service_started
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     networks:
-      - internal
-      - frontend
+      internal:
+      frontend:
+        gw_priority: 1
     volumes:
       - livekit_runtime_config:/run/livekit-config:ro
     healthcheck:
@@ -227,21 +261,25 @@ services:
           memory: 2048M
 
   cadvisor:
+    logging: *default-logging
     profiles: ["observability"]
-    image: gcr.io/cadvisor/cadvisor:v0.49.2
+    image: ghcr.io/google/cadvisor:v0.57.0@sha256:e75bdb03b74b0b6995f208f166fead2e6e555dde73e44200113bb26f41b1981d
     restart: on-failure:10
-    # privileged: required by cAdvisor to read hardware and container metrics from /sys and /dev.
-    # All volume mounts below are read-only — the elevated privilege is limited to kernel metric access.
-    privileged: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
     command:
       - --docker_only=true
       - --housekeeping_interval=30s
+      - --disable_metrics=disk,diskIO,perf_event
     volumes:
       - /:/rootfs:ro
       - /var/run:/var/run:ro
       - /sys:/sys:ro
       - /var/lib/docker:/var/lib/docker:ro
-      - /dev/disk:/dev/disk:ro
     networks:
       - internal
     healthcheck:
@@ -250,21 +288,60 @@ services:
       timeout: 5s
       retries: 5
 
+  node-exporter:
+    logging: *default-logging
+    profiles: ["observability"]
+    image: prom/node-exporter:v1.11.1@sha256:e9cff4fc67b1818f8c97adb115b9f12c9a54b533de86765d4a0effc01b357205
+    restart: on-failure:10
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    user: "65534:65534"
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/host
+      - --collector.textfile.directory=/textfile
+      - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|var/lib/docker/.+|var/lib/containers/storage/.+)($$|/)
+    volumes:
+      - /:/host:ro,rslave
+      - ./data/metrics:/textfile:ro
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:9100/metrics 2>/dev/null && echo ok || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
   # ═══════════════════════════════════════════════════
   # BotParty API (NestJS)
   # ═══════════════════════════════════════════════════
   api:
+    logging: *default-logging
     build:
       context: .
       dockerfile: docker/api/Dockerfile
-    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-onlybrezel}/botparty-api:${APP_VERSION:-latest}
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-onlybrezel}/botparty-api:${APP_VERSION:-0.1.3}
     restart: on-failure:10
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    # The root entrypoint needs read access to host bind-mounted 0600 secrets;
+    # su-exec then drops UID, GID, and all effective capabilities for Node.
+    cap_add: [DAC_OVERRIDE, SETGID, SETUID]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
     expose:
       - "4000"
-    environment:
+    environment: &api-environment
       NODE_ENV: production
       PORT: 4000
       DATABASE_URL_FILE: ${DATABASE_URL_FILE:-/run/secrets/api_database_url}
+      DATABASE_WRITE_URL_FILE: ${DATABASE_WRITE_URL_FILE:-/run/secrets/api_database_url}
+      DATABASE_READ_URL_FILE: ${DATABASE_READ_URL_FILE:-/run/secrets/api_database_url}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD_FILE: ${REDIS_PASSWORD_FILE:-/run/secrets/redis_password}
@@ -289,6 +366,7 @@ services:
       PASSWORD_RESET_TTL_SEC: ${PASSWORD_RESET_TTL_SEC:-3600}
       RECORDING_SIGNED_URL_TTL_SEC: ${RECORDING_SIGNED_URL_TTL_SEC:-300}
       APP_URL: ${APP_URL:-https://botparty.live}
+      PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-https://botparty.live}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_SECURE: ${SMTP_SECURE:-false}
@@ -312,6 +390,8 @@ services:
       THROTTLE_TTL: ${THROTTLE_TTL:-60000}
       THROTTLE_LIMIT: ${THROTTLE_LIMIT:-100}
       FASTIFY_BODY_LIMIT: ${FASTIFY_BODY_LIMIT:-1048576}
+      MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-64}
+      MAX_CONCURRENT_LOGIN_REQUESTS: ${MAX_CONCURRENT_LOGIN_REQUESTS:-2}
       THUMBNAIL_PUBLIC_BASE_URL: ${THUMBNAIL_PUBLIC_BASE_URL:-https://botparty.live/storage/botparty-thumbnails}
       THUMBNAIL_S3_BUCKET: ${THUMBNAIL_S3_BUCKET:-botparty-thumbnails}
       THUMBNAIL_S3_REGION: ${THUMBNAIL_S3_REGION:-us-east-1}
@@ -320,7 +400,11 @@ services:
       THUMBNAIL_S3_SECRET_ACCESS_KEY_FILE: ${THUMBNAIL_S3_SECRET_ACCESS_KEY_FILE:-/run/secrets/minio_root_password}
       THUMBNAIL_S3_FORCE_PATH_STYLE: ${THUMBNAIL_S3_FORCE_PATH_STYLE:-true}
       SEED_ADMIN_PASSWORD_FILE: ${SEED_ADMIN_PASSWORD_FILE:-/run/secrets/seed_admin_password}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-}
+      SEED_ADMIN_USERNAME: ${SEED_ADMIN_USERNAME:-admin}
       SEED_DEMO_USER_PASSWORD_FILE: ${SEED_DEMO_USER_PASSWORD_FILE:-/run/secrets/seed_demo_user_password}
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-false}
+      SEED_E2E_FIXTURES: ${SEED_E2E_FIXTURES:-false}
       STRIPE_SECRET_KEY_FILE: ${STRIPE_SECRET_KEY_FILE:-/run/secrets/stripe_secret_key}
       STRIPE_WEBHOOK_SECRET_FILE: ${STRIPE_WEBHOOK_SECRET_FILE:-/run/secrets/stripe_webhook_secret}
       STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
@@ -328,20 +412,28 @@ services:
       PAYPAL_CLIENT_SECRET_FILE: ${PAYPAL_CLIENT_SECRET_FILE:-/run/secrets/paypal_client_secret}
       PAYPAL_WEBHOOK_ID_FILE: ${PAYPAL_WEBHOOK_ID_FILE:-/run/secrets/paypal_webhook_id}
       PAYPAL_ENV: ${PAYPAL_ENV:-sandbox}
+      PAYPAL_REQUEST_TIMEOUT_MS: ${PAYPAL_REQUEST_TIMEOUT_MS:-8000}
+      PAYPAL_MAX_RETRIES: ${PAYPAL_MAX_RETRIES:-2}
+      PAYPAL_RETRY_BASE_MS: ${PAYPAL_RETRY_BASE_MS:-250}
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       livekit:
-        condition: service_started
+        condition: service_healthy
       livekit-ingress:
-        condition: service_started
+        condition: service_healthy
       minio:
-        condition: service_started
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     networks:
-      - internal
-      - frontend
+      internal:
+      frontend:
+        gw_priority: 1
     volumes:
       - ${BOTPARTY_SECRET_DIR:-./docker/secrets}:/run/secrets:ro
     healthcheck:
@@ -359,10 +451,38 @@ services:
           cpus: '0.25'
           memory: 256M
 
+  # Database schema and initial seed are applied exactly once before any API
+  # instance starts. This service is safe to run explicitly during releases.
+  migrate:
+    logging: *default-logging
+    build:
+      context: .
+      dockerfile: docker/api/Dockerfile
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-onlybrezel}/botparty-api:${APP_VERSION:-0.1.3}
+    restart: "no"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    cap_add: [DAC_OVERRIDE, SETGID, SETUID]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    entrypoint: ["/migrate-entrypoint.sh"]
+    environment:
+      <<: *api-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - internal
+    volumes:
+      - ${BOTPARTY_SECRET_DIR:-./docker/secrets}:/run/secrets:ro
+
   # ═══════════════════════════════════════════════════
   # BotParty Web (Next.js)
   # ═══════════════════════════════════════════════════
   web:
+    logging: *default-logging
     build:
       context: .
       dockerfile: docker/web/Dockerfile
@@ -376,8 +496,8 @@ services:
         NEXT_PUBLIC_LEGAL_OPERATOR_NAME: ${NEXT_PUBLIC_LEGAL_OPERATOR_NAME:-}
         NEXT_PUBLIC_LEGAL_OPERATOR_EMAIL: ${NEXT_PUBLIC_LEGAL_OPERATOR_EMAIL:-}
         NEXT_PUBLIC_LEGAL_OPERATOR_ADDRESS: ${NEXT_PUBLIC_LEGAL_OPERATOR_ADDRESS:-}
-        NEXT_PUBLIC_LEGAL_OPERATOR_COUNTRY: ${NEXT_PUBLIC_LEGAL_OPERATOR_COUNTRY:-}
-        NEXT_PUBLIC_LEGAL_GOVERNING_LAW: ${NEXT_PUBLIC_LEGAL_GOVERNING_LAW:-}
+        NEXT_PUBLIC_LEGAL_OPERATOR_COUNTRY: ${NEXT_PUBLIC_LEGAL_OPERATOR_COUNTRY:-Germany}
+        NEXT_PUBLIC_LEGAL_GOVERNING_LAW: ${NEXT_PUBLIC_LEGAL_GOVERNING_LAW:-Germany}
         NEXT_PUBLIC_LEGAL_VAT_ID: ${NEXT_PUBLIC_LEGAL_VAT_ID:-}
         NEXT_PUBLIC_LEGAL_COMMERCIAL_REGISTER: ${NEXT_PUBLIC_LEGAL_COMMERCIAL_REGISTER:-}
         NEXT_PUBLIC_LEGAL_SUPPORT_URL: ${NEXT_PUBLIC_LEGAL_SUPPORT_URL:-}
@@ -386,8 +506,15 @@ services:
         NEXT_PUBLIC_FEATURE_DONATIONS: ${FEATURE_DONATIONS_ENABLED:-false}
         NEXT_PUBLIC_FEATURE_PAYOUTS: ${FEATURE_PAYOUTS_ENABLED:-false}
         NEXT_PUBLIC_FEATURE_PAID_CONTROLS: ${FEATURE_PAID_CONTROLS_ENABLED:-false}
-    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-onlybrezel}/botparty-web:${APP_VERSION:-latest}
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-onlybrezel}/botparty-web:${APP_VERSION:-0.1.3}
     restart: on-failure:10
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+      - /app/apps/web/.next/cache:rw,noexec,nosuid,size=128m
     environment:
       # SSR-internal URL (used by Next.js server-side fetch, container-to-container)
       API_URL: http://api:4000
@@ -405,9 +532,9 @@ services:
       NEXT_PUBLIC_LEGAL_SUPPORT_URL: ${NEXT_PUBLIC_LEGAL_SUPPORT_URL:-}
     depends_on:
       api:
-        condition: service_started
+        condition: service_healthy
       minio:
-        condition: service_started
+        condition: service_healthy
     networks:
       - frontend
     healthcheck:
@@ -429,19 +556,30 @@ services:
   # NGINX Reverse Proxy
   # ═══════════════════════════════════════════════════
   nginx:
-    image: nginx:1.27-alpine
+    logging: *default-logging
+    image: nginxinc/nginx-unprivileged:1.27-alpine@sha256:65e3e85dbaed8ba248841d9d58a899b6197106c23cb0ff1a132b7bfe0547e4c0
+    entrypoint: ["/bin/sh", "/etc/nginx/botparty-entrypoint.sh"]
     restart: on-failure:10
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    group_add:
+      - "${BOTPARTY_SECRET_GID:-1000}"
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
     ports:
-      - "80:80"
-      - "443:443"
+      - "${HTTP_HOST_PORT:-80}:80"
+      - "${HTTPS_HOST_PORT:-443}:443"
     volumes:
       - ${NGINX_CONF:-./docker/nginx/nginx.conf}:/etc/nginx/nginx.conf:ro
+      - ./docker/nginx/entrypoint.sh:/etc/nginx/botparty-entrypoint.sh:ro
       - ./docker/nginx/ssl:/etc/nginx/ssl:ro
     depends_on:
       web:
-        condition: service_started
+        condition: service_healthy
       api:
-        condition: service_started
+        condition: service_healthy
     networks:
       - frontend
     healthcheck:
@@ -456,9 +594,18 @@ services:
           memory: 256M
 
   prometheus:
+    logging: *default-logging
     profiles: ["observability"]
-    image: prom/prometheus:v3.5.0
+    image: prom/prometheus:v3.13.1@sha256:3c42b892cf723fa54d2f262c37a0e1f80aa8c8ddb1da7b9b0df9455a35a7f893
     restart: on-failure:10
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    group_add:
+      - "${BOTPARTY_SECRET_GID:-1000}"
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.retention.time=30d
@@ -473,9 +620,16 @@ services:
         condition: service_started
       alertmanager:
         condition: service_started
+      node-exporter:
+        condition: service_started
     networks:
       - internal
       - frontend
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:9090/-/ready 2>/dev/null && echo ok || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     deploy:
       resources:
         limits:
@@ -483,9 +637,18 @@ services:
           memory: 1024M
 
   alertmanager:
+    logging: *default-logging
     profiles: ["observability"]
-    image: prom/alertmanager:v0.28.1
+    image: prom/alertmanager:v0.28.1@sha256:27c475db5fb156cab31d5c18a4251ac7ed567746a2483ff264516437a39b15ba
     restart: on-failure:10
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    group_add:
+      - "${BOTPARTY_SECRET_GID:-1000}"
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
     entrypoint: ["/bin/sh", "/etc/alertmanager/entrypoint.sh"]
     volumes:
       - ./docker/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
@@ -494,6 +657,11 @@ services:
       - alertmanager_data:/alertmanager
     networks:
       - frontend
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:9093/-/ready 2>/dev/null && echo ok || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     deploy:
       resources:
         limits:
@@ -504,12 +672,17 @@ services:
   # Optional centralized logs (Loki + Promtail)
   # ═══════════════════════════════════════════════════
   loki:
+    logging: *default-logging
     profiles: ["observability-logs"]
-    image: grafana/loki:3.2.1
+    image: grafana/loki:3.2.1@sha256:09a53b4a4ff81ffcd8f13886df19d33fac7a8d3aaf952e3c7e66cbade5b2fc31
     restart: on-failure:10
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
     command: ["-config.file=/etc/loki/config.yaml"]
     volumes:
       - ./docker/loki/config.yaml:/etc/loki/config.yaml:ro
+      - loki_data:/loki
     networks:
       - frontend
     deploy:
@@ -519,14 +692,19 @@ services:
           memory: 1024M
 
   promtail:
+    logging: *default-logging
     profiles: ["observability-logs"]
-    image: grafana/promtail:3.2.1
+    image: grafana/promtail:3.2.1@sha256:bf617e9d67e80247a59f717f9c1ad388d7d32dc0a1d29abd5799516d15e0a9b5
     restart: on-failure:10
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
     command: ["-config.file=/etc/promtail/config.yaml"]
     volumes:
       - ./docker/promtail/config.yaml:/etc/promtail/config.yaml:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - promtail_positions:/positions
     depends_on:
       loki:
         condition: service_started
@@ -544,6 +722,8 @@ volumes:
   minio_data:
   prometheus_data:
   alertmanager_data:
+  loki_data:
+  promtail_positions:
   livekit_runtime_config:
 
 networks:

@@ -1,7 +1,6 @@
 import {
   Injectable,
   NotFoundException,
-  ForbiddenException,
   BadRequestException,
   OnModuleDestroy,
   OnModuleInit,
@@ -13,6 +12,7 @@ import { assertRobotOwner } from '../common/robot-access';
 import { RedisService } from '../redis/redis.service';
 import type Redis from 'ioredis';
 import { FeatureFlagsService } from '../common/feature-flags.service';
+import { Prisma } from '@botparty/prisma';
 
 type EnabledControlButtonRecord = {
   id: string;
@@ -59,7 +59,8 @@ export class ControlsService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleInit() {
-    this.cacheSubscriber = this.redis.duplicate();
+    this.cacheSubscriber = this.redis.duplicate({ lazyConnect: true });
+    await this.cacheSubscriber.connect();
     await this.cacheSubscriber.psubscribe('controls:invalidate:*');
     this.cacheSubscriber.on('pmessage', (_pattern, channel) => {
       const robotId = channel.slice('controls:invalidate:'.length);
@@ -84,7 +85,7 @@ export class ControlsService implements OnModuleInit, OnModuleDestroy {
   async getVisibleButtons(robotId: string, requester: VisibleControlsRequester) {
     const robot = await this.prisma.robot.findUnique({
       where: { id: robotId },
-      select: { ownerId: true },
+      select: { ownerId: true, visibility: true },
     });
 
     if (!robot) {
@@ -92,6 +93,9 @@ export class ControlsService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (!requester.hasRoomAccess) {
+      if (robot.visibility === 'PRIVATE') {
+        throw new NotFoundException('Robot not found');
+      }
       return [];
     }
 
@@ -173,6 +177,7 @@ export class ControlsService implements OnModuleInit, OnModuleDestroy {
     if ((dto.costCredits ?? 0) > 0) this.features.assertEnabled('PAID_CONTROLS');
 
     const button = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw(Prisma.sql`SELECT id FROM "robots" WHERE id = ${robotId}::uuid FOR UPDATE`);
       let count = await tx.controlButton.count({ where: { robotId } });
       if (count === 0) {
         await tx.controlButton.createMany({
@@ -247,7 +252,7 @@ export class ControlsService implements OnModuleInit, OnModuleDestroy {
           costCredits: dto.costCredits ?? 0,
         },
       });
-    });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     this.invalidateEnabledButtonsCache(robotId);
     return button;

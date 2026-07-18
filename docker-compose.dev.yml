@@ -13,6 +13,14 @@
 # ─────────────────────────────────────────────────────
 
 services:
+  migrate:
+    build:
+      target: dev
+    image: botparty-api:dev
+    environment:
+      NODE_ENV: development
+    read_only: false
+
   api:
     build:
       target: dev
@@ -25,6 +33,7 @@ services:
       AUTH_COOKIE_SECURE: "false"
       LIVEKIT_PUBLIC_URL: ${NEXT_PUBLIC_LIVEKIT_URL:-ws://localhost:7880}
       THUMBNAIL_PUBLIC_BASE_URL: ${THUMBNAIL_PUBLIC_BASE_URL:-http://localhost:9000/botparty-thumbnails}
+    read_only: false
     volumes:
       - ${API_SOURCE_DIR:-./apps/api/src}:/app/apps/api/src:delegated
     ports:
@@ -47,6 +56,7 @@ services:
       NEXT_PUBLIC_LEGAL_OPERATOR_ADDRESS: ${NEXT_PUBLIC_LEGAL_OPERATOR_ADDRESS:-Local development}
       NEXT_PUBLIC_LEGAL_OPERATOR_COUNTRY: ${NEXT_PUBLIC_LEGAL_OPERATOR_COUNTRY:-Germany}
       NEXT_PUBLIC_LEGAL_GOVERNING_LAW: ${NEXT_PUBLIC_LEGAL_GOVERNING_LAW:-Germany}
+    read_only: false
     volumes:
       - ${WEB_SOURCE_DIR:-./apps/web/src}:/app/apps/web/src:delegated
     ports:

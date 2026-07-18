@@ -1,20 +1,12 @@
 // @ts-check
-const { FlatCompat } = require('@eslint/eslintrc');
-const js = require('@eslint/js');
-const path = require('path');
-
-const compat = new FlatCompat({
-  baseDirectory: __dirname,
-  resolvePluginsRelativeTo: path.resolve(__dirname, '../../packages/eslint-config'),
-  recommendedConfig: js.configs.recommended,
-});
+const sharedConfig = require('@botparty/eslint-config');
 
 /** @type {import('eslint').Linter.Config[]} */
 module.exports = [
   {
     ignores: ['dist/**', 'node_modules/**', '.turbo/**'],
   },
-  ...compat.extends('@botparty/eslint-config'),
+  ...sharedConfig,
   {
     files: ['**/*.ts'],
     languageOptions: {

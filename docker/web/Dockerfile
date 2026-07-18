@@ -7,7 +7,7 @@
 # ----------------------------------------------
 
 # ─── deps: install workspace dependencies ─────
-FROM node:24-alpine AS deps
+FROM node:24-alpine@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd AS deps
 RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
 WORKDIR /app
 
@@ -29,7 +29,7 @@ EXPOSE 3000
 CMD ["pnpm", "--filter", "@botparty/web", "dev"]
 
 # ─── builder: compile shared, then Next.js ────
-FROM node:24-alpine AS builder
+FROM node:24-alpine@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd AS builder
 RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
 WORKDIR /app
 ARG NEXT_PUBLIC_APP_VERSION=dev
@@ -56,9 +56,10 @@ ARG NEXT_PUBLIC_FEATURE_PAID_CONTROLS=false
 COPY --from=deps /app/.npmrc /app/pnpm-workspace.yaml /app/package.json ./
 COPY --from=deps /app/node_modules ./node_modules
 
-COPY packages/tsconfig/  packages/tsconfig/
-COPY packages/shared/    packages/shared/
-COPY apps/web/           apps/web/
+COPY packages/tsconfig/      packages/tsconfig/
+COPY packages/eslint-config/ packages/eslint-config/
+COPY packages/shared/        packages/shared/
+COPY apps/web/               apps/web/
 COPY scripts/validate-public-env.mjs scripts/validate-public-env.mjs
 
 RUN pnpm --filter @botparty/shared build
@@ -88,9 +89,10 @@ RUN --mount=type=cache,id=next-build-cache,target=/app/apps/web/.next/cache \
     pnpm --filter @botparty/web build
 
 # ─── runner: minimal production image ─────────
-FROM node:24-alpine AS runner
+FROM node:24-alpine@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd AS runner
 WORKDIR /app
 
+ARG NEXT_PUBLIC_APP_VERSION=dev
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000

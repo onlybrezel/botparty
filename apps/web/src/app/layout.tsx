@@ -7,6 +7,10 @@ import Nav from '@/components/nav';
 import { ThemeController } from '@/components/theme-controller';
 import { ToastStack } from '@/components/ui/toast-stack';
 
+// A per-request CSP nonce is injected by middleware and must also reach the
+// framework scripts. Static prerendering would produce nonce-less script tags.
+export const dynamic = 'force-dynamic';
+
 export const metadata: Metadata = {
   metadataBase: new URL('https://botparty.live'),
   title: { default: 'BotParty', template: '%s | BotParty' },

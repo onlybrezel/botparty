@@ -27,6 +27,8 @@ import { FeatureFlagsModule } from '../common/feature-flags.service';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { AnalyticsModule } from '../analytics/analytics.module';
 import { HttpMetricsInterceptor } from '../common/http-metrics.interceptor';
+import { RedisService } from '../redis/redis.service';
+import { RedisThrottlerStorage } from '../common/redis-throttler.storage';
 
 @Module({
   imports: [
@@ -37,13 +39,17 @@ import { HttpMetricsInterceptor } from '../common/http-metrics.interceptor';
     }),
     FeatureFlagsModule,
     ThrottlerModule.forRootAsync({
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => [
-        {
-          ttl: Number(config.get<string>('THROTTLE_TTL') ?? '60000'),
-          limit: Number(config.get<string>('THROTTLE_LIMIT') ?? '100'),
-        },
-      ],
+      imports: [RedisModule],
+      inject: [ConfigService, RedisService],
+      useFactory: (config: ConfigService, redis: RedisService) => ({
+        storage: new RedisThrottlerStorage(redis),
+        throttlers: [
+          {
+            ttl: Number(config.get<string>('THROTTLE_TTL') ?? '60000'),
+            limit: Number(config.get<string>('THROTTLE_LIMIT') ?? '100'),
+          },
+        ],
+      }),
     }),
     PrismaModule,
     RedisModule,

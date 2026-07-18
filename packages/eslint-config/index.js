@@ -1,16 +1,18 @@
-/** @type {import("eslint").Linter.Config} */
-module.exports = {
-  parser: '@typescript-eslint/parser',
-  plugins: ['@typescript-eslint'],
-  extends: [
-    'eslint:recommended',
-    'plugin:@typescript-eslint/recommended',
-    'prettier',
-  ],
-  rules: {
-    '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
-    '@typescript-eslint/no-explicit-any': 'warn',
-    '@typescript-eslint/consistent-type-imports': 'error',
+const js = require('@eslint/js');
+const typescriptPlugin = require('@typescript-eslint/eslint-plugin');
+const prettier = require('eslint-config-prettier');
+
+/** @type {import('eslint').Linter.Config[]} */
+module.exports = [
+  js.configs.recommended,
+  ...typescriptPlugin.configs['flat/recommended'],
+  {
+    files: ['**/*.{ts,tsx}'],
+    rules: {
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+      '@typescript-eslint/no-explicit-any': 'error',
+      '@typescript-eslint/consistent-type-imports': 'error',
+    },
   },
-  ignorePatterns: ['dist/', 'node_modules/', '.next/', '.turbo/'],
-};
+  prettier,
+];

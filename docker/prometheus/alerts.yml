@@ -36,6 +36,13 @@ groups:
         annotations:
           summary: API p95 latency exceeds 500 ms
           runbook_url: docs/runbook.md#incident-response-by-alert
+      - alert: BotPartyApiOverloadSustained
+        expr: sum(rate(botparty_http_overload_rejections_total[5m])) > 0.5
+        for: 5m
+        labels: { severity: warning, owner: application }
+        annotations:
+          summary: API instances are continuously rejecting work at their concurrency limit
+          runbook_url: PERFORMANCE_RUNBOOK.md#overload-diagnose
 
   - name: botparty-product-flows
     rules:
@@ -80,6 +87,34 @@ groups:
         annotations:
           summary: A retention cleanup job failed
           runbook_url: docs/runbook.md#incident-response-by-alert
+      - alert: BotPartyStorageDeletionBacklog
+        expr: botparty_storage_deletion_failed > 0 or botparty_storage_deletion_backlog > 100
+        for: 15m
+        labels: { severity: warning, owner: compliance }
+        annotations:
+          summary: Object-storage deletions are failing or accumulating
+          runbook_url: docs/runbook.md#incident-response-by-alert
+      - alert: BotPartyJobQueueBacklog
+        expr: botparty_job_queue_depth > 100
+        for: 10m
+        labels: { severity: warning, owner: application }
+        annotations:
+          summary: A background-job queue has more than 100 pending jobs
+          runbook_url: docs/runbook.md#incident-response-by-alert
+      - alert: BotPartyJobQueueFailures
+        expr: botparty_job_queue_failed > 0
+        for: 5m
+        labels: { severity: warning, owner: application }
+        annotations:
+          summary: A background-job queue contains failed jobs
+          runbook_url: docs/runbook.md#incident-response-by-alert
+      - alert: BotPartyJobQueueWorkerUnavailable
+        expr: botparty_job_queue_worker_up == 0
+        for: 2m
+        labels: { severity: critical, owner: application }
+        annotations:
+          summary: A background-job worker cannot reach its queue
+          runbook_url: docs/runbook.md#redis-oom--redis-down
 
   - name: botparty-capacity
     rules:
@@ -91,12 +126,19 @@ groups:
           summary: Redis uses more than 90% of its 256 MiB data limit
           runbook_url: docs/runbook.md#redis-oom--redis-down
       - alert: BotPartyDatabaseConnectionsHigh
-        expr: botparty_database_connections > 80
+        expr: botparty_database_connections >= 64
         for: 10m
         labels: { severity: warning, owner: platform }
         annotations:
           summary: PostgreSQL connection use is near the default limit
           runbook_url: docs/runbook.md#prisma-pool-tuning
+      - alert: BotPartyApiEventLoopLagHigh
+        expr: max(botparty_api_nodejs_eventloop_lag_p99_seconds) > 0.1
+        for: 10m
+        labels: { severity: warning, owner: application }
+        annotations:
+          summary: API event-loop p99 lag exceeds 100 ms
+          runbook_url: PERFORMANCE_RUNBOOK.md#nodejs-diagnose
       - alert: BotPartyContainerMemoryHigh
         expr: container_memory_working_set_bytes{name=~"botparty-.+"} / clamp_min(container_spec_memory_limit_bytes{name=~"botparty-.+"}, 1) > 0.9
         for: 10m
@@ -104,10 +146,52 @@ groups:
         annotations:
           summary: A BotParty container uses more than 90% of its memory limit
           runbook_url: docs/runbook.md#incident-response-by-alert
-      - alert: BotPartyContainerDiskHigh
-        expr: container_fs_usage_bytes{name=~"botparty-.+"} / clamp_min(container_fs_limit_bytes{name=~"botparty-.+"}, 1) > 0.9
+      - alert: BotPartyContainerRestartLoop
+        expr: changes(container_start_time_seconds{name=~"botparty-.+"}[15m]) > 2
+        for: 5m
+        labels: { severity: warning, owner: platform }
+        annotations:
+          summary: A BotParty container restarted repeatedly
+          runbook_url: docs/runbook.md#incident-response-by-alert
+      - alert: BotPartyTlsCertificateInvalid
+        expr: botparty_tls_certificate_configured == 1 and botparty_tls_certificate_expiry_unixtime_seconds == 0
         for: 10m
         labels: { severity: critical, owner: platform }
         annotations:
-          summary: A BotParty container filesystem uses more than 90% of its limit
+          summary: The configured TLS certificate cannot be parsed
+          runbook_url: docs/runbook.md#tls-certificate-expiry
+      - alert: BotPartyTlsCertificateMissing
+        expr: botparty_tls_certificate_configured == 0
+        for: 30m
+        labels: { severity: warning, owner: platform }
+        annotations:
+          summary: No TLS certificate is exposed to operator monitoring
+          runbook_url: docs/runbook.md#tls-certificate-expiry
+      - alert: BotPartyTlsCertificateExpiring
+        expr: botparty_tls_certificate_expiry_unixtime_seconds > 0 and botparty_tls_certificate_expiry_unixtime_seconds - time() < 1209600
+        for: 1h
+        labels: { severity: warning, owner: platform }
+        annotations:
+          summary: The TLS certificate expires in less than 14 days
+          runbook_url: docs/runbook.md#tls-certificate-expiry
+      - alert: BotPartyHostFilesystemLow
+        expr: node_filesystem_avail_bytes{job="node-exporter",fstype!~"tmpfs|overlay|squashfs"} / clamp_min(node_filesystem_size_bytes{job="node-exporter",fstype!~"tmpfs|overlay|squashfs"}, 1) < 0.1 and node_filesystem_readonly{job="node-exporter"} == 0
+        for: 10m
+        labels: { severity: critical, owner: platform }
+        annotations:
+          summary: A writable host filesystem has less than 10% free space
           runbook_url: docs/runbook.md#disk-full
+      - alert: BotPartyBackupLastRunFailed
+        expr: botparty_backup_last_run_success == 0
+        for: 5m
+        labels: { severity: critical, owner: platform }
+        annotations:
+          summary: The latest release backup attempt failed
+          runbook_url: docs/runbook.md#backup--restore
+      - alert: BotPartyBackupStale
+        expr: time() - botparty_backup_last_success_unixtime_seconds > botparty_backup_max_age_seconds
+        for: 10m
+        labels: { severity: critical, owner: platform }
+        annotations:
+          summary: No successful release backup exists inside the configured maximum age
+          runbook_url: docs/runbook.md#backup--restore

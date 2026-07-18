@@ -57,6 +57,12 @@ tests:
         values: '0x8'
       - series: 'botparty_retention_cleanup_runs_total{outcome="failure"}'
         values: '0 0 1 1 1 1 1 1'
+      - series: 'botparty_job_queue_depth{queue="mail-send"}'
+        values: '101x13'
+      - series: 'botparty_job_queue_failed{queue="webhook-delivery"}'
+        values: '2x13'
+      - series: 'botparty_job_queue_worker_up{queue="audit-cleanup"}'
+        values: '0x13'
     alert_rule_test:
       - eval_time: 6m
         alertname: BotPartyQueueStalled
@@ -100,6 +106,27 @@ tests:
             exp_annotations:
               summary: Users are queued while no robot control connection is available
               runbook_url: docs/runbook.md#incident-response-by-alert
+      - eval_time: 11m
+        alertname: BotPartyJobQueueBacklog
+        exp_alerts:
+          - exp_labels: { queue: mail-send, severity: warning, owner: application }
+            exp_annotations:
+              summary: A background-job queue has more than 100 pending jobs
+              runbook_url: docs/runbook.md#incident-response-by-alert
+      - eval_time: 6m
+        alertname: BotPartyJobQueueFailures
+        exp_alerts:
+          - exp_labels: { queue: webhook-delivery, severity: warning, owner: application }
+            exp_annotations:
+              summary: A background-job queue contains failed jobs
+              runbook_url: docs/runbook.md#incident-response-by-alert
+      - eval_time: 3m
+        alertname: BotPartyJobQueueWorkerUnavailable
+        exp_alerts:
+          - exp_labels: { queue: audit-cleanup, severity: critical, owner: application }
+            exp_annotations:
+              summary: A background-job worker cannot reach its queue
+              runbook_url: docs/runbook.md#redis-oom--redis-down
 
   - name: api error budget and latency game day
     interval: 1m
@@ -143,10 +170,20 @@ tests:
         values: '950x13'
       - series: 'container_spec_memory_limit_bytes{name="botparty-api"}'
         values: '1000x13'
-      - series: 'container_fs_usage_bytes{name="botparty-api"}'
-        values: '950x13'
-      - series: 'container_fs_limit_bytes{name="botparty-api"}'
-        values: '1000x13'
+      - series: 'container_start_time_seconds{name="botparty-api"}'
+        values: '100 200 300 400x13'
+      - series: 'node_filesystem_avail_bytes{job="node-exporter",device="/dev/audit",mountpoint="/audit",fstype="ext4"}'
+        values: '5x13'
+      - series: 'node_filesystem_size_bytes{job="node-exporter",device="/dev/audit",mountpoint="/audit",fstype="ext4"}'
+        values: '100x13'
+      - series: 'node_filesystem_readonly{job="node-exporter",device="/dev/audit",mountpoint="/audit",fstype="ext4"}'
+        values: '0x13'
+      - series: 'botparty_backup_last_run_success'
+        values: '0x13'
+      - series: 'botparty_backup_last_success_unixtime_seconds'
+        values: '0x13'
+      - series: 'botparty_backup_max_age_seconds'
+        values: '60x13'
     alert_rule_test:
       - eval_time: 11m
         alertname: BotPartyRedisMemoryHigh
@@ -169,10 +206,77 @@ tests:
             exp_annotations:
               summary: A BotParty container uses more than 90% of its memory limit
               runbook_url: docs/runbook.md#incident-response-by-alert
-      - eval_time: 11m
-        alertname: BotPartyContainerDiskHigh
+      - eval_time: 9m
+        alertname: BotPartyContainerRestartLoop
         exp_alerts:
-          - exp_labels: { name: botparty-api, severity: critical, owner: platform }
+          - exp_labels: { name: botparty-api, severity: warning, owner: platform }
             exp_annotations:
-              summary: A BotParty container filesystem uses more than 90% of its limit
+              summary: A BotParty container restarted repeatedly
+              runbook_url: docs/runbook.md#incident-response-by-alert
+      - eval_time: 11m
+        alertname: BotPartyHostFilesystemLow
+        exp_alerts:
+          - exp_labels: { job: node-exporter, device: /dev/audit, mountpoint: /audit, fstype: ext4, severity: critical, owner: platform }
+            exp_annotations:
+              summary: A writable host filesystem has less than 10% free space
               runbook_url: docs/runbook.md#disk-full
+      - eval_time: 6m
+        alertname: BotPartyBackupLastRunFailed
+        exp_alerts:
+          - exp_labels: { severity: critical, owner: platform }
+            exp_annotations:
+              summary: The latest release backup attempt failed
+              runbook_url: docs/runbook.md#backup--restore
+      - eval_time: 13m
+        alertname: BotPartyBackupStale
+        exp_alerts:
+          - exp_labels: { severity: critical, owner: platform }
+            exp_annotations:
+              summary: No successful release backup exists inside the configured maximum age
+              runbook_url: docs/runbook.md#backup--restore
+
+  - name: tls certificate missing game day
+    interval: 1m
+    input_series:
+      - series: 'botparty_tls_certificate_configured'
+        values: '0x35'
+    alert_rule_test:
+      - eval_time: 31m
+        alertname: BotPartyTlsCertificateMissing
+        exp_alerts:
+          - exp_labels: { severity: warning, owner: platform }
+            exp_annotations:
+              summary: No TLS certificate is exposed to operator monitoring
+              runbook_url: docs/runbook.md#tls-certificate-expiry
+
+  - name: tls certificate invalid game day
+    interval: 1m
+    input_series:
+      - series: 'botparty_tls_certificate_configured'
+        values: '1x15'
+      - series: 'botparty_tls_certificate_expiry_unixtime_seconds'
+        values: '0x15'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: BotPartyTlsCertificateInvalid
+        exp_alerts:
+          - exp_labels: { severity: critical, owner: platform }
+            exp_annotations:
+              summary: The configured TLS certificate cannot be parsed
+              runbook_url: docs/runbook.md#tls-certificate-expiry
+
+  - name: tls certificate expiry game day
+    interval: 1m
+    input_series:
+      - series: 'botparty_tls_certificate_configured'
+        values: '1x65'
+      - series: 'botparty_tls_certificate_expiry_unixtime_seconds'
+        values: '1000000x65'
+    alert_rule_test:
+      - eval_time: 61m
+        alertname: BotPartyTlsCertificateExpiring
+        exp_alerts:
+          - exp_labels: { severity: warning, owner: platform }
+            exp_annotations:
+              summary: The TLS certificate expires in less than 14 days
+              runbook_url: docs/runbook.md#tls-certificate-expiry

@@ -1,4 +1,4 @@
-export type LegalConfig = {
+type LegalConfig = {
   operatorName: string;
   operatorEmail: string;
   operatorAddress: string;
@@ -8,11 +8,6 @@ export type LegalConfig = {
   commercialRegister: string | null;
   supportUrl: string | null;
 };
-
-export const LEGAL_VERSIONS = {
-  terms: '2026-07-17',
-  privacy: '2026-07-17',
-} as const;
 
 function readEnv(name: string) {
   return process.env[name]?.trim() ?? '';

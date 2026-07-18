@@ -1,0 +1,123 @@
+services:
+  postgres:
+    environment:
+      POSTGRES_DB: botparty_performance
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - max_connections=80
+      - -c
+      - track_io_timing=on
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2048M
+
+  redis:
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  mail-test:
+    image: axllent/mailpit:v1.27@sha256:e22dce5b36f93c77082e204a3942fb6b283b7896e057458400a4c88344c3df68
+    restart: on-failure:3
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    networks:
+      - internal
+    healthcheck:
+      test: ['CMD-SHELL', 'wget --spider -q http://127.0.0.1:8025/livez']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+
+  migrate:
+    environment:
+      NODE_ENV: development
+
+  api:
+    environment:
+      NODE_ENV: production
+      APP_URL: https://nginx
+      PUBLIC_WEB_URL: https://nginx
+      CORS_ORIGIN: https://nginx
+      AUTH_COOKIE_SECURE: 'true'
+      LIVEKIT_PUBLIC_URL: wss://nginx/rtc
+      THUMBNAIL_PUBLIC_BASE_URL: http://nginx/storage/botparty-thumbnails
+      SMTP_HOST: mail-test
+      SMTP_PORT: 1025
+      SMTP_SECURE: 'false'
+      SMTP_FROM: BotParty Performance <no-reply@performance.invalid>
+      MAX_CONCURRENT_REQUESTS: 32
+      MAX_CONCURRENT_LOGIN_REQUESTS: 1
+    volumes:
+      - ./scripts/seed-performance.mjs:/performance/seed-performance.mjs:ro
+    depends_on:
+      mail-test:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 768M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  web:
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 768M
+
+  nginx:
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  load-generator:
+    profiles: ['performance']
+    image: node:24-alpine@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd
+    init: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    working_dir: /performance
+    entrypoint: ['node', '/performance/performance-load.mjs']
+    environment:
+      PERFORMANCE_BASE_URL: http://nginx
+      PERFORMANCE_ORIGIN: https://nginx
+      PERFORMANCE_ALLOW_DOCKER: 'true'
+      PERFORMANCE_EMAIL: admin@botparty.test
+      PERFORMANCE_PASSWORD: E2eAdminPassword!2026
+      PERFORMANCE_UPLOAD_FILE: /fixtures/upload.jpg
+    volumes:
+      - ./scripts/performance-load.mjs:/performance/performance-load.mjs:ro
+      - ./assets/botparty-hero-1.jpg:/fixtures/upload.jpg:ro
+    networks:
+      - frontend
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1024M

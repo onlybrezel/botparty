@@ -27,8 +27,8 @@ jobs:
       - run: pnpm db:generate
       - name: Start isolated backup sources
         run: |
-          docker run -d --name drill-source-pg -e POSTGRES_PASSWORD=source_password -e POSTGRES_DB=botparty -p 127.0.0.1:35432:5432 postgres:16-alpine
-          docker run -d --name drill-source-minio -e MINIO_ROOT_USER=source_access -e MINIO_ROOT_PASSWORD=source_secret_123 -p 127.0.0.1:39000:9000 minio/minio:latest server /data
+          docker run -d --name drill-source-pg -e POSTGRES_PASSWORD=source_password -e POSTGRES_DB=botparty -p 127.0.0.1:35432:5432 postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+          docker run -d --name drill-source-minio -e MINIO_ROOT_USER=source_access -e MINIO_ROOT_PASSWORD=source_secret_123 -p 127.0.0.1:39000:9000 minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e server /data
           for i in $(seq 1 60); do docker exec drill-source-pg pg_isready -U postgres -d botparty && break; sleep 1; done
           for i in $(seq 1 60); do curl -fsS http://127.0.0.1:39000/minio/health/live && break; sleep 1; done
       - name: Provision deterministic database and objects
@@ -45,21 +45,45 @@ jobs:
           pnpm --filter @botparty/prisma db:seed
           mkdir -p data/drill-object data/drill-secrets
           printf fixture > data/drill-object/fixture.txt
-          docker run --rm --network host --entrypoint /bin/sh -v "$PWD/data/drill-object:/fixture:ro" minio/mc:latest -c 'mc alias set source http://127.0.0.1:39000 source_access source_secret_123 >/dev/null; for b in botparty-thumbnails botparty-recordings; do mc mb --ignore-existing source/$b; mc cp /fixture/fixture.txt source/$b/fixture.txt; done'
-          for name in api_database_url jwt_secret jwt_refresh_secret robot_jwt_secret webhook_secret_encryption_key payout_destination_encryption_key livekit_api_secret redis_password smtp_password alertmanager_webhook_url; do printf 'drill-value-%s' "$name" > "data/drill-secrets/$name"; done
+          docker run --rm --network host --entrypoint /bin/sh --security-opt no-new-privileges:true --cap-drop ALL -v "$PWD/data/drill-object:/fixture:ro" minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727 -c 'mc alias set source http://127.0.0.1:39000 source_access source_secret_123 >/dev/null; for b in botparty-thumbnails botparty-recordings; do mc mb --ignore-existing source/$b; mc cp /fixture/fixture.txt source/$b/fixture.txt; done'
+          docker exec -i drill-source-pg psql -U postgres -d botparty -v ON_ERROR_STOP=1 <<'SQL'
+          INSERT INTO sessions (id, "robotId", "userId", status, "startedAt", "endedAt", "createdAt")
+          SELECT '10000000-0000-0000-0000-000000000001', r.id, r."ownerId", 'ENDED', now() - interval '1 minute', now(), now()
+          FROM robots r WHERE r.slug = 'test-robot';
+          INSERT INTO recordings (id, "sessionId", "robotId", "cameraId", "egressId", "objectKey", "startedAt", "endedAt", "createdAt")
+          SELECT '20000000-0000-0000-0000-000000000001', s.id, s."robotId", 'restore-camera', 'restore-egress', 'fixture.txt', s."startedAt", s."endedAt", now()
+          FROM sessions s WHERE s.id = '10000000-0000-0000-0000-000000000001';
+          SQL
+          for name in jwt_secret jwt_refresh_secret robot_jwt_secret webhook_secret_encryption_key payout_destination_encryption_key livekit_api_secret; do printf 'restore-drill-%s-at-least-32-characters' "$name" > "data/drill-secrets/$name"; done
+          printf 'postgresql://postgres:source_password@127.0.0.1:35432/botparty?schema=public' > data/drill-secrets/api_database_url
+          printf 'restore-drill-redis-password' > data/drill-secrets/redis_password
+          printf 'source_secret_123' > data/drill-secrets/minio_root_password
+          printf 'restore-drill-metrics-password' > data/drill-secrets/metrics_password
+          printf 'restore-admin-password-at-least-16' > data/drill-secrets/seed_admin_password
+          : > data/drill-secrets/smtp_password
+          printf 'source_secret_123' > data/drill-secrets/backup_s3_secret
+          printf 'restore-drill-backup-encryption-key-at-least-32-characters' > data/drill-secrets/backup_encryption_key
+          chmod 600 data/drill-secrets/*
+      - name: Build production API used by the restored application
+        run: docker build -f docker/api/Dockerfile -t botparty-restore-drill-api:${{ github.sha }} .
       - name: Create release backup
         env:
           DATABASE_URL: postgresql://postgres:source_password@127.0.0.1:35432/botparty?schema=public
           BACKUP_S3_ENDPOINT: http://127.0.0.1:39000
           BACKUP_S3_ACCESS_KEY: source_access
-          BACKUP_S3_SECRET_KEY: source_secret_123
+          BACKUP_S3_SECRET_KEY_FILE: ${{ github.workspace }}/data/drill-secrets/backup_s3_secret
+          BACKUP_ENCRYPTION_KEY_FILE: ${{ github.workspace }}/data/drill-secrets/backup_encryption_key
+          BACKUP_DATABASE_DOCKER_NETWORK: host
+          BACKUP_OBJECT_DOCKER_NETWORK: host
         run: ./scripts/backup-release.sh data/backups
       - name: Restore into a new isolated environment
         env:
           RESTORE_SECRET_DIR: ${{ github.workspace }}/data/drill-secrets
-          RESTORE_RPO_SECONDS: 21600
-          RESTORE_RTO_SECONDS: 1800
-        run: ./scripts/restore-drill.sh "$(find data/backups -name 'botparty-release-*.tar.gz' -print -quit)"
+          RESTORE_API_IMAGE: botparty-restore-drill-api:${{ github.sha }}
+          RESTORE_TEST_EMAIL: admin@botparty.test
+          RESTORE_TEST_PASSWORD_FILE: ${{ github.workspace }}/data/drill-secrets/seed_admin_password
+          BACKUP_ENCRYPTION_KEY_FILE: ${{ github.workspace }}/data/drill-secrets/backup_encryption_key
+        run: ./scripts/restore-drill.sh "$(find data/backups -name 'botparty-release-*.tar.gz.enc' -print -quit)"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:

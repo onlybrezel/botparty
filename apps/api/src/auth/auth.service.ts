@@ -11,7 +11,6 @@ import { JwtService, type JwtSignOptions } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { hash, verify } from 'argon2';
 import { createHash, randomBytes } from 'crypto';
-import type { StringValue } from 'ms';
 import { PrismaService } from '../prisma/prisma.service';
 import type { JwtPayload, RefreshTokenPayload, ForgotPasswordInput, ResetPasswordInput } from '@botparty/shared';
 import { registerSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema } from '@botparty/shared';
@@ -19,7 +18,8 @@ import type { z } from 'zod';
 import { RedisService } from '../redis/redis.service';
 import { MailService } from '../mail/mail.service';
 
-const asJwtExpiresIn = (value: string): StringValue => value as StringValue;
+const asJwtExpiresIn = (value: string): NonNullable<JwtSignOptions['expiresIn']> =>
+  value as NonNullable<JwtSignOptions['expiresIn']>;
 
 const MAX_LOGIN_ATTEMPTS = 10;
 const LOGIN_LOCKOUT_SEC = 15 * 60; // 15 minutes

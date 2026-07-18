@@ -32,23 +32,22 @@ export class QueueService {
   }
 
   async join(robotId: string, userId: string, roomAccessToken?: string, isPriority = false) {
-    const access = await this.robotsService.getAccessPolicy(robotId);
-    if (access.control === 'DISABLED') {
-      throw new ForbiddenException('Control is disabled for this robot');
-    }
-
     const robot = await this.robotsService.findById(robotId);
-    if (robot.status === 'OFFLINE' || robot.status === 'MAINTENANCE') {
-      throw new ForbiddenException('This robot is currently offline');
-    }
-
     const allowed = await this.robotsService.validateRoomAccess({
       robotId,
       actorId: userId,
       roomAccessToken,
     });
     if (!allowed) {
-      throw new ForbiddenException('Room access verification required');
+      this.throwRoomAccessDenied(robot.visibility);
+    }
+
+    const access = await this.robotsService.getAccessPolicy(robotId);
+    if (access.control === 'DISABLED') {
+      throw new ForbiddenException('Control is disabled for this robot');
+    }
+    if (robot.status === 'OFFLINE' || robot.status === 'MAINTENANCE') {
+      throw new ForbiddenException('This robot is currently offline');
     }
 
     const entry = await this.withSerializableRetry(() => this.prisma.$transaction(
@@ -172,7 +171,7 @@ export class QueueService {
 
     if (accessRequiresVerification) {
       if (!actorId) {
-        throw new ForbiddenException('Room access verification required');
+        this.throwRoomAccessDenied(robot.visibility);
       }
 
       const allowed = await this.robotsService.validateRoomAccess({
@@ -181,7 +180,7 @@ export class QueueService {
         roomAccessToken,
       });
       if (!allowed) {
-        throw new ForbiddenException('Room access verification required');
+        this.throwRoomAccessDenied(robot.visibility);
       }
     }
 
@@ -204,7 +203,7 @@ export class QueueService {
 
     const robot = await this.prisma.robot.findUnique({
       where: { id: robotId },
-      select: { queueMode: true },
+      select: { queueMode: true, visibility: true },
     });
     if (!robot) {
       throw new NotFoundException('Robot not found');
@@ -219,7 +218,7 @@ export class QueueService {
       roomAccessToken,
     });
     if (!allowed) {
-      throw new ForbiddenException('Room access verification required');
+      this.throwRoomAccessDenied(robot.visibility);
     }
 
     const entry = await this.prisma.queueEntry.findUnique({
@@ -272,6 +271,13 @@ export class QueueService {
 
   private voteBallotKey(robotId: string) {
     return `queue:ballots:${robotId}`;
+  }
+
+  private throwRoomAccessDenied(visibility: string): never {
+    if (visibility === 'PRIVATE') {
+      throw new NotFoundException('Robot not found');
+    }
+    throw new ForbiddenException('Room access verification required');
   }
 
   private async removeVotingFootprint(robotId: string, userId: string) {

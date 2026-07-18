@@ -1,5 +1,4 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { Prisma } from '@botparty/prisma';
 import type { NotificationCategory, NotificationKind, UpdateNotificationPreferencesInput } from '@botparty/shared';
 import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -25,10 +24,16 @@ const DEFAULT_PREFERENCES = {
   timezone: 'UTC',
 };
 
+function isUniqueConstraintError(error: unknown): boolean {
+  return (error as { code?: unknown } | null)?.code === 'P2002';
+}
+
 @Injectable()
 export class NotificationsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(NotificationsService.name);
   private timer: ReturnType<typeof setInterval> | null = null;
+  private startupTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastDeliveryCycleErrorLogAt = 0;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -36,15 +41,31 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
-    const startup = setTimeout(() => void this.deliverPendingEmails(), 5_000);
-    startup.unref?.();
-    this.timer = setInterval(() => void this.deliverPendingEmails(), 15_000);
+    this.startupTimer = setTimeout(() => this.deliverPendingEmailsSafely(), 5_000);
+    this.startupTimer.unref?.();
+    this.timer = setInterval(() => this.deliverPendingEmailsSafely(), 15_000);
     this.timer.unref?.();
   }
 
   onModuleDestroy() {
+    if (this.startupTimer) clearTimeout(this.startupTimer);
+    this.startupTimer = null;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+  }
+
+  private deliverPendingEmailsSafely() {
+    void this.deliverPendingEmails()
+      .then(() => {
+        this.lastDeliveryCycleErrorLogAt = 0;
+      })
+      .catch((error) => {
+        const now = Date.now();
+        if (now - this.lastDeliveryCycleErrorLogAt >= 60_000) {
+          this.lastDeliveryCycleErrorLogAt = now;
+          this.logger.error(`Notification email delivery cycle failed: ${(error as Error).message}`);
+        }
+      });
   }
 
   async publish(input: PublishNotificationInput) {
@@ -85,7 +106,7 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
         },
       });
     } catch (error) {
-      if ((error as { code?: string }).code === 'P2002') {
+      if (isUniqueConstraintError(error)) {
         return this.prisma.notification.findUnique({ where: { dedupeKey: input.dedupeKey } });
       }
       throw error;
@@ -147,19 +168,29 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
   }
 
   async getPreferences(userId: string) {
-    return this.prisma.notificationPreference.upsert({
-      where: { userId },
-      create: { userId },
-      update: {},
-    });
+    try {
+      return await this.prisma.notificationPreference.upsert({
+        where: { userId },
+        create: { userId },
+        update: {},
+      });
+    } catch (error) {
+      if (!isUniqueConstraintError(error)) throw error;
+      return this.prisma.notificationPreference.findUniqueOrThrow({ where: { userId } });
+    }
   }
 
   async updatePreferences(userId: string, input: UpdateNotificationPreferencesInput) {
-    return this.prisma.notificationPreference.upsert({
-      where: { userId },
-      create: { userId, ...input },
-      update: input,
-    });
+    try {
+      return await this.prisma.notificationPreference.upsert({
+        where: { userId },
+        create: { userId, ...input },
+        update: input,
+      });
+    } catch (error) {
+      if (!isUniqueConstraintError(error)) throw error;
+      return this.prisma.notificationPreference.update({ where: { userId }, data: input });
+    }
   }
 
   async deliverPendingEmails() {

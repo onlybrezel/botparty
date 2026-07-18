@@ -83,8 +83,6 @@ function toIsoDateTime(value: string) {
   return date.toISOString();
 }
 
-export const LOCAL_SETTINGS_KEY = 'botparty.settings.v1';
-
 export const DEFAULT_CREATE_FORM: RobotFormState = {
   name: '',
   slug: '',
@@ -134,16 +132,6 @@ export const DEFAULT_CONTROL_DRAFT: ControlButtonDraft = {
   access: ControlButtonAccessEnum.QUEUE_TURN,
   color: '',
 };
-
-export const accessModeOptions: Array<{
-  value: 'ALL' | 'AUTHENTICATED' | 'DISABLED';
-  title: string;
-  description: string;
-}> = [
-  { value: 'ALL', title: 'Everyone', description: 'Guests and signed-in users can access this' },
-  { value: 'AUTHENTICATED', title: 'Signed-in users only', description: 'Requires an account login' },
-  { value: 'DISABLED', title: 'Disabled', description: 'Function is disabled' },
-];
 
 export const controlAccessOptions: Array<{ value: ControlButtonAccess; label: string }> = [
   { value: ControlButtonAccessEnum.EVERYONE, label: 'Everyone (guests + signed-in)' },

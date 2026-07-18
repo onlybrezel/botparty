@@ -8,6 +8,7 @@ node_modules
 dist
 **/dist
 **/*.tsbuildinfo
+packages/prisma/generated
 coverage
 **/coverage
 test-results

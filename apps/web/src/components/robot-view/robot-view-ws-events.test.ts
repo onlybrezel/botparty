@@ -2,6 +2,29 @@ import { createRobotWsEventHandler } from './robot-view-ws-events';
 import { api } from '@/lib/api';
 import { pushToast } from '@/lib/toast';
 import { RobotStatus } from '@botparty/shared';
+import type {
+  ActiveSessionState,
+  ChatMsg,
+  QueueEntry,
+  ReconnectNotice,
+  Viewer,
+} from './types';
+
+type VideoState = 'idle' | 'loading' | 'ready' | 'error';
+
+function activeSession(userId: string): ActiveSessionState {
+  return {
+    sessionId: `session-${userId}`,
+    userId,
+    username: userId,
+    startedAt: 1_700_000_000_000,
+    expiresAt: null,
+  };
+}
+
+function queueEntry(userId: string): QueueEntry {
+  return { userId, username: userId, position: 0 };
+}
 
 vi.mock('@/lib/api', () => ({
   api: {
@@ -23,21 +46,21 @@ function stateSetter<T>(initial: T) {
 }
 
 function buildHandler() {
-  const viewers = stateSetter<any[]>([]);
+  const viewers = stateSetter<Viewer[]>([]);
   const crowdInputs = stateSetter(new Map<string, number>());
-  const messages = stateSetter<any[]>([]);
+  const messages = stateSetter<ChatMsg[]>([]);
   const chatHistoryCursor = stateSetter<number | null>(null);
   const chatHistoryHasMore = stateSetter(false);
-  const queue = stateSetter<any[]>([]);
-  const activeSession = stateSetter<any>(null);
+  const queue = stateSetter<QueueEntry[]>([]);
+  const activeSession = stateSetter<ActiveSessionState | null>(null);
   const activeKeys = stateSetter(new Set<string>());
   const activeCommands = stateSetter(new Set<string>());
   const chatRestriction = stateSetter<string | null>(null);
   const robotStatus = stateSetter(RobotStatus.ONLINE);
-  const livekitCreds = stateSetter<any>({ token: 'token', url: 'url' });
-  const videoState = stateSetter<any>('ready');
+  const livekitCreds = stateSetter<{ token: string; url: string } | null>({ token: 'token', url: 'url' });
+  const videoState = stateSetter<VideoState>('ready');
   const inQueue = stateSetter(true);
-  const reconnectNotice = stateSetter<any>(null);
+  const reconnectNotice = stateSetter<ReconnectNotice | null>(null);
   const ws = { close: vi.fn() };
   const refreshViewerToken = vi.fn().mockResolvedValue(undefined);
   const activeMotionKeysRef = { current: new Set(['w']) };
@@ -192,19 +215,19 @@ describe('createRobotWsEventHandler', () => {
 
   it('ends only the targeted session and clears local motion for the current viewer', () => {
     const { handler, states, activeMotionKeysRef } = buildHandler();
-    states.activeSession.set({ userId: 'user-1' });
+    states.activeSession.set(activeSession('user-1'));
     states.activeKeys.set(new Set(['w']));
     states.activeCommands.set(new Set(['forward']));
 
     handler('session:end', { userId: 'other-user' });
-    expect(states.activeSession.get()).toEqual({ userId: 'user-1' });
+    expect(states.activeSession.get()).toEqual(activeSession('user-1'));
     handler('queue:turn-end', { userId: 'user-1' });
     expect(states.activeSession.get()).toBeNull();
     expect(states.activeKeys.get().size).toBe(0);
     expect(states.activeCommands.get().size).toBe(0);
     expect(activeMotionKeysRef.current.size).toBe(0);
 
-    states.activeSession.set({ userId: 'other-user' });
+    states.activeSession.set(activeSession('other-user'));
     handler('session:end', {});
     expect(states.activeSession.get()).toBeNull();
   });
@@ -234,8 +257,8 @@ describe('createRobotWsEventHandler', () => {
 
   it('clears live state offline and refreshes video only when online credentials are absent', () => {
     const { handler, states, refreshViewerToken, setHasLivekitCreds } = buildHandler();
-    states.queue.set([{ userId: 'user-1' }]);
-    states.activeSession.set({ userId: 'user-1' });
+    states.queue.set([queueEntry('user-1')]);
+    states.activeSession.set(activeSession('user-1'));
     handler('robot:status', { status: 'OFFLINE' });
     expect(states.robotStatus.get()).toBe('OFFLINE');
     expect(states.livekitCreds.get()).toBeNull();

@@ -2563,6 +2563,29 @@ Responses
 
 ### users
 
+#### GET /users/{id}/avatar-image
+
+Get a platform-hosted user avatar
+
+Authentication: Public
+Operation ID: UsersController_getAvatar
+
+Parameters
+
+| In | Name | Required | Type | Description |
+| --- | --- | --- | --- | --- |
+| path | id | Yes | string |  |
+
+Request Body
+
+No request body.
+
+Responses
+
+| Status | Description | Schema |
+| --- | --- | --- |
+| 200 |  |  |
+
 #### GET /users/{username}
 
 Get user by username

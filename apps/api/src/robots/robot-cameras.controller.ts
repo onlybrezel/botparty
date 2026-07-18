@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, HttpCode, NotFoundException, Param, Post, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, HttpCode, NotFoundException, Param, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -79,7 +79,7 @@ export class RobotCamerasController {
   private async requireRobotOwner(robotId: string, userId: string) {
     const robot = await this.robotsService.findById(robotId);
     if (robot.ownerId !== userId) {
-      throw new ForbiddenException('Not your robot');
+      throw new NotFoundException('Robot not found');
     }
     return robot;
   }

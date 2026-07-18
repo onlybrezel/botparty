@@ -1,6 +1,6 @@
-import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { createRobotSchema, updateRobotSchema, LIMITS } from '@botparty/shared';
-import type { Prisma } from '@botparty/prisma';
+import { Prisma } from '@botparty/prisma';
 import { createHash, randomBytes } from 'crypto';
 import { hash } from 'argon2';
 import type { z } from 'zod';
@@ -29,15 +29,6 @@ export class RobotWriteHelper {
   ) {}
 
   async create(ownerId: string, input: z.infer<typeof createRobotSchema>, maxRobotsPerOwner: number) {
-    if (maxRobotsPerOwner > 0) {
-      const existingRobots = await this.prisma.robot.count({ where: { ownerId } });
-      if (existingRobots >= maxRobotsPerOwner) {
-        throw new BadRequestException(
-          `Maximum of ${maxRobotsPerOwner} robots allowed per operator account`,
-        );
-      }
-    }
-
     const data = createRobotSchema.parse(input);
     assertRobotTextAllowed(data);
     const metadata = withStreamKeyIssuedAt(
@@ -47,13 +38,7 @@ export class RobotWriteHelper {
 
     let slug = this.slugService.generateSlug(data.name);
     if (data.slug) {
-      const nextSlug = this.slugService.validateAndNormalizeSlugInput(data.slug);
-      const conflict = await this.prisma.robot.findUnique({ where: { slug: nextSlug }, select: { id: true } });
-      if (conflict) {
-        throw new ConflictException('This slug is already taken');
-      }
-      await this.slugService.reclaimSlugAlias(nextSlug);
-      slug = nextSlug;
+      slug = this.slugService.validateAndNormalizeSlugInput(data.slug);
     }
 
     const streamKey = randomBytes(32).toString('hex');
@@ -68,33 +53,70 @@ export class RobotWriteHelper {
       nextAccessMode: data.accessMode,
     });
 
-    const robot = await this.prisma.robot.create({
-      data: {
-        ...baseData,
-        accessPassword: passwordHash,
-        inviteCode,
-        metadata: metadata as Prisma.InputJsonValue,
-        slug,
-        streamKeyHash: createHash('sha256').update(streamKey).digest('hex'),
-        claimTokenHash: createHash('sha256').update(claimToken).digest('hex'),
-        ownerId,
-      },
-      include: {
-        owner: {
-          select: { id: true, username: true, displayName: true, avatarUrl: true },
-        },
-      },
-    });
+    let robot;
+    try {
+      robot = await this.prisma.$transaction(async (tx) => {
+        // Serializes the per-owner entitlement check across all API instances.
+        await tx.$queryRaw(Prisma.sql`SELECT id FROM "users" WHERE id = ${ownerId}::uuid FOR UPDATE`);
+        if (maxRobotsPerOwner > 0) {
+          const existingRobots = await tx.robot.count({ where: { ownerId } });
+          if (existingRobots >= maxRobotsPerOwner) {
+            throw new BadRequestException(
+              `Maximum of ${maxRobotsPerOwner} robots allowed per operator account`,
+            );
+          }
+        }
 
-    await this.prisma.controlButton.createMany({
-      data: DEFAULT_ROBOT_CONTROLS.map((button) => ({
-        ...button,
-        robotId: robot.id,
-        cooldownMs: LIMITS.DEFAULT_CONTROL_COOLDOWN_MS,
-        access: 'QUEUE_TURN',
-        isEnabled: true,
-      })),
-    });
+        if (data.slug) {
+          const conflict = await tx.robot.findUnique({ where: { slug }, select: { id: true } });
+          if (conflict) throw new ConflictException('This slug is already taken');
+          const aliasHolders = await tx.robot.findMany({
+            where: { slugAliases: { has: slug } },
+            select: { id: true, slugAliases: true },
+          });
+          for (const holder of aliasHolders) {
+            await tx.robot.update({
+              where: { id: holder.id },
+              data: { slugAliases: { set: holder.slugAliases.filter((entry) => entry !== slug) } },
+            });
+          }
+        }
+
+        const created = await tx.robot.create({
+          data: {
+            ...baseData,
+            accessPassword: passwordHash,
+            inviteCode,
+            metadata: metadata as Prisma.InputJsonValue,
+            slug,
+            streamKeyHash: createHash('sha256').update(streamKey).digest('hex'),
+            claimTokenHash: createHash('sha256').update(claimToken).digest('hex'),
+            ownerId,
+          },
+          include: {
+            owner: {
+              select: { id: true, username: true, displayName: true, avatarUrl: true },
+            },
+          },
+        });
+
+        await tx.controlButton.createMany({
+          data: DEFAULT_ROBOT_CONTROLS.map((button) => ({
+            ...button,
+            robotId: created.id,
+            cooldownMs: LIMITS.DEFAULT_CONTROL_COOLDOWN_MS,
+            access: 'QUEUE_TURN',
+            isEnabled: true,
+          })),
+        });
+        return created;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException('This slug is already taken');
+      }
+      throw error;
+    }
 
     return { ...sanitizeManagedRobot(robot), streamKey, claimToken };
   }
@@ -201,11 +223,11 @@ export class RobotWriteHelper {
     const isStaff = isStaffRole(requester?.role);
 
     if (robot.visibility !== 'PRIVATE' && !isStaff && robot.ownerId !== requesterId) {
-      throw new ForbiddenException('Robot is public');
+      throw new NotFoundException('Robot not found');
     }
 
     if (robot.ownerId !== requesterId && !isStaff) {
-      throw new ForbiddenException('Not allowed to access this robot');
+      throw new NotFoundException('Robot not found');
     }
   }
 }

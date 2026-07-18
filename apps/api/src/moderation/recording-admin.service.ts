@@ -13,7 +13,6 @@ import { basename } from 'node:path';
 import { Readable } from 'node:stream';
 import { PrismaService } from '../prisma/prisma.service';
 import { LivekitService } from '../livekit/livekit.service';
-import { isStaffRole } from '../common/robot-access';
 import {
   createS3CompatibleStorageClient,
   resolveS3CompatibleStorageConfig,
@@ -32,8 +31,7 @@ export class RecordingAdminService {
   ) {
     this.playbackSigningKey =
       this.config.get<string>('RECORDING_SIGNING_SECRET')?.trim()
-      || this.config.get<string>('JWT_SECRET')?.trim()
-      || 'botparty-recording-signing-fallback';
+      || this.config.getOrThrow<string>('JWT_SECRET').trim();
     this.playbackTtlSec = Number(this.config.get<string>('RECORDING_SIGNED_URL_TTL_SEC') ?? '300');
   }
 
@@ -150,7 +148,7 @@ export class RecordingAdminService {
       where: { id: userId },
       select: { role: true },
     });
-    if (!user || !isStaffRole(user.role)) {
+    if (!user || user.role !== 'ADMIN') {
       throw new ForbiddenException('Access denied');
     }
   }

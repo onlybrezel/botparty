@@ -535,6 +535,24 @@ model Recording {
   @@map("recordings")
 }
 
+// Durable outbox for object-storage deletions. Rows are created in the same
+// transaction that removes the owning database record and are removed only
+// after the object store confirms deletion.
+model StorageDeletionTask {
+  id            String   @id @default(uuid()) @db.Uuid
+  bucket        String   @db.VarChar(255)
+  objectKey     String   @db.VarChar(1024)
+  attempts      Int      @default(0)
+  nextAttemptAt DateTime @default(now())
+  lastError     String?  @db.VarChar(1000)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([bucket, objectKey])
+  @@index([nextAttemptAt])
+  @@map("storage_deletion_tasks")
+}
+
 // ═════════════════════════════════════════════════════
 // SWARM GROUP (Multi-Robot Control)
 // Reserved for roadmap-capability grouping. See ADR-0005.

@@ -1,4 +1,4 @@
-/* eslint-disable @next/next/no-img-element */
+import { createElement } from 'react';
 import type { AnchorHTMLAttributes, ImgHTMLAttributes } from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import Nav from './nav';
@@ -22,7 +22,7 @@ vi.mock('next/link', () => ({
 
 vi.mock('next/image', () => ({
   default: ({ priority: _priority, ...props }: ImgHTMLAttributes<HTMLImageElement> & { priority?: boolean }) => (
-    <img {...props} alt={props.alt ?? ''} />
+    createElement('img', { ...props, alt: props.alt ?? '' })
   ),
 }));
 
@@ -44,16 +44,9 @@ vi.mock('@/lib/store', () => ({
   }),
 }));
 
-vi.mock('@/lib/use-locale', () => ({
-  useLocale: () => 'en',
-}));
-
 vi.mock('@/lib/i18n', () => ({
-  supportedLocales: ['en', 'de'],
   defaultLocale: 'en',
-  localizeHref: (pathname: string) => pathname,
   localizePath: (pathname: string) => pathname,
-  isSupportedLocale: (locale: string) => ['en', 'de'].includes(locale),
 }));
 
 describe('Nav', () => {

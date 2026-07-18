@@ -39,7 +39,7 @@ export function useVisibilityPolling(
       if (disposed) return;
       const delay = document.visibilityState === 'visible' ? intervalMs : hiddenIntervalMs;
       if (delay === null) return;
-      timer = window.setTimeout(() => void run().catch(() => undefined), delay);
+      timer = window.setTimeout(() => void run(), delay);
     };
 
     const run = async () => {
@@ -47,6 +47,8 @@ export function useVisibilityPolling(
       running = true;
       try {
         await taskRef.current();
+      } catch (error) {
+        console.error('Background refresh failed', error);
       } finally {
         running = false;
         schedule();
@@ -56,7 +58,7 @@ export function useVisibilityPolling(
     const handleVisibilityChange = () => {
       clearTimer();
       if (document.visibilityState === 'visible') {
-        void run().catch(() => undefined);
+        void run();
       } else {
         schedule();
       }
@@ -64,7 +66,7 @@ export function useVisibilityPolling(
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     if (runImmediately && document.visibilityState === 'visible') {
-      void run().catch(() => undefined);
+      void run();
     } else {
       schedule();
     }

@@ -2,7 +2,6 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
-  ForbiddenException,
   Logger,
   InternalServerErrorException,
 } from '@nestjs/common';
@@ -15,6 +14,10 @@ import {
 } from '@aws-sdk/client-s3';
 import sharp from 'sharp';
 import { PrismaService } from '../prisma/prisma.service';
+import { isStaffRole } from '../common/robot-access';
+import { StorageDeletionService } from '../storage/storage-deletion.service';
+import { Prisma } from '@botparty/prisma';
+import { randomUUID } from 'node:crypto';
 
 type ThumbnailObjectStorageConfig = {
   bucket: string;
@@ -26,59 +29,97 @@ type ThumbnailObjectStorageConfig = {
   forcePathStyle: boolean;
 };
 
+const MAX_INPUT_PIXELS = 4_096 * 4_096;
+
 @Injectable()
 export class RobotThumbnailService {
   private readonly logger = new Logger(RobotThumbnailService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly storageDeletion: StorageDeletionService,
+  ) {}
 
   async save(robotId: string, ownerId: string, dataUrl: string) {
-    const robot = await this.prisma.robot.findUnique({
-      where: { id: robotId },
-      include: { owner: { select: { id: true, username: true, displayName: true, avatarUrl: true } } },
-    });
-
-    if (!robot) throw new NotFoundException('Robot not found');
-    if (robot.ownerId !== ownerId) throw new ForbiddenException('Not your robot');
-
     const parsed = this._parseDataUrl(dataUrl);
     const normalizedBuffer = await this._normalizeImage(parsed.buffer);
     const objectStorage = this._requireObjectStorageConfig();
-    await this._removeExistingObject(objectStorage, robotId);
-
     const objectKey = this._objectKey(robotId);
-    await this._putObject(objectStorage, objectKey, normalizedBuffer);
-    const thumbnailUrl = this._buildObjectUrl(objectStorage, objectKey);
-    this.logger.debug(`Stored thumbnail for ${robotId} in object storage`);
+    const thumbnailUrl = this._buildProxyUrl(robotId);
+    let uploaded = false;
+    try {
+      const result = await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw(Prisma.sql`SELECT id FROM "robots" WHERE id = ${robotId}::uuid FOR UPDATE`);
+        const robot = await tx.robot.findUnique({
+          where: { id: robotId },
+          select: { ownerId: true },
+        });
+        if (!robot || robot.ownerId !== ownerId) throw new NotFoundException('Robot not found');
 
-    return await this.prisma.robot.update({
-      where: { id: robotId },
-      data: { thumbnailUrl },
-      include: { owner: { select: { id: true, username: true, displayName: true, avatarUrl: true } } },
-    });
+        const previousKeys = await this._listObjectKeys(objectStorage, robotId);
+        await this._putObject(objectStorage, objectKey, normalizedBuffer);
+        uploaded = true;
+        const updated = await tx.robot.update({
+          where: { id: robotId },
+          data: { thumbnailUrl },
+          include: { owner: { select: { id: true, username: true, displayName: true, avatarUrl: true } } },
+        });
+        await this.storageDeletion.enqueue(
+          tx,
+          objectStorage.bucket,
+          previousKeys.filter((key) => key !== objectKey),
+        );
+        return updated;
+      }, { timeout: 30_000 });
+      this.logger.debug(`Stored thumbnail for ${robotId} in object storage`);
+      return result;
+    } catch (error) {
+      if (uploaded) {
+        try {
+          await this._deleteObjectKeys(objectStorage, [objectKey]);
+        } catch (cleanupError) {
+          this.logger.warn(`Failed to remove uncommitted thumbnail ${objectKey}: ${(cleanupError as Error).message}`);
+        }
+      }
+      throw error;
+    }
   }
 
   async clear(robotId: string, ownerId: string) {
-    const robot = await this.prisma.robot.findUnique({ where: { id: robotId } });
-    if (!robot) throw new NotFoundException('Robot not found');
-    if (robot.ownerId !== ownerId) throw new ForbiddenException('Not your robot');
-
     const objectStorage = this._requireObjectStorageConfig();
-    await this._removeExistingObject(objectStorage, robotId);
-
-    return await this.prisma.robot.update({
-      where: { id: robotId },
-      data: { thumbnailUrl: null },
-      include: { owner: { select: { id: true, username: true, displayName: true, avatarUrl: true } } },
-    });
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw(Prisma.sql`SELECT id FROM "robots" WHERE id = ${robotId}::uuid FOR UPDATE`);
+      const robot = await tx.robot.findUnique({ where: { id: robotId }, select: { ownerId: true } });
+      if (!robot || robot.ownerId !== ownerId) throw new NotFoundException('Robot not found');
+      const previousKeys = await this._listObjectKeys(objectStorage, robotId);
+      const updated = await tx.robot.update({
+        where: { id: robotId },
+        data: { thumbnailUrl: null },
+        include: { owner: { select: { id: true, username: true, displayName: true, avatarUrl: true } } },
+      });
+      await this.storageDeletion.enqueue(tx, objectStorage.bucket, previousKeys);
+      return updated;
+    }, { timeout: 30_000 });
   }
 
-  async read(robotId: string): Promise<{ buffer: Buffer; contentType: string }> {
+  async read(
+    robotId: string,
+    requesterId: string | null,
+  ): Promise<{ buffer: Buffer; contentType: string; cacheControl: string }> {
     const objectStorage = this._requireObjectStorageConfig();
     const robot = await this.prisma.robot.findUnique({
       where: { id: robotId },
-      select: { thumbnailUrl: true },
+      select: { id: true, ownerId: true, visibility: true, thumbnailUrl: true },
     });
+    if (!robot) throw new NotFoundException('Thumbnail not found');
+    if (!robot.thumbnailUrl) throw new NotFoundException('Thumbnail not found');
+
+    if (robot.visibility === 'PRIVATE' && robot.ownerId !== requesterId) {
+      const requester = requesterId
+        ? await this.prisma.user.findUnique({ where: { id: requesterId }, select: { role: true } })
+        : null;
+      if (!isStaffRole(requester?.role)) throw new NotFoundException('Thumbnail not found');
+    }
 
     const objectKey =
       this._objectKeyFromUrl(objectStorage, robot?.thumbnailUrl ?? null)
@@ -87,19 +128,25 @@ export class RobotThumbnailService {
       throw new NotFoundException('Thumbnail not found');
     }
 
-    return this._readObject(objectStorage, objectKey);
+    return {
+      ...(await this._readObject(objectStorage, objectKey)),
+      cacheControl:
+        robot.visibility === 'PRIVATE'
+          ? 'private, no-store'
+          : 'public, max-age=3600, stale-while-revalidate=86400',
+    };
   }
 
   private _objectKey(robotId: string) {
-    return `${this._objectPrefix(robotId)}${Date.now()}.webp`;
+    return `${this._objectPrefix(robotId)}${randomUUID()}.webp`;
   }
 
   private _objectPrefix(robotId: string) {
     return `robot-thumbnails/${robotId}/`;
   }
 
-  private _buildObjectUrl(config: ThumbnailObjectStorageConfig, objectKey: string) {
-    return `${this._normalizePublicBaseUrl(config.publicBaseUrl)}/${encodeURI(objectKey)}`;
+  private _buildProxyUrl(robotId: string) {
+    return `/api/v1/robots/${encodeURIComponent(robotId)}/thumbnail-image`;
   }
 
   private _objectStorageConfig(): ThumbnailObjectStorageConfig | null {
@@ -176,30 +223,35 @@ export class RobotThumbnailService {
         Key: objectKey,
         Body: buffer,
         ContentType: 'image/webp',
-        CacheControl: 'public, max-age=31536000, immutable',
+        CacheControl: 'private, no-store',
       }),
     );
   }
 
-  private async _removeExistingObject(config: ThumbnailObjectStorageConfig, robotId: string): Promise<void> {
+  private async _listObjectKeys(config: ThumbnailObjectStorageConfig, robotId: string): Promise<string[]> {
     const client = this._createObjectStorageClient(config);
-    const listed = await client.send(
-      new ListObjectsV2Command({
+    const keys: string[] = [];
+    let continuationToken: string | undefined;
+    do {
+      const listed = await client.send(new ListObjectsV2Command({
         Bucket: config.bucket,
         Prefix: this._objectPrefix(robotId),
-      }),
-    );
+        ContinuationToken: continuationToken,
+      }));
+      keys.push(...(listed.Contents ?? []).flatMap((entry) => entry.Key ? [entry.Key] : []));
+      continuationToken = listed.IsTruncated ? listed.NextContinuationToken : undefined;
+    } while (continuationToken);
+    return keys;
+  }
 
-    const objects = listed.Contents?.flatMap((entry) => (entry.Key ? [{ Key: entry.Key }] : [])) ?? [];
-    if (objects.length === 0) {
-      return;
-    }
-
+  private async _deleteObjectKeys(config: ThumbnailObjectStorageConfig, keys: string[]): Promise<void> {
+    if (keys.length === 0) return;
+    const client = this._createObjectStorageClient(config);
     await client.send(
       new DeleteObjectsCommand({
         Bucket: config.bucket,
         Delete: {
-          Objects: objects,
+          Objects: keys.map((Key) => ({ Key })),
           Quiet: true,
         },
       }),
@@ -208,26 +260,24 @@ export class RobotThumbnailService {
 
   private async _findLatestObjectKey(config: ThumbnailObjectStorageConfig, robotId: string): Promise<string | null> {
     const client = this._createObjectStorageClient(config);
-    const listed = await client.send(
-      new ListObjectsV2Command({
+    let latest: { key: string; modifiedAt: number } | null = null;
+    let continuationToken: string | undefined;
+    do {
+      const listed = await client.send(new ListObjectsV2Command({
         Bucket: config.bucket,
         Prefix: this._objectPrefix(robotId),
-      }),
-    );
-
-    const latest = (listed.Contents ?? []).reduce<{ key: string; modifiedAt: number } | null>((current, entry) => {
-      const key = entry.Key?.trim();
-      if (!key) {
-        return current;
+        ContinuationToken: continuationToken,
+      }));
+      for (const entry of listed.Contents ?? []) {
+        const key = entry.Key?.trim();
+        if (!key) continue;
+        const modifiedAt = entry.LastModified?.getTime() ?? 0;
+        if (!latest || modifiedAt >= latest.modifiedAt) {
+          latest = { key, modifiedAt };
+        }
       }
-
-      const modifiedAt = entry.LastModified?.getTime() ?? 0;
-      if (!current || modifiedAt >= current.modifiedAt) {
-        return { key, modifiedAt };
-      }
-
-      return current;
-    }, null);
+      continuationToken = listed.IsTruncated ? listed.NextContinuationToken : undefined;
+    } while (continuationToken);
 
     return latest?.key ?? null;
   }
@@ -278,7 +328,7 @@ export class RobotThumbnailService {
 
   private async _normalizeImage(buffer: Buffer) {
     try {
-      return await sharp(buffer)
+      return await sharp(buffer, { limitInputPixels: MAX_INPUT_PIXELS })
         .rotate()
         .resize({
           width: 1280,

@@ -3,9 +3,9 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 
-export type ThemePreference = 'system' | 'dark' | 'light';
+type ThemePreference = 'system' | 'dark' | 'light';
 
-export type AppPreferences = {
+type AppPreferences = {
   theme: ThemePreference;
   dashboardMaskToken: boolean;
   queuePositionNotifications: boolean;
@@ -21,7 +21,7 @@ type PreferencesState = AppPreferences & {
   updatePreferences: (values: Partial<AppPreferences>) => void;
 };
 
-export const DEFAULT_PREFERENCES: AppPreferences = {
+const DEFAULT_PREFERENCES: AppPreferences = {
   theme: 'system',
   dashboardMaskToken: true,
   queuePositionNotifications: true,

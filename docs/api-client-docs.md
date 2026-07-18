@@ -33,18 +33,8 @@ The generated Markdown includes:
 
 This keeps the client-facing reference derived from the same OpenAPI source the Swagger UI uses.
 
-## TypeScript Client Generation
+## Web API Client
 
-Generate a typed fetch client for the web app with:
-
-```bash
-pnpm generate:ts-api-client
-```
-
-The default output path is `apps/web/src/lib/generated/openapi-client`.
-
-You can override both ends when needed:
-
-```bash
-pnpm generate:ts-api-client --input docs/openapi.json --output apps/web/src/lib/generated/openapi-client
-```
+The web application uses the focused modules under `apps/web/src/lib/api/`. They preserve the
+product-specific cookie, CSRF, retry, and error-handling behavior and are covered by frontend and
+end-to-end tests. No second generated runtime client is maintained.

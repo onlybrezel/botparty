@@ -38,6 +38,11 @@
     "typecheck": {
       "dependsOn": ["^build"]
     },
+    "test:coverage": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "outputs": ["coverage/**"]
+    },
     "clean": {
       "cache": false
     },

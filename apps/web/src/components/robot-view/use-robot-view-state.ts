@@ -66,7 +66,8 @@ export function useRobotViewState(robot: RobotPublic) {
   useEffect(() => {
     if (!hasHydrated || !accessToken) return;
     api.setToken(accessToken);
-    void api.analytics.event('DISCOVERY_ROBOT_VIEW', robot.id).catch(() => undefined);
+    void api.analytics.event('DISCOVERY_ROBOT_VIEW', robot.id)
+      .catch((error: unknown) => console.error('Failed to report robot view', error));
   }, [accessToken, hasHydrated, robot.id]);
 
   const [focusMode, setFocusMode] = useState<FocusMode>('controls');
@@ -411,7 +412,8 @@ export function useRobotViewState(robot: RobotPublic) {
     api.queue
       .getQueue(robot.id)
       .then((rows) => setQueue(normalizeQueueEntries(rows as QueueEntryWire[])))
-      .catch(() => {});
+      .catch((error: unknown) => pushThrottledToast(lastErrorToastRef, 'queue-load',
+        getErrorMessage(error, 'Queue could not be loaded.'), { cooldownMs: 30_000, kind: 'error' }));
   }, [accessToken, robot.id, roomAccessToken]);
 
   useEffect(() => {
@@ -428,7 +430,8 @@ export function useRobotViewState(robot: RobotPublic) {
           expiresAt: null,
         });
       })
-      .catch(() => {});
+      .catch((error: unknown) => pushThrottledToast(lastErrorToastRef, 'active-session-load',
+        getErrorMessage(error, 'Active session could not be loaded.'), { cooldownMs: 30_000, kind: 'error' }));
 
     return () => {
       active = false;
