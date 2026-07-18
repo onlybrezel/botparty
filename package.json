@@ -43,9 +43,9 @@
   "devDependencies": {
     "@botparty/eslint-config": "workspace:*",
     "@botparty/tsconfig": "workspace:*",
-    "openapi-typescript-codegen": "^0.29.0",
-    "prettier": "^3.5.3",
-    "turbo": "^2.5.0"
+    "openapi-typescript-codegen": "^0.31.0",
+    "prettier": "^3.9.5",
+    "turbo": "^2.10.5"
   },
   "pnpm": {
     "overrides": {
