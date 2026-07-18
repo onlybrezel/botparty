@@ -1,11 +1,11 @@
 /* eslint-disable @next/next/no-img-element */
-import type { AnchorHTMLAttributes, ImgHTMLAttributes, ReactNode } from 'react';
+import type { AnchorHTMLAttributes, ImgHTMLAttributes } from 'react';
 import { render, screen } from '@testing-library/react';
 import { QueueMode, RobotAccessMode, RobotStatus, RobotVisibility, Role } from '@botparty/shared';
 import RobotCard from './robot-card';
 
 vi.mock('next/link', () => ({
-  default: ({ children, href, ...props }: AnchorHTMLAttributes<HTMLAnchorElement>) => (
+  default: ({ children, href, prefetch: _prefetch, ...props }: AnchorHTMLAttributes<HTMLAnchorElement> & { prefetch?: boolean }) => (
     <a href={href} {...props}>
       {children}
     </a>
@@ -16,16 +16,6 @@ vi.mock('next/image', () => ({
   default: ({ priority: _priority, ...props }: ImgHTMLAttributes<HTMLImageElement> & { priority?: boolean }) => (
     <img {...props} alt={props.alt ?? ''} />
   ),
-}));
-
-vi.mock('framer-motion', () => ({
-  motion: {
-    div: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  },
-}));
-
-vi.mock('@/lib/use-desktop-motion', () => ({
-  useDesktopMotionPreference: () => false,
 }));
 
 describe('RobotCard', () => {

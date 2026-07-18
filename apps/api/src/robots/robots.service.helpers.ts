@@ -137,11 +137,20 @@ function normalizeModerationText(value: string): string {
     .trim();
 }
 
-export function sanitizeManagedRobot<T extends { accessPassword?: string | null }>(robot: T): T {
+export function sanitizeManagedRobot<
+  T extends {
+    accessPassword?: string | null;
+    claimTokenHash?: string;
+    streamKeyHash?: string;
+  },
+>(robot: T): Omit<T, 'claimTokenHash' | 'streamKeyHash'> & { claimToken: null; streamKey: null } {
+  const { claimTokenHash: _claimTokenHash, streamKeyHash: _streamKeyHash, ...safeRobot } = robot;
   return {
-    ...robot,
+    ...safeRobot,
     accessPassword: null,
-  };
+    claimToken: null,
+    streamKey: null,
+  } as Omit<T, 'claimTokenHash' | 'streamKeyHash'> & { claimToken: null; streamKey: null };
 }
 
 export function toPublicRobot<

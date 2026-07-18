@@ -96,7 +96,7 @@ describe('robot-view controls', () => {
       />,
     );
 
-    const pad = screen.getByRole('application', { name: 'Drive XY pad' }) as HTMLDivElement & {
+    const pad = screen.getByRole('slider', { name: 'Drive XY pad' }) as HTMLDivElement & {
       setPointerCapture?: (pointerId: number) => void;
     };
     pad.setPointerCapture = vi.fn();
@@ -132,5 +132,46 @@ describe('robot-view controls', () => {
 
     expect(onSendValue).toHaveBeenNthCalledWith(1, { x: 50, y: 50 });
     expect(onSendValue).toHaveBeenNthCalledWith(2, { x: 0, y: 0 });
+  });
+
+  it('supports arrow-key movement and keyboard reset on the XY pad', () => {
+    const onSendValue = vi.fn();
+
+    render(
+      <XYPadControl
+        label="Drive"
+        command="drive_xy"
+        config={{
+          kind: 'xy',
+          xMin: -100,
+          xMax: 100,
+          xStart: 0,
+          yMin: -100,
+          yMax: 100,
+          yStart: 0,
+          returnMode: 'center',
+          resetOnQueueLoss: false,
+          resetOnOffline: false,
+          resetAfterMs: null,
+        }}
+        color={null}
+        cooldownMs={120}
+        access="QUEUE_TURN"
+        isCrowd={false}
+        disabled={false}
+        queueResetEpoch={0}
+        offlineResetEpoch={0}
+        onSendValue={onSendValue}
+      />,
+    );
+
+    const pad = screen.getByRole('slider', { name: 'Drive XY pad' });
+    fireEvent.keyDown(pad, { key: 'ArrowRight' });
+    fireEvent.keyDown(pad, { key: 'ArrowUp' });
+    fireEvent.keyDown(pad, { key: 'Home' });
+
+    expect(onSendValue).toHaveBeenNthCalledWith(1, { x: 10, y: 0 });
+    expect(onSendValue).toHaveBeenNthCalledWith(2, { x: 10, y: 10 });
+    expect(onSendValue).toHaveBeenNthCalledWith(3, { x: 0, y: 0 });
   });
 });

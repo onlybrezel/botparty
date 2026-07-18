@@ -71,8 +71,8 @@ describeIf('Prisma + Redis integration (testcontainers)', () => {
         ownerId: user.id,
         name: 'Integration Robot',
         slug: 'integration-robot',
-        streamKey: 'integration-stream-key',
-        claimToken: 'integration-claim-token',
+        streamKeyHash: 'a'.repeat(64),
+        claimTokenHash: 'b'.repeat(64),
       },
     });
 

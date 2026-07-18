@@ -8,9 +8,12 @@ export interface CheckoutSession {
 
 export interface VerifiedWebhookEvent {
   eventId: string;
-  type: 'completed' | 'failed' | 'refunded' | 'chargeback' | 'canceled' | 'unknown';
+  type: 'approved' | 'completed' | 'failed' | 'refunded' | 'chargeback' | 'canceled' | 'unknown';
   intentId: string | null;
   providerRef: string;
+  paymentRef: string | null;
+  subscriptionRef: string | null;
+  relatedProviderRef: string | null;
   customerRef: string | null;
   amountCents: number;
   currency: string;

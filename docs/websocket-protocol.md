@@ -45,9 +45,10 @@ This document describes the BotParty realtime protocol used on the API gateway w
 | `room:ping` | `{ robotId }` | Optional | Keepalive and room liveness signal. |
 | `robot:claim` | `{ robotAuthToken, protocolVersion? }` | Robot token | Robot realtime identity binding plus protocol negotiation. |
 | `robot:heartbeat` | `{}` | Robot token | Robot liveness update path. |
-| `robot:telemetry` | `{ clientVersion?, gitBranch?, gitCommit?, gitDirty?, botpartyStreamerVersion?, streamerVersion?, pythonVersion?, cpuPercent?, memoryPercent?, temperatureC?, uptimeSec?, controlConnected?, livekitConnected?, commandsReceived?, cameraFrames? }` | Robot token | Runtime telemetry payload (all fields optional). |
+| `robot:telemetry` | `{ clientVersion?, gitBranch?, gitCommit?, gitDirty?, botpartyStreamerVersion?, streamerVersion?, pythonVersion?, cpuPercent?, memoryPercent?, temperatureC?, uptimeSec?, controlConnected?, livekitConnected?, emergencyStopVerified?, commandsReceived?, cameraFrames? }` | Robot token | Runtime telemetry payload; a verified emergency-stop capability is required before public go-live. |
 | `robot:actions:pull` | `{}` | Robot token | Pulls pending robot actions from server queue. |
-| `control:command` | `{ robotId, command, value?, timestamp? }` | Depends on robot policy | Queue turn, button access, moderation, cooldown enforced server-side. |
+| `control:command` | `{ robotId, commandId, command, buttonId?, value?, timestamp? }` | Depends on robot policy | `commandId` is a UUID. Queue turn, button access, moderation, cooldown, and command freshness are enforced server-side. |
+| `control:ack` | `{ commandId, status, error? }` | Claimed robot | Completes a pending command with `status` equal to `ACK` or `NACK`. |
 | `control:emergency-stop` | `{ robotId }` | Depends on robot policy | Immediate stop path with stricter checks. |
 | `queue:join` | `{ robotId }` | User token required | Adds user to control queue. |
 | `queue:leave` | `{ robotId }` | User token required | Removes user from control queue. |
@@ -77,7 +78,10 @@ This document describes the BotParty realtime protocol used on the API gateway w
 | `chat:system` | `{ message, timestamp }` | Server/system message. |
 | `robot:status` | `{ status }` | Robot online/offline/busy state change. |
 | `robot:controls-updated` | `{ robotId, controlsVersion }` | Control layout/permissions changed. |
-| `control:latency-warning` | `{ latencyMs }` | Client clock skew/latency warning. |
+| `control:command` | `{ commandId, command, buttonId?, value?, issuedAt }` | Command delivered to the claimed robot. |
+| `control:command-status` | `{ commandId, status, error? }` | Pending, acknowledged, rejected, timed-out, or compensated state delivered to the initiating browser. |
+| `wallet:update` | `{ balance, transactionId?, reason? }` | Authoritative balance update after a financial transition. |
+| `control:latency-warning` | `{ latencyMs }` | Measured timing warning; clients must not infer acknowledgement from this event. |
 | `mod:action` | `{ action, actorUserId, targetUserId, reason?, expiresAt? }` | Moderation action broadcast. |
 | `server:shutdown` | `{ reason, retryAfterMs, message }` | Planned restart/maintenance notice. |
 | `session:start` | `{ robotId, userId, startedAt }` | Session lifecycle event. |

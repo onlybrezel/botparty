@@ -1,17 +1,37 @@
 'use client';
 
-import type { FormEvent } from 'react';
+import type { ChangeEvent, FormEvent } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { BellRing, Palette, Save, ShieldAlert, UserRound, Eye, EyeOff, Trash2, Cookie, LogOut } from 'lucide-react';
+import { BellRing, Palette, Save, ShieldAlert, UserRound, ImagePlus, Trash2, Cookie, LogOut } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/store';
 import { pushToast } from '@/lib/toast';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Dialog } from '@/components/ui/dialog';
 import { usePreferences } from '@/lib/preferences';
+import type { NotificationPreferenceRecord } from '@/lib/api/notifications';
+
+const defaultNotificationPreferences: NotificationPreferenceRecord = {
+  inAppEnabled: true,
+  browserEnabled: false,
+  emailTurn: true,
+  emailRobot: true,
+  emailFinance: true,
+  quietStartMin: null,
+  quietEndMin: null,
+  timezone: 'UTC',
+};
+
+const minutesToTime = (minutes: number | null) => minutes === null
+  ? ''
+  : `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+
+const timeToMinutes = (value: string) => {
+  const match = /^(\d{2}):(\d{2})$/.exec(value);
+  return match ? Number(match[1]) * 60 + Number(match[2]) : null;
+};
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -19,11 +39,10 @@ export default function SettingsPage() {
   const { accessToken, hasHydrated } = auth;
   const {
     theme,
-    cookieConsent,
     dashboardMaskToken,
-    keyboardTabSwitchOnlyWhenEmpty,
     queuePositionNotifications,
     queueTurnNotifications,
+    productAnalyticsEnabled,
     updatePreference,
   } = usePreferences();
 
@@ -31,14 +50,16 @@ export default function SettingsPage() {
   const [avatarUrl, setAvatarUrl] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [showAvatar, setShowAvatar] = useState(false);
+  const [avatarUploading, setAvatarUploading] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [exportingData, setExportingData] = useState(false);
+  const [exportPassword, setExportPassword] = useState('');
   const [revokingSessions, setRevokingSessions] = useState(false);
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | 'unsupported'>(
     'default',
   );
+  const [notificationPreferences, setNotificationPreferences] = useState(defaultNotificationPreferences);
 
   useEffect(() => {
     if (!hasHydrated) {
@@ -65,7 +86,9 @@ export default function SettingsPage() {
         pushToast('Failed to load profile.', 'error');
       })
       .finally(() => setLoading(false));
-  }, [accessToken, hasHydrated, router]);
+    void api.notifications.preferences().then(setNotificationPreferences).catch(() => undefined);
+    void api.analytics.consent().then((consent) => updatePreference('productAnalyticsEnabled', consent.productAnalyticsEnabled)).catch(() => undefined);
+  }, [accessToken, hasHydrated, router, updatePreference]);
 
   const notificationSummary = useMemo(() => {
     if (notificationPermission === 'unsupported') {
@@ -80,16 +103,6 @@ export default function SettingsPage() {
     return 'Enable desktop notifications to get queue updates when another tab is active.';
   }, [notificationPermission]);
 
-  const cookieConsentSummary = useMemo(() => {
-    if (cookieConsent === 'accepted') {
-      return 'You accepted the cookie notice. BotParty still only uses essential browser storage today.';
-    }
-    if (cookieConsent === 'declined') {
-      return 'You declined optional acknowledgement. Only essential browser storage remains active.';
-    }
-    return 'You have not responded to the cookie notice yet.';
-  }, [cookieConsent]);
-
   const handleSaveProfile = async (event: FormEvent) => {
     event.preventDefault();
     if (!accessToken) return;
@@ -99,7 +112,6 @@ export default function SettingsPage() {
       api.setToken(accessToken);
       const me = await api.users.updateMe({
         displayName,
-        avatarUrl,
       });
 
       auth.setSession({ displayName: me.displayName ?? null, role: me.role });
@@ -111,6 +123,53 @@ export default function SettingsPage() {
     }
   };
 
+  const handleAvatarUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || !accessToken) return;
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+      pushToast('Choose a PNG, JPEG, or WebP image.', 'error');
+      return;
+    }
+    if (file.size > 750 * 1024) {
+      pushToast('The image must be 750 KB or smaller.', 'error');
+      return;
+    }
+
+    setAvatarUploading(true);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('Invalid image'));
+        reader.onerror = () => reject(reader.error ?? new Error('Could not read image'));
+        reader.readAsDataURL(file);
+      });
+      api.setToken(accessToken);
+      const me = await api.users.uploadAvatar(dataUrl);
+      setAvatarUrl(me.avatarUrl ?? '');
+      pushToast('Profile photo updated.', 'success');
+    } catch (err) {
+      pushToast(err instanceof Error ? err.message : 'Failed to upload profile photo.', 'error');
+    } finally {
+      setAvatarUploading(false);
+    }
+  };
+
+  const handleAvatarDelete = async () => {
+    if (!accessToken) return;
+    setAvatarUploading(true);
+    try {
+      api.setToken(accessToken);
+      await api.users.deleteAvatar();
+      setAvatarUrl('');
+      pushToast('Profile photo removed.', 'success');
+    } catch (err) {
+      pushToast(err instanceof Error ? err.message : 'Failed to remove profile photo.', 'error');
+    } finally {
+      setAvatarUploading(false);
+    }
+  };
+
   const requestNotificationPermission = async () => {
     if (typeof window === 'undefined' || !('Notification' in window)) {
       setNotificationPermission('unsupported');
@@ -119,10 +178,33 @@ export default function SettingsPage() {
 
     const permission = await Notification.requestPermission();
     setNotificationPermission(permission);
+    if (permission === 'granted') {
+      const updated = await api.notifications.updatePreferences({ browserEnabled: true });
+      setNotificationPreferences(updated);
+    }
     pushToast(
       permission === 'granted' ? 'Desktop notifications enabled.' : 'Desktop notifications not enabled.',
       permission === 'granted' ? 'success' : 'info',
     );
+  };
+
+  const updateNotifications = async (input: Partial<NotificationPreferenceRecord>) => {
+    try {
+      const updated = await api.notifications.updatePreferences(input);
+      setNotificationPreferences(updated);
+    } catch (error) {
+      pushToast(error instanceof Error ? error.message : 'Could not save notification preferences.', 'error');
+    }
+  };
+
+  const updateAnalyticsConsent = async (enabled: boolean) => {
+    try {
+      const result = await api.analytics.setConsent(enabled);
+      updatePreference('productAnalyticsEnabled', result.productAnalyticsEnabled);
+      pushToast(result.productAnalyticsEnabled ? 'Product analytics enabled.' : 'Product analytics disabled and prior events deleted.', 'success');
+    } catch (error) {
+      pushToast(error instanceof Error ? error.message : 'Could not save analytics preference.', 'error');
+    }
   };
 
   const handleDeleteAccount = async () => {
@@ -150,7 +232,7 @@ export default function SettingsPage() {
     setExportingData(true);
     try {
       api.setToken(accessToken);
-      const payload = await api.users.exportMe();
+      const payload = await api.users.exportMe(exportPassword);
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -159,6 +241,7 @@ export default function SettingsPage() {
       link.click();
       URL.revokeObjectURL(url);
       pushToast('Account export downloaded.', 'success');
+      setExportPassword('');
     } catch (err) {
       pushToast(err instanceof Error ? err.message : 'Failed to export account data.', 'error');
     } finally {
@@ -220,25 +303,39 @@ export default function SettingsPage() {
                 autoComplete="nickname"
               />
 
-              <label className="mb-2 block text-sm font-medium">Avatar URL</label>
-              <div className="mb-4 flex gap-2">
-                <input
-                  type={showAvatar ? 'text' : 'password'}
-                  value={avatarUrl}
-                  onChange={(event) => setAvatarUrl(event.target.value)}
-                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-                  maxLength={512}
-                  autoComplete="url"
+              <span className="mb-2 block text-sm font-medium">Profile photo</span>
+              <div className="mb-4 flex items-center gap-3">
+                <div
+                  className="h-16 w-16 shrink-0 rounded-full border border-[var(--border)] bg-cover bg-center bg-[var(--background)]"
+                  style={avatarUrl ? { backgroundImage: `url(${avatarUrl})` } : undefined}
+                  aria-label={avatarUrl ? 'Current profile photo' : 'No profile photo'}
+                  role="img"
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowAvatar((prev) => !prev)}
-                  className="rounded-lg border border-[var(--border)] px-3"
-                  aria-label="Toggle avatar URL visibility"
-                >
-                  {showAvatar ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-medium">
+                    <ImagePlus className="h-4 w-4" />
+                    {avatarUploading ? 'Uploading...' : 'Choose image'}
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      className="sr-only"
+                      disabled={avatarUploading}
+                      onChange={(event) => void handleAvatarUpload(event)}
+                    />
+                  </label>
+                  {avatarUrl ? (
+                    <button
+                      type="button"
+                      onClick={() => void handleAvatarDelete()}
+                      disabled={avatarUploading}
+                      className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm disabled:opacity-60"
+                    >
+                      Remove
+                    </button>
+                  ) : null}
+                </div>
               </div>
+              <p className="mb-4 text-xs text-[var(--muted-foreground)]">PNG, JPEG or WebP, up to 750 KB.</p>
 
               <button
                 type="submit"
@@ -279,26 +376,11 @@ export default function SettingsPage() {
         <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-5">
           <h2 className="mb-4 flex items-center gap-2 text-lg font-bold">
             <Cookie className="h-5 w-5 text-emerald-300" />
-            Cookie Notice
+            Browser storage
           </h2>
-          <p className="mb-4 text-sm text-[var(--muted-foreground)]">{cookieConsentSummary}</p>
-          <div className="mb-4 flex flex-wrap gap-2">
-            <Badge tone={cookieConsent === 'accepted' ? 'success' : cookieConsent === 'declined' ? 'warning' : 'default'}>
-              {cookieConsent === 'accepted'
-                ? 'Accepted'
-                : cookieConsent === 'declined'
-                  ? 'Declined'
-                  : 'Not decided'}
-            </Badge>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="secondary" onClick={() => updatePreference('cookieConsent', 'declined')}>
-              Decline optional acknowledgement
-            </Button>
-            <Button type="button" onClick={() => updatePreference('cookieConsent', 'accepted')}>
-              Accept
-            </Button>
-          </div>
+          <p className="text-sm text-[var(--muted-foreground)]">
+            BotParty stores sign-in state, room grants and local preferences needed for the features you use. Product analytics is first-party and only active after you enable it.
+          </p>
         </div>
 
         <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-5">
@@ -310,34 +392,86 @@ export default function SettingsPage() {
               label="Hide claim token by default"
               description="Keep robot claim tokens masked in the dashboard until explicitly revealed."
             />
-            <Switch
-              checked={keyboardTabSwitchOnlyWhenEmpty}
-              onChange={(event) => updatePreference('keyboardTabSwitchOnlyWhenEmpty', event.target.checked)}
-              label="Only switch chat focus on empty TAB"
-              description="TAB toggles between controls and chat only when the chat input is empty."
-            />
           </div>
         </div>
 
         <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-5">
           <h2 className="mb-4 flex items-center gap-2 text-lg font-bold">
             <BellRing className="h-5 w-5 text-amber-300" />
-            Queue Notifications
+            Notifications
           </h2>
           <p className="mb-4 text-sm text-[var(--muted-foreground)]">{notificationSummary}</p>
           <div className="space-y-3">
             <Switch
               checked={queuePositionNotifications}
-              onChange={(event) => updatePreference('queuePositionNotifications', event.target.checked)}
+              onChange={(event) => {
+                updatePreference('queuePositionNotifications', event.target.checked);
+                void updateNotifications({ inAppEnabled: event.target.checked });
+              }}
               label="Notify when queue position changes"
               description="Useful when you are waiting in another tab."
             />
             <Switch
               checked={queueTurnNotifications}
-              onChange={(event) => updatePreference('queueTurnNotifications', event.target.checked)}
+              onChange={(event) => {
+                updatePreference('queueTurnNotifications', event.target.checked);
+                void updateNotifications({ browserEnabled: event.target.checked && notificationPermission === 'granted' });
+              }}
               label="Notify when your turn starts"
               description="Send a desktop notification when you reach position #1."
             />
+            <Switch
+              checked={notificationPreferences.emailTurn}
+              onChange={(event) => void updateNotifications({ emailTurn: event.target.checked })}
+              label="Email for queue turns"
+              description="Email when you are next or your turn starts."
+            />
+            <Switch
+              checked={notificationPreferences.emailRobot}
+              onChange={(event) => void updateNotifications({ emailRobot: event.target.checked })}
+              label="Email when a robot goes offline"
+              description="For robots you host."
+            />
+            <Switch
+              checked={notificationPreferences.emailFinance}
+              onChange={(event) => void updateNotifications({ emailFinance: event.target.checked })}
+              label="Email for payments and payouts"
+              description="Final payment and payout status updates."
+            />
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <label className="text-xs text-[var(--muted-foreground)]">
+                Quiet hours start
+                <input
+                  type="time"
+                  value={minutesToTime(notificationPreferences.quietStartMin)}
+                  onChange={(event) => {
+                    const start = timeToMinutes(event.target.value);
+                    void updateNotifications({
+                      quietStartMin: start,
+                      quietEndMin: start === null ? null : notificationPreferences.quietEndMin ?? 480,
+                      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+                    });
+                  }}
+                  className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-2 py-1.5"
+                />
+              </label>
+              <label className="text-xs text-[var(--muted-foreground)]">
+                Quiet hours end
+                <input
+                  type="time"
+                  value={minutesToTime(notificationPreferences.quietEndMin)}
+                  onChange={(event) => {
+                    const end = timeToMinutes(event.target.value);
+                    void updateNotifications({
+                      quietStartMin: end === null ? null : notificationPreferences.quietStartMin ?? 1320,
+                      quietEndMin: end,
+                      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+                    });
+                  }}
+                  className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-2 py-1.5"
+                />
+              </label>
+            </div>
           </div>
           <button
             type="button"
@@ -350,14 +484,34 @@ export default function SettingsPage() {
         </div>
 
         <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-5">
+          <h2 className="mb-4 text-lg font-bold">Product analytics</h2>
+          <Switch
+            checked={productAnalyticsEnabled}
+            onChange={(event) => void updateAnalyticsConsent(event.target.checked)}
+            label="Share product usage"
+            description="Share first-party events such as robot views and completed turns. No advertising identifiers or third-party trackers are used. Events are deleted after 90 days; withdrawing consent deletes your prior events."
+          />
+        </div>
+
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-5">
           <h2 className="mb-4 text-lg font-bold">Account Data Export</h2>
           <p className="mb-4 text-sm text-[var(--muted-foreground)]">
-            Download a JSON export of your profile, robots, recent sessions, and queue history.
+            Download your account, robot, session, chat, moderation, analytics, wallet, billing, payout, and recording data as JSON.
           </p>
+          <label className="mb-3 block text-sm">
+            <span className="mb-1 block text-[var(--muted-foreground)]">Confirm your password</span>
+            <input
+              type="password"
+              autoComplete="current-password"
+              value={exportPassword}
+              onChange={(event) => setExportPassword(event.target.value)}
+              className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2"
+            />
+          </label>
           <button
             type="button"
             onClick={() => void handleExportData()}
-            disabled={exportingData}
+            disabled={exportingData || !exportPassword}
             className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm font-medium disabled:opacity-50"
           >
             {exportingData ? 'Preparing export...' : 'Download my data'}

@@ -1,7 +1,9 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { randomBytes } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@botparty/prisma';
+import { RedisService } from '../redis/redis.service';
+import { Counter, Gauge, register } from 'prom-client';
 
 // AnalyticsEvent rows older than this are deleted during maintenance sweeps.
 const ANALYTICS_RETENTION_DAYS = Number(process.env.ANALYTICS_RETENTION_DAYS ?? 90);
@@ -10,13 +12,40 @@ const CLEANUP_INTERVAL_MS = Number(process.env.CLEANUP_INTERVAL_MS ?? 6 * 60 * 6
 const ROBOT_STREAM_KEY_MAX_AGE_DAYS = Number(process.env.ROBOT_STREAM_KEY_MAX_AGE_DAYS ?? 90);
 const ADMIN_AUDIT_LOG_RETENTION_DAYS = Number(process.env.ADMIN_AUDIT_LOG_RETENTION_DAYS ?? 180);
 const LEDGER_RECONCILIATION_LOOKBACK_DAYS = Number(process.env.LEDGER_RECONCILIATION_LOOKBACK_DAYS ?? 30);
+const CHAT_RETENTION_DAYS = Number(process.env.CHAT_RETENTION_DAYS ?? 30);
+const BILLING_WEBHOOK_PAYLOAD_RETENTION_DAYS = Number(process.env.BILLING_WEBHOOK_PAYLOAD_RETENTION_DAYS ?? 30);
+const MODERATION_RETENTION_DAYS = Number(process.env.MODERATION_RETENTION_DAYS ?? 180);
+const RECORDING_RETENTION_DAYS = Number(process.env.RECORDING_RETENTION_DAYS ?? 30);
+
+const cleanupRuns = (register.getSingleMetric('botparty_retention_cleanup_runs_total') as Counter<'dataset' | 'outcome'> | undefined)
+  ?? new Counter({
+    name: 'botparty_retention_cleanup_runs_total',
+    help: 'Retention cleanup runs by dataset and outcome',
+    labelNames: ['dataset', 'outcome'] as const,
+  });
+const cleanupRows = (register.getSingleMetric('botparty_retention_cleanup_rows_total') as Counter<'dataset'> | undefined)
+  ?? new Counter({
+    name: 'botparty_retention_cleanup_rows_total',
+    help: 'Rows deleted or minimized by retention cleanup',
+    labelNames: ['dataset'] as const,
+  });
+const cleanupLastSuccess = (register.getSingleMetric('botparty_retention_cleanup_last_success_timestamp_seconds') as Gauge<'dataset'> | undefined)
+  ?? new Gauge({
+    name: 'botparty_retention_cleanup_last_success_timestamp_seconds',
+    help: 'Unix timestamp of the last successful retention cleanup',
+    labelNames: ['dataset'] as const,
+  });
 
 @Injectable()
 export class MaintenanceService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(MaintenanceService.name);
   private _timer: ReturnType<typeof setInterval> | null = null;
+  private _viewerCountTimer: ReturnType<typeof setInterval> | null = null;
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
+  ) {}
 
   onModuleInit() {
     // Run once shortly after startup, then on the configured interval.
@@ -26,6 +55,9 @@ export class MaintenanceService implements OnModuleInit, OnModuleDestroy {
     const timer = setInterval(() => void this._runCleanup(), CLEANUP_INTERVAL_MS);
     timer.unref?.();
     this._timer = timer;
+    const viewerCountTimer = setInterval(() => void this._flushViewerCounts(), 30_000);
+    viewerCountTimer.unref?.();
+    this._viewerCountTimer = viewerCountTimer;
   }
 
   onModuleDestroy() {
@@ -33,37 +65,30 @@ export class MaintenanceService implements OnModuleInit, OnModuleDestroy {
       clearInterval(this._timer);
       this._timer = null;
     }
+    if (this._viewerCountTimer) {
+      clearInterval(this._viewerCountTimer);
+      this._viewerCountTimer = null;
+    }
   }
 
   private async _runCleanup() {
-    try {
-      await this._purgeExpiredQueueEntries();
-    } catch (err) {
-      this.logger.warn('Queue entry cleanup failed', err);
-    }
-
-    try {
-      await this._purgeOldAnalyticsEvents();
-    } catch (err) {
-      this.logger.warn('Analytics event cleanup failed', err);
-    }
-
-    try {
-      await this._rotateExpiredRobotStreamKeys();
-    } catch (err) {
-      this.logger.warn('Robot stream key rotation sweep failed', err);
-    }
-
-    try {
-      await this._purgeOldAdminAuditLogs();
-    } catch (err) {
-      this.logger.warn('Admin audit log cleanup failed', err);
-    }
-
-    try {
-      await this._reconcileLedgerGroups();
-    } catch (err) {
-      this.logger.warn('Ledger reconciliation sweep failed', err);
+    const jobs: Array<[string, () => Promise<void>]> = [
+      ['queue', () => this._purgeExpiredQueueEntries()],
+      ['analytics', () => this._purgeOldAnalyticsEvents()],
+      ['robot_stream_keys', () => this._rotateExpiredRobotStreamKeys()],
+      ['admin_audit', () => this._purgeOldAdminAuditLogs()],
+      ['ledger_reconciliation', () => this._reconcileLedgerGroups()],
+      ['content', () => this._enforceContentRetention()],
+    ];
+    for (const [dataset, job] of jobs) {
+      try {
+        await job();
+        cleanupRuns.inc({ dataset, outcome: 'success' });
+        cleanupLastSuccess.set({ dataset }, Date.now() / 1000);
+      } catch (error) {
+        cleanupRuns.inc({ dataset, outcome: 'failure' });
+        this.logger.warn(`${dataset} maintenance failed`, error);
+      }
     }
   }
 
@@ -73,6 +98,7 @@ export class MaintenanceService implements OnModuleInit, OnModuleDestroy {
     });
 
     if (result.count > 0) {
+      cleanupRows.inc({ dataset: 'queue_entries' }, result.count);
       this.logger.log(`Purged ${result.count} expired queue entry(ies)`);
     }
   }
@@ -86,6 +112,7 @@ export class MaintenanceService implements OnModuleInit, OnModuleDestroy {
     });
 
     if (result.count > 0) {
+      cleanupRows.inc({ dataset: 'analytics_events' }, result.count);
       this.logger.log(
         `Purged ${result.count} analytics event(s) older than ${ANALYTICS_RETENTION_DAYS} days`,
       );
@@ -117,7 +144,7 @@ export class MaintenanceService implements OnModuleInit, OnModuleDestroy {
       await this.prisma.robot.update({
         where: { id: robot.id },
         data: {
-          streamKey: randomBytes(32).toString('hex'),
+          streamKeyHash: createHash('sha256').update(randomBytes(32).toString('hex')).digest('hex'),
           metadata: nextMetadata as Prisma.InputJsonValue,
         },
       });
@@ -136,10 +163,11 @@ export class MaintenanceService implements OnModuleInit, OnModuleDestroy {
 
     const cutoff = new Date(Date.now() - ADMIN_AUDIT_LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000);
     const result = await this.prisma.adminAuditLog.deleteMany({
-      where: { createdAt: { lt: cutoff } },
+      where: { OR: [{ expiresAt: { lt: new Date() } }, { createdAt: { lt: cutoff } }] },
     });
 
     if (result.count > 0) {
+      cleanupRows.inc({ dataset: 'admin_audit_logs' }, result.count);
       this.logger.log(
         `Purged ${result.count} admin audit log entr${result.count === 1 ? 'y' : 'ies'} older than ${ADMIN_AUDIT_LOG_RETENTION_DAYS} days`,
       );
@@ -175,6 +203,67 @@ export class MaintenanceService implements OnModuleInit, OnModuleDestroy {
         );
       }
     }
+  }
+
+  private async _flushViewerCounts() {
+    const robots = await this.prisma.robot.findMany({
+      where: { status: { in: ['ONLINE', 'BUSY'] } },
+      select: { id: true, viewerCount: true },
+    });
+    if (robots.length === 0) return;
+    const counts = await this.redis.mget(...robots.map((robot) => `robot:viewer-count:${robot.id}`));
+    await this.prisma.$transaction(
+      robots.flatMap((robot, index) => {
+        const count = Math.max(0, Number(counts[index] ?? 0) || 0);
+        return count === robot.viewerCount
+          ? []
+          : [this.prisma.robot.update({ where: { id: robot.id }, data: { viewerCount: count } })];
+      }),
+    );
+  }
+
+  private async _enforceContentRetention() {
+    const now = Date.now();
+    if (CHAT_RETENTION_DAYS > 0) {
+      const deleted = await this.prisma.chatMessage.deleteMany({
+        where: { createdAt: { lt: new Date(now - CHAT_RETENTION_DAYS * 86_400_000) } },
+      });
+      cleanupRows.inc({ dataset: 'chat_messages' }, deleted.count);
+    }
+    if (BILLING_WEBHOOK_PAYLOAD_RETENTION_DAYS > 0) {
+      const cutoff = new Date(now - BILLING_WEBHOOK_PAYLOAD_RETENTION_DAYS * 86_400_000);
+      const minimized = await this.prisma.$executeRaw`
+        UPDATE billing_webhook_events
+        SET payload = '{"retained":false,"reason":"payload_retention_elapsed"}'::jsonb
+        WHERE "processedAt" < ${cutoff}
+          AND payload IS DISTINCT FROM '{"retained":false,"reason":"payload_retention_elapsed"}'::jsonb
+      `;
+      cleanupRows.inc({ dataset: 'billing_webhook_payloads' }, minimized);
+    }
+    if (MODERATION_RETENTION_DAYS > 0) {
+      await this.prisma.robotModerationEntry.updateMany({
+        where: { isActive: true, expiresAt: { lt: new Date() } },
+        data: { isActive: false },
+      });
+      const deleted = await this.prisma.robotModerationEntry.deleteMany({
+        where: { createdAt: { lt: new Date(now - MODERATION_RETENTION_DAYS * 86_400_000) }, isActive: false },
+      });
+      cleanupRows.inc({ dataset: 'moderation_entries' }, deleted.count);
+    }
+    if (RECORDING_RETENTION_DAYS > 0) {
+      const deleted = await this.prisma.recording.deleteMany({
+        where: { startedAt: { lt: new Date(now - RECORDING_RETENTION_DAYS * 86_400_000) } },
+      });
+      cleanupRows.inc({ dataset: 'recording_metadata' }, deleted.count);
+    }
+    await this.prisma.user.updateMany({
+      where: { emailVerificationExpiry: { lt: new Date() } },
+      data: { emailVerificationToken: null, emailVerificationExpiry: null },
+    });
+    const notifications = await this.prisma.notification.deleteMany({
+      where: { expiresAt: { lt: new Date() } },
+    });
+    cleanupRows.inc({ dataset: 'notifications' }, notifications.count);
   }
 
   private _withIssuedAt(metadata: unknown, field: 'streamKeyIssuedAt'): Record<string, unknown> {

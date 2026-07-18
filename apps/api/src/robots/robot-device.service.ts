@@ -53,7 +53,8 @@ export class RobotDeviceService {
   }
 
   async findByClaimToken(claimToken: string) {
-    const robot = await this.prisma.robot.findUnique({ where: { claimToken } });
+    const claimTokenHash = createHash('sha256').update(claimToken).digest('hex');
+    const robot = await this.prisma.robot.findUnique({ where: { claimTokenHash } });
     if (!robot) {
       return null;
     }
@@ -71,6 +72,15 @@ export class RobotDeviceService {
     }
 
     return robot;
+  }
+
+  async validateRobotAuth(robotId: string, deviceHash: string, tokenVersion: number) {
+    const robot = await this.prisma.robot.findUnique({
+      where: { id: robotId },
+      select: { id: true, metadata: true, deviceTokenVersion: true },
+    });
+    if (!robot || robot.deviceTokenVersion !== tokenVersion) return false;
+    return this.readBoundDeviceHash(robot.metadata) === deviceHash;
   }
 
   /** Stamps the current time as claimTokenIssuedAt into a metadata object. */

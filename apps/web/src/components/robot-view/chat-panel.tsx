@@ -9,11 +9,9 @@ interface Props {
   setChatInput: (value: string) => void;
   chatRestriction: string | null;
   focusMode: FocusMode;
-  setFocusMode: (mode: FocusMode) => void;
   currentViewerId: string;
   canModerate: boolean;
   moderatingUserId: string | null;
-  tabSwitchOnlyWhenEmpty: boolean;
   chatScrollRef: RefObject<HTMLDivElement | null>;
   chatPanelRef: RefObject<HTMLDivElement | null>;
   chatInputRef: RefObject<HTMLInputElement | null>;
@@ -31,11 +29,9 @@ export function RobotChatPanel({
   setChatInput,
   chatRestriction,
   focusMode,
-  setFocusMode,
   currentViewerId,
   canModerate,
   moderatingUserId,
-  tabSwitchOnlyWhenEmpty,
   chatScrollRef,
   chatPanelRef,
   chatInputRef,
@@ -156,14 +152,8 @@ export function RobotChatPanel({
           onChange={(e) => setChatInput(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') { e.preventDefault(); onSend(); }
-            if (e.key === 'Tab') {
-              if (!tabSwitchOnlyWhenEmpty || chatInput.trim().length === 0) {
-                e.preventDefault();
-                setFocusMode('controls');
-              }
-            }
           }}
-          placeholder={focusMode === 'chat' ? 'Say something...' : 'Tab to chat...'}
+          placeholder={focusMode === 'chat' ? 'Say something...' : 'Write a message...'}
           maxLength={300}
           className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm outline-none transition-colors focus:border-[var(--primary)]"
         />

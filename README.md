@@ -10,14 +10,14 @@ Inspired by LetsRobot.tv and Remo.tv. Written with a modern stack when the time 
 
 ## What works right now
 
-- **Live video** via LiveKit SFU (WebRTC) — ~150ms end-to-end on a decent connection
-- **Control commands** over the BotParty gateway WebSocket — ~50ms round-trip locally
+- **Live video** via LiveKit SFU (WebRTC), including adaptive multi-camera playback
+- **Control commands** over the BotParty gateway WebSocket with command acknowledgements
 - **Queue system** — first-come-first-serve, configurable turn time
 - **Chat** — in-room messaging between the driver and viewers
 - **Crowd echo** — everyone sees button presses as they happen
 - **Configurable control buttons** — label, hotkey, icon, cooldown, per-robot
 - **RBAC** — Admin, Mod, User roles
-- **Emergency stop** — ESC key or automatic at >300ms latency
+- **Emergency stop** — ESC key, visible stop control, stale-command rejection, and robot safety acknowledgement
 - **Robot dashboard** — visibility, access mode, queue settings
 - **Python robot client** — runs on Pi, Jetson, anything with a camera and serial port
 - **Password reset via email** — expiring reset links over SMTP
@@ -47,11 +47,9 @@ flowchart TD
     Client -- Commands --> API
 ```
 
-In practice we see:
-- ~150 ms end-to-end video latency on a decent connection
-- ~50 ms control round-trip when running locally
----
+Performance depends on the robot hardware, camera pipeline, network path, and LiveKit deployment. The checked-in benchmark protocols and release budgets are documented in [docs/performance.md](docs/performance.md).
 
+---
 
 ## 📁 Project Structure
 
@@ -96,6 +94,7 @@ botparty/
 ## Quick Start
 
 ### Prerequisites
+
 - Node.js 24, pnpm 9.15+
 - Docker & Docker Compose
 - Python 3.10+ (robot client only)
@@ -111,31 +110,38 @@ nvm use
 pnpm install
 ```
 
-Start the database, cache, and LiveKit:
+Create a local configuration and file-based secrets:
 
 ```bash
-docker compose up -d postgres redis livekit
+bash setup-env.sh
 ```
 
-Set up the environment (defaults work for local dev):
+Choose the local development option. Then start the database, cache, and LiveKit:
 
 ```bash
-cp .env.example .env
+docker compose up -d postgres redis livekit-config livekit
 ```
 
-Generate the Prisma client, push the schema and seed demo data:
+Generate the Prisma client and apply the versioned migrations:
 
 ```bash
 pnpm db:generate
-pnpm db:push
-pnpm --filter @botparty/prisma db:seed
+pnpm --filter @botparty/prisma db:migrate:prod
 ```
 
-Start everything with hot reload:
+Start the apps with hot reload:
 
 ```bash
 pnpm dev
 ```
+
+To run the same hot-reload setup fully in containers:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+```
+
+The API dev container applies committed migrations and converges the idempotent seed before starting its watcher. `pnpm dev:smoke` builds an isolated stack, checks both health endpoints and verifies that API and Web reload after a mounted source change.
 
 - Frontend: http://localhost:3000
 - API: http://localhost:4000
@@ -248,7 +254,7 @@ docker compose up -d api web nginx
 - Strict CORS origin list
 - Security headers via nginx (X-Frame-Options, CSP, etc.)
 - Zod validation on all API inputs
-- Emergency stop fires automatically at >300ms latency
+- Robot control tokens are short-lived and revocable; stale commands are rejected and paid commands require robot acknowledgement
 
 ---
 
@@ -261,16 +267,16 @@ docker compose up -d api web nginx
 - **ChatMessage** — in-room messages
 - **ControlButton** — per-robot configurable controls
 - **RobotModerationEntry** — bans and timeouts per robot
-- **Transaction** — credit ledger (for future priority queue / features)
+- **Transaction** — immutable credit ledger for deposits, controls, donations, payouts, refunds, and reconciliation
 
 ---
 
 ## Open areas
 
-- Better queue balancing and voting
+- Additional queue policies beyond first-come and voting
 - ROS2 integration
 - More community / leaderboard features
-- Credit and priority queue system (schema is there, UI and billing wiring missing)
+- More payment providers through the existing provider adapter
 
 ---
 

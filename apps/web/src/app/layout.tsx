@@ -1,22 +1,11 @@
 import type { Metadata } from 'next';
-import { cookies, headers } from 'next/headers';
 import Link from 'next/link';
 import Script from 'next/script';
-import { Inter } from 'next/font/google';
 import './globals.css';
-import { CookieBanner } from '@/components/cookie-banner';
-import { BOTPARTY_LOCALE_COOKIE, defaultLocale, isSupportedLocale, localizePath } from '@/lib/i18n';
+import { defaultLocale, localizePath } from '@/lib/i18n';
 import Nav from '@/components/nav';
-import { ServiceWorkerRegistration } from '@/components/service-worker-registration';
-import { SentryBrowser } from '@/components/sentry-browser';
 import { ThemeController } from '@/components/theme-controller';
 import { ToastStack } from '@/components/ui/toast-stack';
-
-const inter = Inter({
-  subsets: ['latin'],
-  variable: '--font-inter',
-  display: 'swap',
-});
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://botparty.live'),
@@ -59,11 +48,7 @@ export const metadata: Metadata = {
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const headerStore = await headers();
-  const cookieStore = await cookies();
-  const headerLocale = headerStore.get('x-botparty-locale');
-  const cookieLocale = cookieStore.get(BOTPARTY_LOCALE_COOKIE)?.value;
-  const locale = isSupportedLocale(headerLocale) ? headerLocale : isSupportedLocale(cookieLocale) ? cookieLocale : defaultLocale;
+  const locale = defaultLocale;
 
   return (
     <html lang={locale} suppressHydrationWarning>
@@ -88,18 +73,15 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           })();`}
         </Script>
       </head>
-      <body className={`${inter.variable} flex min-h-screen flex-col bg-[var(--background)] text-[var(--foreground)] antialiased`}>
+      <body className="flex min-h-screen flex-col bg-[var(--background)] text-[var(--foreground)] antialiased">
         <noscript>
           <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
             BotParty needs JavaScript for live video, chat, and robot controls.
           </div>
         </noscript>
         <ThemeController />
-        <SentryBrowser />
-        <ServiceWorkerRegistration />
         <Nav />
         <ToastStack />
-        <CookieBanner />
         <main className="flex-1">{children}</main>
         <footer className="border-t border-[var(--border)] bg-[var(--background)]/96">
           <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-6 text-sm text-[var(--muted-foreground)] sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
@@ -107,22 +89,22 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               <p className="font-semibold text-[var(--foreground)]">BotParty</p>
             </div>
             <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs">
-              <Link href={localizePath('/terms', locale)} className="transition hover:text-[var(--foreground)]">
+              <Link href={localizePath('/terms', locale)} prefetch={false} className="transition hover:text-[var(--foreground)]">
                 Terms of Service
               </Link>
-              <Link href={localizePath('/privacy', locale)} className="transition hover:text-[var(--foreground)]">
+              <Link href={localizePath('/privacy', locale)} prefetch={false} className="transition hover:text-[var(--foreground)]">
                 Privacy Policy
               </Link>
-              <Link href={localizePath('/imprint', locale)} className="transition hover:text-[var(--foreground)]">
+              <Link href={localizePath('/imprint', locale)} prefetch={false} className="transition hover:text-[var(--foreground)]">
                 Imprint
               </Link>
-              <Link href={localizePath('/cookies', locale)} className="transition hover:text-[var(--foreground)]">
+              <Link href={localizePath('/cookies', locale)} prefetch={false} className="transition hover:text-[var(--foreground)]">
                 Cookie Notice
               </Link>
-              <Link href={localizePath('/status', locale)} className="transition hover:text-[var(--foreground)]">
+              <Link href={localizePath('/status', locale)} prefetch={false} className="transition hover:text-[var(--foreground)]">
                 Status
               </Link>
-              <Link href={localizePath('/docs/robot-setup', locale)} className="transition hover:text-[var(--foreground)]">
+              <Link href={localizePath('/docs/robot-setup', locale)} prefetch={false} className="transition hover:text-[var(--foreground)]">
                 Robot Setup
               </Link>
             </div>

@@ -14,12 +14,12 @@ type StaffUser = {
   id: string;
   username: string;
   displayName: string | null;
-  email: string;
+  email?: string;
   role: UserRole;
   isActive: boolean;
-  credits: number;
-  balance: number;
-  lastLoginAt: string | null;
+  credits?: number;
+  balance?: number;
+  lastLoginAt?: string | null;
 };
 
 type UserDraft = {
@@ -82,17 +82,18 @@ export function UsersView({
             <div key={user.id} className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--background)]">
               <button
                 type="button"
-                onClick={() => onStartUserEdit(user)}
+                onClick={() => viewerIsAdmin && onStartUserEdit(user)}
+                disabled={!viewerIsAdmin}
                 className="grid w-full grid-cols-12 gap-2 px-3 py-3 text-left text-sm transition hover:bg-[var(--muted)]/70"
               >
                 <span className="col-span-4 truncate font-medium">{user.displayName ?? user.username}</span>
-                <span className="col-span-4 truncate text-[var(--muted-foreground)]">{user.email}</span>
+                <span className="col-span-4 truncate text-[var(--muted-foreground)]">{user.email ?? 'Contact details hidden'}</span>
                 <span className="col-span-2 text-xs text-[var(--muted-foreground)]">{user.role}</span>
-                <span className="col-span-1 text-right text-xs text-[var(--muted-foreground)]">{user.credits} cr</span>
-                <span className="col-span-1 text-right text-xs text-sky-300">{isEditing ? 'Open' : 'Edit'}</span>
+                <span className="col-span-1 text-right text-xs text-[var(--muted-foreground)]">{viewerIsAdmin ? `${user.credits ?? 0} cr` : ''}</span>
+                <span className="col-span-1 text-right text-xs text-sky-300">{viewerIsAdmin ? (isEditing ? 'Open' : 'Edit') : ''}</span>
               </button>
 
-              {isEditing ? (
+              {isEditing && viewerIsAdmin ? (
                 <div className="border-t border-[var(--border)] bg-[var(--card)]/80 p-4">
                   <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
                     <div>

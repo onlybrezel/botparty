@@ -36,16 +36,6 @@ export default function TermsPage() {
         </p>
       </div>
 
-      {!legal.isConfigured ? (
-        <div className="mb-5 rounded-2xl border border-amber-500/40 bg-amber-100 text-amber-950 p-4 text-sm dark:bg-amber-500/10 dark:text-amber-100">
-          Final operator details are still missing for this deployment. Configure the `NEXT_PUBLIC_LEGAL_*` variables before public launch.
-        </div>
-      ) : null}
-
-      <div className="mb-5 rounded-2xl border border-sky-500/30 bg-sky-500/10 p-4 text-sm text-sky-100">
-        This page is a product-ready template, not legal advice. The operator should adapt it to the target market, tax setup, and consumer law before launch.
-      </div>
-
       <div className="space-y-5">
         <Section title="Use of the service">
           <p>BotParty provides live robot video, queueing, chat, moderation, and remote control features. You may only use the service in ways that are lawful, safe, and consistent with the platform rules.</p>
@@ -78,20 +68,20 @@ export default function TermsPage() {
           <p>Credits may be consumed by platform features such as robot interactions, placements, or other operator-defined paid mechanics. Credits do not represent stored fiat money unless local law requires otherwise.</p>
         </Section>
 
-        <Section title="Refund and chargeback template">
+        <Section title="Refunds and chargebacks">
           <p>For digital credit purchases, refunds are generally evaluated case by case. The operator may refuse refunds once credits have been delivered and materially consumed, unless mandatory law says otherwise.</p>
           <p>If a payment is refunded, disputed, or charged back, the matching BotParty credits may be removed, locked, or set negative until the balance is reconciled.</p>
-          <p>Recommended operator policy: refund duplicate payments, obvious technical failures, and undelivered credit purchases promptly; document exceptions for abuse, fraud, or already-consumed digital goods.</p>
+          <p>Duplicate payments, technical failures, and purchases without delivered credits are reviewed promptly. Contact the operator with the payment reference.</p>
         </Section>
 
-        <Section title="EU consumer withdrawal template">
-          <p>If the operator serves EU consumers, digital content withdrawal rights may apply until performance begins. The operator should collect explicit consent that delivery starts immediately and that the withdrawal right may expire once credits are delivered.</p>
-          <p>Suggested checkout consent text: “I consent to immediate delivery of digital credits and acknowledge that my statutory withdrawal right may expire once performance begins.”</p>
+        <Section title="Digital delivery">
+          <p>Checkout asks for explicit consent before digital credits are delivered immediately. Statutory consumer rights remain unaffected.</p>
         </Section>
 
         <Section title="Liability and governing law">
           <p><strong className="text-[var(--foreground)]">Operator:</strong> {legal.operatorName}</p>
           <p><strong className="text-[var(--foreground)]">Governing law:</strong> {legal.governingLaw}</p>
+          <p><strong className="text-[var(--foreground)]">Policy version:</strong> 2026-07-17</p>
           <p>
             Service and legal notices should be sent to{' '}
             <a className="underline" href={`mailto:${legal.operatorEmail}`}>{legal.operatorEmail}</a>.

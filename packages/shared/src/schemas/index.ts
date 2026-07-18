@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { LIMITS } from '../constants/index.js';
+import { LEGAL_POLICY_VERSIONS, LIMITS } from '../constants/index.js';
 
 export function isValidTimezone(value: string): boolean {
   const timezone = value.trim();
@@ -79,6 +79,8 @@ export const registerSchema = z.object({
   email: emailSchema,
   password: passwordSchema,
   displayName: z.string().min(1).max(64).optional(),
+  acceptedTermsVersion: z.literal(LEGAL_POLICY_VERSIONS.TERMS),
+  acceptedPrivacyVersion: z.literal(LEGAL_POLICY_VERSIONS.PRIVACY),
 });
 
 export const loginSchema = z.object({
@@ -101,7 +103,7 @@ const robotWriteSchema = z.object({
   slug: robotSlugSchema.optional(),
   description: z.string().max(LIMITS.MAX_ROBOT_DESCRIPTION_LENGTH).optional(),
   thumbnailUrl: z.string().url().max(512).optional(),
-  visibility: z.enum(['PUBLIC', 'UNLISTED', 'PRIVATE']).default('PUBLIC'),
+  visibility: z.enum(['PUBLIC', 'UNLISTED', 'PRIVATE']).default('PRIVATE'),
   accessMode: z.enum(['OPEN', 'PASSWORD', 'LINK_ONLY', 'ALLOWED_USERS']).default('OPEN'),
   accessPassword: z.string().min(4).max(64).optional(),
   queueMode: z.enum(['FIRST_COME', 'VOTING', 'DISABLED']).default('FIRST_COME'),
@@ -145,6 +147,8 @@ export const updateRobotSchema = robotWriteSchema.partial().extend({
 
 // ─── Control Schemas ─────────────────────────────────
 export const controlCommandSchema = z.object({
+  commandId: z.string().uuid(),
+  buttonId: z.string().uuid().optional(),
   command: z.string().min(1).max(64),
   value: z.union([z.number(), z.string(), z.boolean()]).optional(),
   timestamp: z.number(),
@@ -154,6 +158,7 @@ export const controlCommandSchema = z.object({
 export const chatMessageSchema = z.object({
   content: z.string().min(1).max(LIMITS.MAX_CHAT_MESSAGE_LENGTH),
   robotId: z.string().uuid(),
+  clientMessageId: z.string().uuid(),
 });
 
 // ─── Queue Schemas ───────────────────────────────────
@@ -178,6 +183,8 @@ export const checkoutRequestSchema = z.object({
   packageId: z.string().min(1).max(64),
   successUrl: z.string().url().max(512).optional(),
   cancelUrl: z.string().url().max(512).optional(),
+  termsVersion: z.literal(LEGAL_POLICY_VERSIONS.TERMS),
+  immediateDeliveryConsent: z.literal(true),
 });
 
 export const subscriptionCheckoutRequestSchema = z.object({
@@ -194,5 +201,54 @@ export const payoutRequestSchema = z.object({
     .min(LIMITS.MIN_PAYOUT_REQUEST_CREDITS)
     .max(LIMITS.MAX_PAYOUT_REQUEST_CREDITS),
   destination: z.string().trim().min(3).max(128),
+  destinationType: z.enum(['PAYPAL_EMAIL', 'IBAN']),
   notes: z.string().trim().max(1000).optional(),
+}).superRefine((value, context) => {
+  const destination = value.destination.replace(/\s+/g, '');
+  if (value.destinationType === 'PAYPAL_EMAIL' && !/^\S+@\S+\.\S+$/.test(destination)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['destination'], message: 'Invalid PayPal email address' });
+  }
+  if (value.destinationType === 'IBAN' && !/^[A-Z]{2}[A-Z0-9]{13,32}$/i.test(destination)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['destination'], message: 'Invalid IBAN' });
+  }
 });
+
+// ─── Notification and analytics schemas ─────────────
+export const updateNotificationPreferencesSchema = z.object({
+  inAppEnabled: z.boolean().optional(),
+  browserEnabled: z.boolean().optional(),
+  emailTurn: z.boolean().optional(),
+  emailRobot: z.boolean().optional(),
+  emailFinance: z.boolean().optional(),
+  quietStartMin: z.number().int().min(0).max(1439).nullable().optional(),
+  quietEndMin: z.number().int().min(0).max(1439).nullable().optional(),
+  timezone: z.string().min(1).max(64).refine(isValidTimezone, 'Timezone must be a valid IANA timezone').optional(),
+}).strict().superRefine((value, context) => {
+  const hasStart = value.quietStartMin !== undefined && value.quietStartMin !== null;
+  const hasEnd = value.quietEndMin !== undefined && value.quietEndMin !== null;
+  if (hasStart !== hasEnd) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: 'Quiet hours require both a start and end time' });
+  }
+  if (hasStart && value.quietStartMin === value.quietEndMin) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: 'Quiet hours must have different start and end times' });
+  }
+});
+
+export const analyticsEventSchema = z.discriminatedUnion('event', [
+  z.object({
+    event: z.enum(['DISCOVERY_ROBOT_VIEW', 'HOST_ONBOARDING_VIEW', 'WALLET_VIEW']),
+    robotId: z.string().uuid().optional(),
+  }).strict(),
+  z.object({
+    event: z.literal('PERFORMANCE_WEB_VITAL'),
+    payload: z.object({
+      metric: z.enum(['CLS', 'FCP', 'FID', 'INP', 'LCP', 'TTFB']),
+      value: z.number().finite().min(0).max(10_000_000),
+      rating: z.enum(['good', 'needs-improvement', 'poor']),
+      path: z.string().startsWith('/').max(200),
+      navigationType: z.string().max(40).optional(),
+    }).strict(),
+  }).strict(),
+]);
+
+export const analyticsConsentSchema = z.object({ enabled: z.boolean() }).strict();

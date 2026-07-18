@@ -4,22 +4,22 @@ BotParty can now render human-readable client docs straight from the OpenAPI doc
 
 ## Default Workflow
 
-1. Start the API with Swagger enabled.
+1. Regenerate `docs/openapi.json` with `pnpm openapi:export` after API changes.
 2. Run:
 
 ```bash
 pnpm docs:api-client
 ```
 
-By default, the generator reads `http://localhost:4000/docs-json` and writes `docs/api-client.md`.
+By default, the generator reads `docs/openapi.json` and writes `docs/api-client.md`.
 
 ## Custom Input Or Output
 
 Use a local spec file or a different URL when needed:
 
 ```bash
-pnpm docs:api-client -- --input apps/api/openapi.json --output docs/api-client.md
-pnpm docs:api-client -- --input https://example.com/docs-json --output /tmp/botparty-api.md
+pnpm docs:api-client --input docs/openapi.json --output docs/api-client.md
+pnpm docs:api-client --input https://example.com/docs-json --output /tmp/botparty-api.md
 ```
 
 ## Output Contents
@@ -46,5 +46,5 @@ The default output path is `apps/web/src/lib/generated/openapi-client`.
 You can override both ends when needed:
 
 ```bash
-pnpm generate:ts-api-client -- --input apps/api/openapi.json --output apps/web/src/lib/generated/openapi-client
+pnpm generate:ts-api-client --input docs/openapi.json --output apps/web/src/lib/generated/openapi-client
 ```

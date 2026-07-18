@@ -7,6 +7,8 @@ import { QueueApi } from './api/queue';
 import { ControlsApi } from './api/controls';
 import { SessionsApi } from './api/sessions';
 import { WalletApi } from './api/wallet';
+import { NotificationsApi } from './api/notifications';
+import { AnalyticsApi } from './api/analytics';
 import type { ApiRequestOptions, AuthSessionResponse, RequestFn } from './api/types';
 import type { PlatformStats } from './api-types';
 
@@ -74,6 +76,8 @@ class ApiClient {
   readonly controls: ControlsApi;
   readonly sessions: SessionsApi;
   readonly wallet: WalletApi;
+  readonly notifications: NotificationsApi;
+  readonly analytics: AnalyticsApi;
 
   constructor(baseUrl: string) {
     this.baseUrl = `${baseUrl}/api/v1`;
@@ -86,6 +90,8 @@ class ApiClient {
     this.controls = new ControlsApi(req);
     this.sessions = new SessionsApi(req);
     this.wallet = new WalletApi(req);
+    this.notifications = new NotificationsApi(req);
+    this.analytics = new AnalyticsApi(req);
   }
 
   setToken(token: string | null) {

@@ -2,6 +2,13 @@ import { TurnHandler } from './turn.handler';
 import type { TurnHandlerContext } from './turn.handler';
 import type { ActiveTurnState, WsClient } from './gateway-types';
 
+const makeTurn = (input: Pick<ActiveTurnState, 'sessionId' | 'userId' | 'startedAt' | 'expiresAt'> & Partial<ActiveTurnState>): ActiveTurnState => ({
+  ownerId: 'instance-a',
+  fencingToken: 1,
+  leaseExpiresAt: Date.now() + 15_000,
+  ...input,
+});
+
 const makeContext = (
   overrides: Partial<TurnHandlerContext> = {},
 ): TurnHandlerContext & {
@@ -17,11 +24,11 @@ const makeContext = (
     robotClients: new Map<string, WsClient>(),
     getActiveTurn: jest.fn(async (robotId: string) => activeTurns.get(robotId) ?? null),
     hasLocalActiveTurn: jest.fn((robotId: string) => activeTurns.has(robotId)),
-    rememberActiveTurn: jest.fn((robotId: string, state: ActiveTurnState) => {
-      activeTurns.set(robotId, state);
-    }),
-    setActiveTurn: jest.fn(async (robotId: string, state: ActiveTurnState) => {
-      activeTurns.set(robotId, state);
+    isTurnOwner: jest.fn((state: ActiveTurnState) => state.ownerId === 'instance-a'),
+    acquireActiveTurn: jest.fn(async (robotId: string, state: ActiveTurnState) => {
+      const acquired = makeTurn({ ...state, ownerId: 'instance-a', fencingToken: 2 });
+      activeTurns.set(robotId, acquired);
+      return acquired;
     }),
     clearActiveTurn: jest.fn(async (robotId: string) => {
       const current = activeTurns.get(robotId) ?? null;
@@ -41,6 +48,7 @@ const makeContext = (
     }),
     broadcastToRoom: jest.fn(),
     sendRobotStop: jest.fn(),
+    revokeController: jest.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 };
@@ -53,10 +61,15 @@ const mockRobotsService = {
 const mockSessionsService = {
   create: jest.fn(),
   end: jest.fn().mockResolvedValue(undefined),
+  findActiveForTurnRecovery: jest.fn().mockResolvedValue(null),
 };
 
 const mockQueueService = {
   leave: jest.fn().mockResolvedValue(undefined),
+};
+
+const mockNotifications = {
+  publishSafely: jest.fn().mockResolvedValue(null),
 };
 
 describe('TurnHandler', () => {
@@ -65,7 +78,7 @@ describe('TurnHandler', () => {
   describe('clearTurnState', () => {
     it('is a no-op if no active turn exists', async () => {
       const ctx = makeContext();
-      const handler = new TurnHandler(ctx, mockRobotsService as never, mockSessionsService as never, mockQueueService as never);
+      const handler = new TurnHandler(ctx, mockRobotsService as never, mockSessionsService as never, mockQueueService as never, mockNotifications as never);
 
       await handler.clearTurnState('robot-1');
 
@@ -75,14 +88,14 @@ describe('TurnHandler', () => {
 
     it('broadcasts session end and turn end when active turn exists', async () => {
       const ctx = makeContext();
-      ctx.activeTurns.set('robot-1', {
+      ctx.activeTurns.set('robot-1', makeTurn({
         sessionId: 'session-1',
         userId: 'user-1',
         startedAt: Date.now() - 5000,
         expiresAt: Date.now() + 5000,
-      });
+      }));
 
-      const handler = new TurnHandler(ctx, mockRobotsService as never, mockSessionsService as never, mockQueueService as never);
+      const handler = new TurnHandler(ctx, mockRobotsService as never, mockSessionsService as never, mockQueueService as never, mockNotifications as never);
       await handler.clearTurnState('robot-1', 'timeout');
 
       expect(ctx.sendRobotStop).toHaveBeenCalledWith('robot-1', 'Turn ended: timeout');
@@ -96,7 +109,7 @@ describe('TurnHandler', () => {
       const fakeTimer = setTimeout(() => {}, 99999) as ReturnType<typeof setTimeout>;
       ctx.turnTimeouts.set('robot-1', fakeTimer);
 
-      const handler = new TurnHandler(ctx, mockRobotsService as never, mockSessionsService as never, mockQueueService as never);
+      const handler = new TurnHandler(ctx, mockRobotsService as never, mockSessionsService as never, mockQueueService as never, mockNotifications as never);
       await handler.clearTurnState('robot-1');
 
       expect(ctx.turnTimeouts.has('robot-1')).toBe(false);
@@ -107,15 +120,15 @@ describe('TurnHandler', () => {
   describe('syncTurnLifecycle', () => {
     it('clears turn when queue mode is DISABLED', async () => {
       const ctx = makeContext();
-      ctx.activeTurns.set('robot-1', {
+      ctx.activeTurns.set('robot-1', makeTurn({
         sessionId: 's1',
         userId: 'u1',
         startedAt: Date.now(),
         expiresAt: Date.now() + 1000,
-      });
+      }));
       mockRobotsService.findById.mockResolvedValueOnce({ queueMode: 'DISABLED', status: 'ONLINE', maxTurnTime: 60000 });
 
-      const handler = new TurnHandler(ctx, mockRobotsService as never, mockSessionsService as never, mockQueueService as never);
+      const handler = new TurnHandler(ctx, mockRobotsService as never, mockSessionsService as never, mockQueueService as never, mockNotifications as never);
       await handler.syncTurnLifecycle('robot-1', []);
 
       expect(ctx.activeTurns.has('robot-1')).toBe(false);
@@ -124,15 +137,15 @@ describe('TurnHandler', () => {
     it('clears turn when robot is in maintenance', async () => {
       const ctx = makeContext();
       ctx.robotClients.set('robot-1', {} as WsClient);
-      ctx.activeTurns.set('robot-1', {
+      ctx.activeTurns.set('robot-1', makeTurn({
         sessionId: 's1',
         userId: 'u1',
         startedAt: Date.now(),
         expiresAt: Date.now() + 1000,
-      });
+      }));
       mockRobotsService.findById.mockResolvedValueOnce({ queueMode: 'STANDARD', status: 'MAINTENANCE', maxTurnTime: 60000 });
 
-      const handler = new TurnHandler(ctx, mockRobotsService as never, mockSessionsService as never, mockQueueService as never);
+      const handler = new TurnHandler(ctx, mockRobotsService as never, mockSessionsService as never, mockQueueService as never, mockNotifications as never);
       await handler.syncTurnLifecycle('robot-1', []);
 
       expect(ctx.activeTurns.has('robot-1')).toBe(false);
@@ -144,7 +157,7 @@ describe('TurnHandler', () => {
       mockRobotsService.findById.mockResolvedValueOnce({ queueMode: 'STANDARD', status: 'ONLINE', maxTurnTime: 60000 });
       mockSessionsService.create.mockResolvedValueOnce({ id: 'new-session' });
 
-      const handler = new TurnHandler(ctx, mockRobotsService as never, mockSessionsService as never, mockQueueService as never);
+      const handler = new TurnHandler(ctx, mockRobotsService as never, mockSessionsService as never, mockQueueService as never, mockNotifications as never);
       await handler.syncTurnLifecycle('robot-1', [{ userId: 'user-1', user: { username: 'alice' } }]);
 
       expect(ctx.activeTurns.get('robot-1')?.userId).toBe('user-1');
@@ -154,28 +167,29 @@ describe('TurnHandler', () => {
     it('does nothing if turn already belongs to queue head', async () => {
       const ctx = makeContext();
       ctx.robotClients.set('robot-1', {} as WsClient);
-      ctx.activeTurns.set('robot-1', {
+      ctx.activeTurns.set('robot-1', makeTurn({
         sessionId: 's1',
         userId: 'user-1',
         startedAt: Date.now(),
         expiresAt: Date.now() + 1000,
-      });
+      }));
       mockRobotsService.findById.mockResolvedValueOnce({ queueMode: 'STANDARD', status: 'ONLINE', maxTurnTime: 60000 });
 
-      const handler = new TurnHandler(ctx, mockRobotsService as never, mockSessionsService as never, mockQueueService as never);
+      const handler = new TurnHandler(ctx, mockRobotsService as never, mockSessionsService as never, mockQueueService as never, mockNotifications as never);
       await handler.syncTurnLifecycle('robot-1', [{ userId: 'user-1' }]);
 
       expect(mockSessionsService.create).not.toHaveBeenCalled();
-      expect(ctx.rememberActiveTurn).not.toHaveBeenCalled();
+      expect(ctx.acquireActiveTurn).not.toHaveBeenCalled();
     });
 
-    it('rehydrates local turn state when the shared active turn already matches the queue head', async () => {
-      const sharedTurn: ActiveTurnState = {
+    it('does not take over a matching turn owned by another instance', async () => {
+      const sharedTurn: ActiveTurnState = makeTurn({
         sessionId: 's1',
         userId: 'user-1',
         startedAt: Date.now() - 2000,
         expiresAt: Date.now() + 5000,
-      };
+        ownerId: 'instance-b',
+      });
       const ctx = makeContext({
         getActiveTurn: jest.fn().mockResolvedValue(sharedTurn),
         hasLocalActiveTurn: jest.fn().mockReturnValue(false),
@@ -183,10 +197,9 @@ describe('TurnHandler', () => {
       ctx.robotClients.set('robot-1', {} as WsClient);
       mockRobotsService.findById.mockResolvedValueOnce({ queueMode: 'STANDARD', status: 'ONLINE', maxTurnTime: 60000 });
 
-      const handler = new TurnHandler(ctx, mockRobotsService as never, mockSessionsService as never, mockQueueService as never);
+      const handler = new TurnHandler(ctx, mockRobotsService as never, mockSessionsService as never, mockQueueService as never, mockNotifications as never);
       await handler.syncTurnLifecycle('robot-1', [{ userId: 'user-1' }]);
 
-      expect(ctx.rememberActiveTurn).toHaveBeenCalledWith('robot-1', sharedTurn);
       expect(mockSessionsService.create).not.toHaveBeenCalled();
     });
   });
@@ -194,14 +207,14 @@ describe('TurnHandler', () => {
   describe('handleTurnTimeout', () => {
     it('clears turn state and removes user from queue', async () => {
       const ctx = makeContext();
-      ctx.activeTurns.set('robot-1', {
+      ctx.activeTurns.set('robot-1', makeTurn({
         sessionId: 's1',
         userId: 'user-1',
         startedAt: Date.now(),
         expiresAt: Date.now() - 1,
-      });
+      }));
 
-      const handler = new TurnHandler(ctx, mockRobotsService as never, mockSessionsService as never, mockQueueService as never);
+      const handler = new TurnHandler(ctx, mockRobotsService as never, mockSessionsService as never, mockQueueService as never, mockNotifications as never);
       await handler.handleTurnTimeout('robot-1', 'user-1');
 
       expect(mockQueueService.leave).toHaveBeenCalledWith('robot-1', 'user-1');

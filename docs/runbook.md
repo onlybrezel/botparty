@@ -6,25 +6,15 @@ Quick reference for common production incident scenarios.
 
 ## DB Corruption / Postgres Down
 
-**Symptoms:** API health endpoint returns `{ "postgres": "error" }`, 500s on all data endpoints.
+**Symptoms:** readiness returns `503` and reports discovery, auth, or control as unavailable; data endpoints fail.
 
 **Steps:**
 1. Check container status: `docker compose ps postgres`
 2. Check logs: `docker compose logs --tail=50 postgres`
 3. Attempt restart: `docker compose restart postgres`
-4. If startup fails, check volume integrity:
-   ```bash
-   docker compose down postgres
-   docker run --rm -v botparty_postgres_data:/var/lib/postgresql/data postgres:16-alpine pg_resetwal -n /var/lib/postgresql/data
-   ```
-5. Restore from latest backup:
-   ```bash
-   # List backups
-   ls -lt data/backups/
-   # Restore
-   PGPASSWORD=<DB_PASSWORD> psql -h 127.0.0.1 -p 5433 -U botparty botparty < <(zcat data/backups/botparty-<TIMESTAMP>.sql.gz)
-   ```
-6. If corruption is severe, create new volume and restore from backup.
+4. Do not run `pg_resetwal` against the production volume. Preserve the failed volume for diagnosis.
+5. Select the newest release archive that is inside the six-hour RPO and run `./scripts/restore-drill.sh data/backups/botparty-release-<TIMESTAMP>.tar.gz` first. This validates checksums, PostgreSQL, migrations, schema drift, and object storage in an isolated environment.
+6. For a production replacement, provision new PostgreSQL and object-storage volumes, restore the verified archive with the same `pg_restore` and object mirror procedure, then switch the API connection only after the readiness probe passes.
 
 ---
 
@@ -53,7 +43,7 @@ Quick reference for common production incident scenarios.
    docker compose exec redis sh -lc 'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning --scan | xargs -r -n 200 redis-cli -a "$REDIS_PASSWORD" --no-auth-warning unlink'
    ```
 4. Restart: `docker compose restart redis`
-5. Note: Redis is ephemeral — queues and presence will reset. Active robot sessions need to rejoin.
+5. Redis carries leases, fencing tokens, queue cache, presence, and pub/sub state. Keep AOF enabled and `maxmemory-policy noeviction`; never clear the database as an OOM response. If the instance cannot recover, stop API traffic before restoring Redis or allowing lease reconstruction from PostgreSQL.
 
 ---
 
@@ -80,6 +70,11 @@ Before exposing a BotParty instance publicly, confirm these envs are explicitly 
 4. `NEXT_PUBLIC_LEGAL_OPERATOR_NAME`, `NEXT_PUBLIC_LEGAL_OPERATOR_EMAIL`, and `NEXT_PUBLIC_LEGAL_OPERATOR_ADDRESS` so `/imprint`, `/terms`, and `/privacy` render real operator details.
 5. `WEBHOOK_SECRET_ENCRYPTION_KEY` set to a unique high-entropy secret before enabling outbound webhooks.
 6. `RECORDING_RETENTION_DAYS` set to a retention window that matches your privacy policy and moderation workflow.
+7. A reachable `SMTP_HOST` and valid sender configuration. Production startup performs an SMTP handshake and fails when delivery is unavailable.
+
+Production Compose reads credentials from `BOTPARTY_SECRET_DIR` (default `docker/secrets`) and mounts them read-only. Run `setup-env.sh` to create mode-0600 files, or provision files with the names used by `docker/api/entrypoint.sh`. `pnpm secrets:smoke` proves that PostgreSQL, Redis, MinIO, and the generated LiveKit configurations start without direct secret environment variables.
+
+The observability profile additionally requires `alertmanager_webhook_url` in the same secret directory. Alertmanager refuses to start with a missing or non-HTTP(S) endpoint so alerts cannot be silently discarded.
 
 ---
 
@@ -98,27 +93,25 @@ Before exposing a BotParty instance publicly, confirm these envs are explicitly 
 
 ## Backup Strategy
 
-Production backups are required for PostgreSQL and recommended for Redis snapshots.
+The release backup contains a PostgreSQL custom-format dump, the recording and thumbnail buckets, a version manifest, and per-file checksums.
 
-1. PostgreSQL logical backup every 6 hours using [scripts/backup-db.sh](scripts/backup-db.sh)
-2. Store backups under `data/backups/` with timestamped filenames
-3. Keep at least 30 days of backups
-4. Verify backup restore weekly on a staging database
-5. Keep one off-host copy (object storage or remote volume)
-6. Mirror the MinIO buckets (`botparty-recordings`, `botparty-thumbnails`) to separate storage or enable bucket replication, otherwise DB-only restores will not recover media assets
-7. Keep MinIO lifecycle retention (`RECORDING_RETENTION_DAYS`) aligned with the backup retention you promise to users
+1. Run `./scripts/backup-release.sh` at least every six hours. `backup-db.sh` is a compatibility wrapper for the same command.
+2. Keep encrypted, immutable off-host copies for 30 days by default.
+3. Treat six hours as the RPO and one hour as the RTO unless the deployment sets stricter values.
+4. The monthly and release-triggered `restore-drill.yml` workflow restores into fresh isolated services and publishes a machine-readable report.
+5. Alert if the latest successful archive is older than six hours or the scheduled restore drill fails.
 
 Example cron entry:
 
 ```bash
-0 */6 * * * cd /srv/botparty && ./scripts/backup-db.sh >> /var/log/botparty-backup.log 2>&1
+0 */6 * * * cd /srv/botparty && ./scripts/backup-release.sh >> /var/log/botparty-backup.log 2>&1
 ```
 
 ---
 
 ## OpenAPI Export
 
-The API serves Swagger/OpenAPI at `/api/docs` when `SWAGGER_DOCS=true` and the optional basic-auth credentials are configured.
+The API serves Swagger/OpenAPI at `/docs` when `SWAGGER_DOCS=true`. Production startup requires `SWAGGER_DOCS_USERNAME` and `SWAGGER_DOCS_PASSWORD` whenever the route is enabled.
 
 For release packaging or local regeneration, export the checked-in spec directly from the built API bundle:
 
@@ -195,22 +188,19 @@ For schema changes, run `pnpm db:migrate:prod` before replacing API containers.
 
 ## Horizontal Scaling Model
 
-BotParty can run multiple API instances behind a load balancer, but websocket control rooms are not fully stateless yet.
+BotParty can run multiple API instances behind a load balancer.
 
 **Guaranteed across instances today:**
 1. Robot claim exclusivity is coordinated through Redis lock keys.
 2. Room broadcasts, queue snapshots, presence fan-out, and shutdown notices replicate through Redis pub/sub.
-3. A reconnecting robot can land on a different instance without duplicating the control channel.
-
-**Current limitations:**
-1. Active turn timers remain in the gateway process memory (`activeTurns` / `turnTimeouts`).
-2. Per-user control cooldowns remain instance-local (`controlCooldowns`).
-3. A single robot room spread across multiple API instances can see edge-case drift during turn handoff or cooldown enforcement.
+3. Active turns use Redis leases with monotonically increasing fencing tokens and reconstructible deadlines.
+4. Control cooldowns use shared Redis state.
+5. A reconnecting robot can land on a different instance without duplicating the control channel.
 
 **Operational guidance:**
-1. Prefer sticky websocket routing for `/ws` by room shard, cookie, or at minimum client IP.
-2. Keep a robot socket and the majority of viewers for that robot on the same API instance when possible.
-3. Drain websocket traffic before rotating replicas; do not use pure round-robin websocket routing for hot rooms until turn state is externalized.
+1. Drain websocket traffic before rotating replicas to avoid unnecessary reconnects.
+2. Monitor lease acquisition failures and Redis persistence health.
+3. Keep Redis on persistent storage with AOF and `noeviction`; it is part of the control-plane consistency model.
 
 ---
 
@@ -248,21 +238,16 @@ docker images | grep botparty
 
 ---
 
-## Emergency: Stop All Active Robot Sessions
+## Emergency: Stop Robot Control Traffic
 
-```bash
-# Via admin panel: Moderation → Active Sessions → End All
-# Or via redis-cli scan:
-docker compose exec redis sh -lc 'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning --scan --pattern "robot:session:*" | xargs -r redis-cli -a "$REDIS_PASSWORD" --no-auth-warning del'
-docker compose restart api
-```
+Use the moderation console to end affected sessions. If the console is unavailable, stop the API service with `docker compose stop api`; this closes command sockets without deleting lease or queue data. Keep robot-local emergency-stop hardware available independently of the platform.
 
 ---
 
 ## Observability
 
 - Prometheus scrape endpoints:
-   - API: `/health/metrics`
+   - API: `/api/v1/health/metrics`
    - Streamer: `/metrics`
 - Grafana dashboard template: `docs/grafana/botparty-observability-overview.json`
 - Setup notes and metric inventory: `docs/observability.md`
@@ -321,22 +306,22 @@ A linear checklist for cutting a production deploy. Do not skip steps.
    - `STRIPE_*`/`PAYPAL_*` only set if billing is enabled — once set, the boot
      guard will require the respective webhook secret.
 4. **Migrations**
-   - Take a Postgres snapshot (`./scripts/backup-db.sh`).
+   - Create a versioned database-and-object archive (`./scripts/backup-release.sh`).
    - Bring the API container up; entrypoint runs `prisma migrate deploy`.
    - Confirm `_prisma_migrations` table contains every committed migration.
    - In production the entrypoint refuses to fall back to `prisma db push`.
 5. **Smoke tests**
-   - `curl -fsS https://<host>/api/v1/health` returns `200`.
+   - `curl -fsS https://<host>/api/v1/health/ready` returns `200`.
    - `curl -I https://<host>/` returns identical CSP across HTML and API
      responses (no `unsafe-eval`).
    - Headless smoke: `pnpm --filter @botparty/web exec playwright test`.
 6. **Monitoring**
-   - Prometheus is scraping `/health/metrics` (status 200).
+   - Prometheus is scraping `/api/v1/health/metrics` with the configured basic-auth credentials.
    - Loki / Promtail (if enabled) sees container logs.
-   - Sentry receives a release event (set `SENTRY_RELEASE`).
+   - The configured OpenTelemetry collector receives a trace carrying the release version.
 7. **Backups**
-   - Cron pulls `./scripts/backup-db.sh` once per day; verify a sample restore
-     into a staging DB at least once per quarter (see Backup/Restore below).
+   - The archive job runs at least every six hours.
+   - The latest scheduled `Backup Restore Drill` workflow completed inside the configured RTO.
 8. **Rollback plan**
     - Keep the previous image tag pinned in `docker-compose.yml`.
     - Restore script ready (see Backup/Restore below).
@@ -365,34 +350,29 @@ BotParty publishes release images from Git tags.
 
 ### Backup
 
-`./scripts/backup-db.sh` produces `data/backups/botparty-<TIMESTAMP>.sql.gz`
-and prunes anything older than `BACKUP_RETENTION_DAYS` (default 14).
+`./scripts/backup-release.sh` produces `data/backups/botparty-release-<TIMESTAMP>.tar.gz` and a sidecar SHA-256 checksum. The archive includes a PostgreSQL custom-format dump, object-storage buckets, a release manifest, and file checksums. Archives older than `BACKUP_RETENTION_DAYS` are pruned; the default is 30 days.
 
 Schedule via host cron, e.g.:
 
 ```cron
-15 3 * * *  cd /opt/botparty && ./scripts/backup-db.sh >> /var/log/botparty-backup.log 2>&1
+0 */6 * * *  cd /opt/botparty && ./scripts/backup-release.sh >> /var/log/botparty-backup.log 2>&1
 ```
 
-Recordings/uploaded media live in MinIO. Mirror the MinIO data directory
-(`./data/minio`) with `restic`, `borg`, or `rclone sync` to an off-host
-target. We recommend object-lock or append-only credentials on the remote.
+Copy completed archives to encrypted immutable off-host storage. The backup command requires explicit database and S3-compatible object-storage credentials and never falls back to development values.
 
 ### Restore
 
-Use `./scripts/restore-db.sh <path/to/dump.sql.gz>`. The script:
+Use `./scripts/restore-drill.sh <path/to/botparty-release-*.tar.gz>`. `restore-db.sh` is a compatibility wrapper for this isolated drill. The drill:
 
-1. Stops the API service so no writes happen during restore.
-2. Drops & recreates the `botparty` database.
-3. Pipes the gzip dump through `psql`.
-4. Brings the API back up which re-applies migrations idempotently.
+1. verifies archive and file checksums;
+2. validates that every required secret file exists without exposing its value;
+3. rejects archives older than `RESTORE_RPO_SECONDS`;
+4. restores PostgreSQL and objects into fresh isolated containers;
+5. deploys migrations, checks schema drift, and performs database and object smoke tests;
+6. fails if elapsed time exceeds `RESTORE_RTO_SECONDS`;
+7. writes a JSON report under `data/restore-drills/`.
 
-For MinIO, copy the backup tree back to `./data/minio` while the MinIO
-container is stopped. Then restart MinIO and verify `mc ls` lists the
-expected buckets.
-
-Test restores quarterly into the dedicated `botparty-staging` database name
-to validate dumps are usable.
+Production recovery uses the verified dump and object tree to populate new volumes before traffic is switched. Never overwrite the failed source volumes during diagnosis.
 
 ---
 
@@ -407,7 +387,7 @@ to validate dumps are usable.
    `ghcr.io/<org>/botparty-api:<version>` and `…-web:<version>`.
 6. On the host:
    ```bash
-   ./scripts/backup-db.sh
+   ./scripts/backup-release.sh
    docker compose pull
    docker compose up -d
    docker compose logs -f --tail=100 api    # entrypoint runs migrate deploy

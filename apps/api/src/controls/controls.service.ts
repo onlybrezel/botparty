@@ -4,11 +4,15 @@ import {
   ForbiddenException,
   BadRequestException,
   OnModuleDestroy,
+  OnModuleInit,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateControlButtonDto, UpdateControlButtonDto, ReorderControlButtonsDto } from './controls.dto';
 import { LIMITS, ControlButtonAccess, Role } from '@botparty/shared';
 import { assertRobotOwner } from '../common/robot-access';
+import { RedisService } from '../redis/redis.service';
+import type Redis from 'ioredis';
+import { FeatureFlagsService } from '../common/feature-flags.service';
 
 type EnabledControlButtonRecord = {
   id: string;
@@ -32,14 +36,19 @@ type VisibleControlsRequester = {
 const ENABLED_BUTTON_CACHE_TTL_MS = 5_000;
 
 @Injectable()
-export class ControlsService implements OnModuleDestroy {
+export class ControlsService implements OnModuleInit, OnModuleDestroy {
   private readonly enabledButtonsCache = new Map<
     string,
     { expiresAt: number; buttons: EnabledControlButtonRecord[] }
   >();
   private readonly _cacheSweeper: ReturnType<typeof setInterval>;
+  private cacheSubscriber: Redis | null = null;
 
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
+    private readonly features: FeatureFlagsService,
+  ) {
     // Sweep expired entries every 60s to prevent unbounded Map growth.
     this._cacheSweeper = setInterval(() => {
       const now = Date.now();
@@ -49,8 +58,18 @@ export class ControlsService implements OnModuleDestroy {
     }, 60_000);
   }
 
-  onModuleDestroy() {
+  async onModuleInit() {
+    this.cacheSubscriber = this.redis.duplicate();
+    await this.cacheSubscriber.psubscribe('controls:invalidate:*');
+    this.cacheSubscriber.on('pmessage', (_pattern, channel) => {
+      const robotId = channel.slice('controls:invalidate:'.length);
+      if (robotId) this.enabledButtonsCache.delete(robotId);
+    });
+  }
+
+  async onModuleDestroy() {
     clearInterval(this._cacheSweeper);
+    if (this.cacheSubscriber) await this.cacheSubscriber.quit();
   }
 
   /** Returns all enabled buttons for a robot, sorted by position. */
@@ -151,6 +170,7 @@ export class ControlsService implements OnModuleDestroy {
 
   async create(robotId: string, dto: CreateControlButtonDto, requesterId: string) {
     await this._assertOwner(robotId, requesterId);
+    if ((dto.costCredits ?? 0) > 0) this.features.assertEnabled('PAID_CONTROLS');
 
     const button = await this.prisma.$transaction(async (tx) => {
       let count = await tx.controlButton.count({ where: { robotId } });
@@ -236,6 +256,7 @@ export class ControlsService implements OnModuleDestroy {
   async update(buttonId: string, dto: UpdateControlButtonDto, requesterId: string) {
     const button = await this._findButtonOrThrow(buttonId);
     await this._assertOwner(button.robotId, requesterId);
+    if ((dto.costCredits ?? 0) > 0) this.features.assertEnabled('PAID_CONTROLS');
 
     const updated = await this.prisma.controlButton.update({
       where: { id: buttonId },
@@ -307,6 +328,7 @@ export class ControlsService implements OnModuleDestroy {
 
   private invalidateEnabledButtonsCache(robotId: string) {
     this.enabledButtonsCache.delete(robotId);
+    void this.redis.publish(`controls:invalidate:${robotId}`, robotId);
   }
 
   private toSharedControlButtonAccess(access: string): ControlButtonAccess {

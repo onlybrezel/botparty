@@ -1,12 +1,10 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createHmac } from 'crypto';
 import type { BillingIntent } from '@botparty/prisma';
 import type { CheckoutSession, PaymentProvider, VerifiedWebhookEvent } from './payment-provider.interface';
 
 /**
- * Minimal PayPal Orders v2 integration. Uses the REST API directly to keep the
- * surface area small. SDK is installed in case we need richer features later.
+ * Minimal PayPal Orders v2 integration using the provider's REST API.
  */
 @Injectable()
 export class PaypalProvider implements PaymentProvider {
@@ -163,7 +161,9 @@ export class PaypalProvider implements PaymentProvider {
   }): VerifiedWebhookEvent {
     let type: VerifiedWebhookEvent['type'] = 'unknown';
     let intentId: string | null = null;
-    const providerRef = event.id;
+    let providerRef = (event.resource as { id?: string }).id ?? event.id;
+    let paymentRef: string | null = null;
+    let relatedProviderRef: string | null = null;
     let amountCents = 0;
     let currency = 'EUR';
 
@@ -181,8 +181,15 @@ export class PaypalProvider implements PaymentProvider {
 
     switch (event.event_type) {
       case 'CHECKOUT.ORDER.APPROVED':
+        type = 'approved';
+        break;
       case 'PAYMENT.CAPTURE.COMPLETED':
         type = 'completed';
+        paymentRef = (resource as { id?: string }).id ?? null;
+        relatedProviderRef =
+          (resource as { supplementary_data?: { related_ids?: { order_id?: string } } })
+            .supplementary_data?.related_ids?.order_id ?? null;
+        providerRef = relatedProviderRef ?? providerRef;
         break;
       case 'PAYMENT.CAPTURE.DENIED':
       case 'CHECKOUT.ORDER.VOIDED':
@@ -190,6 +197,9 @@ export class PaypalProvider implements PaymentProvider {
         break;
       case 'PAYMENT.CAPTURE.REFUNDED':
         type = 'refunded';
+        relatedProviderRef =
+          (resource as { supplementary_data?: { related_ids?: { capture_id?: string } } })
+            .supplementary_data?.related_ids?.capture_id ?? null;
         break;
       case 'CUSTOMER.DISPUTE.CREATED':
       case 'CUSTOMER.DISPUTE.RESOLVED':
@@ -204,6 +214,9 @@ export class PaypalProvider implements PaymentProvider {
       type,
       intentId,
       providerRef,
+      paymentRef,
+      subscriptionRef: null,
+      relatedProviderRef,
       customerRef: null,
       amountCents,
       currency,
@@ -219,7 +232,44 @@ export class PaypalProvider implements PaymentProvider {
     throw new BadRequestException('PayPal billing portal is not yet supported');
   }
 
-  private _hmac(secret: string, payload: string) {
-    return createHmac('sha256', secret).update(payload).digest('hex');
+  async captureApprovedOrder(orderId: string, intentId: string): Promise<VerifiedWebhookEvent> {
+    const token = await this.getAccessToken();
+    const response = await fetch(`${this.apiBase}/v2/checkout/orders/${encodeURIComponent(orderId)}/capture`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'PayPal-Request-Id': `${intentId}:capture`,
+      },
+      body: '{}',
+    });
+    if (!response.ok) {
+      throw new BadRequestException('PayPal capture failed');
+    }
+    const payload = (await response.json()) as {
+      id: string;
+      purchase_units?: Array<{
+        custom_id?: string;
+        payments?: { captures?: Array<{ id: string; status?: string; amount?: { value?: string; currency_code?: string } }> };
+      }>;
+    };
+    const unit = payload.purchase_units?.[0];
+    const capture = unit?.payments?.captures?.[0];
+    if (!capture?.id || capture.status !== 'COMPLETED') {
+      throw new BadRequestException('PayPal capture was not completed');
+    }
+    return {
+      eventId: `capture:${capture.id}`,
+      type: 'completed',
+      intentId: unit?.custom_id ?? intentId,
+      providerRef: payload.id,
+      paymentRef: capture.id,
+      subscriptionRef: null,
+      relatedProviderRef: payload.id,
+      customerRef: null,
+      amountCents: Math.round(Number(capture.amount?.value ?? 0) * 100),
+      currency: (capture.amount?.currency_code ?? 'EUR').toUpperCase(),
+      rawPayload: payload,
+    };
   }
 }

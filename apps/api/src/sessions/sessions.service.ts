@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RobotsService } from '../robots/robots.service';
 import { RobotWebhookService } from '../robots/robot-webhook.service';
 import { RecordingAdminService } from '../moderation/recording-admin.service';
+import { AnalyticsService } from '../analytics/analytics.service';
 
 @Injectable()
 export class SessionsService {
@@ -13,43 +14,30 @@ export class SessionsService {
     private readonly robotsService: RobotsService,
     private readonly robotWebhookService: RobotWebhookService,
     private readonly recordingAdminService: RecordingAdminService,
+    private readonly analytics: AnalyticsService,
   ) {}
 
-  async create(robotId: string, userId: string) {
-    const session = await this.prisma.$transaction(async (tx) => {
-      const now = new Date();
-      const activeSessions = await tx.session.findMany({
-        where: { robotId, status: 'ACTIVE' },
-        select: { id: true, startedAt: true },
-      });
-
-      for (const activeSession of activeSessions) {
-        await tx.session.update({
-          where: { id: activeSession.id },
-          data: {
-            status: 'ENDED',
-            endedAt: now,
-            durationMs: now.getTime() - activeSession.startedAt.getTime(),
-          },
+  async create(robotId: string, userId: string, sessionId?: string) {
+    const session = await this.prisma.$transaction(
+      async (tx) => {
+        const createdSession = await tx.session.create({
+          data: { id: sessionId, robotId, userId },
         });
-      }
 
-      const createdSession = await tx.session.create({
-        data: { robotId, userId },
-      });
+        await tx.robot.update({
+          where: { id: robotId },
+          data: { totalSessions: { increment: 1 } },
+        });
 
-      await tx.robot.update({
-        where: { id: robotId },
-        data: { totalSessions: { increment: 1 } },
-      });
-
-      return createdSession;
-    });
+        return createdSession;
+      },
+      { isolationLevel: 'Serializable' },
+    );
 
     this.logger.log(`Session started: ${session.id} (robot: ${robotId}, user: ${userId})`);
     this.robotWebhookService.emitSessionStarted(session);
-    this.prisma.analyticsEvent
-      .create({ data: { robotId, userId, event: 'session_start', payload: { sessionId: session.id } } })
+    this.analytics
+      .recordConsented(userId, 'SESSION_START', robotId, { sessionId: session.id })
       .catch((err) => this.logger.warn(`analytics ingest failed: ${err?.message}`));
     return session;
   }
@@ -69,14 +57,10 @@ export class SessionsService {
         durationMs,
       },
     });
-    this.prisma.analyticsEvent
-      .create({
-        data: {
-          robotId: ended.robotId,
-          userId: ended.userId,
-          event: 'session_end',
-          payload: { sessionId: ended.id, durationMs: ended.durationMs },
-        },
+    this.analytics
+      .recordConsented(ended.userId, 'SESSION_END', ended.robotId, {
+        sessionId: ended.id,
+        durationMs: ended.durationMs,
       })
       .catch((err) => this.logger.warn(`analytics ingest failed: ${err?.message}`));
     this.robotWebhookService.emitSessionEnded(ended);
@@ -146,16 +130,14 @@ export class SessionsService {
     }
 
     const isStaff = requester.role === 'ADMIN' || requester.role === 'MOD';
-    const canView = isStaff || session.userId === requesterId || session.robot.ownerId === requesterId;
+    const canView =
+      isStaff || session.userId === requesterId || session.robot.ownerId === requesterId;
     if (!canView) {
       throw new ForbiddenException('Not allowed to view this session');
     }
 
     const replayCandidates = await this.recordingAdminService.findReplayCandidatesForSession({
-      robotId: session.robotId,
-      startedAt: session.startedAt,
-      endedAt: session.endedAt,
-      recordingUrl: session.recordingUrl,
+      sessionId: session.id,
     });
 
     return {
@@ -231,6 +213,13 @@ export class SessionsService {
     this.logger.log(`Reconciled ${active.length} orphaned active session(s) on startup`);
   }
 
+  async findActiveForTurnRecovery(robotId: string) {
+    return this.prisma.session.findFirst({
+      where: { robotId, status: 'ACTIVE' },
+      orderBy: { startedAt: 'desc' },
+    });
+  }
+
   private async findByRobotUnsafe(robotId: string, limit = 50) {
     return this.prisma.session.findMany({
       where: { robotId },
@@ -271,9 +260,7 @@ export class SessionsService {
     }
 
     const actorId =
-      requesterId ??
-      this.robotsService.resolveGuestActorId(guestSessionId) ??
-      'guest:anonymous';
+      requesterId ?? this.robotsService.resolveGuestActorId(guestSessionId) ?? 'guest:anonymous';
     if (!requesterId) {
       throw new ForbiddenException('Authentication is required to view session history');
     }

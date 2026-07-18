@@ -1,8 +1,19 @@
 import { PrismaClient } from './generated/client/index.js';
 import { hash } from 'argon2';
-import { randomBytes } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 
 const prisma = new PrismaClient();
+const PLATFORM_USER_ID = '00000000-0000-0000-0000-00000000fee5';
+const DISABLED_PASSWORD_HASH =
+  '$argon2id$v=19$m=65536,t=3,p=4$disabled-disabled-disabled-disabled$disabled-disabled-disabled-disabled-disabled-disabled-disabled';
+
+function tokenHash(value: string) {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+function enabled(name: string) {
+  return process.env[name]?.trim().toLowerCase() === 'true';
+}
 
 function slugBase(name: string) {
   return name
@@ -14,15 +25,57 @@ function slugBase(name: string) {
 async function createUniqueSlug(base: string) {
   for (let attempt = 0; attempt < 10; attempt += 1) {
     const candidate = `${base}-${randomBytes(3).toString('hex')}`;
-    const exists = await prisma.robot.findUnique({
-      where: { slug: candidate },
-      select: { id: true },
-    });
-    if (!exists) {
-      return candidate;
-    }
+    const exists = await prisma.robot.findUnique({ where: { slug: candidate }, select: { id: true } });
+    if (!exists) return candidate;
   }
   throw new Error(`Could not generate unique slug for base ${base}`);
+}
+
+async function ensurePlatformUser() {
+  await prisma.user.upsert({
+    where: { id: PLATFORM_USER_ID },
+    update: { role: 'ADMIN', isActive: true, emailVerified: true },
+    create: {
+      id: PLATFORM_USER_ID,
+      username: '__platform__',
+      email: 'platform@botparty.internal',
+      passwordHash: DISABLED_PASSWORD_HASH,
+      displayName: 'BotParty Platform',
+      role: 'ADMIN',
+      isActive: true,
+      emailVerified: true,
+    },
+  });
+  console.log('✅ Platform ledger user is present.');
+}
+
+async function ensureInitialAdmin() {
+  const password = process.env.SEED_ADMIN_PASSWORD?.trim();
+  if (!password) {
+    console.log('ℹ️  Initial admin skipped (SEED_ADMIN_PASSWORD is not set).');
+    return null;
+  }
+  if (password.length < 16) {
+    throw new Error('SEED_ADMIN_PASSWORD must contain at least 16 characters.');
+  }
+
+  const email = process.env.SEED_ADMIN_EMAIL?.trim().toLowerCase() || 'admin@localhost.invalid';
+  const username = process.env.SEED_ADMIN_USERNAME?.trim() || 'admin';
+  const passwordHash = await hash(password);
+  const admin = await prisma.user.upsert({
+    where: { email },
+    update: {},
+    create: {
+      username,
+      email,
+      passwordHash,
+      displayName: 'Administrator',
+      role: 'ADMIN',
+      emailVerified: true,
+    },
+  });
+  console.log(`✅ Initial admin is present (${admin.email}).`);
+  return admin;
 }
 
 async function ensureSeedRobot(input: {
@@ -30,16 +83,15 @@ async function ensureSeedRobot(input: {
   name: string;
   description: string;
   tags: string[];
+  fixedSlug?: string;
 }) {
   const base = slugBase(input.name);
-
-  const existing = await prisma.robot.findFirst({
-    where: {
-      ownerId: input.ownerId,
-      OR: [{ name: input.name }, { slug: { startsWith: `${base}-` } }],
-    },
-    orderBy: { createdAt: 'asc' },
-  });
+  const existing = input.fixedSlug
+    ? await prisma.robot.findUnique({ where: { slug: input.fixedSlug } })
+    : await prisma.robot.findFirst({
+        where: { ownerId: input.ownerId, OR: [{ name: input.name }, { slug: { startsWith: `${base}-` } }] },
+        orderBy: { createdAt: 'asc' },
+      });
 
   if (existing) {
     return prisma.robot.update({
@@ -51,227 +103,106 @@ async function ensureSeedRobot(input: {
         visibility: 'PUBLIC',
         accessMode: 'OPEN',
         queueMode: 'FIRST_COME',
-        maxTurnTime: 60000,
+        maxTurnTime: 60_000,
         tags: input.tags,
       },
     });
   }
 
-  const slug = await createUniqueSlug(base);
   return prisma.robot.create({
     data: {
       name: input.name,
-      slug,
+      slug: input.fixedSlug ?? (await createUniqueSlug(base)),
       description: input.description,
       ownerId: input.ownerId,
-      streamKey: randomBytes(32).toString('hex'),
-      claimToken: randomBytes(32).toString('hex'),
+      streamKeyHash: tokenHash(randomBytes(32).toString('hex')),
+      claimTokenHash: tokenHash(randomBytes(32).toString('hex')),
       visibility: 'PUBLIC',
       accessMode: 'OPEN',
       queueMode: 'FIRST_COME',
-      maxTurnTime: 60000,
+      maxTurnTime: 60_000,
       tags: input.tags,
     },
   });
 }
 
-async function main() {
-  const tableCounts = await prisma.$transaction([
-    prisma.user.count(),
-    prisma.robot.count(),
-    prisma.robotAllowedUser.count(),
-    prisma.transaction.count(),
-    prisma.session.count(),
-    prisma.queueEntry.count(),
-    prisma.chatMessage.count(),
-    prisma.swarmGroup.count(),
-    prisma.analyticsEvent.count(),
-    prisma.controlButton.count(),
-    prisma.robotModerationEntry.count(),
-  ]);
-  const totalRows = tableCounts.reduce((sum, value) => sum + value, 0);
+async function ensureButtons(robotId: string) {
+  const buttons = [
+    { label: 'Forward', command: 'forward', hotKey: 'w', icon: '⬆️', cooldownMs: 100, position: 0 },
+    { label: 'Left', command: 'left', hotKey: 'a', icon: '⬅️', cooldownMs: 100, position: 1 },
+    { label: 'Back', command: 'backward', hotKey: 's', icon: '⬇️', cooldownMs: 100, position: 2 },
+    { label: 'Right', command: 'right', hotKey: 'd', icon: '➡️', cooldownMs: 100, position: 3 },
+    { label: 'Action', command: 'action_1', hotKey: 'f', icon: '⚡', cooldownMs: 500, position: 4 },
+  ];
+  for (const button of buttons) {
+    const existing = await prisma.controlButton.findFirst({
+      where: { robotId, position: button.position },
+      select: { id: true },
+    });
+    if (existing) {
+      await prisma.controlButton.update({ where: { id: existing.id }, data: button });
+    } else {
+      await prisma.controlButton.create({
+        data: { ...button, robotId, access: 'QUEUE_TURN', isEnabled: true },
+      });
+    }
+  }
+}
 
-  if (totalRows > 0) {
-    console.log(`⏭️  Seed skipped: database is not empty (${totalRows} existing rows).`);
-    return;
+async function ensureDemoData(admin: NonNullable<Awaited<ReturnType<typeof ensureInitialAdmin>>>) {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('SEED_DEMO_DATA and SEED_E2E_FIXTURES are forbidden in production.');
   }
 
-  console.log('🌱 Seeding BotParty database...');
-  const appUrl = process.env.APP_URL ?? 'https://botparty.live';
-  const isProduction = process.env.NODE_ENV === 'production';
-  const adminPasswordPlain = process.env.SEED_ADMIN_PASSWORD?.trim() || (isProduction ? '' : 'admin123456');
-  const demoUserPasswordPlain =
-    process.env.SEED_DEMO_USER_PASSWORD?.trim() || (isProduction ? '' : 'user123456');
-
-  if (!adminPasswordPlain) {
-    throw new Error('SEED_ADMIN_PASSWORD is required to initialize an empty production database.');
+  const demoPassword = process.env.SEED_DEMO_USER_PASSWORD?.trim();
+  if (!demoPassword || demoPassword.length < 12) {
+    throw new Error('SEED_DEMO_USER_PASSWORD with at least 12 characters is required for demo data.');
   }
-
-  // Create admin user
-  const adminPassword = await hash(adminPasswordPlain);
-  const admin = await prisma.user.upsert({
-    where: { email: 'admin@botparty.live' },
+  const user = await prisma.user.upsert({
+    where: { email: 'user@botparty.local' },
     update: {},
     create: {
-      username: 'admin',
-      email: 'admin@botparty.live',
-      passwordHash: adminPassword,
-      displayName: 'BotParty Admin',
-      role: 'ADMIN',
-      balance: 10000,
-      credits: 10000,
+      username: 'demo_user',
+      email: 'user@botparty.local',
+      passwordHash: await hash(demoPassword),
+      displayName: 'Demo User',
+      role: 'USER',
+      emailVerified: true,
     },
   });
-  console.log(`  ✅ Admin user: ${admin.username} (${admin.email})`);
-  if (!isProduction) {
-    // Show dev-only credentials in stdout (not in logs). Never run seed in production.
-    process.stdout.write(`     Password: ${adminPasswordPlain}\n`);
-  }
-
-  let user:
-    | Awaited<ReturnType<typeof prisma.user.upsert>>
-    | null = null;
-
-  if (demoUserPasswordPlain) {
-    const userPassword = await hash(demoUserPasswordPlain);
-    user = await prisma.user.upsert({
-      where: { email: 'user@botparty.live' },
-      update: {},
-      create: {
-        username: 'demo_user',
-        email: 'user@botparty.live',
-        passwordHash: userPassword,
-        displayName: 'Demo User',
-        role: 'USER',
-        balance: 500,
-        credits: 500,
-      },
-    });
-    console.log(`  ✅ User: ${user.username}`);
-    if (!isProduction) {
-      process.stdout.write(`     Password: ${demoUserPasswordPlain}\n`);
-    }
-  } else {
-    console.log('  ℹ️  Demo user skipped (SEED_DEMO_USER_PASSWORD not set).');
-  }
-
-  // Create seed robots
-  const userBot = user
-    ? await ensureSeedRobot({
-        ownerId: user.id,
-        name: 'User Bot',
-        description: 'Demo robot owned by the regular user account.',
-        tags: ['demo', 'user'],
-      })
-    : null;
-
-  const adminBot = await ensureSeedRobot({
-    ownerId: admin.id,
-    name: 'Admin Bot',
-    description: 'Demo robot owned by the admin account.',
-    tags: ['demo', 'admin'],
+  const robot = await ensureSeedRobot({
+    ownerId: user.id,
+    name: 'Demo Robot',
+    description: 'Local demo robot.',
+    tags: ['demo'],
   });
+  await ensureButtons(robot.id);
 
-  if (userBot) {
-    console.log(`  ✅ User robot: ${userBot.name} (${userBot.slug})`);
-  }
-  console.log(`  ✅ Admin robot: ${adminBot.name} (${adminBot.slug})`);
-
-  // Default control buttons for demo robot
-  const defaultButtons = [
-    { label: 'Forward', command: 'forward', hotKey: 'w', icon: '⬆️', cooldownMs: 100, position: 0 },
-    { label: 'Left',    command: 'left',    hotKey: 'a', icon: '⬅️', cooldownMs: 100, position: 1 },
-    { label: 'Back',    command: 'backward',hotKey: 's', icon: '⬇️', cooldownMs: 100, position: 2 },
-    { label: 'Right',   command: 'right',   hotKey: 'd', icon: '➡️', cooldownMs: 100, position: 3 },
-    { label: 'Action',  command: 'action_1',hotKey: 'f', icon: '⚡', cooldownMs: 500, position: 4 },
-  ];
-
-  // Delete and recreate buttons so seed stays idempotent.
-  for (const robot of [userBot, adminBot].filter((value): value is NonNullable<typeof value> => value !== null)) {
-    await prisma.controlButton.deleteMany({ where: { robotId: robot.id } });
-    await prisma.controlButton.createMany({
-      data: defaultButtons.map((btn) => ({
-        robotId: robot.id,
-        label: btn.label,
-        command: btn.command,
-        hotKey: btn.hotKey,
-        icon: btn.icon,
-        cooldownMs: btn.cooldownMs,
-        access: 'QUEUE_TURN' as const,
-        position: btn.position,
-        isEnabled: true,
-      })),
-    });
-  }
-  console.log(`  ✅ Control buttons: ${defaultButtons.length} added per demo robot`);
-
-  // Create test-robot fixture for E2E tests (always with same slug)
-  const testRobot = await prisma.robot.upsert({
-    where: { slug: 'test-robot' },
-    update: {
+  if (enabled('SEED_E2E_FIXTURES')) {
+    const testRobot = await ensureSeedRobot({
       ownerId: admin.id,
       name: 'Test Robot',
-      description: 'E2E test fixture robot for Playwright tests.',
-      visibility: 'PUBLIC',
-      accessMode: 'OPEN',
-      queueMode: 'FIRST_COME',
-      maxTurnTime: 60000,
+      description: 'Deterministic Playwright fixture.',
       tags: ['test', 'e2e'],
-    },
-    create: {
-      name: 'Test Robot',
-      slug: 'test-robot',
-      description: 'E2E test fixture robot for Playwright tests.',
-      ownerId: admin.id,
-      streamKey: randomBytes(32).toString('hex'),
-      claimToken: randomBytes(32).toString('hex'),
-      visibility: 'PUBLIC',
-      accessMode: 'OPEN',
-      queueMode: 'FIRST_COME',
-      maxTurnTime: 60000,
-      tags: ['test', 'e2e'],
-    },
-  });
-  // Add control buttons to test robot
-  await prisma.controlButton.deleteMany({ where: { robotId: testRobot.id } });
-  await prisma.controlButton.createMany({
-    data: defaultButtons.map((btn) => ({
-      robotId: testRobot.id,
-      label: btn.label,
-      command: btn.command,
-      hotKey: btn.hotKey,
-      icon: btn.icon,
-      cooldownMs: btn.cooldownMs,
-      access: 'QUEUE_TURN' as const,
-      position: btn.position,
-      isEnabled: true,
-    })),
-  });
-  console.log(`  ✅ Test robot: ${testRobot.name} (${testRobot.slug}) for E2E fixtures`);
+      fixedSlug: 'test-robot',
+    });
+    await ensureButtons(testRobot.id);
+  }
+  console.log('✅ Optional local seed data converged.');
+}
 
-  console.log('\n🎉 Seed complete!');
-  if (!isProduction) {
-    console.log('\n📋 Login credentials:');
-    console.log(`   Admin:   admin@botparty.live   / ${adminPasswordPlain}`);
-    if (user && demoUserPasswordPlain) {
-      console.log(`   User:    user@botparty.live    / ${demoUserPasswordPlain}`);
-    }
-  } else {
-    console.log('\n🔐 Initial admin account created from SEED_ADMIN_PASSWORD.');
+async function main() {
+  await ensurePlatformUser();
+  const admin = await ensureInitialAdmin();
+  if (enabled('SEED_DEMO_DATA') || enabled('SEED_E2E_FIXTURES')) {
+    if (!admin) throw new Error('SEED_ADMIN_PASSWORD is required when optional fixtures are enabled.');
+    await ensureDemoData(admin);
   }
-  if (userBot) {
-    console.log(`   User Bot URL:  /robot/${userBot.slug}`);
-  }
-  console.log(`   Test Robot URL: /robot/${testRobot.slug}`);
-  console.log(`   Admin Bot URL: /robot/${adminBot.slug}`);
-  console.log(`   Web:     ${appUrl}`);
 }
 
 main()
-  .catch((e) => {
-    console.error('❌ Seed failed:', e);
-    process.exit(1);
+  .catch((error) => {
+    console.error(`Seed failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+    process.exitCode = 1;
   })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+  .finally(async () => prisma.$disconnect());

@@ -12,6 +12,8 @@ import { ControlsService } from '../controls/controls.service';
 import { AuthService } from '../auth/auth.service';
 import { WalletService } from '../wallet/wallet.service';
 import { LivekitService } from '../livekit/livekit.service';
+import { FeatureFlagsService } from '../common/feature-flags.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 describe('BotGateway', () => {
   let gateway: BotGateway;
@@ -150,13 +152,23 @@ describe('BotGateway', () => {
             credit: jest.fn(),
             debit: jest.fn(),
             getBalance: jest.fn().mockResolvedValue(0),
+            listStaleReservedControlIds: jest.fn().mockResolvedValue([]),
           } as any,
         },
         {
           provide: LivekitService,
           useValue: {
+            revokeController: jest.fn().mockResolvedValue(undefined),
             stopRoomRecording: jest.fn().mockResolvedValue({ active: false, outputs: [] }),
           } as any,
+        },
+        {
+          provide: FeatureFlagsService,
+          useValue: { isEnabled: jest.fn().mockReturnValue(false) } as any,
+        },
+        {
+          provide: NotificationsService,
+          useValue: { publishSafely: jest.fn().mockResolvedValue(null) } as any,
         },
       ],
     }).compile();
@@ -174,7 +186,8 @@ describe('BotGateway', () => {
   });
 
   afterEach(async () => {
-    await module.close();
+    await module?.close();
+    jest.useRealTimers();
   });
 
   describe('onModuleInit', () => {
@@ -224,6 +237,7 @@ describe('BotGateway', () => {
     });
 
     it('stops active room recording when a robot socket disconnects', async () => {
+      jest.useFakeTimers();
       const robotSocket = {
         id: 'robot-socket-1',
         robotId: 'robot-1',
@@ -235,8 +249,10 @@ describe('BotGateway', () => {
       await gateway.handleConnection(robotSocket, {});
       (gateway as any).runtime.robotClients.set('robot-1', robotSocket);
       await gateway.handleDisconnect(robotSocket);
+      await jest.advanceTimersByTimeAsync(10_000);
 
       expect(livekitService.stopRoomRecording).toHaveBeenCalledWith('robot-1');
+      jest.useRealTimers();
     });
   });
 
@@ -255,7 +271,12 @@ describe('BotGateway', () => {
     it('stores control cooldowns in redis with a shared TTL gate', async () => {
       const client = { id: 'viewer-1', userId: 'user-1' } as any;
 
-      const allowed = await (gateway as any).consumeControlCooldown(client, 'robot-1', 'Forward', 120);
+      const allowed = await (gateway as any).consumeControlCooldown(
+        client,
+        'robot-1',
+        'Forward',
+        120,
+      );
 
       expect(allowed).toBe(true);
       expect(redisService.set).toHaveBeenCalledWith(
@@ -273,10 +294,25 @@ describe('BotGateway', () => {
       redisService.set.mockRejectedValueOnce(new Error('redis still down'));
       redisService.set.mockResolvedValueOnce('OK');
 
-      const first = await (gateway as any).consumeControlCooldown(client, 'robot-1', 'forward', 120);
-      const second = await (gateway as any).consumeControlCooldown(client, 'robot-1', 'forward', 120);
+      const first = await (gateway as any).consumeControlCooldown(
+        client,
+        'robot-1',
+        'forward',
+        120,
+      );
+      const second = await (gateway as any).consumeControlCooldown(
+        client,
+        'robot-1',
+        'forward',
+        120,
+      );
       const metricsDuringFallback = gateway.getRuntimeMetricsSnapshot();
-      const recovered = await (gateway as any).consumeControlCooldown(client, 'robot-1', 'left', 120);
+      const recovered = await (gateway as any).consumeControlCooldown(
+        client,
+        'robot-1',
+        'left',
+        120,
+      );
       const metricsAfterRecovery = gateway.getRuntimeMetricsSnapshot();
 
       expect(first).toBe(true);

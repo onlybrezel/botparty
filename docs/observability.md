@@ -25,6 +25,12 @@ It also exports dependency reachability gauges for dashboard and alert wiring:
 
 The API metrics endpoint now supports HTTP basic auth. In production, BotParty requires `METRICS_USERNAME` and `METRICS_PASSWORD` unless `METRICS_AUTH_REQUIRED=false` is set explicitly.
 
+Alertmanager sends firing and resolved alerts to the HTTP(S) endpoint stored in
+`docker/secrets/alertmanager_webhook_url` (or the configured `BOTPARTY_SECRET_DIR`).
+The observability profile fails to start when this delivery path is absent or invalid.
+Every rule carries an owner and a runbook link; `promtool test rules docker/prometheus/alerts.test.yml`
+simulates availability, dependency, product-flow, SLO, and capacity incidents in CI.
+
 ## Prometheus Scrape Example
 
 ```yaml

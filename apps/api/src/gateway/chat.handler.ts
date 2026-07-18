@@ -4,17 +4,15 @@ import { isStaffRole } from '../common/robot-access';
 import type { ModerationService } from '../moderation/moderation.service';
 import type { RobotsService } from '../robots/robots.service';
 import type { CommandMetadata, WsClient } from './gateway-types';
-import { z } from 'zod';
 
 export interface ChatHandlerContext {
   broadcastToRoom(robotId: string, event: string, data: unknown, excludeClientId?: string): void;
   getOpenRobotClient(robotId: string): WsClient | undefined;
   buildCommandMetadata(client: WsClient, robotId: string, ownerId?: string | null): CommandMetadata;
+  reserveChatMessage(actorId: string, clientMessageId: string): Promise<boolean>;
 }
 
-const incomingChatSchema = chatMessageSchema
-  .extend({ clientMessageId: z.string().max(128).optional() })
-  .strict();
+const incomingChatSchema = chatMessageSchema.strict();
 
 export class ChatHandler {
   private readonly logger = new Logger(ChatHandler.name);
@@ -32,6 +30,10 @@ export class ChatHandler {
       return;
     }
     const data = parsed.data;
+
+    if (!(await this.ctx.reserveChatMessage(client.userId ?? client.id, data.clientMessageId))) {
+      return;
+    }
 
     if (client.watchingRobotId !== data.robotId) {
       client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Join the room before chatting' } }));
@@ -122,7 +124,7 @@ export class ChatHandler {
       clientMessageId: data.clientMessageId,
     });
 
-    void this.robotsService.appendChatMessage(data.robotId, client.userId, sanitized, now).catch((err) => {
+    void this.robotsService.appendChatMessage(data.robotId, client.userId, sanitized, now, data.clientMessageId).catch((err) => {
       this.logger.warn(`Failed to persist chat message for ${data.robotId}: ${String(err)}`);
     });
 

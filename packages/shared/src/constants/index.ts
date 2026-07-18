@@ -98,6 +98,8 @@ export const WS_EVENTS = {
 
   // Control
   CONTROL_COMMAND: 'control:command',
+  CONTROL_ACK: 'control:ack',
+  CONTROL_COMMAND_STATUS: 'control:command-status',
   CONTROL_EMERGENCY_STOP: 'control:emergency-stop',
   CONTROL_LATENCY_WARNING: 'control:latency-warning',
 
@@ -154,6 +156,11 @@ export const WS_EVENTS = {
 
 export const WS_PROTOCOL_VERSION = 1;
 export const WS_MIN_SUPPORTED_PROTOCOL_VERSION = 1;
+
+export const LEGAL_POLICY_VERSIONS = {
+  TERMS: '2026-07-17',
+  PRIVACY: '2026-07-17',
+} as const;
 
 // ─── Control Command Names ───────────────────────────
 export const CONTROL_COMMANDS = {

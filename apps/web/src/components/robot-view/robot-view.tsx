@@ -45,20 +45,6 @@ export function RobotView({ robot }: Props) {
         />
       )}
 
-      {!state.connected && (
-        <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-          <p className="font-medium text-amber-200">
-            {state.reconnectNotice?.message ??
-              'Realtime connection lost. Controls and chat are temporarily unavailable.'}
-          </p>
-          <p className="mt-1 text-xs text-amber-200/80">
-            {state.reconnectSeconds !== null
-              ? `Reconnecting in about ${state.reconnectSeconds}s.`
-              : 'BotParty will reconnect automatically as soon as the room is reachable again.'}
-          </p>
-        </div>
-      )}
-
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         <RobotViewMainColumn state={state} />
         <RobotViewSidebar state={state} />

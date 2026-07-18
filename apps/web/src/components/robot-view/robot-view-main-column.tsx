@@ -3,6 +3,7 @@ import dynamic from 'next/dynamic';
 import { AlertTriangle, Bot, Gamepad2, Radio, Video } from 'lucide-react';
 import { ControlKey, SliderControl, XYPadControl } from '@/components/robot-view/controls';
 import type { RobotViewState } from './use-robot-view-state';
+import { releaseFeatures } from '@/lib/release-features';
 
 const LiveKitPlayer = dynamic(
   () => import('@/components/livekit-player').then((module) => module.LiveKitPlayer),
@@ -231,6 +232,7 @@ export function RobotViewMainColumn({ state }: Props) {
                     state.sendCommand(command, {
                       cooldownMs: button.cooldownMs,
                       access: button.access,
+                      buttonId: button.id,
                     });
                   }}
                   onRelease={() => {
@@ -266,6 +268,7 @@ export function RobotViewMainColumn({ state }: Props) {
                     state.sendCommand(command, {
                       cooldownMs: button.cooldownMs,
                       access: button.access,
+                      buttonId: button.id,
                     });
                   }}
                   onRelease={() => {
@@ -299,17 +302,12 @@ export function RobotViewMainColumn({ state }: Props) {
                   state.sendCommand(button.command, {
                     cooldownMs: button.cooldownMs,
                     access: button.access,
-                  })
-                }
-                onPointerDown={() =>
-                  state.sendCommand(button.command, {
-                    cooldownMs: button.cooldownMs,
-                    access: button.access,
+                    buttonId: button.id,
                   })
                 }
                 disabled={!state.canUseButton(button)}
                 aria-label={`Send ${button.label} command`}
-                title={button.hotKey ? `${button.label} [${button.hotKey}]` : button.label}
+                title={button.costCredits > 0 && !releaseFeatures.paidControls ? 'Paid controls are unavailable' : button.hotKey ? `${button.label} [${button.hotKey}]` : button.label}
                 style={
                   button.color ? { borderColor: button.color, color: button.color } : undefined
                 }
@@ -324,7 +322,7 @@ export function RobotViewMainColumn({ state }: Props) {
                 {button.hotKey && (
                   <span className="ml-1 text-xs opacity-40">[{button.hotKey}]</span>
                 )}
-                {button.costCredits > 0 && (
+                {releaseFeatures.paidControls && button.costCredits > 0 && (
                   <span className="ml-1 rounded-full border border-amber-500/40 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300">
                     {button.costCredits}cr
                   </span>
@@ -349,6 +347,7 @@ export function RobotViewMainColumn({ state }: Props) {
                   state.sendCommand(button.command, {
                     cooldownMs: button.cooldownMs,
                     access: button.access,
+                    buttonId: button.id,
                     value,
                   })
                 }
@@ -372,6 +371,7 @@ export function RobotViewMainColumn({ state }: Props) {
                   state.sendCommand(button.command, {
                     cooldownMs: button.cooldownMs,
                     access: button.access,
+                    buttonId: button.id,
                     value,
                   })
                 }
@@ -385,7 +385,6 @@ export function RobotViewMainColumn({ state }: Props) {
             <button
               type="button"
               onClick={state.triggerEStop}
-              onPointerDown={state.triggerEStop}
               aria-label="Emergency stop"
               title="Emergency stop"
               className="flex h-14 w-full max-w-[12rem] select-none flex-col items-center justify-center rounded-xl bg-[var(--destructive)] text-xs font-black text-white shadow-lg shadow-red-500/20 transition hover:brightness-110 active:scale-95 sm:w-28 lg:max-w-[10rem] lg:rounded-xl lg:shadow-lg"

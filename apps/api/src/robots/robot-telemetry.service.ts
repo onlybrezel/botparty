@@ -46,6 +46,7 @@ export class RobotTelemetryService {
       livekitConnected?: boolean;
       commandsReceived?: number;
       cameraFrames?: number;
+      emergencyStopVerified?: boolean;
     },
   ) {
     const telemetry = {
@@ -99,6 +100,7 @@ export class RobotTelemetryService {
         typeof payload.cameraFrames === 'number' && Number.isFinite(payload.cameraFrames)
           ? Math.max(0, Math.floor(payload.cameraFrames))
           : 0,
+      emergencyStopVerified: payload.emergencyStopVerified === true,
     };
 
     const latestKey = `robot:telemetry:${robotId}:latest`;

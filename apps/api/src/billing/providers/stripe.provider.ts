@@ -15,6 +15,7 @@ type StripeCheckoutSession = {
   amount_total?: number | null;
   currency?: string | null;
   subscription?: string | null;
+  payment_intent?: string | { id?: string } | null;
   customer?: string | { id?: string } | null;
   mode?: string | null;
 };
@@ -23,6 +24,7 @@ type StripeCharge = {
   id: string;
   amount_refunded: number;
   currency: string | null;
+  payment_intent?: string | { id?: string } | null;
 };
 
 type StripeDispute = {
@@ -204,6 +206,9 @@ export class StripeProvider implements PaymentProvider {
     let type: VerifiedWebhookEvent['type'] = 'unknown';
     let intentId: string | null = null;
     let providerRef = event.id;
+    let paymentRef: string | null = null;
+    let subscriptionRef: string | null = null;
+    const relatedProviderRef: string | null = null;
     let customerRef: string | null = null;
     let amountCents = 0;
     let currency = 'eur';
@@ -215,6 +220,11 @@ export class StripeProvider implements PaymentProvider {
         type = obj.payment_status === 'paid' || isSubscription ? 'completed' : 'failed';
         intentId = obj.client_reference_id ?? obj.metadata?.intentId ?? null;
         providerRef = obj.subscription ?? obj.id;
+        subscriptionRef = obj.subscription ?? null;
+        paymentRef =
+          typeof obj.payment_intent === 'string'
+            ? obj.payment_intent
+            : obj.payment_intent?.id ?? null;
         customerRef =
           typeof obj.customer === 'string'
             ? obj.customer
@@ -229,6 +239,7 @@ export class StripeProvider implements PaymentProvider {
         type = 'completed';
         intentId = null;
         providerRef = obj.subscription ?? event.id;
+        subscriptionRef = obj.subscription ?? null;
         customerRef =
           typeof obj.customer === 'string'
             ? obj.customer
@@ -242,6 +253,7 @@ export class StripeProvider implements PaymentProvider {
         type = 'canceled';
         intentId = null;
         providerRef = obj.id;
+        paymentRef = obj.id;
         customerRef =
           typeof obj.customer === 'string'
             ? obj.customer
@@ -282,6 +294,9 @@ export class StripeProvider implements PaymentProvider {
       type,
       intentId,
       providerRef,
+      paymentRef,
+      subscriptionRef,
+      relatedProviderRef,
       customerRef,
       amountCents,
       currency: currency.toUpperCase(),

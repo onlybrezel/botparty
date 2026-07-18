@@ -1,12 +1,13 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { ConfigService } from '@nestjs/config';
-import { createHmac, randomBytes, randomUUID } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { JOBS_QUEUE_WEBHOOK, type WebhookJobData } from '../jobs/jobs.constants';
 import { assertSafeWebhookTarget } from '../common/webhook-target';
 import { readNonNegativeIntegerEnv } from '../common/config-number';
+import { AeadCipher } from '../common/aead-cipher';
 
 export const ROBOT_WEBHOOK_EVENTS = [
   'robot.online',
@@ -22,7 +23,7 @@ type WebhookPayload = Record<string, unknown>;
 @Injectable()
 export class RobotWebhookService {
   private readonly logger = new Logger(RobotWebhookService.name);
-  private readonly webhookSecretKey: string;
+  private readonly secretCipher: AeadCipher;
   private readonly maxWebhooksPerRobot: number;
 
   constructor(
@@ -32,12 +33,19 @@ export class RobotWebhookService {
   ) {
     const explicitKey = this.config.get<string>('WEBHOOK_SECRET_ENCRYPTION_KEY')?.trim();
     if (explicitKey) {
-      this.webhookSecretKey = explicitKey;
+      this.secretCipher = new AeadCipher(
+        explicitKey,
+        (this.config.get<string>('WEBHOOK_SECRET_ENCRYPTION_KEY_PREVIOUS') ?? '')
+          .split(',')
+          .map((key) => key.trim()),
+      );
     } else if (process.env.NODE_ENV === 'production') {
       throw new Error('WEBHOOK_SECRET_ENCRYPTION_KEY is required in production');
     } else {
-      this.webhookSecretKey =
-        this.config.get<string>('JWT_SECRET')?.trim() || 'botparty-webhook-secret-fallback';
+      this.secretCipher = new AeadCipher(
+        this.config.get<string>('JWT_SECRET')?.trim() ||
+          'botparty-webhook-secret-fallback-32-characters',
+      );
       this.logger.warn(
         'WEBHOOK_SECRET_ENCRYPTION_KEY not set — falling back to JWT_SECRET (dev only).',
       );
@@ -223,32 +231,10 @@ export class RobotWebhookService {
   }
 
   private encryptWebhookSecret(webhookId: string, plainSecretHex: string): string {
-    const plain = Buffer.from(plainSecretHex, 'hex');
-    const keyStream = createHmac('sha256', this.webhookSecretKey).update(webhookId).digest();
-    const encrypted = Buffer.alloc(plain.length);
-    for (let index = 0; index < plain.length; index += 1) {
-      const plainByte = plain[index] ?? 0;
-      const keyByte = keyStream[index % keyStream.length] ?? 0;
-      encrypted[index] = plainByte ^ keyByte;
-    }
-    return encrypted.toString('base64url');
+    return this.secretCipher.encrypt(plainSecretHex, `robot-webhook:${webhookId}`);
   }
 
   private decryptWebhookSecret(webhookId: string, storedSecret: string): string {
-    // Backward compatibility: plaintext legacy secrets are 64-char hex strings.
-    if (/^[a-f0-9]{64}$/i.test(storedSecret)) {
-      return storedSecret;
-    }
-
-    const encrypted = Buffer.from(storedSecret, 'base64url');
-    const keyStream = createHmac('sha256', this.webhookSecretKey).update(webhookId).digest();
-    const decrypted = Buffer.alloc(encrypted.length);
-    for (let index = 0; index < encrypted.length; index += 1) {
-      const encryptedByte = encrypted[index] ?? 0;
-      const keyByte = keyStream[index % keyStream.length] ?? 0;
-      decrypted[index] = encryptedByte ^ keyByte;
-    }
-
-    return decrypted.toString('hex');
+    return this.secretCipher.decrypt(storedSecret, `robot-webhook:${webhookId}`).plaintext;
   }
 }

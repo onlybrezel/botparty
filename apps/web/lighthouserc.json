@@ -1,0 +1,33 @@
+{
+  "ci": {
+    "collect": {
+      "startServerCommand": "pnpm --filter @botparty/api start & pnpm --filter @botparty/web start",
+      "startServerReadyPattern": "Ready in|started server on|Local:",
+      "startServerReadyTimeout": 120000,
+      "puppeteerScript": "./tests/lighthouse/auth.cjs",
+      "url": [
+        "http://127.0.0.1:3000/",
+        "http://127.0.0.1:3000/explore",
+        "http://127.0.0.1:3000/robot/e2e_admin/test-robot",
+        "http://127.0.0.1:3000/login",
+        "http://127.0.0.1:3000/pricing",
+        "http://127.0.0.1:3000/dashboard"
+      ],
+      "numberOfRuns": 3,
+      "settings": { "onlyCategories": ["performance", "accessibility", "best-practices", "seo"] }
+    },
+    "assert": {
+      "assertions": {
+        "categories:performance": ["error", { "minScore": 0.75 }],
+        "categories:accessibility": ["error", { "minScore": 0.9 }],
+        "largest-contentful-paint": ["error", { "maxNumericValue": 3000 }],
+        "total-blocking-time": ["error", { "maxNumericValue": 300 }],
+        "cumulative-layout-shift": ["error", { "maxNumericValue": 0.1 }],
+        "total-byte-weight": ["error", { "maxNumericValue": 1500000 }],
+        "resource-summary:script:size": ["error", { "maxNumericValue": 800000 }],
+        "resource-summary:total:count": ["error", { "maxNumericValue": 120 }]
+      }
+    },
+    "upload": { "target": "filesystem", "outputDir": ".lighthouseci" }
+  }
+}

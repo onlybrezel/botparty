@@ -1,13 +1,11 @@
 # Robot Authentication – Architecture & Flow
 
-> **Reference:** Audit finding B-SEC-02
-
 ## Overview
 
 Robot hardware clients authenticate to BotParty using a two-phase mechanism:
 
-1. **Claim Token** – a static 64-hex-character secret stored in `config.yaml`. Used only for the initial `/robots/claim` handshake to obtain a device-bound JWT.
-2. **Robot Auth JWT** – a short-lived (default: 30 days) JWT signed with `ROBOT_JWT_SECRET`. Used for all subsequent API calls (heartbeat) and WebSocket identity (`robot:identify` event).
+1. **Claim Token** – a 64-hex-character secret stored by the robot client. The API stores only its SHA-256 digest. It is used for the initial `/robots/claim` handshake.
+2. **Robot Auth JWT** – a short-lived (default: 15 minutes) JWT signed with `ROBOT_JWT_SECRET`. It is used for subsequent API calls and the WebSocket `robot:claim` event.
 
 These are not competing auth systems — they are complementary stages in the same flow. The claim token is a long-lived secret provisioned by the robot owner; the JWT is derived from it and bound to a specific hardware device.
 
@@ -23,15 +21,15 @@ POST /api/v1/robots/claim
   Body: { claimToken, deviceKey, publishCameraIds? }
     │
     ├── 1. robots.service.findByClaimToken(claimToken)
-    │       verifies token exists and is not expired (ROBOT_CLAIM_TOKEN_MAX_AGE_DAYS)
+    │       hashes the submitted token and verifies the digest and maximum age
     │
     ├── 2. robots.service.validateOrBindRobotDevice(robotId, deviceKey)
     │       - if no device is bound: SHA-256 hashes the deviceKey and stores it in metadata
     │       - if a device is already bound: verifies deviceKey hash matches
     │       - rejects if deviceKey < 32 characters
     │
-    └── 3. jwtService.sign({ sub: robotId, scope: 'robot', deviceHash }, ROBOT_JWT_SECRET)
-            returns robotAuthToken (JWT, default expiry 30d)
+    └── 3. jwtService.sign({ sub, scope, deviceHash, tokenVersion }, ROBOT_JWT_SECRET)
+            returns robotAuthToken (JWT, default expiry 15m)
             also returns: livekitToken, publishTokens, livekitUrl, ingress, stream policy
 
     ▼
@@ -41,7 +39,7 @@ Robot stores robotAuthToken in memory
     │                  Authorization: Bearer <robotAuthToken>
     │
     └── WebSocket  → connects to BotParty gateway, sends:
-                     { event: "robot:identify", data: { robotAuthToken } }
+                     { event: "robot:claim", data: { robotAuthToken } }
                      gateway validates via resolveRobotSocketIdentity()
 ```
 
@@ -54,8 +52,8 @@ Robot stores robotAuthToken in memory
 | Property | Value |
 |---|---|
 | Format | 64-char hex string (`randomBytes(32).toString('hex')`) |
-| Storage | `robots.claimToken` column (plain text in DB) |
-| Rotation | Via dashboard or staff API (generates new token, updates `claimTokenIssuedAt` in metadata) |
+| Storage | SHA-256 digest in `robots.claimTokenHash`; the plaintext is shown only when generated |
+| Rotation | Via dashboard or staff API; rotation also increments `deviceTokenVersion` and clears the previous device binding |
 | Expiry | Configurable via `ROBOT_CLAIM_TOKEN_MAX_AGE_DAYS` (default: 90 days). Checked on each claim attempt. |
 | Risk | If leaked, an attacker with the claim token can bind to the same device hash and obtain a JWT. Mitigate by rotating via dashboard. |
 
@@ -65,9 +63,9 @@ Robot stores robotAuthToken in memory
 |---|---|
 | Algorithm | HS256 (NestJS `JwtService` default) |
 | Secret | `ROBOT_JWT_SECRET` env var |
-| Payload | `{ sub: robotId, scope: 'robot', deviceHash: <sha256hex> }` |
-| Expiry | Default: `30d`. Override with `ROBOT_JWT_EXPIRES_IN` env var. |
-| Validation | `resolveRobotSocketIdentity()` in `bot.gateway.runtime.ts` verifies secret, checks `scope === 'robot'`, validates `deviceHash` format |
+| Payload | `{ sub: robotId, scope: 'robot', deviceHash: <sha256hex>, tokenVersion }` |
+| Expiry | Default: `15m`. Override with `ROBOT_JWT_EXPIRES_IN`. |
+| Validation | Signature, expiry, scope, device hash, current device binding, and the database token version are checked for REST and WebSocket use |
 | Risk | If `ROBOT_JWT_SECRET` is leaked, all robot JWTs can be forged. Use a ≥32 byte random secret. |
 
 ---
@@ -83,16 +81,12 @@ To move a robot to new hardware, the owner must reset the device binding from th
 ## Security Notes
 
 - The `claimToken` in `config.yaml` should be treated as a password: `chmod 600 config.yaml`.
-- The `robotAuthToken` is sent as a JSON payload field in the WebSocket `robot:identify` event (not as an HTTP header). Debug-level logging should never log raw WebSocket payloads.
+- The `robotAuthToken` is sent as a JSON payload field in the WebSocket `robot:claim` event. Application logging redacts credentials and does not log raw event payloads.
 - `ROBOT_JWT_SECRET` must be set to a strong random value (≥32 bytes) and must differ from `JWT_SECRET` (used for user auth).
 - Swagger docs expose the `/robots/claim` endpoint schema. Keep Swagger disabled in production (`SWAGGER_DOCS=true` is opt-in).
 
 ---
 
-## Long-term Roadmap
+## Rotation and recovery
 
-The current flow is stable and secure for the current scale. Future hardening options:
-
-- **Shorter JWT expiry** with automatic re-claim on expiry (Python client already retries failed claims).
-- **Refresh endpoint for robot JWTs** — avoids full re-claim on expiry without requiring the claim token to be in memory.
-- **Audit log** for claim events (token use, device binding changes, expiry rejections).
+Rotating a claim token revokes existing robot JWTs immediately through the token-version check. Moving a robot to different hardware therefore requires one explicit rotation in the owner dashboard followed by a new claim on the target device.

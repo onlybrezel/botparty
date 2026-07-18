@@ -4,16 +4,14 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 
 export type ThemePreference = 'system' | 'dark' | 'light';
-export type CookieConsentStatus = 'unknown' | 'accepted' | 'declined';
 
 export type AppPreferences = {
   theme: ThemePreference;
-  cookieConsent: CookieConsentStatus;
   dashboardMaskToken: boolean;
-  keyboardTabSwitchOnlyWhenEmpty: boolean;
   queuePositionNotifications: boolean;
   queueTurnNotifications: boolean;
   robotRoomOnboardingSeen: boolean;
+  productAnalyticsEnabled: boolean;
 };
 
 type PreferencesState = AppPreferences & {
@@ -25,12 +23,11 @@ type PreferencesState = AppPreferences & {
 
 export const DEFAULT_PREFERENCES: AppPreferences = {
   theme: 'system',
-  cookieConsent: 'unknown',
   dashboardMaskToken: true,
-  keyboardTabSwitchOnlyWhenEmpty: true,
   queuePositionNotifications: true,
   queueTurnNotifications: true,
   robotRoomOnboardingSeen: false,
+  productAnalyticsEnabled: false,
 };
 
 export const usePreferences = create<PreferencesState>()(
@@ -47,12 +44,11 @@ export const usePreferences = create<PreferencesState>()(
       storage: createJSONStorage(() => window.localStorage),
       partialize: (state) => ({
         theme: state.theme,
-        cookieConsent: state.cookieConsent,
         dashboardMaskToken: state.dashboardMaskToken,
-        keyboardTabSwitchOnlyWhenEmpty: state.keyboardTabSwitchOnlyWhenEmpty,
         queuePositionNotifications: state.queuePositionNotifications,
         queueTurnNotifications: state.queueTurnNotifications,
         robotRoomOnboardingSeen: state.robotRoomOnboardingSeen,
+        productAnalyticsEnabled: state.productAnalyticsEnabled,
       }),
       onRehydrateStorage: () => (state) => {
         state?.setHydrated(true);
@@ -74,8 +70,4 @@ export function resolveThemeClass(theme: ThemePreference) {
   }
 
   return 'dark';
-}
-
-export function hasOptionalCookieConsent(status: CookieConsentStatus) {
-  return status === 'accepted';
 }

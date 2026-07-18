@@ -37,6 +37,9 @@ export interface ActiveTurnState {
   userId: string;
   startedAt: number;
   expiresAt: number;
+  ownerId: string;
+  fencingToken: number;
+  leaseExpiresAt: number;
 }
 
 export interface CommandMetadata {

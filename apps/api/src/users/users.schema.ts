@@ -2,10 +2,19 @@ import { z } from 'zod';
 
 export const updateMeSchema = z.object({
   displayName: z.string().max(64).optional(),
-  avatarUrl: z.string().url().max(512).optional(),
 }).strict();
 
 export type UpdateMeInput = z.infer<typeof updateMeSchema>;
+
+export const exportOwnDataSchema = z.object({
+  password: z.string().min(1).max(128),
+}).strict();
+
+export type ExportOwnDataInput = z.infer<typeof exportOwnDataSchema>;
+
+export const uploadAvatarSchema = z.object({
+  dataUrl: z.string().min(32).max(1_100_000),
+}).strict();
 
 export const updateAdminUserSchema = z.object({
   username: z.string().min(3).max(32).regex(/^[a-zA-Z0-9_-]+$/).optional(),

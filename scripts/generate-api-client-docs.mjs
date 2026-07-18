@@ -3,7 +3,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-const DEFAULT_INPUT = 'http://localhost:4000/docs-json';
+const DEFAULT_INPUT = 'docs/openapi.json';
 const DEFAULT_OUTPUT = 'docs/api-client.md';
 const METHOD_ORDER = ['get', 'post', 'put', 'patch', 'delete', 'options', 'head'];
 

@@ -1,10 +1,10 @@
-import { Controller, Post, Get, Query, Body, HttpCode, HttpStatus, Headers, Res, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Query, Body, HttpCode, HttpStatus, Headers, Req, Res, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { Throttle } from '@nestjs/throttler';
 import { randomBytes } from 'crypto';
 import { AuthService } from './auth.service';
-import type { FastifyReply } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import {
   buildClientCookie,
   buildClearedCookie,
@@ -69,7 +69,7 @@ export class AuthController {
     reply.header(
       'set-cookie',
       buildClientCookie(csrfCookieName, csrfToken, {
-        path: '/api/v1/auth',
+        path: '/api/v1',
         maxAgeMs: getRefreshCookieTtlMs(this.configService),
         secure,
         sameSite,
@@ -85,9 +85,10 @@ export class AuthController {
   @ApiOperation({ summary: 'Login with email/password' })
   async login(
     @Body(new ZodValidationPipe(loginSchema)) body: LoginInput,
+    @Req() request: FastifyRequest,
     @Res({ passthrough: true }) reply: FastifyReply,
   ) {
-    const tokens = await this.authService.login(body);
+    const tokens = await this.authService.login(body, { remoteIp: request.ip });
     this.applyAuthCookies(reply, tokens.accessToken, tokens.refreshToken);
     return { accessToken: tokens.accessToken, user: tokens.user };
   }

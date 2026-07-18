@@ -69,29 +69,23 @@ export class LivekitController {
       throw new ForbiddenException('Guest video access is unavailable for private robots');
     }
 
-    if (robot.accessMode === 'LINK_ONLY') {
-      void guestSessionId;
-      const actorId = await this.robotsService.resolveRoomAccessActorId(robotId, roomAccessToken);
-      if (!actorId) {
-        throw new ForbiddenException('Invite verification required');
-      }
-
-      const allowed = await this.robotsService.validateRoomAccess({
-        robotId,
-        actorId,
-        roomAccessToken,
-      });
-      if (!allowed) {
-        throw new ForbiddenException('Invite verification required');
-      }
-    }
-
     const access = this.readVideoAccess(robot.metadata);
     if (access.video !== 'ALL') {
       throw new ForbiddenException('Guest video access is disabled');
     }
 
-    const guestId = `guest-${randomUUID()}`;
+    const grantedActorId = await this.robotsService.resolveRoomAccessActorId(robotId, roomAccessToken);
+    const guestActorId = grantedActorId
+      ?? this.robotsService.resolveGuestActorId(guestSessionId)
+      ?? `guest:${randomUUID()}`;
+    const allowed = await this.robotsService.validateRoomAccess({
+      robotId,
+      actorId: guestActorId,
+      roomAccessToken,
+    });
+    if (!allowed) throw new ForbiddenException('Room access verification required');
+
+    const guestId = guestActorId.replace(/^guest:/, 'guest-');
     const token = await this.livekitService.generateViewerToken(
       robotId,
       guestId,

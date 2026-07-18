@@ -34,10 +34,17 @@ export const robotTelemetrySchema = z.object({
   livekitConnected: z.boolean().optional(),
   commandsReceived: z.number().finite().optional(),
   cameraFrames: z.number().finite().optional(),
+  emergencyStopVerified: z.boolean().optional(),
 }).strict();
 
 export const emergencyStopSchema = z.object({
   robotId: z.string().uuid(),
+}).strict();
+
+export const controlAckSchema = z.object({
+  commandId: z.string().uuid(),
+  status: z.enum(['ACK', 'NACK']),
+  message: z.string().max(256).optional(),
 }).strict();
 
 export const emptyPayloadSchema = z.undefined().or(z.object({}).strict());

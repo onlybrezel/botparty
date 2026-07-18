@@ -257,8 +257,13 @@ export function XYPadControl({
       </div>
       <div
         ref={padRef}
-        role="application"
+        role="slider"
         aria-label={`${label} XY pad`}
+        aria-valuetext={`x ${point.x.toFixed(0)}, y ${point.y.toFixed(0)}`}
+        aria-valuemin={config.xMin}
+        aria-valuemax={config.xMax}
+        aria-valuenow={point.x}
+        tabIndex={disabled ? -1 : 0}
         className="relative h-32 w-32 touch-none rounded border border-[var(--border)] bg-[var(--background)]"
         onPointerDown={(event) => {
           if (disabled) return;
@@ -272,6 +277,21 @@ export function XYPadControl({
         }}
         onPointerUp={resetToStart}
         onPointerCancel={resetToStart}
+        onKeyDown={(event) => {
+          if (disabled) return;
+          const xStep = Math.max(1, (config.xMax - config.xMin) / 20);
+          const yStep = Math.max(1, (config.yMax - config.yMin) / 20);
+          let nextPoint = point;
+          if (event.key === 'ArrowLeft') nextPoint = { ...point, x: clamp(point.x - xStep, config.xMin, config.xMax) };
+          else if (event.key === 'ArrowRight') nextPoint = { ...point, x: clamp(point.x + xStep, config.xMin, config.xMax) };
+          else if (event.key === 'ArrowDown') nextPoint = { ...point, y: clamp(point.y - yStep, config.yMin, config.yMax) };
+          else if (event.key === 'ArrowUp') nextPoint = { ...point, y: clamp(point.y + yStep, config.yMin, config.yMax) };
+          else if (event.key === 'Home') nextPoint = { x: config.xStart, y: config.yStart };
+          else return;
+          event.preventDefault();
+          setPoint(nextPoint);
+          sendPoint(nextPoint);
+        }}
       >
         <div className="absolute left-1/2 top-1/2 h-px w-full -translate-x-1/2 bg-[var(--border)]" />
         <div className="absolute left-1/2 top-1/2 h-full w-px -translate-y-1/2 bg-[var(--border)]" />

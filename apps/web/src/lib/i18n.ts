@@ -1,5 +1,5 @@
 export const BOTPARTY_LOCALE_COOKIE = 'botparty.locale';
-export const supportedLocales = ['en', 'de'] as const;
+export const supportedLocales = ['en'] as const;
 
 export type Locale = (typeof supportedLocales)[number];
 
@@ -16,9 +16,6 @@ export function getPreferredLocale(acceptLanguage?: string | null): Locale {
     .filter((part): part is string => Boolean(part));
 
   for (const candidate of candidates) {
-    if (candidate === 'de' || candidate.startsWith('de-')) {
-      return 'de';
-    }
     if (candidate === 'en' || candidate.startsWith('en-')) {
       return 'en';
     }
@@ -41,13 +38,10 @@ export function stripLocalePrefix(pathname: string): { locale: Locale | null; pa
   };
 }
 
-export function localizePath(pathname: string, locale: Locale): string {
+export function localizePath(pathname: string, _locale: Locale): string {
   const normalizedPath = pathname.startsWith('/') ? pathname : `/${pathname}`;
   const stripped = stripLocalePrefix(normalizedPath).pathname;
-  if (locale === defaultLocale) {
-    return stripped;
-  }
-  return stripped === '/' ? `/${locale}` : `/${locale}${stripped}`;
+  return stripped;
 }
 
 export function localizeHref(pathname: string, locale: Locale, search?: string): string {

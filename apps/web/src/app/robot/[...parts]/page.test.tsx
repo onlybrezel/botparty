@@ -25,8 +25,12 @@ vi.mock('@/components/robot-view/private-robot-loader', () => ({
   ),
 }));
 
-vi.mock('@/components/robot-view/robot-view', () => ({
-  default: ({ robot }: { robot: RobotPublic }) => <div data-robot={robot.slug} />,
+vi.mock('@/components/robot-view/online-robot-view-loader', () => ({
+  OnlineRobotViewLoader: ({ robot }: { robot: RobotPublic }) => <div data-robot={robot.slug} />,
+}));
+
+vi.mock('@/components/robot-view/offline-robot-view', () => ({
+  OfflineRobotView: ({ robot }: { robot: RobotPublic }) => <div data-offline-robot={robot.slug} />,
 }));
 
 function createResponse(robot: Partial<RobotPublic>, status = 200) {
@@ -85,6 +89,64 @@ describe('robot catch-all route', () => {
 
     expect(result.props.slug).toBe('secret-bot');
     expect(result.props.username).toBeNull();
+  });
+
+  it('uses the lightweight room view while a public robot is offline', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(createResponse({
+        name: 'Mars Rover',
+        slug: 'mars-rover',
+        status: 'OFFLINE' as RobotPublic['status'],
+        owner: {
+          id: 'owner-1',
+          username: 'julien',
+          displayName: 'Julien',
+          avatarUrl: null,
+          role: Role.USER,
+          createdAt: '2026-01-01T00:00:00.000Z',
+        },
+      }))),
+    );
+
+    const { default: RobotPage } = await import('./page');
+    const { OfflineRobotView } = await import('@/components/robot-view/offline-robot-view');
+    const result = (await RobotPage({
+      params: Promise.resolve({ parts: ['julien', 'mars-rover'] }),
+    })) as ReactElement<{ robot: RobotPublic }>;
+
+    expect(result.props.robot.status).toBe('OFFLINE');
+    expect(result.type).toBe(OfflineRobotView);
+  });
+
+  it('loads the interactive room view for an online robot', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(createResponse({
+        name: 'Mars Rover',
+        slug: 'mars-rover',
+        status: 'ONLINE' as RobotPublic['status'],
+        owner: {
+          id: 'owner-1',
+          username: 'julien',
+          displayName: 'Julien',
+          avatarUrl: null,
+          role: Role.USER,
+          createdAt: '2026-01-01T00:00:00.000Z',
+        },
+      }))),
+    );
+
+    const { default: RobotPage } = await import('./page');
+    const { OnlineRobotViewLoader } = await import(
+      '@/components/robot-view/online-robot-view-loader'
+    );
+    const result = (await RobotPage({
+      params: Promise.resolve({ parts: ['julien', 'mars-rover'] }),
+    })) as ReactElement<{ robot: RobotPublic }>;
+
+    expect(result.props.robot.status).toBe('ONLINE');
+    expect(result.type).toBe(OnlineRobotViewLoader);
   });
 
   it('rejects routes with too many path segments', async () => {

@@ -6,8 +6,9 @@ import { useRouter } from 'next/navigation';
 import type { RobotPublic } from '@botparty/shared';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/store';
+import { OfflineRobotView } from '@/components/robot-view/offline-robot-view';
+import { OnlineRobotViewLoader } from '@/components/robot-view/online-robot-view-loader';
 import { RobotRoomSkeleton } from '@/components/robot-view/robot-room-skeleton';
-import RobotView from '@/components/robot-view/robot-view';
 
 function canonicalRobotPath(robot: RobotPublic): string {
   return `/robot/${robot.owner.username}/${robot.slug}`;
@@ -84,6 +85,7 @@ export function PrivateRobotLoader({ slug, username = null }: Props) {
           {!accessToken && (
             <Link
               href="/login"
+              prefetch={false}
               className="mt-4 inline-flex rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-medium text-white"
             >
               Sign in
@@ -94,5 +96,7 @@ export function PrivateRobotLoader({ slug, username = null }: Props) {
     );
   }
 
-  return <RobotView robot={robot} />;
+  return robot.status === 'ONLINE' || robot.status === 'BUSY'
+    ? <OnlineRobotViewLoader robot={robot} />
+    : <OfflineRobotView robot={robot} />;
 }

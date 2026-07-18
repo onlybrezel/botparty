@@ -8,6 +8,7 @@ type ChatPersistJob = {
   userId: string;
   content: string;
   timestampMs: number;
+  clientMessageId: string;
 };
 
 const CHAT_PERSIST_QUEUE = 'chat-persist';
@@ -82,9 +83,12 @@ export class ChatPersistenceService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async persistJob(job: Job<ChatPersistJob>) {
-    const { robotId, userId, content, timestampMs } = job.data;
-    await this.prisma.chatMessage.create({
-      data: {
+    const { robotId, userId, content, timestampMs, clientMessageId } = job.data;
+    await this.prisma.chatMessage.upsert({
+      where: { userId_clientMessageId: { userId, clientMessageId } },
+      update: {},
+      create: {
+        clientMessageId,
         robotId,
         userId,
         content,

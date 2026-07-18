@@ -73,6 +73,7 @@ export class PresenceHandler {
     const roomIndexKey = this.viewerRoomIndexKey(robotId);
     const socketKeys = await this.redis.smembers(roomIndexKey);
     if (socketKeys.length === 0) {
+      await this.redis.set(`robot:viewer-count:${robotId}`, '0', 'EX', VIEWER_PRESENCE_TTL_SEC * 2);
       return { viewerCount: 0, focusUserConnections: 0, presenceList: [], cleanedStaleEntries: false };
     }
 
@@ -140,6 +141,7 @@ export class PresenceHandler {
       }
     }
 
+    await this.redis.set(`robot:viewer-count:${robotId}`, String(viewerCount), 'EX', VIEWER_PRESENCE_TTL_SEC * 2);
     return {
       viewerCount,
       focusUserConnections,

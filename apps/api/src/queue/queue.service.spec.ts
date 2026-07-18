@@ -1,13 +1,6 @@
 import { ConflictException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { QueueService } from './queue.service';
 
-function createPipeline() {
-  return {
-    hdel: jest.fn().mockReturnThis(),
-    exec: jest.fn().mockResolvedValue([]),
-  };
-}
-
 const mockPrisma = {
   queueEntry: {
     findUnique: jest.fn(),
@@ -24,6 +17,7 @@ const mockPrisma = {
   robot: {
     findUnique: jest.fn(),
   },
+  $executeRaw: jest.fn(),
   $transaction: jest.fn(),
 };
 
@@ -34,11 +28,11 @@ const mockRedis = {
   expire: jest.fn(),
   hset: jest.fn(),
   hgetall: jest.fn(),
+  eval: jest.fn(),
   publish: jest.fn().mockResolvedValue(undefined),
   smembers: jest.fn().mockResolvedValue([]),
   sadd: jest.fn(),
   srem: jest.fn(),
-  pipeline: jest.fn(),
 };
 
 const mockRobotsService = {
@@ -56,17 +50,22 @@ describe('QueueService', () => {
   let service: QueueService;
 
   beforeEach(async () => {
-    jest.clearAllMocks();
+    jest.resetAllMocks();
     mockPrisma.$transaction.mockImplementation(async (callback: (tx: typeof mockPrisma) => Promise<unknown>) =>
       callback(mockPrisma as never),
     );
+    mockPrisma.$executeRaw.mockResolvedValue(1);
     mockPrisma.robot.findUnique.mockResolvedValue({ queueMode: 'STANDARD' });
     mockPrisma.queueEntry.updateMany.mockResolvedValue({ count: 0 });
+    mockRobotsService.validateRoomAccess.mockResolvedValue(true);
+    mockRobotsService.resolveGuestActorId.mockReturnValue(null);
     mockRedis.set.mockResolvedValue('OK');
     mockRedis.hgetall.mockResolvedValue({});
     mockRedis.hset.mockResolvedValue(1);
     mockRedis.expire.mockResolvedValue(1);
-    mockRedis.pipeline.mockImplementation(() => createPipeline());
+    mockRedis.eval.mockResolvedValue(1);
+    mockRedis.publish.mockResolvedValue(undefined);
+    mockRedis.smembers.mockResolvedValue([]);
     mockConfig.get.mockReturnValue(undefined);
 
 
@@ -128,7 +127,7 @@ describe('QueueService', () => {
       await expect(service.join('robot-1', 'user-1')).rejects.toThrow(BadRequestException);
     });
 
-    it('creates a new queue entry, clears stale ballots, and publishes a join event', async () => {
+    it('creates a new queue entry under row locks, clears stale ballots, and publishes a join event', async () => {
       const createdEntry = {
         id: 'entry-3',
         robotId: 'robot-1',
@@ -158,14 +157,18 @@ describe('QueueService', () => {
           }),
         }),
       );
+      expect(mockPrisma.$executeRaw).toHaveBeenCalledTimes(2);
+      expect(mockRedis.eval).toHaveBeenCalledWith(
+        expect.stringContaining("redis.call('HGETALL'"),
+        1,
+        'queue:ballots:robot-1',
+        'user-1',
+      );
       expect(mockRedis.publish).toHaveBeenCalledWith(
         'queue:robot-1',
         expect.stringContaining('"type":"join"'),
       );
-      expect(mockPrisma.queueEntry.updateMany).toHaveBeenCalledWith({
-        where: { robotId: 'robot-1', votes: { not: 0 } },
-        data: { votes: 0 },
-      });
+      expect(mockPrisma.queueEntry.updateMany).not.toHaveBeenCalled();
     });
   });
 
@@ -178,21 +181,17 @@ describe('QueueService', () => {
       expect(result.removed).toBe(false);
     });
 
-    it('reorders remaining entries and publishes a leave event', async () => {
+    it('removes the entry without rewriting sparse positions and publishes a leave event', async () => {
       mockPrisma.robot.findUnique.mockResolvedValueOnce({ queueMode: 'STANDARD' });
       mockPrisma.queueEntry.findUnique.mockResolvedValueOnce({ id: 'entry-1' });
-      mockPrisma.queueEntry.findMany.mockResolvedValueOnce([{ id: 'entry-2' }, { id: 'entry-3' }]);
 
       await expect(service.leave('robot-1', 'user-1')).resolves.toEqual({ removed: true });
 
-      expect(mockPrisma.queueEntry.update).toHaveBeenNthCalledWith(1, {
-        where: { id: 'entry-2' },
-        data: { position: 1 },
+      expect(mockPrisma.queueEntry.delete).toHaveBeenCalledWith({
+        where: { robotId_userId: { robotId: 'robot-1', userId: 'user-1' } },
       });
-      expect(mockPrisma.queueEntry.update).toHaveBeenNthCalledWith(2, {
-        where: { id: 'entry-3' },
-        data: { position: 2 },
-      });
+      expect(mockPrisma.queueEntry.update).not.toHaveBeenCalled();
+      expect(mockRedis.eval).toHaveBeenCalledTimes(1);
       expect(mockRedis.publish).toHaveBeenCalledWith(
         'queue:robot-1',
         expect.stringContaining('"type":"leave"'),
@@ -313,13 +312,11 @@ describe('QueueService', () => {
         id: 'target-entry',
         userId: 'user-2',
         votes: 1,
+        position: 1,
       });
 
       expect(mockRedis.hset).toHaveBeenCalledWith('queue:ballots:robot-1', 'user-1', 'user-2');
-      expect(mockPrisma.queueEntry.update).toHaveBeenCalledWith({
-        where: { id: 'target-entry' },
-        data: { votes: 1 },
-      });
+      expect(mockPrisma.queueEntry.update).not.toHaveBeenCalled();
       expect(mockRedis.publish).toHaveBeenCalledWith(
         'queue:robot-1',
         expect.stringContaining('"type":"vote"'),

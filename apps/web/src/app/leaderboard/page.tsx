@@ -55,7 +55,9 @@ async function getRobots(): Promise<RobotPublic[]> {
 async function getTopCreators(period: string): Promise<CreatorLeaderboardEntry[]> {
   const apiUrl = getServerApiUrl();
   try {
-    const res = await fetch(`${apiUrl}/api/v1/users/leaderboard?limit=10&period=${encodeURIComponent(period)}`);
+    const res = await fetch(
+      `${apiUrl}/api/v1/users/leaderboard?limit=10&metric=engagement&period=${encodeURIComponent(period)}`,
+    );
     if (!res.ok) return [];
     return res.json() as Promise<CreatorLeaderboardEntry[]>;
   } catch {
@@ -78,7 +80,7 @@ function statusColor(status: RobotPublic['status']) {
   if (status === 'ONLINE') return 'text-[var(--online)] bg-[var(--online)]/15';
   if (status === 'BUSY') return 'text-amber-400 bg-amber-500/15';
   if (status === 'MAINTENANCE') return 'text-orange-400 bg-orange-600/15';
-  return 'text-zinc-400 bg-zinc-700/40';
+  return 'bg-zinc-200 text-zinc-800 dark:bg-zinc-700 dark:text-zinc-100';
 }
 
 export default async function LeaderboardPage({
@@ -87,12 +89,21 @@ export default async function LeaderboardPage({
   searchParams?: Promise<{ period?: string }>;
 }) {
   const params = await searchParams;
-  const selectedPeriod = PERIOD_OPTIONS.some((option) => option.id === params?.period) ? params?.period ?? '30d' : '30d';
-  const [robots, creators, overview] = await Promise.all([getRobots(), getTopCreators(selectedPeriod), getOverview()]);
+  const selectedPeriod = PERIOD_OPTIONS.some((option) => option.id === params?.period)
+    ? (params?.period ?? '30d')
+    : '30d';
+  const [robots, creators, overview] = await Promise.all([
+    getRobots(),
+    getTopCreators(selectedPeriod),
+    getOverview(),
+  ]);
   const ranked = [...robots].sort((a, b) => b.viewerCount - a.viewerCount);
   const newOperators = [...robots]
     .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
-    .filter((robot, index, source) => source.findIndex((candidate) => candidate.owner.id === robot.owner.id) === index)
+    .filter(
+      (robot, index, source) =>
+        source.findIndex((candidate) => candidate.owner.id === robot.owner.id) === index,
+    )
     .slice(0, 5);
 
   return (
@@ -189,7 +200,9 @@ export default async function LeaderboardPage({
             Online robots
           </p>
           <p className="mt-2 text-2xl font-black">
-            {overview ? overview.totals.liveRobots : ranked.filter((r) => r.status === 'ONLINE' || r.status === 'BUSY').length}
+            {overview
+              ? overview.totals.liveRobots
+              : ranked.filter((r) => r.status === 'ONLINE' || r.status === 'BUSY').length}
           </p>
         </div>
         <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
@@ -198,7 +211,9 @@ export default async function LeaderboardPage({
             Total live viewers
           </p>
           <p className="mt-2 text-2xl font-black">
-            {overview ? overview.totals.totalViewers : ranked.reduce((sum, r) => sum + r.viewerCount, 0)}
+            {overview
+              ? overview.totals.totalViewers
+              : ranked.reduce((sum, r) => sum + r.viewerCount, 0)}
           </p>
         </div>
         <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
@@ -213,7 +228,9 @@ export default async function LeaderboardPage({
       <section className="mt-6 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 sm:p-5">
         <div className="mb-3 flex items-center justify-between gap-2">
           <h2 className="text-lg font-bold">Seasonal creators</h2>
-          <p className="text-xs text-[var(--muted-foreground)]">Credits, activity streaks, and session volume for the selected window</p>
+          <p className="text-xs text-[var(--muted-foreground)]">
+            Credits, activity streaks, and session volume for the selected window
+          </p>
         </div>
 
         {creators.length === 0 ? (
@@ -226,7 +243,9 @@ export default async function LeaderboardPage({
                 className="flex items-center justify-between rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2"
               >
                 <div className="flex min-w-0 items-center gap-3">
-                  <span className="w-6 text-xs font-bold text-[var(--muted-foreground)]">{index + 1}</span>
+                  <span className="w-6 text-xs font-bold text-[var(--muted-foreground)]">
+                    {index + 1}
+                  </span>
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium">
                       {creator.displayName ?? creator.username}
@@ -246,7 +265,9 @@ export default async function LeaderboardPage({
                     </div>
                   </div>
                 </div>
-                <span className="text-sm font-semibold text-amber-300">{creator.credits} cr</span>
+                <span className="text-sm font-semibold text-amber-300">
+                  {creator.credits} sessions
+                </span>
               </li>
             ))}
           </ul>
@@ -259,7 +280,9 @@ export default async function LeaderboardPage({
             <Sparkles className="h-4 w-4 text-emerald-300" />
             New operators
           </h2>
-          <p className="text-xs text-[var(--muted-foreground)]">Latest robot hosts to launch a room</p>
+          <p className="text-xs text-[var(--muted-foreground)]">
+            Latest robot hosts to launch a room
+          </p>
         </div>
 
         {newOperators.length === 0 ? (
@@ -272,7 +295,9 @@ export default async function LeaderboardPage({
                 href={`/robot/${robot.owner.username}/${robot.slug}`}
                 className="rounded-xl border border-[var(--border)] bg-[var(--background)] p-4 transition hover:border-sky-400/30"
               >
-                <p className="text-sm font-semibold">{robot.owner.displayName ?? robot.owner.username}</p>
+                <p className="text-sm font-semibold">
+                  {robot.owner.displayName ?? robot.owner.username}
+                </p>
                 <p className="mt-1 text-xs text-[var(--muted-foreground)]">Launched {robot.name}</p>
                 <p className="mt-3 text-[11px] uppercase tracking-wide text-[var(--muted-foreground)]">
                   Joined {new Date(robot.createdAt).toLocaleDateString()}

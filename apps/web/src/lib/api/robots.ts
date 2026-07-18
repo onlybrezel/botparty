@@ -1,4 +1,4 @@
-import type { PublicRobotOverview, RobotPublic } from '@botparty/shared';
+import type { PublicRobotOverview, RobotOnboardingStatus, RobotPublic } from '@botparty/shared';
 import type {
   AllowedUserRecord,
   RobotChatHistoryPage,
@@ -48,6 +48,10 @@ export class RobotsApi {
 
   async getMyRobots() {
     return this.req<RobotManaged[]>('/robots/my');
+  }
+
+  async getOnboardingStatus(robotId: string) {
+    return this.req<RobotOnboardingStatus>(`/robots/${robotId}/onboarding`);
   }
 
   async createRobot(data: RobotMutationInput) {

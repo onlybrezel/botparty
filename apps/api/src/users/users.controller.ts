@@ -9,6 +9,7 @@ import {
   Delete,
   HttpCode,
   HttpStatus,
+  Post,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { UsersService } from './users.service';
@@ -19,12 +20,24 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Role } from '@botparty/shared';
 import type { JwtPayload } from '@botparty/shared';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
-import { updateMeSchema, updateAdminUserSchema } from './users.schema';
+import {
+  exportOwnDataSchema,
+  updateMeSchema,
+  updateAdminUserSchema,
+  uploadAvatarSchema,
+  type UpdateAdminUserInput,
+  type UpdateMeInput,
+} from './users.schema';
+import { Throttle } from '@nestjs/throttler';
+import { UserAvatarService } from './user-avatar.service';
 
 @ApiTags('users')
 @Controller('users')
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly avatars: UserAvatarService,
+  ) {}
 
   @Get('me')
   @UseGuards(JwtAuthGuard)
@@ -34,12 +47,16 @@ export class UsersController {
     return this.usersService.findById(user.sub);
   }
 
-  @Get('me/export')
+  @Post('me/export')
   @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 2, ttl: 60_000 } })
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Export own account data' })
-  async exportMe(@CurrentUser() user: JwtPayload) {
-    return this.usersService.exportOwnData(user.sub);
+  async exportMe(
+    @CurrentUser() user: JwtPayload,
+    @Body(new ZodValidationPipe(exportOwnDataSchema)) body: { password: string },
+  ) {
+    return this.usersService.exportOwnData(user.sub, body.password);
   }
 
   @Patch('me')
@@ -48,9 +65,30 @@ export class UsersController {
   @ApiOperation({ summary: 'Update current user profile' })
   async updateMe(
     @CurrentUser() user: JwtPayload,
-    @Body(new ZodValidationPipe(updateMeSchema)) dto: any,
+    @Body(new ZodValidationPipe(updateMeSchema)) dto: UpdateMeInput,
   ) {
     return this.usersService.updateMe(user.sub, dto);
+  }
+
+  @Post('me/avatar')
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Upload own avatar to platform storage' })
+  uploadAvatar(
+    @CurrentUser() user: JwtPayload,
+    @Body(new ZodValidationPipe(uploadAvatarSchema)) body: { dataUrl: string },
+  ) {
+    return this.avatars.save(user.sub, body.dataUrl);
+  }
+
+  @Delete('me/avatar')
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Remove own avatar' })
+  deleteAvatar(@CurrentUser() user: JwtPayload) {
+    return this.avatars.clear(user.sub);
   }
 
   @Delete('me')
@@ -68,31 +106,33 @@ export class UsersController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'List users for admin/mod dashboard' })
   async getAdminUsers(
+    @CurrentUser() requester: JwtPayload,
     @Query('q') q?: string,
     @Query('limit') limit?: string,
   ) {
     return this.usersService.listUsersForStaff({
       q,
       limit: limit ? Number(limit) : undefined,
+      requesterRole: requester.role,
     });
   }
 
   @Patch('admin/:id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN, Role.MOD)
+  @Roles(Role.ADMIN)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update user profile/role as staff' })
   async updateAdminUser(
     @Param('id') id: string,
     @CurrentUser() requester: JwtPayload,
-    @Body(new ZodValidationPipe(updateAdminUserSchema)) body: any,
+    @Body(new ZodValidationPipe(updateAdminUserSchema)) body: UpdateAdminUserInput,
   ) {
     return this.usersService.updateUserByStaff(id, requester, body);
   }
 
   @Delete('admin/:id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN, Role.MOD)
+  @Roles(Role.ADMIN)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Delete user account as staff' })
   async deleteAdminUser(
@@ -107,10 +147,12 @@ export class UsersController {
   async getLeaderboard(
     @Query('limit') limit?: string,
     @Query('period') period?: string,
+    @Query('metric') metric?: string,
   ) {
     return this.usersService.getLeaderboard({
       limit: limit ? Number(limit) : 20,
       period,
+      metric: metric === 'creator_revenue' ? 'creator_revenue' : 'engagement',
     });
   }
 

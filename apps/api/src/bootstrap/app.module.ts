@@ -2,7 +2,8 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { CsrfOriginGuard } from '../auth/guards/csrf-origin.guard';
 import { PrismaModule } from '../prisma/prisma.module';
 import { RedisModule } from '../redis/redis.module';
 import { JobsModule } from '../jobs/jobs.module';
@@ -21,13 +22,20 @@ import { MaintenanceModule } from '../maintenance/maintenance.module';
 import { WalletModule } from '../wallet/wallet.module';
 import { BillingModule } from '../billing/billing.module';
 import { EarningsModule } from '../earnings/earnings.module';
+import { validateEnvironment } from '../common/environment';
+import { FeatureFlagsModule } from '../common/feature-flags.service';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { AnalyticsModule } from '../analytics/analytics.module';
+import { HttpMetricsInterceptor } from '../common/http-metrics.interceptor';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: ['.env', '../../.env'],
+      validate: validateEnvironment,
     }),
+    FeatureFlagsModule,
     ThrottlerModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => [
@@ -40,6 +48,8 @@ import { EarningsModule } from '../earnings/earnings.module';
     PrismaModule,
     RedisModule,
     MailModule,
+    NotificationsModule,
+    AnalyticsModule,
     BullModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
@@ -71,6 +81,14 @@ import { EarningsModule } from '../earnings/earnings.module';
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: CsrfOriginGuard,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: HttpMetricsInterceptor,
     },
   ],
 })

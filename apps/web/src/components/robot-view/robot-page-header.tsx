@@ -23,7 +23,7 @@ export function RobotPageHeader({
   return (
     <>
       <div className="mb-4 flex flex-wrap items-center gap-2 text-sm text-[var(--muted-foreground)]">
-        <Link href="/explore" className="hover:text-[var(--foreground)] transition-colors">
+        <Link href="/explore" prefetch={false} className="hover:text-[var(--foreground)] transition-colors">
           Explore
         </Link>
         <span>/</span>

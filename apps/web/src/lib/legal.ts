@@ -7,8 +7,12 @@ export type LegalConfig = {
   vatId: string | null;
   commercialRegister: string | null;
   supportUrl: string | null;
-  isConfigured: boolean;
 };
+
+export const LEGAL_VERSIONS = {
+  terms: '2026-07-17',
+  privacy: '2026-07-17',
+} as const;
 
 function readEnv(name: string) {
   return process.env[name]?.trim() ?? '';
@@ -23,17 +27,18 @@ export function getLegalConfig(): LegalConfig {
   const vatId = readEnv('NEXT_PUBLIC_LEGAL_VAT_ID') || null;
   const commercialRegister = readEnv('NEXT_PUBLIC_LEGAL_COMMERCIAL_REGISTER') || null;
   const supportUrl = readEnv('NEXT_PUBLIC_LEGAL_SUPPORT_URL') || null;
-  const isConfigured = Boolean(operatorName && operatorEmail && operatorAddress);
+  if (!operatorName || !operatorEmail || !operatorAddress) {
+    throw new Error('Legal operator configuration is incomplete.');
+  }
 
   return {
-    operatorName: operatorName || 'Self-hosted BotParty operator',
-    operatorEmail: operatorEmail || 'legal@localhost.invalid',
-    operatorAddress: operatorAddress || 'Operator address not configured for this deployment.',
+    operatorName,
+    operatorEmail,
+    operatorAddress,
     operatorCountry,
     governingLaw,
     vatId,
     commercialRegister,
     supportUrl,
-    isConfigured,
   };
 }

@@ -1,12 +1,28 @@
-import { Body, Controller, Get, Headers, InternalServerErrorException, Logger, Post, Res } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  HttpCode,
+  InternalServerErrorException,
+  Logger,
+  PayloadTooLargeException,
+  Post,
+  Res,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { RouteConfig } from '@nestjs/platform-fastify';
 import type { FastifyReply } from 'fastify';
 import { collectDefaultMetrics, Gauge, register } from 'prom-client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { BotGateway } from '../gateway/bot.gateway';
 import { hasBasicAuthCredentials, isAuthorizedBasicAuth } from '../common/http-basic-auth';
+import { Throttle } from '@nestjs/throttler';
+import { LivekitService } from '../livekit/livekit.service';
+import { MailService } from '../mail/mail.service';
+import { FeatureFlagsService } from '../common/feature-flags.service';
 
 let defaultMetricsEnabled = false;
 const ROBOT_TELEMETRY_FRESH_WINDOW_MS = 180_000;
@@ -88,6 +104,38 @@ const robotTelemetryAvgTemperatureGauge = getOrCreateGauge(
   'botparty_robot_telemetry_avg_temperature_c',
   'Average temperature in Celsius across robots with fresh telemetry',
 );
+const queueOldestAgeGauge = getOrCreateGauge(
+  'botparty_queue_oldest_entry_age_seconds',
+  'Age of the oldest active queue entry in seconds',
+);
+const billingNeedsReviewGauge = getOrCreateGauge(
+  'botparty_billing_needs_review',
+  'Billing intents that require manual review',
+);
+const notificationEmailFailedGauge = getOrCreateGauge(
+  'botparty_notification_email_failed',
+  'Notification email outbox rows in terminal failed state',
+);
+const webhookDeliveryFailedGauge = getOrCreateGauge(
+  'botparty_webhook_delivery_failed',
+  'Active robot webhooks whose latest delivery failed',
+);
+const databaseConnectionsGauge = getOrCreateGauge(
+  'botparty_database_connections',
+  'Current PostgreSQL connections for the BotParty database',
+);
+const redisMemoryBytesGauge = getOrCreateGauge(
+  'botparty_redis_memory_used_bytes',
+  'Redis memory currently in use',
+);
+const livekitUpGauge = getOrCreateGauge(
+  'botparty_dependency_livekit_up',
+  'Whether the API can reach LiveKit (1=up, 0=down)',
+);
+const objectStorageUpGauge = getOrCreateGauge(
+  'botparty_dependency_object_storage_up',
+  'Whether the API can reach object storage (1=up, 0=down)',
+);
 
 @ApiTags('health')
 @Controller('health')
@@ -99,6 +147,9 @@ export class HealthController {
     private readonly redis: RedisService,
     private readonly gateway: BotGateway,
     private readonly config: ConfigService,
+    private readonly livekit: LivekitService,
+    private readonly mail: MailService,
+    private readonly features: FeatureFlagsService,
   ) {
     if (!defaultMetricsEnabled) {
       collectDefaultMetrics({ prefix: 'botparty_api_' });
@@ -109,24 +160,14 @@ export class HealthController {
   @Get()
   @ApiOperation({ summary: 'Health check' })
   async check() {
-    const checks: Record<string, string> = { api: 'ok' };
+    return this.buildHealthSnapshot();
+  }
 
-    try {
-      await this.prisma.$queryRaw`SELECT 1`;
-      checks['database'] = 'ok';
-    } catch {
-      checks['database'] = 'error';
-    }
-
-    try {
-      await this.redis.ping();
-      checks['redis'] = 'ok';
-    } catch {
-      checks['redis'] = 'error';
-    }
-
-    const healthy = Object.values(checks).every((v) => v === 'ok');
-    return { status: healthy ? 'healthy' : 'degraded', checks, timestamp: new Date().toISOString() };
+  @Get('ready')
+  @ApiOperation({ summary: 'Readiness check for traffic routing' })
+  async ready(@Res() reply: FastifyReply) {
+    const snapshot = await this.buildHealthSnapshot();
+    return reply.code(snapshot.status === 'healthy' ? 200 : 503).send(snapshot);
   }
 
   @Get('live')
@@ -183,11 +224,12 @@ export class HealthController {
     wsActiveTurnsGauge.set(ws.activeTurns);
     wsControlCooldownsGauge.set(ws.controlCooldowns);
 
-    const [databaseUp, redisUp, queueDepth, robotTelemetry] = await Promise.all([
+    const [databaseUp, redisUp, queueDepth, robotTelemetry, operational] = await Promise.all([
       this._checkDatabaseUp(),
       this._checkRedisUp(),
       this._getQueueDepth(),
       this._getRobotTelemetrySummary(),
+      this._getOperationalMetrics(),
     ]);
 
     databaseUpGauge.set(databaseUp);
@@ -199,16 +241,37 @@ export class HealthController {
     robotTelemetryAvgCpuGauge.set(robotTelemetry.avgCpuPercent);
     robotTelemetryAvgMemoryGauge.set(robotTelemetry.avgMemoryPercent);
     robotTelemetryAvgTemperatureGauge.set(robotTelemetry.avgTemperatureC);
+    queueOldestAgeGauge.set(operational.oldestQueueAgeSec);
+    billingNeedsReviewGauge.set(operational.billingNeedsReview);
+    notificationEmailFailedGauge.set(operational.failedEmails);
+    webhookDeliveryFailedGauge.set(operational.failedWebhooks);
+    databaseConnectionsGauge.set(operational.databaseConnections);
+    redisMemoryBytesGauge.set(operational.redisMemoryBytes);
+    livekitUpGauge.set(operational.livekitUp);
+    objectStorageUpGauge.set(operational.objectStorageUp);
 
     res.header('Content-Type', register.contentType);
     return res.send(await register.metrics());
   }
 
   @Post('csp-report')
+  @HttpCode(204)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @RouteConfig({ bodyLimit: 16_384 })
   @ApiOperation({ summary: 'Receive browser Content Security Policy violation reports' })
-  cspReport(@Body() body: unknown, @Headers('user-agent') userAgent?: string) {
-    this.logger.warn(`CSP violation report received from ${userAgent ?? 'unknown-agent'}: ${JSON.stringify(body)}`);
-    return { ok: true };
+  cspReport(@Body() body: unknown) {
+    const serialized = JSON.stringify(body ?? {});
+    if (Buffer.byteLength(serialized, 'utf8') > 16_384) throw new PayloadTooLargeException();
+    const report =
+      body && typeof body === 'object' && 'csp-report' in body
+        ? (body as Record<string, unknown>)['csp-report']
+        : body;
+    const fields = report && typeof report === 'object' ? (report as Record<string, unknown>) : {};
+    const directive =
+      typeof fields['violated-directive'] === 'string'
+        ? fields['violated-directive'].slice(0, 128)
+        : 'unknown';
+    this.logger.warn(`CSP violation: ${directive}`);
   }
 
   private async _checkDatabaseUp(): Promise<number> {
@@ -218,6 +281,37 @@ export class HealthController {
     } catch {
       return 0;
     }
+  }
+
+  private async buildHealthSnapshot() {
+    const [databaseUp, redisUp, livekitUp] = await Promise.all([
+      this._checkDatabaseUp(),
+      this._checkRedisUp(),
+      this.livekit
+        .listRooms([])
+        .then(() => 1)
+        .catch(() => 0),
+    ]);
+    const billingEnabled = this.features.isEnabled('BILLING');
+    const mailRequired =
+      String(this.config.get('REQUIRE_EMAIL_VERIFICATION') ?? 'false') === 'true';
+    const checks = {
+      discovery: databaseUp ? 'ok' : 'error',
+      auth: databaseUp && redisUp && (!mailRequired || this.mail.isEnabled()) ? 'ok' : 'error',
+      control: databaseUp && redisUp ? 'ok' : 'error',
+      video: livekitUp ? 'ok' : 'error',
+      payments: billingEnabled ? (databaseUp ? 'ok' : 'error') : 'disabled',
+    } as const;
+    const coreHealthy =
+      checks.discovery === 'ok' &&
+      checks.auth === 'ok' &&
+      checks.control === 'ok' &&
+      checks.video === 'ok';
+    return {
+      status: coreHealthy ? ('healthy' as const) : ('degraded' as const),
+      checks,
+      timestamp: new Date().toISOString(),
+    };
   }
 
   private async _checkRedisUp(): Promise<number> {
@@ -232,6 +326,71 @@ export class HealthController {
   private async _getQueueDepth(): Promise<number> {
     try {
       return await this.prisma.queueEntry.count();
+    } catch {
+      return 0;
+    }
+  }
+
+  private async _getOperationalMetrics() {
+    const [
+      oldestQueue,
+      billingNeedsReview,
+      failedEmails,
+      failedWebhooks,
+      databaseConnections,
+      redisInfo,
+      livekitUp,
+      objectStorageUp,
+    ] = await Promise.all([
+      this.prisma.queueEntry
+        .findFirst({ orderBy: { joinedAt: 'asc' }, select: { joinedAt: true } })
+        .catch(() => null),
+      this.prisma.billingIntent.count({ where: { status: 'NEEDS_REVIEW' } }).catch(() => 0),
+      this.prisma.notification.count({ where: { emailStatus: 'FAILED' } }).catch(() => 0),
+      this.prisma.robotWebhook
+        .count({
+          where: {
+            isActive: true,
+            lastTriggeredAt: { not: null },
+            lastStatusCode: null,
+          },
+        })
+        .catch(() => 0),
+      this.prisma.$queryRaw<Array<{ count: bigint }>>`
+        SELECT COUNT(*)::bigint AS count FROM pg_stat_activity WHERE datname = current_database()
+      `
+        .then((rows) => Number(rows[0]?.count ?? 0))
+        .catch(() => 0),
+      this.redis.info('memory').catch(() => ''),
+      this.livekit
+        .listRooms([])
+        .then(() => 1)
+        .catch(() => 0),
+      this._checkObjectStorage(),
+    ]);
+    const memoryMatch = /(?:^|\r?\n)used_memory:(\d+)/.exec(redisInfo);
+    return {
+      oldestQueueAgeSec: oldestQueue
+        ? Math.max(0, (Date.now() - oldestQueue.joinedAt.getTime()) / 1000)
+        : 0,
+      billingNeedsReview,
+      failedEmails,
+      failedWebhooks,
+      databaseConnections,
+      redisMemoryBytes: Number(memoryMatch?.[1] ?? 0),
+      livekitUp,
+      objectStorageUp,
+    };
+  }
+
+  private async _checkObjectStorage() {
+    const endpoint = this.config.get<string>('THUMBNAIL_S3_ENDPOINT')?.replace(/\/$/, '');
+    if (!endpoint) return 0;
+    try {
+      const response = await fetch(`${endpoint}/minio/health/live`, {
+        signal: AbortSignal.timeout(2_000),
+      });
+      return response.ok ? 1 : 0;
     } catch {
       return 0;
     }
@@ -253,7 +412,9 @@ export class HealthController {
         return emptySummary;
       }
 
-      const telemetryRaw = await this.redis.mget(...robots.map((robot) => `robot:telemetry:${robot.id}:latest`));
+      const telemetryRaw = await this.redis.mget(
+        ...robots.map((robot) => `robot:telemetry:${robot.id}:latest`),
+      );
       const now = Date.now();
       const cpuSamples: number[] = [];
       const memorySamples: number[] = [];
@@ -329,14 +490,11 @@ export class HealthController {
     return Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(1));
   }
 
-  private _authorizeMetricsRequest(
-    authorization: string | undefined,
-    res: FastifyReply,
-  ): boolean {
+  private _authorizeMetricsRequest(authorization: string | undefined, res: FastifyReply): boolean {
     const metricsAuthMode = this.config.get<string>('METRICS_AUTH_REQUIRED')?.trim().toLowerCase();
     const metricsAuthRequired =
-      metricsAuthMode === 'true'
-      || (metricsAuthMode !== 'false' && this.config.get<string>('NODE_ENV') === 'production');
+      metricsAuthMode === 'true' ||
+      (metricsAuthMode !== 'false' && this.config.get<string>('NODE_ENV') === 'production');
 
     if (!metricsAuthRequired) {
       return true;

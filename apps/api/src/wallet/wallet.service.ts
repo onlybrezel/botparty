@@ -34,6 +34,10 @@ interface CreditDebitOptions {
   description?: string | null;
   metadata?: Prisma.InputJsonValue | null;
   ledgerGroupId?: string;
+  billingIntentId?: string;
+  billingReversalKey?: string;
+  payoutRequestId?: string;
+  controlCommandId?: string;
 }
 
 interface TransferOptions extends CreditDebitOptions {
@@ -66,11 +70,15 @@ export class WalletService {
 
   async listTransactions(
     userId: string,
-    opts: { limit?: number; cursor?: string; type?: TransactionType } = {},
+    opts: { limit?: number; cursor?: string; type?: TransactionType; from?: Date; to?: Date; robotId?: string } = {},
   ) {
     const limit = Math.max(1, Math.min(opts.limit ?? 50, 200));
     const where: Prisma.TransactionWhereInput = { userId };
     if (opts.type) where.type = opts.type;
+    if (opts.from || opts.to) {
+      where.createdAt = { ...(opts.from ? { gte: opts.from } : {}), ...(opts.to ? { lte: opts.to } : {}) };
+    }
+    if (opts.robotId) where.metadata = { path: ['robotId'], equals: opts.robotId };
 
     const items = await this.prisma.transaction.findMany({
       where,
@@ -84,6 +92,9 @@ export class WalletService {
         balanceAfter: true,
         description: true,
         ledgerGroupId: true,
+        billingIntentId: true,
+        payoutRequestId: true,
+        controlCommandId: true,
         metadata: true,
         createdAt: true,
       },
@@ -95,11 +106,35 @@ export class WalletService {
     return {
       items: sliced.map((tx) => ({
         ...tx,
+        reconciliationId: tx.billingIntentId ?? tx.payoutRequestId ?? tx.controlCommandId ?? tx.ledgerGroupId ?? tx.id,
         createdAt: tx.createdAt.toISOString(),
         metadata: (tx.metadata as Record<string, unknown> | null) ?? null,
       })),
       nextCursor: hasMore && sliced.length > 0 ? sliced[sliced.length - 1]!.id : null,
     };
+  }
+
+  async exportTransactions(
+    userId: string,
+    opts: { type?: TransactionType; from?: Date; to?: Date; robotId?: string },
+  ) {
+    const all = [];
+    let cursor: string | undefined;
+    do {
+      const page = await this.listTransactions(userId, { ...opts, cursor, limit: 200 });
+      all.push(...page.items);
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor);
+    return all;
+  }
+
+  async listStaleReservedControlIds(olderThan: Date, limit = 500): Promise<string[]> {
+    const commands = await this.prisma.controlCommand.findMany({
+      where: { status: 'PENDING', createdAt: { lt: olderThan } },
+      select: { id: true },
+      take: limit,
+    });
+    return commands.map((command) => command.id);
   }
 
   // ─── Single-leg helpers ──────────────────────────────────────────────────────
@@ -114,20 +149,7 @@ export class WalletService {
     if (!Number.isFinite(amount) || amount <= 0) {
       throw new BadRequestException('Credit amount must be positive');
     }
-    return this.runRetryable(async () => {
-      return this.prisma.$transaction(async (tx) => {
-        const balanceAfter = await this.applyDelta(tx, userId, amount);
-        return this.recordTransaction(tx, {
-          userId,
-          type,
-          amount,
-          balanceAfter,
-          description: opts.description ?? null,
-          metadata: opts.metadata ?? null,
-          ledgerGroupId: opts.ledgerGroupId,
-        });
-      });
-    });
+    return this.runSerializable((tx) => this.creditInTransaction(tx, userId, amount, type, opts));
   }
 
   /** Atomically debit a user's balance with a balance-guard update. */
@@ -140,20 +162,7 @@ export class WalletService {
     if (!Number.isFinite(amount) || amount <= 0) {
       throw new BadRequestException('Debit amount must be positive');
     }
-    return this.runRetryable(async () => {
-      return this.prisma.$transaction(async (tx) => {
-        const balanceAfter = await this.applyDelta(tx, userId, -amount);
-        return this.recordTransaction(tx, {
-          userId,
-          type,
-          amount: -amount,
-          balanceAfter,
-          description: opts.description ?? null,
-          metadata: opts.metadata ?? null,
-          ledgerGroupId: opts.ledgerGroupId,
-        });
-      });
-    });
+    return this.runSerializable((tx) => this.debitInTransaction(tx, userId, amount, type, opts));
   }
 
   // ─── Transfer with platform fee ──────────────────────────────────────────────
@@ -178,64 +187,197 @@ export class WalletService {
       throw new BadRequestException('Payer and payee must differ');
     }
 
+    const ledgerGroupId = randomUUID();
+    return this.runSerializable((tx) =>
+      this.transferInTransaction(tx, payerId, payeeId, gross, { ...options, ledgerGroupId }),
+    );
+  }
+
+  async creditInTransaction(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    amount: number,
+    type: TransactionType,
+    opts: CreditDebitOptions = {},
+  ) {
+    const balanceAfter = await this.applyDelta(tx, userId, amount);
+    return this.recordTransaction(tx, {
+      userId,
+      type,
+      amount,
+      balanceAfter,
+      description: opts.description ?? null,
+      metadata: opts.metadata ?? null,
+      ...this.referenceFields(opts),
+    });
+  }
+
+  async debitInTransaction(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    amount: number,
+    type: TransactionType,
+    opts: CreditDebitOptions = {},
+  ) {
+    const balanceAfter = await this.applyDelta(tx, userId, -amount);
+    return this.recordTransaction(tx, {
+      userId,
+      type,
+      amount: -amount,
+      balanceAfter,
+      description: opts.description ?? null,
+      metadata: opts.metadata ?? null,
+      ...this.referenceFields(opts),
+    });
+  }
+
+  async reverseBillingCreditInTransaction(
+    tx: Prisma.TransactionClient,
+    input: {
+      userId: string;
+      amount: number;
+      type: 'REFUND' | 'CHARGEBACK';
+      reversalKey: string;
+      billingIntentId: string;
+      metadata: Record<string, Prisma.JsonValue>;
+    },
+  ) {
+    const user = await tx.user.findUnique({
+      where: { id: input.userId },
+      select: { balance: true },
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    const debited = Math.min(user.balance, input.amount);
+    const debt = input.amount - debited;
+    const balanceAfter = debited > 0
+      ? await this.applyDelta(tx, input.userId, -debited)
+      : user.balance;
+    if (debt > 0) {
+      await tx.user.update({
+        where: { id: input.userId },
+        data: { creditDebt: { increment: debt }, financialHold: true },
+      });
+    }
+    return this.recordTransaction(tx, {
+      userId: input.userId,
+      type: input.type,
+      amount: -debited,
+      balanceAfter,
+      description: `${input.type === TransactionType.REFUND ? 'Refund' : 'Chargeback'} reversal`,
+      metadata: {
+        ...input.metadata,
+        requestedDebit: input.amount,
+        debtCreated: debt,
+      },
+      billingReversalKey: input.reversalKey,
+    });
+  }
+
+  async transferInTransaction(
+    tx: Prisma.TransactionClient,
+    payerId: string,
+    payeeId: string,
+    gross: number,
+    options: TransferOptions,
+  ): Promise<TransferResult> {
     const platformId = this.platform.getPlatformUserId();
     const fee = this.platform.computeFee(gross);
     const payeeReceived = gross - fee;
-    const ledgerGroupId = randomUUID();
+    const ledgerGroupId = options.ledgerGroupId ?? randomUUID();
+    const ids = [payerId, payeeId, platformId].sort();
+    await tx.$executeRaw(
+      Prisma.sql`SELECT id FROM users WHERE id IN (${Prisma.join(
+        ids.map((id) => Prisma.sql`${id}::uuid`),
+      )}) ORDER BY id FOR UPDATE`,
+    );
 
-    return this.runRetryable(async () => {
-      return this.prisma.$transaction(async (tx) => {
-        // Lock rows in deterministic order to prevent deadlocks.
-        const ids = [payerId, payeeId, platformId].sort();
-        await tx.$executeRaw(
-          Prisma.sql`SELECT id FROM users WHERE id IN (${Prisma.join(
-            ids.map((id) => Prisma.sql`${id}::uuid`),
-          )}) ORDER BY id FOR UPDATE`,
-        );
-
-        const payerBalanceAfter = await this.applyDelta(tx, payerId, -gross);
-        await this.recordTransaction(tx, {
-          userId: payerId,
-          type: options.payerType,
-          amount: -gross,
-          balanceAfter: payerBalanceAfter,
-          description: options.description ?? null,
-          metadata: options.metadata ?? null,
-          ledgerGroupId,
-        });
-
-        const payeeBalanceAfter = await this.applyDelta(tx, payeeId, payeeReceived);
-        await this.recordTransaction(tx, {
-          userId: payeeId,
-          type: options.payeeType,
-          amount: payeeReceived,
-          balanceAfter: payeeBalanceAfter,
-          description: options.description ?? null,
-          metadata: options.metadata ?? null,
-          ledgerGroupId,
-        });
-
-        if (fee > 0) {
-          const platformBalanceAfter = await this.applyDelta(tx, platformId, fee);
-          await this.recordTransaction(tx, {
-            userId: platformId,
-            type: TransactionType.PLATFORM_FEE,
-            amount: fee,
-            balanceAfter: platformBalanceAfter,
-            description: options.description ?? null,
-            metadata: options.metadata ?? null,
-            ledgerGroupId,
-          });
-        }
-
-        return {
-          ledgerGroupId,
-          payerBalanceAfter,
-          payeeBalanceAfter,
-          payeeReceived,
-          fee,
-        };
+    const payerBalanceAfter = await this.applyDelta(tx, payerId, -gross);
+    await this.recordTransaction(tx, {
+      userId: payerId,
+      type: options.payerType,
+      amount: -gross,
+      balanceAfter: payerBalanceAfter,
+      description: options.description ?? null,
+      metadata: options.metadata ?? null,
+      ledgerGroupId,
+      controlCommandId: options.controlCommandId,
+    });
+    const payeeBalanceAfter = await this.applyDelta(tx, payeeId, payeeReceived);
+    await this.recordTransaction(tx, {
+      userId: payeeId,
+      type: options.payeeType,
+      amount: payeeReceived,
+      balanceAfter: payeeBalanceAfter,
+      description: options.description ?? null,
+      metadata: options.metadata ?? null,
+      ledgerGroupId,
+      controlCommandId: options.controlCommandId,
+    });
+    if (fee > 0) {
+      const platformBalanceAfter = await this.applyDelta(tx, platformId, fee);
+      await this.recordTransaction(tx, {
+        userId: platformId,
+        type: TransactionType.PLATFORM_FEE,
+        amount: fee,
+        balanceAfter: platformBalanceAfter,
+        description: options.description ?? null,
+        metadata: options.metadata ?? null,
+        ledgerGroupId,
+        controlCommandId: options.controlCommandId,
       });
+    }
+    return { ledgerGroupId, payerBalanceAfter, payeeBalanceAfter, payeeReceived, fee };
+  }
+
+  async completeReservedControlInTransaction(
+    tx: Prisma.TransactionClient,
+    input: {
+      payeeId: string;
+      gross: number;
+      ledgerGroupId: string;
+      controlCommandId: string;
+      metadata: Prisma.InputJsonValue;
+    },
+  ) {
+    const platformId = this.platform.getPlatformUserId();
+    const fee = this.platform.computeFee(input.gross);
+    const received = input.gross - fee;
+    const payeeBalanceAfter = await this.applyDelta(tx, input.payeeId, received);
+    await this.recordTransaction(tx, {
+      userId: input.payeeId,
+      type: TransactionType.BUTTON_PAYOUT,
+      amount: received,
+      balanceAfter: payeeBalanceAfter,
+      description: 'Paid control completed',
+      metadata: input.metadata,
+      ledgerGroupId: input.ledgerGroupId,
+      controlCommandId: input.controlCommandId,
+    });
+    if (fee > 0) {
+      const platformBalanceAfter = await this.applyDelta(tx, platformId, fee);
+      await this.recordTransaction(tx, {
+        userId: platformId,
+        type: TransactionType.PLATFORM_FEE,
+        amount: fee,
+        balanceAfter: platformBalanceAfter,
+        description: 'Paid control platform fee',
+        metadata: input.metadata,
+        ledgerGroupId: input.ledgerGroupId,
+        controlCommandId: input.controlCommandId,
+      });
+    }
+    return { payeeBalanceAfter, received, fee };
+  }
+
+  async compensateReservedControlInTransaction(
+    tx: Prisma.TransactionClient,
+    input: { userId: string; amount: number; controlCommandId: string; sourceLedgerGroupId: string },
+  ) {
+    return this.creditInTransaction(tx, input.userId, input.amount, TransactionType.REFUND, {
+      controlCommandId: input.controlCommandId,
+      description: 'Paid control was not acknowledged',
+      metadata: { sourceLedgerGroupId: input.sourceLedgerGroupId, controlCommandId: input.controlCommandId },
     });
   }
 
@@ -345,6 +487,10 @@ export class WalletService {
       description: string | null;
       metadata: Prisma.InputJsonValue | null;
       ledgerGroupId?: string;
+      billingIntentId?: string;
+      billingReversalKey?: string;
+      payoutRequestId?: string;
+      controlCommandId?: string;
     },
   ) {
     return tx.transaction.create({
@@ -356,6 +502,10 @@ export class WalletService {
         description: input.description ?? null,
         metadata: input.metadata ?? Prisma.DbNull,
         ledgerGroupId: input.ledgerGroupId ?? null,
+        billingIntentId: input.billingIntentId ?? null,
+        billingReversalKey: input.billingReversalKey ?? null,
+        payoutRequestId: input.payoutRequestId ?? null,
+        controlCommandId: input.controlCommandId ?? null,
       },
       select: {
         id: true,
@@ -368,11 +518,13 @@ export class WalletService {
     });
   }
 
-  private async runRetryable<T>(fn: () => Promise<T>): Promise<T> {
+  async runSerializable<T>(fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
     let attempt = 0;
     while (true) {
       try {
-        return await fn();
+        return await this.prisma.$transaction(fn, {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        });
       } catch (err) {
         const code = (err as { code?: string }).code;
         if (code && SERIALIZATION_ERROR_CODES.has(code) && attempt < MAX_RETRIES) {
@@ -384,5 +536,15 @@ export class WalletService {
         throw err;
       }
     }
+  }
+
+  private referenceFields(opts: CreditDebitOptions) {
+    return {
+      ledgerGroupId: opts.ledgerGroupId,
+      billingIntentId: opts.billingIntentId,
+      billingReversalKey: opts.billingReversalKey,
+      payoutRequestId: opts.payoutRequestId,
+      controlCommandId: opts.controlCommandId,
+    };
   }
 }

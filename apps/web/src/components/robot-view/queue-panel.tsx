@@ -23,6 +23,7 @@ export function RobotQueuePanel({
   userId,
   inQueue,
   queueAction,
+  activeSession,
   votingForUserId,
   robot,
   onToggleQueue,
@@ -78,8 +79,11 @@ export function RobotQueuePanel({
                   {entry.votes ?? 0} votes
                 </span>
               )}
-              {i === 0 && (
+              {activeSession?.userId === entry.userId && (
                 <span className="ml-auto text-xs text-[var(--online)]">Controlling</span>
+              )}
+              {i === 0 && activeSession?.userId !== entry.userId && (
+                <span className="ml-auto text-xs text-amber-300">Next</span>
               )}
               {userId && entry.userId === userId && i > 0 && (
                 <span className="ml-auto text-xs text-amber-300">You</span>

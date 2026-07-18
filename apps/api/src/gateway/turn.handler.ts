@@ -4,19 +4,22 @@ import type { SessionsService } from '../sessions/sessions.service';
 import type { RobotsService } from '../robots/robots.service';
 import type { QueueService } from '../queue/queue.service';
 import type { ActiveTurnState, WsClient } from './gateway-types';
+import { randomUUID } from 'crypto';
+import type { NotificationsService } from '../notifications/notifications.service';
 
 export interface TurnHandlerContext {
   readonly robotClients: Map<string, WsClient>;
   getActiveTurn(robotId: string): Promise<ActiveTurnState | null>;
   hasLocalActiveTurn(robotId: string): boolean;
-  rememberActiveTurn(robotId: string, state: ActiveTurnState): void;
-  setActiveTurn(robotId: string, state: ActiveTurnState): Promise<void>;
-  clearActiveTurn(robotId: string): Promise<ActiveTurnState | null>;
+  isTurnOwner(state: ActiveTurnState): boolean;
+  acquireActiveTurn(robotId: string, state: ActiveTurnState): Promise<ActiveTurnState | null>;
+  clearActiveTurn(robotId: string, expected: ActiveTurnState): Promise<ActiveTurnState | null>;
   getTurnTimeout(robotId: string): ReturnType<typeof setTimeout> | undefined;
   setTurnTimeout(robotId: string, timer: ReturnType<typeof setTimeout>): void;
   clearTurnTimeout(robotId: string): void;
   broadcastToRoom(robotId: string, event: string, data: unknown, excludeClientId?: string): void;
   sendRobotStop(robotId: string, reason: string): void;
+  revokeController(robotId: string, userId: string): Promise<void>;
 }
 
 export class TurnHandler {
@@ -27,6 +30,7 @@ export class TurnHandler {
     private readonly robotsService: RobotsService,
     private readonly sessionsService: SessionsService,
     private readonly queueService: QueueService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async syncTurnLifecycle(
@@ -62,9 +66,7 @@ export class TurnHandler {
     }
 
     if (current && current.userId === nextEntry.userId) {
-      if (!this.ctx.hasLocalActiveTurn(robotId)) {
-        this.ctx.rememberActiveTurn(robotId, current);
-      }
+      if (!this.ctx.isTurnOwner(current)) return;
 
       const remainingMs = current.expiresAt - Date.now();
       if (remainingMs <= 0) {
@@ -82,19 +84,65 @@ export class TurnHandler {
     }
 
     if (current) {
+      if (!this.ctx.isTurnOwner(current)) return;
       await this.clearTurnState(robotId);
     }
 
-    const session = await this.sessionsService.create(robotId, nextEntry.userId);
-    const expiresAt = Date.now() + robot.maxTurnTime;
-    const startedAt = Date.now();
-    const nextTurn: ActiveTurnState = {
-      sessionId: session.id,
+    const recoverable = await this.sessionsService.findActiveForTurnRecovery(robotId);
+    const canRecover =
+      recoverable?.userId === nextEntry.userId &&
+      recoverable.startedAt.getTime() + robot.maxTurnTime > Date.now();
+    const sessionId = canRecover ? recoverable.id : randomUUID();
+    const startedAt = canRecover ? recoverable.startedAt.getTime() : Date.now();
+    const expiresAt = startedAt + robot.maxTurnTime;
+    const candidate: ActiveTurnState = {
+      sessionId,
       userId: nextEntry.userId,
       startedAt,
       expiresAt,
+      ownerId: '',
+      fencingToken: 0,
+      leaseExpiresAt: 0,
     };
-    await this.ctx.setActiveTurn(robotId, nextTurn);
+    const nextTurn = await this.ctx.acquireActiveTurn(robotId, candidate);
+    if (!nextTurn) return;
+
+    let session = recoverable;
+    try {
+      if (!canRecover) {
+        if (recoverable) await this.sessionsService.end(recoverable.id);
+        session = await this.sessionsService.create(robotId, nextEntry.userId, sessionId);
+      }
+    } catch (error) {
+      await this.ctx.clearActiveTurn(robotId, nextTurn);
+      throw error;
+    }
+    if (!session) {
+      await this.ctx.clearActiveTurn(robotId, nextTurn);
+      return;
+    }
+
+    void this.notifications.publishSafely({
+      userId: nextEntry.userId,
+      kind: 'TURN_NOW',
+      category: 'TURN',
+      title: `Your turn on ${robot.name} starts now`,
+      body: 'Open the room to use your control time.',
+      actionUrl: `/robots/${robot.slug}`,
+      dedupeKey: `turn-now:${session.id}`,
+    });
+    const nextWaiting = queue[1];
+    if (nextWaiting?.userId) {
+      void this.notifications.publishSafely({
+        userId: nextWaiting.userId,
+        kind: 'TURN_SOON',
+        category: 'TURN',
+        title: `You are next on ${robot.name}`,
+        body: 'Keep the room open. Your turn starts after the current session.',
+        actionUrl: `/robots/${robot.slug}`,
+        dedupeKey: `turn-soon:${robotId}:${nextWaiting.userId}:${session.id}`,
+      });
+    }
 
     await this.robotsService.updateStatus(robotId, 'BUSY').catch(() => {});
     this.ctx.broadcastToRoom(robotId, WS_EVENTS.ROBOT_STATUS, { status: 'BUSY' });
@@ -127,9 +175,15 @@ export class TurnHandler {
   }
 
   async clearTurnState(robotId: string, reason: 'handoff' | 'timeout' | 'clear' = 'handoff') {
-    const current = await this.ctx.clearActiveTurn(robotId);
+    const expected = await this.ctx.getActiveTurn(robotId);
+    if (!expected || !this.ctx.isTurnOwner(expected)) {
+      this.ctx.clearTurnTimeout(robotId);
+      return;
+    }
+    const current = await this.ctx.clearActiveTurn(robotId, expected);
     if (current) {
       this.ctx.sendRobotStop(robotId, `Turn ended: ${reason}`);
+      await this.ctx.revokeController(robotId, current.userId).catch(() => {});
       await this.sessionsService.end(current.sessionId).catch(() => {});
       this.ctx.broadcastToRoom(robotId, WS_EVENTS.SESSION_END, {
         sessionId: current.sessionId,

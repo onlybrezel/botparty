@@ -30,6 +30,8 @@ import { RedisPubSubHandler } from './redis-pubsub.handler';
 import { RoomHandler } from './room.handler';
 import { RobotRuntimeHandler } from './robot-runtime.handler';
 import { TurnHandler } from './turn.handler';
+import { FeatureFlagsService } from '../common/feature-flags.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @WebSocketGateway({
   path: '/ws',
@@ -54,6 +56,8 @@ export class BotGateway
   private readonly controlHandler: ControlHandler;
   private readonly redisPubSub: RedisPubSubHandler;
   private readonly robotRuntimeHandler: RobotRuntimeHandler;
+  private readonly robotDisconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private turnReconciliationTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     private readonly robotsService: RobotsService,
@@ -67,6 +71,8 @@ export class BotGateway
     private readonly configService: ConfigService,
     private readonly walletService: WalletService,
     private readonly livekitService: LivekitService,
+    private readonly featureFlags: FeatureFlagsService,
+    private readonly notifications: NotificationsService,
   ) {
     this.runtime = new GatewayRuntimeSupport(
       this.redis,
@@ -83,19 +89,21 @@ export class BotGateway
         robotClients: this.robotClients,
         getActiveTurn: (robotId) => this.runtime.activeTurns.get(robotId),
         hasLocalActiveTurn: (robotId) => this.runtime.activeTurns.hasLocal(robotId),
-        rememberActiveTurn: (robotId, state) => this.runtime.activeTurns.remember(robotId, state),
-        setActiveTurn: (robotId, state) => this.runtime.activeTurns.set(robotId, state),
-        clearActiveTurn: (robotId) => this.runtime.activeTurns.clear(robotId),
+        isTurnOwner: (state) => state.ownerId === this.runtime.instanceId && state.leaseExpiresAt > Date.now(),
+        acquireActiveTurn: (robotId, state) => this.runtime.activeTurns.acquire(robotId, state),
+        clearActiveTurn: (robotId, expected) => this.runtime.activeTurns.clear(robotId, expected),
         getTurnTimeout: (robotId) => this.runtime.getTurnTimeout(robotId),
         setTurnTimeout: (robotId, timer) => this.runtime.setTurnTimeout(robotId, timer),
         clearTurnTimeout: (robotId) => this.runtime.clearTurnTimeout(robotId),
         broadcastToRoom: (robotId, event, data, excludeClientId) =>
           this.runtime.broadcastToRoom(robotId, event, data, excludeClientId),
         sendRobotStop: (robotId, reason) => this.runtime.sendRobotStop(robotId, reason),
+        revokeController: (robotId, userId) => this.livekitService.revokeController(robotId, userId),
       },
       this.robotsService,
       this.sessionsService,
       this.queueService,
+      this.notifications,
     );
     this.moderationEnforcer = new ModerationEnforcerHandler(
       {
@@ -112,10 +120,14 @@ export class BotGateway
       getOpenRobotClient: (robotId: string) => this.runtime.getOpenRobotClient(robotId),
       buildCommandMetadata: (client: WsClient, robotId: string, ownerId?: string | null) =>
         this.runtime.buildCommandMetadata(client, robotId, ownerId),
+      reserveChatMessage: async (actorId: string, clientMessageId: string) =>
+        (await this.redis.set(`chat:dedupe:${actorId}:${clientMessageId}`, '1', 'EX', 86_400, 'NX')) === 'OK',
       consumeControlCooldown: async (client: WsClient, robotId: string, command: string, cooldownMs: number) =>
         this.consumeControlCooldown(client, robotId, command, cooldownMs),
       isRoomModerator: (client: WsClient, ownerId?: string | null) =>
         this.runtime.isRoomModerator(client, ownerId),
+      triggerEmergencyStop: (robotId: string, reason: string) =>
+        this.runtime.triggerEmergencyStop(robotId, reason),
     };
     this.chatHandler = new ChatHandler(handlerCtx, this.robotsService, this.moderationService);
     this.controlHandler = new ControlHandler(
@@ -125,6 +137,7 @@ export class BotGateway
       this.queueService,
       this.controlsService,
       this.walletService,
+      this.featureFlags,
     );
     this.robotRuntimeHandler = new RobotRuntimeHandler(
       this.runtime,
@@ -147,17 +160,20 @@ export class BotGateway
   }
 
   async onModuleInit() {
-    await this.sessionsService.endAllActiveSessions().catch((err: unknown) => {
-      this.logger.warn('Failed to reconcile orphaned sessions on startup', err);
-    });
-
     await this.redisPubSub.start();
     this.runtime.start();
+    await this.controlHandler.reconcilePendingCommands();
+    this.turnReconciliationTimer = setInterval(() => {
+      void this.reconcileTurnLeases();
+    }, 5_000);
   }
 
   async onModuleDestroy() {
+    this.controlHandler.shutdown();
     this.runtime.stop();
     await this.redisPubSub.stop();
+    if (this.turnReconciliationTimer) clearInterval(this.turnReconciliationTimer);
+    for (const timer of this.robotDisconnectTimers.values()) clearTimeout(timer);
   }
 
   async beforeApplicationShutdown(signal?: string) {
@@ -177,10 +193,7 @@ export class BotGateway
   handleDisconnect(client: WsClient) {
     this.runtime.handleDisconnect(client, {
       leaveRoom: (socket) => this.roomHandler.leaveRoom(socket),
-      clearTurnState: (robotId) => this.clearTurnState(robotId),
-      clearQueue: (robotId) => this.queueService.clearQueue(robotId),
-      updateRobotStatus: (robotId, status) => this.robotsService.updateStatus(robotId, status),
-      stopRoomRecording: (robotId) => this.livekitService.stopRoomRecording(robotId),
+      scheduleRobotDisconnect: (robotId) => this.scheduleRobotDisconnect(robotId),
     });
   }
 
@@ -210,7 +223,13 @@ export class BotGateway
       return;
     }
 
-    return this.robotRuntimeHandler.handleRobotClaim(client, data);
+    const result = await this.robotRuntimeHandler.handleRobotClaim(client, data);
+    if (client.robotId) {
+      const timer = this.robotDisconnectTimers.get(client.robotId);
+      if (timer) clearTimeout(timer);
+      this.robotDisconnectTimers.delete(client.robotId);
+    }
+    return result;
   }
 
   @SubscribeMessage(WS_EVENTS.ROBOT_HEARTBEAT)
@@ -270,6 +289,12 @@ export class BotGateway
     return this.controlHandler.handle(client, data);
   }
 
+  @SubscribeMessage(WS_EVENTS.CONTROL_ACK)
+  async handleControlAck(@ConnectedSocket() client: WsClient, @MessageBody() data: unknown) {
+    if (!this.runtime.checkEventRateLimit(client, 'control')) return;
+    return this.controlHandler.handleAck(client, data);
+  }
+
   getRuntimeMetricsSnapshot() {
     return this.runtime.getRuntimeMetricsSnapshot();
   }
@@ -279,6 +304,30 @@ export class BotGateway
     queue: Array<{ userId: string; user?: { username?: string; displayName?: string | null } }>,
   ) {
     return this.turnHandler.syncTurnLifecycle(robotId, queue);
+  }
+
+  private scheduleRobotDisconnect(robotId: string) {
+    const existing = this.robotDisconnectTimers.get(robotId);
+    if (existing) clearTimeout(existing);
+    this.robotDisconnectTimers.set(robotId, setTimeout(() => {
+      this.robotDisconnectTimers.delete(robotId);
+      if (this.runtime.getOpenRobotClient(robotId)) return;
+      void this.clearTurnState(robotId, 'clear');
+      void this.robotsService.updateStatus(robotId, 'OFFLINE').catch(() => {});
+      void this.livekitService.stopRoomRecording(robotId).catch(() => {});
+      this.runtime.broadcastToRoom(robotId, WS_EVENTS.ROBOT_STATUS, { status: 'OFFLINE' });
+    }, 10_000));
+  }
+
+  private async reconcileTurnLeases() {
+    const robotIds = await this.queueService.listQueuedRobotIds().catch(() => [] as string[]);
+    for (const robotId of robotIds) {
+      if (!this.runtime.getOpenRobotClient(robotId)) continue;
+      const queue = await this.queueService.getQueue(robotId).catch(() => []);
+      await this.syncTurnLifecycle(robotId, queue).catch((error) => {
+        this.logger.warn(`Turn reconciliation failed for ${robotId}: ${(error as Error).message}`);
+      });
+    }
   }
 
   private async clearTurnState(robotId: string, reason: 'handoff' | 'timeout' | 'clear' = 'handoff') {

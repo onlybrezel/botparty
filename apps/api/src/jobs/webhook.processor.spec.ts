@@ -1,4 +1,5 @@
 import { WebhookProcessor } from './webhook.processor';
+import { AeadCipher } from '../common/aead-cipher';
 
 describe('WebhookProcessor', () => {
   const originalFetch = global.fetch;
@@ -9,19 +10,26 @@ describe('WebhookProcessor', () => {
   });
 
   it('rejects deliveries to unsafe targets before performing fetch', async () => {
+    const encryptionKey = 'test-webhook-encryption-key-at-least-32-characters';
+    const encryptedSecret = new AeadCipher(encryptionKey).encrypt(
+      'webhook-signing-secret',
+      'robot-webhook:hook-1',
+    );
     const prisma = {
       robotWebhook: {
         findUnique: jest.fn().mockResolvedValue({
           id: 'hook-1',
           isActive: true,
           url: 'http://127.0.0.1:8080/webhook',
-          secret: 'a'.repeat(64),
+          secret: encryptedSecret,
         }),
         update: jest.fn().mockResolvedValue(undefined),
       },
     };
     const config = {
-      get: jest.fn().mockReturnValue(undefined),
+      get: jest.fn((key: string) =>
+        key === 'WEBHOOK_SECRET_ENCRYPTION_KEY' ? encryptionKey : undefined,
+      ),
     };
 
     global.fetch = jest.fn();

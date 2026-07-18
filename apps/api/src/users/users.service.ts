@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { DeleteObjectsCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { ConfigService } from '@nestjs/config';
-import { hash } from 'argon2';
+import { hash, verify } from 'argon2';
 import type { Prisma } from '@botparty/prisma';
 import { basename } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
@@ -84,8 +84,8 @@ export class UsersService {
     return user;
   }
 
-  async exportOwnData(userId: string) {
-    const user = await this.prisma.user.findUnique({
+  async exportOwnData(userId: string, password: string) {
+    const account = await this.prisma.user.findUnique({
       where: { id: userId },
       select: {
         id: true,
@@ -97,57 +97,98 @@ export class UsersService {
         balance: true,
         credits: true,
         createdAt: true,
+        legalAcceptedAt: true,
+        acceptedTermsVersion: true,
+        acceptedPrivacyVersion: true,
         emailVerified: true,
-        robots: {
-          orderBy: { createdAt: 'desc' },
-          select: {
-            id: true,
-            name: true,
-            slug: true,
-            description: true,
-            visibility: true,
-            accessMode: true,
-            queueMode: true,
-            status: true,
-            tags: true,
-            createdAt: true,
-            updatedAt: true,
-          },
-        },
-        sessions: {
-          orderBy: { startedAt: 'desc' },
-          take: 100,
-          select: {
-            id: true,
-            robotId: true,
-            startedAt: true,
-            endedAt: true,
-            durationMs: true,
-            status: true,
-            createdAt: true,
-          },
-        },
-        queueEntries: {
-          orderBy: { joinedAt: 'desc' },
-          take: 100,
-          select: {
-            id: true,
-            robotId: true,
-            position: true,
-            votes: true,
-            joinedAt: true,
-          },
-        },
+        passwordHash: true,
       },
     });
 
-    if (!user) {
+    if (!account) {
       throw new NotFoundException('User not found');
     }
+    if (!(await verify(account.passwordHash, password))) {
+      throw new ForbiddenException('Password confirmation failed');
+    }
+
+    const [robots, sessions, queueEntries, chatMessages, transactions, billingIntents, payouts, moderation, analytics, auditHistory, recordings] = await Promise.all([
+      this.prisma.robot.findMany({
+        where: { ownerId: userId },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, name: true, slug: true, description: true, thumbnailUrl: true, visibility: true, accessMode: true, queueMode: true, status: true, tags: true, createdAt: true, updatedAt: true },
+      }),
+      this.prisma.session.findMany({
+        where: { userId },
+        orderBy: { startedAt: 'desc' },
+        select: { id: true, robotId: true, startedAt: true, endedAt: true, durationMs: true, status: true, peakViewers: true, totalCommands: true, avgLatencyMs: true, createdAt: true },
+      }),
+      this.prisma.queueEntry.findMany({
+        where: { userId },
+        orderBy: { joinedAt: 'desc' },
+        select: { id: true, robotId: true, position: true, votes: true, joinedAt: true, expiresAt: true },
+      }),
+      this.prisma.chatMessage.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, robotId: true, content: true, isSystem: true, deletedAt: true, createdAt: true },
+      }),
+      this.prisma.transaction.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, type: true, amount: true, balanceAfter: true, ledgerGroupId: true, billingIntentId: true, payoutRequestId: true, description: true, createdAt: true },
+      }),
+      this.prisma.billingIntent.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, provider: true, providerRef: true, purchaseType: true, packageId: true, amountCents: true, currency: true, creditsAmount: true, reversedCredits: true, status: true, paidAt: true, refundedAt: true, termsVersion: true, immediateDeliveryConsentAt: true, createdAt: true, updatedAt: true },
+      }),
+      this.prisma.payoutRequest.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, amount: true, status: true, destinationType: true, destinationLast4: true, notes: true, reviewedAt: true, providerRef: true, paidAt: true, createdAt: true, updatedAt: true },
+      }),
+      this.prisma.robotModerationEntry.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, robotId: true, action: true, reason: true, expiresAt: true, isActive: true, createdAt: true, updatedAt: true },
+      }),
+      this.prisma.analyticsEvent.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, robotId: true, event: true, createdAt: true },
+      }),
+      this.prisma.adminAuditLog.findMany({
+        where: { OR: [{ actorId: userId }, { targetType: 'user', targetId: userId }] },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, action: true, targetType: true, targetId: true, createdAt: true },
+      }),
+      this.prisma.recording.findMany({
+        where: { session: { userId } },
+        orderBy: { startedAt: 'desc' },
+        select: { id: true, sessionId: true, robotId: true, cameraId: true, startedAt: true, endedAt: true, createdAt: true },
+      }),
+    ]);
+
+    const { passwordHash: _passwordHash, ...profile } = account;
 
     return {
       exportedAt: new Date().toISOString(),
-      profile: user,
+      profile,
+      robots,
+      sessions,
+      queueEntries,
+      chatMessages,
+      transactions,
+      billingIntents,
+      payouts: payouts.map((payout) => ({
+        ...payout,
+        destination: `${payout.destinationType === 'IBAN' ? 'IBAN' : 'PayPal'} ••••${payout.destinationLast4}`,
+      })),
+      moderation,
+      analytics,
+      auditHistory,
+      recordings,
     };
   }
 
@@ -167,14 +208,37 @@ export class UsersService {
     return user;
   }
 
-  async getLeaderboard(input?: { limit?: number; period?: string }) {
-    const limit = Math.min(input?.limit ?? 20, 100);
+  async getLeaderboard(input?: { limit?: number; period?: string; metric?: 'engagement' | 'creator_revenue' }) {
+    const limit = Math.max(1, Math.min(input?.limit ?? 20, 100));
     const since = this.resolveLeaderboardSince(input?.period);
+    const metric = input?.metric ?? 'engagement';
     const newOperatorThreshold = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const ranked = metric === 'creator_revenue'
+      ? await this.prisma.transaction.groupBy({
+          by: ['userId'],
+          where: {
+            type: { in: ['BUTTON_PAYOUT', 'DONATION_RECEIVED'] },
+            ...(since ? { createdAt: { gte: since } } : {}),
+          },
+          _sum: { amount: true },
+          orderBy: { _sum: { amount: 'desc' } },
+          take: limit,
+        })
+      : await this.prisma.session.groupBy({
+          by: ['userId'],
+          where: since ? { startedAt: { gte: since } } : undefined,
+          _count: { _all: true },
+          orderBy: { _count: { userId: 'desc' } },
+          take: limit,
+        });
+    const scoreByUser = new Map(ranked.map((row) => [
+      row.userId,
+      metric === 'creator_revenue'
+        ? ('_sum' in row ? row._sum.amount ?? 0 : 0)
+        : ('_count' in row ? row._count._all : 0),
+    ]));
     const users = await this.prisma.user.findMany({
-      where: { id: { not: this.platformUser.getPlatformUserId() } },
-      take: limit,
-      orderBy: { balance: 'desc' },
+      where: { id: { in: [...scoreByUser.keys()], not: this.platformUser.getPlatformUserId() } },
       select: {
         id: true,
         username: true,
@@ -204,26 +268,22 @@ export class UsersService {
       username: user.username,
       displayName: user.displayName,
       avatarUrl: user.avatarUrl,
-      credits: user.balance,
+      credits: scoreByUser.get(user.id) ?? 0,
+      metric,
       createdAt: user.createdAt,
       recentSessions: user.sessions.length,
       streakDays: this.countSessionStreak(user.sessions),
       robotCount: user.robots.length,
       isNewOperator: user.robots.some((robot) => robot.createdAt >= newOperatorThreshold),
-    }));
+    })).sort((left, right) => right.credits - left.credits);
   }
 
   async updateMe(userId: string, dto: UpdateMeInput) {
-    const updates: { displayName?: string | null; avatarUrl?: string | null } = {};
+    const updates: { displayName?: string | null } = {};
 
     if (dto.displayName !== undefined) {
       const cleaned = dto.displayName.trim();
       updates.displayName = cleaned.length > 0 ? cleaned : null;
-    }
-
-    if (dto.avatarUrl !== undefined) {
-      const cleaned = dto.avatarUrl.trim();
-      updates.avatarUrl = cleaned.length > 0 ? this.normalizeAvatarUrl(cleaned) : null;
     }
 
     return this.prisma.user.update({
@@ -242,7 +302,7 @@ export class UsersService {
     });
   }
 
-  async listUsersForStaff(input?: { q?: string; limit?: number }) {
+  async listUsersForStaff(input?: { q?: string; limit?: number; requesterRole?: string }) {
     const limit = Math.max(1, Math.min(input?.limit ?? 100, 250));
     const query = input?.q?.trim();
     const platformId = this.platformUser.getPlatformUserId();
@@ -254,7 +314,7 @@ export class UsersService {
           ? {
               OR: [
                 { username: { contains: query, mode: 'insensitive' } },
-                { email: { contains: query, mode: 'insensitive' } },
+                ...(input?.requesterRole === 'ADMIN' ? [{ email: { contains: query, mode: 'insensitive' } as const }] : []),
                 { displayName: { contains: query, mode: 'insensitive' } },
               ],
             }
@@ -262,7 +322,7 @@ export class UsersService {
       },
       take: limit,
       orderBy: [{ createdAt: 'desc' }],
-      select: {
+      select: input?.requesterRole === 'ADMIN' ? {
         id: true,
         username: true,
         displayName: true,
@@ -274,23 +334,16 @@ export class UsersService {
         balance: true,
         lastLoginAt: true,
         createdAt: true,
+      } : {
+        id: true,
+        username: true,
+        displayName: true,
+        avatarUrl: true,
+        role: true,
+        isActive: true,
+        createdAt: true,
       },
     });
-  }
-
-  private normalizeAvatarUrl(value: string): string {
-    let parsed: URL;
-    try {
-      parsed = new URL(value);
-    } catch {
-      throw new BadRequestException('Invalid avatar URL');
-    }
-
-    if (parsed.protocol !== 'https:') {
-      throw new BadRequestException('Avatar URL must use https');
-    }
-
-    return parsed.toString();
   }
 
   async updateUserByStaff(
@@ -540,14 +593,12 @@ export class UsersService {
     });
     await this.deleteOwnedRecordings(ownedRobots.map((robot) => robot.id));
 
-    // Now delete the user
     await this.prisma.$transaction(async (tx) => {
       if (target.role === 'ADMIN') {
         await this.ensureAnotherActiveAdminExists(tx, target.id);
       }
-      await tx.user.delete({
-        where: { id: target.id },
-      });
+      await tx.robot.deleteMany({ where: { ownerId: target.id } });
+      await this.anonymizeUser(tx, target.id);
     });
   }
 
@@ -569,7 +620,29 @@ export class UsersService {
       if (user.role === 'ADMIN') {
         await this.ensureAnotherActiveAdminExists(tx, userId);
       }
-      await tx.user.delete({ where: { id: userId } });
+      await tx.robot.deleteMany({ where: { ownerId: userId } });
+      await this.anonymizeUser(tx, userId);
+    });
+  }
+
+  private anonymizeUser(tx: Prisma.TransactionClient, userId: string) {
+    const suffix = userId.replace(/-/g, '').slice(0, 20);
+    return tx.user.update({
+      where: { id: userId },
+      data: {
+        username: `deleted_${suffix}`,
+        email: `deleted+${userId}@botparty.invalid`,
+        passwordHash: '$argon2id$v=19$m=65536,t=3,p=4$disabled-disabled-disabled-disabled$disabled-disabled-disabled-disabled-disabled-disabled-disabled',
+        displayName: null,
+        avatarUrl: null,
+        role: 'USER',
+        isActive: false,
+        emailVerified: false,
+        emailVerificationToken: null,
+        emailVerificationExpiry: null,
+        tokenVersion: { increment: 1 },
+        deletedAt: new Date(),
+      },
     });
   }
 

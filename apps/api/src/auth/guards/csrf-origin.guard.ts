@@ -2,15 +2,16 @@ import { Injectable, CanActivate, ExecutionContext, ForbiddenException } from '@
 import { ConfigService } from '@nestjs/config';
 import type { FastifyRequest } from 'fastify';
 import { getCsrfCookieName, parseCookie } from '../auth.cookies';
+import { getAccessCookieName, getRefreshCookieName } from '../auth.cookies';
+import { timingSafeEqual } from 'crypto';
 
 /**
  * Defense-in-depth CSRF origin guard for cookie-based mutation endpoints.
  *
- * The app defaults to SameSite=Strict cookies which already prevent CSRF.
- * This guard provides an additional layer by validating that the request
- * Origin (or Referer fallback) matches the configured APP_URL.  Requests
- * without an Origin header (e.g. direct REST clients, curl, mobile apps)
- * are passed through so as not to break non-browser flows.
+ * Cookie-authenticated mutation requests must come from a configured origin
+ * and present the CSRF token in both the cookie and request header. Bearer
+ * clients and unauthenticated requests do not rely on browser cookies and are
+ * therefore not subject to this guard.
  */
 @Injectable()
 export class CsrfOriginGuard implements CanActivate {
@@ -26,19 +27,32 @@ export class CsrfOriginGuard implements CanActivate {
       return true;
     }
 
-    const allowed = this._allowedOrigin();
-    if (!allowed) {
-      // No APP_URL configured; skip check in dev.
+    if (
+      typeof request.headers.authorization === 'string' &&
+      request.headers.authorization.startsWith('Bearer ')
+    ) {
       return true;
     }
 
+    const cookieHeader = request.headers['cookie'] as string | undefined;
+    const csrfCookieName = getCsrfCookieName(this.configService);
+    const hasAuthCookie = Boolean(
+      parseCookie(cookieHeader, getAccessCookieName(this.configService)) ||
+      parseCookie(cookieHeader, getRefreshCookieName(this.configService)) ||
+      parseCookie(cookieHeader, csrfCookieName),
+    );
+    if (!hasAuthCookie) return true;
+
+    const allowed = this._allowedOrigins();
+    if (allowed.size === 0) throw new ForbiddenException('CSRF origin is not configured');
+
     if (origin) {
-      if (origin !== allowed) {
+      if (!allowed.has(origin)) {
         throw new ForbiddenException('CSRF origin mismatch');
       }
     } else if (referer) {
       try {
-        if (new URL(referer).origin !== allowed) {
+        if (!allowed.has(new URL(referer).origin)) {
           throw new ForbiddenException('CSRF referer mismatch');
         }
       } catch {
@@ -48,29 +62,38 @@ export class CsrfOriginGuard implements CanActivate {
       throw new ForbiddenException('CSRF origin or referer required');
     }
 
-    const csrfCookieName = getCsrfCookieName(this.configService);
-    const cookieHeader = request.headers['cookie'] as string | undefined;
     const cookieToken = parseCookie(cookieHeader, csrfCookieName);
     const headerToken = (request.headers['x-csrf-token'] as string | undefined)?.trim();
 
-    if (!cookieToken || !headerToken || cookieToken !== headerToken) {
+    if (!cookieToken || !headerToken || !this._sameToken(cookieToken, headerToken)) {
       throw new ForbiddenException('CSRF token mismatch');
     }
 
     return true;
   }
 
-  private _allowedOrigin(): string | null {
-    const raw = (process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? '').trim();
-    if (!raw) {
-      return null;
+  private _allowedOrigins(): Set<string> {
+    const configured = [
+      this.configService.get<string>('APP_URL'),
+      this.configService.get<string>('PUBLIC_WEB_URL'),
+      this.configService.get<string>('CORS_ORIGIN'),
+    ];
+    const origins = new Set<string>();
+    for (const raw of configured) {
+      for (const entry of raw?.split(',') ?? []) {
+        try {
+          origins.add(new URL(entry.trim()).origin);
+        } catch {
+          // Invalid values are rejected by environment validation in production.
+        }
+      }
     }
+    return origins;
+  }
 
-    try {
-      const url = new URL(raw);
-      return url.origin; // e.g. "https://botparty.io"
-    } catch {
-      return null;
-    }
+  private _sameToken(left: string, right: string): boolean {
+    const leftBuffer = Buffer.from(left);
+    const rightBuffer = Buffer.from(right);
+    return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
   }
 }

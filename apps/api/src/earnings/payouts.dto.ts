@@ -22,3 +22,9 @@ export class RejectPayoutDto {
   @MaxLength(1000)
   reason!: string;
 }
+
+export class MarkPaidPayoutDto {
+  @IsString()
+  @MaxLength(192)
+  providerRef!: string;
+}

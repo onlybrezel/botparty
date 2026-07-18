@@ -1,15 +1,12 @@
 'use client';
 
 import { VideoTrack, useRoomContext, useTracks } from '@livekit/components-react';
-import { Track, RoomEvent, type RemoteVideoTrack, type RemoteTrackPublication } from 'livekit-client';
+import { Track, RoomEvent, VideoQuality, type RemoteVideoTrack, type RemoteTrackPublication } from 'livekit-client';
 import type { TrackReference } from '@livekit/components-core';
-import { Check, Copy, Maximize, Minimize, Radio, Volume2, VolumeX, X } from 'lucide-react';
-import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { Sparkline } from './sparkline';
+import { Maximize, Minimize, Radio, Volume2, VolumeX } from 'lucide-react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import {
-  formatStat,
   maskIdentifier,
-  formatPercent,
   buildCameraTracks,
   clampFloatingPosition,
   type StreamConfig,
@@ -17,92 +14,13 @@ import {
   type DragState,
   type VolumePreference,
 } from './stats-utils';
+import {
+  StreamDiagnosticsPanel,
+  type CandidateStats,
+  type NerdStats,
+  type StatHistoryPoint,
+} from './stream-diagnostics-panel';
 
-
-type NerdStats = {
-  timestamp: string;
-  connectionState: string;
-  participantQuality: string;
-  trackSid: string;
-  audioTrackSid: string;
-  mimeType: string;
-  audioMimeType: string;
-  source: string;
-  subscription: string;
-  streamState: string;
-  bitrateKbps: number | null;
-  audioBitrateKbps: number | null;
-  framesPerSecond: number | null;
-  frameWidth: number | null;
-  frameHeight: number | null;
-  framesDropped: number | null;
-  packetsLost: number | null;
-  audioPacketsLost: number | null;
-  jitterMs: number | null;
-  audioJitterMs: number | null;
-  jitterBufferMs: number | null;
-  audioJitterBufferMs: number | null;
-  roundTripMs: number | null;
-  videoWidth: number | null;
-  videoHeight: number | null;
-  readyState: number | null;
-  audioLevel: number | null;
-  concealedSamples: number | null;
-  audioMuted: string;
-  transportProtocol: string;
-  localCandidateType: string;
-  remoteCandidateType: string;
-};
-
-type StatHistoryPoint = {
-  videoBitrateKbps: number | null;
-  audioBitrateKbps: number | null;
-  roundTripMs: number | null;
-};
-
-type CandidateStats = RTCStats & {
-  candidateType?: string;
-  protocol?: string;
-};
-
-function statsToClipboardText(stats: NerdStats | null) {
-  if (!stats) {
-    return 'Stats for nerds: no data yet';
-  }
-
-  return [
-    `Updated: ${stats.timestamp}`,
-    `Room state: ${stats.connectionState}`,
-    `Connection quality: ${stats.participantQuality}`,
-    `Track: ${stats.trackSid}`,
-    `Audio track: ${stats.audioTrackSid}`,
-    `Mime: ${stats.mimeType}`,
-    `Audio mime: ${stats.audioMimeType}`,
-    `Source: ${stats.source}`,
-    `Subscription: ${stats.subscription}`,
-    `Stream state: ${stats.streamState}`,
-    `Video bitrate: ${formatStat(stats.bitrateKbps, ' kbps')}`,
-    `Audio bitrate: ${formatStat(stats.audioBitrateKbps, ' kbps')}`,
-    `FPS: ${formatStat(stats.framesPerSecond)}`,
-    `Inbound size: ${formatStat(stats.frameWidth)} x ${formatStat(stats.frameHeight)}`,
-    `Rendered size: ${formatStat(stats.videoWidth)} x ${formatStat(stats.videoHeight)}`,
-    `Frames dropped: ${formatStat(stats.framesDropped)}`,
-    `Video packets lost: ${formatStat(stats.packetsLost)}`,
-    `Audio packets lost: ${formatStat(stats.audioPacketsLost)}`,
-    `Video jitter: ${formatStat(stats.jitterMs, ' ms')}`,
-    `Audio jitter: ${formatStat(stats.audioJitterMs, ' ms')}`,
-    `Video jitter buffer: ${formatStat(stats.jitterBufferMs, ' ms')}`,
-    `Audio jitter buffer: ${formatStat(stats.audioJitterBufferMs, ' ms')}`,
-    `RTT: ${formatStat(stats.roundTripMs, ' ms')}`,
-    `Transport: ${stats.transportProtocol}`,
-    `Local candidate: ${stats.localCandidateType}`,
-    `Remote candidate: ${stats.remoteCandidateType}`,
-    `Video readyState: ${formatStat(stats.readyState)}`,
-    `Audio level: ${formatPercent(stats.audioLevel)}`,
-    `Concealed samples: ${formatStat(stats.concealedSamples)}`,
-    `Audio muted: ${stats.audioMuted}`,
-  ].join('\n');
-}
 
 export function VideoRenderer({
   onStreamStalled,
@@ -130,7 +48,6 @@ export function VideoRenderer({
   const [stats, setStats] = useState<NerdStats | null>(null);
   const [history, setHistory] = useState<StatHistoryPoint[]>([]);
   const [panelPosition, setPanelPosition] = useState<PanelPosition | null>(null);
-  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
   const [showVolumeControls, setShowVolumeControls] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [dragState, setDragState] = useState<DragState | null>(null);
@@ -141,8 +58,14 @@ export function VideoRenderer({
   const stallNotifiedRef = useRef(false);
   const trackRecoveryTimeoutRef = useRef<number | null>(null);
   const volumeHideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const publishedTracks = tracks.filter((track) => track.publication !== undefined) as TrackReference[];
-  const cameraTracks = buildCameraTracks(publishedTracks, streamConfig);
+  const publishedTracks = useMemo(
+    () => tracks.filter((track) => track.publication !== undefined) as TrackReference[],
+    [tracks],
+  );
+  const cameraTracks = useMemo(
+    () => buildCameraTracks(publishedTracks, streamConfig),
+    [publishedTracks, streamConfig],
+  );
   const hasMultipleCameras = cameraTracks.length > 1;
   const cameraTrackIdsKey = cameraTracks.map((camera) => camera.id).join('|');
   const robotTrack =
@@ -151,8 +74,14 @@ export function VideoRenderer({
   const selectedCamera =
     cameraTracks.find((camera) => camera.trackRef.publication?.trackSid === robotTrack?.publication?.trackSid)
     ?? cameraTracks[0];
-  const previewTracks = cameraTracks.filter((camera) => camera.id !== selectedCamera?.id).slice(0, 3);
-  const robotAudioTracks = audioTracks.filter((t) => t.publication !== undefined) as TrackReference[];
+  const previewTracks = useMemo(
+    () => cameraTracks.filter((camera) => camera.id !== selectedCamera?.id).slice(0, 3),
+    [cameraTracks, selectedCamera?.id],
+  );
+  const robotAudioTracks = useMemo(
+    () => audioTracks.filter((track) => track.publication !== undefined) as TrackReference[],
+    [audioTracks],
+  );
 
   // Lazy track subscription: subscribe only to tracks that are displayed, unsubscribe hidden ones.
   // This avoids pulling bandwidth for cameras that aren't visible.
@@ -172,6 +101,12 @@ export function VideoRenderer({
       const shouldSubscribe = visibleSids.has(pub.trackSid);
       if (pub.isSubscribed !== shouldSubscribe) {
         (pub as RemoteTrackPublication).setSubscribed(shouldSubscribe);
+      }
+      if (shouldSubscribe) {
+        const quality = pub.trackSid === selectedCamera?.trackRef.publication?.trackSid
+          ? VideoQuality.HIGH
+          : VideoQuality.LOW;
+        (pub as RemoteTrackPublication).setVideoQuality(quality);
       }
     }
   }, [selectedCamera, previewTracks, cameraTracks]);
@@ -197,7 +132,7 @@ export function VideoRenderer({
 
       return cameraTracks[0]?.id ?? null;
     });
-  }, [cameraTrackIdsKey, streamConfig?.activeCameraId]);
+  }, [cameraTrackIdsKey, cameraTracks, streamConfig?.activeCameraId]);
 
   useLayoutEffect(() => {
     if (!hasMultipleCameras || previewTracks.length === 0) {
@@ -400,9 +335,7 @@ export function VideoRenderer({
     return () => window.clearTimeout(timeout);
   }, [robotTrack, room.state, onStreamStalled]);
 
-  // Minimize the browser WebRTC jitter buffer. playoutDelayHint is Chrome-specific
-  // but silently ignored elsewhere. Setting it to 0 tells Chrome to target the
-  // smallest possible playout queue, which alone can cut 300-600 ms of latency.
+  // Ask supported browsers for the smallest practical WebRTC playout buffer.
   useEffect(() => {
     if (!videoTrack) {
       return;
@@ -534,7 +467,7 @@ export function VideoRenderer({
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [audioPublication, audioTrack, panelPosition, robotTrack, room.state, videoPublication, videoTrack]);
+  }, [audioPublication, audioTrack, panelPosition, robotAudioTracks, robotTrack, room.state, videoPublication, videoTrack]);
 
   useEffect(() => {
     if (videoTrack) {
@@ -630,15 +563,6 @@ export function VideoRenderer({
   }, [previewTrayPosition, previewTrayDragState]);
 
   useEffect(() => {
-    if (copyState === 'idle') {
-      return;
-    }
-
-    const timeout = window.setTimeout(() => setCopyState('idle'), 1600);
-    return () => window.clearTimeout(timeout);
-  }, [copyState]);
-
-  useEffect(() => {
     const scheduleHide = () => {
       if (volumeHideTimeoutRef.current) {
         clearTimeout(volumeHideTimeoutRef.current);
@@ -701,15 +625,6 @@ export function VideoRenderer({
       offsetX: event.clientX - rect.left,
       offsetY: event.clientY - rect.top,
     });
-  };
-
-  const copyStats = async () => {
-    try {
-      await navigator.clipboard.writeText(statsToClipboardText(stats));
-      setCopyState('copied');
-    } catch {
-      setCopyState('error');
-    }
   };
 
   if (!robotTrack) {
@@ -846,132 +761,13 @@ export function VideoRenderer({
       </div>
 
       {panelPosition && (
-        <div
-          className="fixed z-[70] w-[min(42rem,calc(100vw-1rem))] overflow-hidden rounded-2xl border border-cyan-400/30 bg-slate-950/92 text-[11px] text-slate-100 shadow-2xl backdrop-blur-xl"
-          style={{
-            left: Math.max(8, Math.min(panelPosition.x, window.innerWidth - 680)),
-            top: Math.max(8, Math.min(panelPosition.y, window.innerHeight - 420)),
-          }}
-          onClick={(event) => event.stopPropagation()}
-        >
-          <div
-            className="flex cursor-move items-center justify-between border-b border-white/10 bg-cyan-400/10 px-3 py-2"
-            onMouseDown={startDraggingPanel}
-          >
-            <div>
-              <p className="text-[10px] uppercase tracking-[0.3em] text-cyan-200/70">Stats</p>
-              <p className="mt-1 text-xs font-semibold text-white">Local stream diagnostics</p>
-            </div>
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => void copyStats()}
-                className="inline-flex items-center gap-1 rounded-full border border-white/10 px-2 py-1 text-[10px] font-medium text-slate-300 transition hover:bg-white/10 hover:text-white"
-              >
-                {copyState === 'copied' ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                {copyState === 'copied' ? 'Copied' : copyState === 'error' ? 'Retry' : 'Copy'}
-              </button>
-              <button
-                type="button"
-                onClick={() => setPanelPosition(null)}
-                className="rounded-full p-1 text-slate-400 transition hover:bg-white/10 hover:text-white"
-                aria-label="Close stats panel"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          </div>
-
-          <div className="grid gap-0 md:grid-cols-[minmax(0,1fr)_17rem]">
-            <div className="grid grid-cols-2 gap-x-4 gap-y-2 px-3 py-3 md:grid-cols-[auto_1fr_auto_1fr]">
-              <p className="text-slate-400">Updated</p>
-              <p>{stats?.timestamp ?? 'collecting...'}</p>
-              <p className="text-slate-400">Room state</p>
-              <p>{formatStat(stats?.connectionState)}</p>
-              <p className="text-slate-400">Connection quality</p>
-              <p>{formatStat(stats?.participantQuality)}</p>
-              <p className="text-slate-400">Track</p>
-              <p>{formatStat(stats?.trackSid)}</p>
-              <p className="text-slate-400">Audio track</p>
-              <p>{formatStat(stats?.audioTrackSid)}</p>
-              <p className="text-slate-400">Source</p>
-              <p>{formatStat(stats?.source)}</p>
-              <p className="text-slate-400">Video bitrate</p>
-              <p>{formatStat(stats?.bitrateKbps, ' kbps')}</p>
-              <p className="text-slate-400">Audio bitrate</p>
-              <p>{formatStat(stats?.audioBitrateKbps, ' kbps')}</p>
-              <p className="text-slate-400">FPS</p>
-              <p>{formatStat(stats?.framesPerSecond)}</p>
-              <p className="text-slate-400">RTT</p>
-              <p>{formatStat(stats?.roundTripMs, ' ms')}</p>
-              <p className="text-slate-400">Inbound size</p>
-              <p>{formatStat(stats?.frameWidth)} x {formatStat(stats?.frameHeight)}</p>
-              <p className="text-slate-400">Rendered size</p>
-              <p>{formatStat(stats?.videoWidth)} x {formatStat(stats?.videoHeight)}</p>
-              <p className="text-slate-400">Frames dropped</p>
-              <p>{formatStat(stats?.framesDropped)}</p>
-              <p className="text-slate-400">Video loss</p>
-              <p>{formatStat(stats?.packetsLost)}</p>
-              <p className="text-slate-400">Audio loss</p>
-              <p>{formatStat(stats?.audioPacketsLost)}</p>
-              <p className="text-slate-400">Video jitter</p>
-              <p>{formatStat(stats?.jitterMs, ' ms')}</p>
-              <p className="text-slate-400">Audio jitter</p>
-              <p>{formatStat(stats?.audioJitterMs, ' ms')}</p>
-              <p className="text-slate-400">Video buffer</p>
-              <p>{formatStat(stats?.jitterBufferMs, ' ms')}</p>
-              <p className="text-slate-400">Audio buffer</p>
-              <p>{formatStat(stats?.audioJitterBufferMs, ' ms')}</p>
-              <p className="text-slate-400">Transport</p>
-              <p>{formatStat(stats?.transportProtocol)}</p>
-              <p className="text-slate-400">Local candidate</p>
-              <p>{formatStat(stats?.localCandidateType)}</p>
-              <p className="text-slate-400">Remote candidate</p>
-              <p>{formatStat(stats?.remoteCandidateType)}</p>
-              <p className="text-slate-400">Audio level</p>
-              <p>{formatPercent(stats?.audioLevel)}</p>
-              <p className="text-slate-400">Audio state</p>
-              <p>{formatStat(stats?.audioMuted)}</p>
-              <p className="text-slate-400">Mime</p>
-              <p className="truncate">{formatStat(stats?.mimeType)}</p>
-              <p className="text-slate-400">Audio mime</p>
-              <p className="truncate">{formatStat(stats?.audioMimeType)}</p>
-              <p className="text-slate-400">Stream state</p>
-              <p>{formatStat(stats?.streamState)}</p>
-              <p className="text-slate-400">Ready</p>
-              <p>{formatStat(stats?.readyState)}</p>
-              <p className="text-slate-400">Concealed</p>
-              <p>{formatStat(stats?.concealedSamples)}</p>
-            </div>
-
-            <div className="grid grid-cols-1 gap-2 border-t border-white/8 px-3 py-3 md:border-l md:border-t-0">
-              <Sparkline
-                label="Video bitrate"
-                value={stats?.bitrateKbps ?? null}
-                suffix=" kbps"
-                values={history.map((point) => point.videoBitrateKbps)}
-                stroke="#22d3ee"
-                minRange={120}
-              />
-              <Sparkline
-                label="Audio bitrate"
-                value={stats?.audioBitrateKbps ?? null}
-                suffix=" kbps"
-                values={history.map((point) => point.audioBitrateKbps)}
-                stroke="#f59e0b"
-                minRange={24}
-              />
-              <Sparkline
-                label="RTT"
-                value={stats?.roundTripMs ?? null}
-                suffix=" ms"
-                values={history.map((point) => point.roundTripMs)}
-                stroke="#fb7185"
-                minRange={40}
-              />
-            </div>
-          </div>
-        </div>
+        <StreamDiagnosticsPanel
+          position={panelPosition}
+          stats={stats}
+          history={history}
+          onClose={() => setPanelPosition(null)}
+          onDragStart={startDraggingPanel}
+        />
       )}
     </div>
   );

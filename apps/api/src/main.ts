@@ -11,10 +11,10 @@ import { randomUUID } from 'crypto';
 import { AppModule } from './bootstrap/app.module';
 import { loadFileBackedEnv } from './common/env-file';
 import { hasBasicAuthCredentials, isAuthorizedBasicAuth } from './common/http-basic-auth';
-import { initSentry } from './common/sentry';
 import { initTracing, shutdownTracing } from './common/tracing';
 import { AllExceptionsFilter } from './filters/all-exceptions.filter';
 import { createSwaggerDocumentConfig } from './openapi/swagger-config';
+import { installPaymentRawBodyCapture } from './billing/payment-raw-body';
 
 function readOrigin(raw: string | undefined): string | null {
   const value = raw?.trim();
@@ -66,7 +66,6 @@ function isProtectedSwaggerPath(url: string | undefined): boolean {
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
   loadFileBackedEnv(process.env, logger);
-  await initSentry(logger);
   await initTracing(logger);
 
   // ─── Security sanity checks ───────────────────────
@@ -130,7 +129,7 @@ async function bootstrap() {
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     new FastifyAdapter({
-      bodyLimit: Number(process.env.FASTIFY_BODY_LIMIT ?? 5 * 1024 * 1024),
+      bodyLimit: Number(process.env.FASTIFY_BODY_LIMIT ?? 1024 * 1024),
       genReqId: (req: { headers: Record<string, string | string[] | undefined> }) => {
         const fromHeader = req.headers['x-correlation-id'];
         if (typeof fromHeader === 'string' && fromHeader.trim()) {
@@ -150,7 +149,11 @@ async function bootstrap() {
       // Docker bridge, RFC-1918).  Override via TRUST_PROXY env var if needed.
       trustProxy: process.env.TRUST_PROXY ?? 'loopback, linklocal, uniquelocal',
     }),
-    { rawBody: true },
+  );
+
+  installPaymentRawBodyCapture(
+    app.getHttpAdapter().getInstance(),
+    Number(process.env.PAYMENT_WEBHOOK_BODY_LIMIT ?? 262_144),
   );
 
   // ─── WebSocket adapter (ws, not socket.io) ────────

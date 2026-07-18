@@ -1,38 +1,77 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
-import {
-  BOTPARTY_LOCALE_COOKIE,
-  getPreferredLocale,
-  isSupportedLocale,
-  stripLocalePrefix,
-} from './lib/i18n';
+function parseOrigins(raw: string | undefined): string[] {
+  const origins = new Set<string>();
+  for (const value of raw?.split(',') ?? []) {
+    try {
+      origins.add(new URL(value.trim()).origin);
+    } catch {
+      // Invalid optional origins are ignored here and rejected by deployment validation.
+    }
+  }
+  return [...origins];
+}
+
+function buildCsp(nonce: string, pathname: string): string {
+  const connectOrigins = [
+    ...parseOrigins(process.env.NEXT_PUBLIC_API_URL),
+    ...parseOrigins(process.env.NEXT_PUBLIC_WS_URL),
+    ...parseOrigins(process.env.NEXT_PUBLIC_LIVEKIT_URL),
+    ...parseOrigins(process.env.NEXT_PUBLIC_APP_URL),
+    ...parseOrigins(process.env.CSP_EXTRA_CONNECT_ORIGINS),
+  ];
+  const imageOrigins = [
+    ...parseOrigins(process.env.NEXT_PUBLIC_APP_URL),
+    ...parseOrigins(process.env.THUMBNAIL_PUBLIC_BASE_URL),
+    ...parseOrigins(process.env.CSP_EXTRA_IMG_ORIGINS),
+  ];
+  const devConnect = process.env.NODE_ENV === 'production' ? [] : ['http:', 'ws:'];
+  const devScript = process.env.NODE_ENV === 'production' ? [] : ["'unsafe-eval'"];
+
+  return [
+    "default-src 'self'",
+    "base-uri 'self'",
+    pathname.startsWith('/embed/') ? 'frame-ancestors https:' : "frame-ancestors 'none'",
+    "object-src 'none'",
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' ${devScript.join(' ')}`.trim(),
+    "style-src 'self' 'unsafe-inline'",
+    `img-src 'self' data: blob: ${[...new Set(imageOrigins)].join(' ')}`.trim(),
+    "font-src 'self' data:",
+    "media-src 'self' blob:",
+    "worker-src 'self' blob:",
+    `connect-src 'self' ${[...new Set([...connectOrigins, ...devConnect])].join(' ')}`.trim(),
+    "manifest-src 'self'",
+    'report-uri /api/v1/health/csp-report',
+  ].join('; ');
+}
 
 export function middleware(request: NextRequest) {
-  const cookieLocale = request.cookies.get(BOTPARTY_LOCALE_COOKIE)?.value;
-  const preferredLocale = isSupportedLocale(cookieLocale)
-    ? cookieLocale
-    : getPreferredLocale(request.headers.get('accept-language'));
-  const { locale, pathname } = stripLocalePrefix(request.nextUrl.pathname);
-  const effectiveLocale = locale ?? preferredLocale;
-  const requestHeaders = new Headers(request.headers);
-  requestHeaders.set('x-botparty-locale', effectiveLocale);
-
-  const applyLocaleCookie = (response: NextResponse) => {
-    response.cookies.set(BOTPARTY_LOCALE_COOKIE, effectiveLocale, {
-      path: '/',
-      sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 365,
-    });
-    return response;
-  };
-
-  if (locale) {
-    const rewritten = request.nextUrl.clone();
-    rewritten.pathname = pathname;
-    return applyLocaleCookie(NextResponse.rewrite(rewritten, { request: { headers: requestHeaders } }));
+  if (request.nextUrl.pathname === '/de' || request.nextUrl.pathname.startsWith('/de/')) {
+    const canonical = request.nextUrl.clone();
+    canonical.pathname = request.nextUrl.pathname.slice(3) || '/';
+    return NextResponse.redirect(canonical, 308);
   }
 
-  return applyLocaleCookie(NextResponse.next({ request: { headers: requestHeaders } }));
+  if (request.nextUrl.pathname === '/explore') {
+    const hasSearchFilters = ['q', 'status', 'sort', 'tag', 'limit', 'offset'].some((key) =>
+      request.nextUrl.searchParams.has(key),
+    );
+    if (hasSearchFilters) {
+      const filtered = request.nextUrl.clone();
+      filtered.pathname = '/explore/search';
+      return NextResponse.redirect(filtered, 308);
+    }
+  }
+
+  const nonce = btoa(crypto.randomUUID());
+  const csp = buildCsp(nonce, request.nextUrl.pathname);
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set('x-botparty-locale', 'en');
+  requestHeaders.set('x-nonce', nonce);
+  requestHeaders.set('Content-Security-Policy', csp);
+  const response = NextResponse.next({ request: { headers: requestHeaders } });
+  response.headers.set('Content-Security-Policy', csp);
+  return response;
 }
 
 export const config = {

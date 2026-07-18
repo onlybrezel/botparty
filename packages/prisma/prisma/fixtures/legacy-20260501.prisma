@@ -1,0 +1,555 @@
+// ─────────────────────────────────────────────────────
+// BotParty – Prisma Schema
+// ─────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+
+// ═════════════════════════════════════════════════════
+// ENUMS
+// ═════════════════════════════════════════════════════
+
+enum Role {
+  ADMIN
+  MOD
+  USER
+}
+
+enum RobotVisibility {
+  PUBLIC
+  UNLISTED
+  PRIVATE
+}
+
+enum RobotAccessMode {
+  OPEN
+  PASSWORD
+  LINK_ONLY
+  ALLOWED_USERS
+}
+
+enum QueueMode {
+  FIRST_COME
+  VOTING
+  DISABLED
+}
+
+enum RobotStatus {
+  ONLINE
+  OFFLINE
+  BUSY
+  MAINTENANCE
+}
+
+enum TransactionType {
+  DEPOSIT
+  WITHDRAWAL
+  PRIORITY_QUEUE
+  FEATURED_ROBOT
+  BATTLE_ENTRY
+  REWARD
+  BUTTON_SPEND
+  BUTTON_PAYOUT
+  DONATION_SENT
+  DONATION_RECEIVED
+  PLATFORM_FEE
+  ADMIN_ADJUSTMENT
+  REFUND
+  CHARGEBACK
+}
+
+enum BillingIntentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+  CHARGEBACK
+  CANCELED
+}
+
+enum BillingPurchaseType {
+  ONE_TIME
+  SUBSCRIPTION
+}
+
+enum PayoutRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  PAID
+}
+
+enum SessionStatus {
+  ACTIVE
+  ENDED
+  RECORDING
+}
+
+enum ControlButtonAccess {
+  EVERYONE
+  QUEUE_TURN  // Only the active controller
+  MODERATOR
+  OWNER
+}
+
+enum ModerationActionType {
+  TIMEOUT
+  KICK
+  BAN
+  UNBAN
+  WARN
+}
+
+// ═════════════════════════════════════════════════════
+// USER
+// ═════════════════════════════════════════════════════
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  username     String   @unique @db.VarChar(32)
+  email        String   @unique @db.VarChar(255)
+  passwordHash String   @db.VarChar(255)
+  displayName  String?  @db.VarChar(64)
+  avatarUrl    String?  @db.VarChar(512)
+  role         Role     @default(USER)
+  balance      Int      @default(0) // Reserved for the durable credits ledger. See docs/adr/0005-schema-cleanup-decisions.md.
+  credits      Int      @default(0) // Exposed in staff and leaderboard flows; intentionally kept. See ADR-0005.
+  tokenVersion Int      @default(0) // For refresh token invalidation
+  isActive     Boolean  @default(true)
+  emailVerified         Boolean   @default(false) // existing users are backfilled true in migration; new users default to unverified
+  emailVerificationToken String?  @unique @db.VarChar(64)
+  emailVerificationExpiry DateTime?
+  lastLoginAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  robots              Robot[]
+  transactions        Transaction[]
+  sessions            Session[]         @relation("SessionUser")
+  queueEntries        QueueEntry[]
+  chatMessages        ChatMessage[]
+  deletedMessages     ChatMessage[]     @relation("DeletedMessages")
+  allowedRobots       RobotAllowedUser[]
+  analyticsEvents     AnalyticsEvent[]
+  moderationEntries   RobotModerationEntry[]
+  givenModerations    RobotModerationEntry[] @relation("ModeratorActions")
+  adminAuditLogs      AdminAuditLog[]
+  billingIntents      BillingIntent[]
+  walletIdempotency   WalletIdempotencyKey[]
+  payoutRequests      PayoutRequest[]
+
+  @@index([email])
+  @@index([username])
+  @@map("users")
+}
+
+// ═════════════════════════════════════════════════════
+// ROBOT
+// ═════════════════════════════════════════════════════
+
+model Robot {
+  id              String          @id @default(uuid()) @db.Uuid
+  name            String          @db.VarChar(64)
+  slug            String          @unique @db.VarChar(80)
+  slugAliases     String[]        @default([])
+  description     String?         @db.VarChar(2000)
+  thumbnailUrl    String?         @db.VarChar(512)
+  status          RobotStatus     @default(OFFLINE)
+
+  // ─── Access & Visibility ───────────────────────────
+  visibility      RobotVisibility @default(PUBLIC)
+  accessMode      RobotAccessMode @default(OPEN)
+  accessPassword  String?         @db.VarChar(255) // Hashed
+  inviteCode      String?         @unique @db.VarChar(32)
+
+  // ─── Queue Settings ────────────────────────────────
+  queueMode       QueueMode       @default(FIRST_COME)
+  maxTurnTime     Int             @default(60000)  // ms
+  maxViewers      Int             @default(1000)
+  maxControllers  Int             @default(10)
+
+  // ─── Streaming ─────────────────────────────────────
+  streamKey       String          @unique @db.VarChar(64)
+  claimToken      String          @unique @db.VarChar(64)
+  livekitRoom     String?         @db.VarChar(128)
+
+  // ─── Schedule ──────────────────────────────────────
+  scheduleStart   DateTime?       // Zeitfenster Start
+  scheduleEnd     DateTime?       // Zeitfenster Ende
+  timezone        String          @default("UTC") @db.VarChar(64)
+
+  // ─── Features ──────────────────────────────────────
+  isFeatured      Boolean         @default(false)
+  recordSessions  Boolean         @default(false)
+  aiAssistEnabled Boolean         @default(false)
+  ros2Enabled     Boolean         @default(false)
+  swarmGroupId    String?         @db.Uuid
+
+  // ─── Stats (denormalized for performance) ──────────
+  viewerCount     Int             @default(0)
+  totalSessions   Int             @default(0)
+  totalViewers    Int             @default(0)
+
+  // ─── Meta ──────────────────────────────────────────
+  tags            String[]        @default([])
+  metadata        Json?           // Flexible extra config
+  lastOnlineAt    DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  // ─── Owner ─────────────────────────────────────────
+  ownerId         String          @db.Uuid
+  owner           User            @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  // ─── Swarm Group ───────────────────────────────────
+  swarmGroup      SwarmGroup?     @relation(fields: [swarmGroupId], references: [id])
+
+  // Relations
+  sessions        Session[]
+  queueEntries    QueueEntry[]
+  chatMessages    ChatMessage[]
+  allowedUsers    RobotAllowedUser[]
+  analyticsEvents AnalyticsEvent[]
+  controlButtons  ControlButton[]
+  webhooks        RobotWebhook[]
+  moderationEntries RobotModerationEntry[]
+
+  @@index([ownerId])
+  @@index([status])
+  @@index([visibility, status])
+  @@index([slug])
+  @@map("robots")
+}
+
+// ═════════════════════════════════════════════════════
+// ROBOT ALLOWED USERS (for ALLOWED_USERS access mode)
+// ═════════════════════════════════════════════════════
+
+model RobotAllowedUser {
+  id        String   @id @default(uuid()) @db.Uuid
+  robotId   String   @db.Uuid
+  userId    String   @db.Uuid
+  robot     Robot    @relation(fields: [robotId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([robotId, userId])
+  @@map("robot_allowed_users")
+}
+
+// ═════════════════════════════════════════════════════
+// TRANSACTION (Virtual Currency)
+// Kept intentionally as the future-proof ledger model. See ADR-0005.
+// ═════════════════════════════════════════════════════
+
+model Transaction {
+  id            String          @id @default(uuid()) @db.Uuid
+  userId        String          @db.Uuid
+  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type          TransactionType
+  amount        Int             // Positive = credit, Negative = debit
+  balanceAfter  Int             // Balance snapshot after transaction
+  ledgerGroupId String?         @db.Uuid // Groups multi-leg events (payer/payee/fee). Sum across group must equal 0.
+  description   String?         @db.VarChar(255)
+  metadata      Json?
+  createdAt     DateTime        @default(now())
+
+  @@index([userId, createdAt])
+  @@index([type])
+  @@index([ledgerGroupId])
+  @@index([createdAt])
+  @@map("transactions")
+}
+
+// ═════════════════════════════════════════════════════
+// BILLING (Provider-agnostic purchase intents + idempotent webhook events)
+// ═════════════════════════════════════════════════════
+
+model BillingIntent {
+  id             String              @id @default(uuid()) @db.Uuid
+  userId         String              @db.Uuid
+  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider       String              @db.VarChar(16)       // 'stripe' | 'paypal'
+  providerRef    String?             @db.VarChar(128)      // checkout/session/order/intent id once known
+  providerCustomerRef String?        @db.VarChar(128)
+  purchaseType   BillingPurchaseType @default(ONE_TIME)
+  packageId      String              @db.VarChar(64)
+  amountCents    Int
+  currency       String              @db.VarChar(8)
+  creditsAmount  Int
+  status         BillingIntentStatus @default(PENDING)
+  metadata       Json?
+  paidAt         DateTime?
+  refundedAt     DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@unique([provider, providerRef])
+  @@index([userId, purchaseType, status])
+  @@index([status, createdAt])
+  @@map("billing_intents")
+}
+
+model BillingWebhookEvent {
+  id          String   @id @default(uuid()) @db.Uuid
+  provider    String   @db.VarChar(16)
+  eventId     String   @db.VarChar(128)
+  eventType   String   @db.VarChar(64)
+  payload     Json
+  processedAt DateTime @default(now())
+
+  @@unique([provider, eventId])
+  @@index([processedAt])
+  @@map("billing_webhook_events")
+}
+
+model WalletIdempotencyKey {
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String   @db.Uuid
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scope         String   @db.VarChar(32)        // 'donation' | 'control_press'
+  key           String   @db.VarChar(128)
+  transactionId String?  @db.Uuid
+  result        Json?
+  createdAt     DateTime @default(now())
+
+  @@unique([userId, scope, key])
+  @@index([createdAt])
+  @@map("wallet_idempotency_keys")
+}
+
+model PayoutRequest {
+  id             String              @id @default(uuid()) @db.Uuid
+  userId         String              @db.Uuid
+  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount         Int                                       // credits requested for payout
+  status         PayoutRequestStatus @default(PENDING)
+  destination    String              @db.VarChar(128)      // payout method reference (manual review for now)
+  notes          String?             @db.VarChar(1000)
+  reviewedById   String?             @db.Uuid
+  reviewedAt     DateTime?
+  paidAt         DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@index([userId, status])
+  @@index([status, createdAt])
+  @@map("payout_requests")
+}
+
+// ═════════════════════════════════════════════════════
+// SESSION
+// ═════════════════════════════════════════════════════
+
+model Session {
+  id            String        @id @default(uuid()) @db.Uuid
+  robotId       String        @db.Uuid
+  robot         Robot         @relation(fields: [robotId], references: [id], onDelete: Cascade)
+  userId        String        @db.Uuid
+  user          User          @relation("SessionUser", fields: [userId], references: [id], onDelete: Cascade)
+  status        SessionStatus @default(ACTIVE)
+  startedAt     DateTime      @default(now())
+  endedAt       DateTime?
+  durationMs    Int?
+  recordingUrl  String?       @db.VarChar(512)
+  peakViewers   Int           @default(0)
+  totalCommands Int           @default(0)
+  avgLatencyMs  Float?
+  metadata      Json?
+  createdAt     DateTime      @default(now())
+
+  @@index([robotId])
+  @@index([userId])
+  @@index([startedAt])
+  @@map("sessions")
+}
+
+// ═════════════════════════════════════════════════════
+// QUEUE
+// ═════════════════════════════════════════════════════
+
+model QueueEntry {
+  id         String   @id @default(uuid()) @db.Uuid
+  robotId    String   @db.Uuid
+  robot      Robot    @relation(fields: [robotId], references: [id], onDelete: Cascade)
+  userId     String   @db.Uuid
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  position   Int
+  isPriority Boolean  @default(false)
+  votes      Int      @default(0)
+  joinedAt   DateTime @default(now())
+  expiresAt  DateTime?
+
+  @@unique([robotId, userId])
+  @@index([robotId, position])
+  @@map("queue_entries")
+}
+
+// ═════════════════════════════════════════════════════
+// CHAT
+// ═════════════════════════════════════════════════════
+
+model ChatMessage {
+  id          String    @id @default(uuid()) @db.Uuid
+  robotId     String    @db.Uuid
+  robot       Robot     @relation(fields: [robotId], references: [id], onDelete: Cascade)
+  userId      String    @db.Uuid
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content     String    @db.VarChar(500)
+  isSystem    Boolean   @default(false)
+  deletedAt   DateTime?
+  deletedById String?   @db.Uuid
+  deletedBy   User?     @relation("DeletedMessages", fields: [deletedById], references: [id], onDelete: SetNull)
+  createdAt   DateTime  @default(now())
+
+  @@index([robotId, createdAt])
+  @@index([userId])
+  @@index([deletedAt])
+  @@map("chat_messages")
+}
+
+// ═════════════════════════════════════════════════════
+// ADMIN AUDIT LOG
+// ═════════════════════════════════════════════════════
+
+model AdminAuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  actorId    String?  @db.Uuid
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  action     String   @db.VarChar(64)  // e.g. "ban_user", "delete_message", "mute_user"
+  targetType String?  @db.VarChar(32)  // e.g. "user", "robot", "message"
+  targetId   String?  @db.Uuid
+  payload    Json?
+  createdAt  DateTime @default(now())
+  expiresAt  DateTime @default(dbgenerated("now() + interval '90 days'")) // Retain for 90 days
+
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
+  @@index([targetType, targetId, createdAt])
+  @@index([expiresAt]) // For pruning job to efficiently find expired entries
+  @@map("admin_audit_logs")
+}
+
+// ═════════════════════════════════════════════════════
+// SWARM GROUP (Multi-Robot Control)
+// Reserved for roadmap-capability grouping. See ADR-0005.
+// ═════════════════════════════════════════════════════
+
+model SwarmGroup {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @db.VarChar(64)
+  description String?  @db.VarChar(500)
+  robots      Robot[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("swarm_groups")
+}
+
+// ═════════════════════════════════════════════════════
+// ANALYTICS
+// ═════════════════════════════════════════════════════
+
+model AnalyticsEvent {
+  id        String   @id @default(uuid()) @db.Uuid
+  robotId   String?  @db.Uuid
+  robot     Robot?   @relation(fields: [robotId], references: [id], onDelete: SetNull)
+  userId    String?  @db.Uuid
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  event     String   @db.VarChar(64)  // e.g. "view", "control", "session_start"
+  payload   Json?
+  createdAt DateTime @default(now())
+
+  @@index([robotId, event, createdAt])
+  @@index([userId, event, createdAt])
+  @@index([createdAt])
+  @@map("analytics_events")
+}
+
+// ═════════════════════════════════════════════════════
+// ROBOT WEBHOOKS
+// ═════════════════════════════════════════════════════
+
+model RobotWebhook {
+  id              String   @id @default(uuid()) @db.Uuid
+  robotId         String   @db.Uuid
+  robot           Robot    @relation(fields: [robotId], references: [id], onDelete: Cascade)
+  url             String   @db.VarChar(1024)
+  secret          String   @db.VarChar(64)
+  events          String[] @default([])
+  isActive        Boolean  @default(true)
+  lastTriggeredAt DateTime?
+  lastStatusCode  Int?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([robotId, isActive])
+  @@index([robotId, createdAt])
+  @@map("robot_webhooks")
+}
+
+// ═════════════════════════════════════════════════════
+// CONTROL BUTTONS (Dynamic button config per robot)
+// ═════════════════════════════════════════════════════
+
+model ControlButton {
+  id          String              @id @default(uuid()) @db.Uuid
+  robotId     String              @db.Uuid
+  robot       Robot               @relation(fields: [robotId], references: [id], onDelete: Cascade)
+
+  label       String              @db.VarChar(32)    // Display text on button
+  command     String              @db.VarChar(64)    // Command string sent to robot
+  hotKey      String?             @db.VarChar(8)     // Keyboard shortcut (e.g. "w", "ArrowUp")
+  icon        String?             @db.VarChar(64)    // Optional emoji or icon name
+  cooldownMs  Int                 @default(200)      // Minimum time between presses
+  costCredits Int                 @default(0)        // Credits charged per press (0 = free)
+  access      ControlButtonAccess @default(QUEUE_TURN)
+  position    Int                 @default(0)        // Sort order
+  isEnabled   Boolean             @default(true)
+  color       String?             @db.VarChar(16)    // Optional CSS color hint
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  @@index([robotId, position])
+  @@index([robotId, isEnabled])
+  @@map("control_buttons")
+}
+
+// ═════════════════════════════════════════════════════
+// ROBOT MODERATION (Per-robot user restrictions)
+// ═════════════════════════════════════════════════════
+
+model RobotModerationEntry {
+  id          String               @id @default(uuid()) @db.Uuid
+  robotId     String               @db.Uuid
+  robot       Robot                @relation(fields: [robotId], references: [id], onDelete: Cascade)
+  userId      String               @db.Uuid
+  user        User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  action      ModerationActionType
+  reason      String?              @db.VarChar(500)
+  expiresAt   DateTime?            // null = permanent (for bans)
+  isActive    Boolean              @default(true)
+
+  // Who issued the moderation action
+  moderatorId String?              @db.Uuid
+  moderator   User?                @relation("ModeratorActions", fields: [moderatorId], references: [id], onDelete: SetNull)
+
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  @@index([robotId, userId, isActive])
+  @@index([robotId, action, isActive])
+  @@index([expiresAt])
+  @@map("robot_moderation_entries")
+}
+

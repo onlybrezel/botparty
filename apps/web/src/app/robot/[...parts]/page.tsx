@@ -2,7 +2,8 @@ import type { Metadata } from 'next';
 import { notFound, permanentRedirect } from 'next/navigation';
 import type { RobotPublic } from '@botparty/shared';
 import { PrivateRobotLoader } from '@/components/robot-view/private-robot-loader';
-import RobotView from '@/components/robot-view/robot-view';
+import { OfflineRobotView } from '@/components/robot-view/offline-robot-view';
+import { OnlineRobotViewLoader } from '@/components/robot-view/online-robot-view-loader';
 import {
   buildRobotDescription,
   buildRobotLookupUrl,
@@ -102,5 +103,7 @@ export default async function RobotPage({ params }: { params: Promise<{ parts: s
     permanentRedirect(canonicalRobotPath(robot));
   }
 
-  return <RobotView robot={robot} />;
+  return robot.status === 'ONLINE' || robot.status === 'BUSY'
+    ? <OnlineRobotViewLoader robot={robot} />
+    : <OfflineRobotView robot={robot} />;
 }

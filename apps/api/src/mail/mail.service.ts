@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, ServiceUnavailableException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { ConfigService } from '@nestjs/config';
 import { Queue } from 'bullmq';
@@ -39,7 +39,7 @@ ${body}
 }
 
 @Injectable()
-export class MailService {
+export class MailService implements OnModuleInit {
   private readonly logger = new Logger(MailService.name);
   private readonly transport: ReturnType<typeof nodemailer.createTransport> | null;
   private readonly fromAddress: string;
@@ -58,17 +58,31 @@ export class MailService {
     return this.transport !== null;
   }
 
+  async onModuleInit(): Promise<void> {
+    if (
+      this.config.get<string>('NODE_ENV', process.env.NODE_ENV ?? 'development') !== 'production'
+    ) {
+      return;
+    }
+    if (!this.transport) {
+      throw new Error('SMTP transport is required in production');
+    }
+    await this.transport.verify();
+    this.logger.log('SMTP transport verified');
+  }
+
   async sendEmailVerification(email: string, token: string) {
     const verifyUrl = new URL('/verify-email', this.appUrl);
     verifyUrl.searchParams.set('token', token);
     const safeVerifyUrl = escapeHtml(verifyUrl.toString());
 
     if (!this.transport) {
-      this.logger.warn(`SMTP not configured; email verification link for ${email}: ${verifyUrl.toString()}`);
-      return;
+      throw new ServiceUnavailableException('Email delivery is not configured.');
     }
 
-    const html = htmlWrapper('Verify your BotParty email', `
+    const html = htmlWrapper(
+      'Verify your BotParty email',
+      `
       <h1>Verify your email address</h1>
       <p>Thanks for signing up for BotParty. Click the button below to verify your email address and activate your account.</p>
       <a href="${safeVerifyUrl}" class="btn">Verify email address</a>
@@ -76,7 +90,8 @@ export class MailService {
       <p>Or copy this link into your browser:</p>
       <p class="token">${safeVerifyUrl}</p>
       <p>This link expires in 24 hours. If you did not create a BotParty account, you can safely ignore this email.</p>
-    `);
+    `,
+    );
 
     await this.enqueueMailJob({
       to: email,
@@ -99,11 +114,12 @@ export class MailService {
     const safeResetUrl = escapeHtml(resetUrl.toString());
 
     if (!this.transport) {
-      this.logger.warn(`SMTP is not configured; password reset link for ${email}: ${resetUrl.toString()}`);
-      return;
+      throw new ServiceUnavailableException('Email delivery is not configured.');
     }
 
-    const html = htmlWrapper('Reset your BotParty password', `
+    const html = htmlWrapper(
+      'Reset your BotParty password',
+      `
       <h1>Reset your password</h1>
       <p>A password reset was requested for your BotParty account. Click the button below to set a new password.</p>
       <a href="${safeResetUrl}" class="btn">Set new password</a>
@@ -111,7 +127,8 @@ export class MailService {
       <p>Or copy this link into your browser:</p>
       <p class="token">${safeResetUrl}</p>
       <p>This link expires in 1 hour. If you did not request a password reset, you can safely ignore this email.</p>
-    `);
+    `,
+    );
 
     await this.enqueueMailJob({
       to: email,
@@ -129,20 +146,22 @@ export class MailService {
 
   async sendAccountLockoutNoticeEmail(email: string, lockoutMinutes: number) {
     if (!this.transport) {
-      this.logger.warn(`SMTP is not configured; account lockout notification for ${email} not sent`);
-      return;
+      throw new ServiceUnavailableException('Email delivery is not configured.');
     }
 
     const loginUrl = new URL('/login', this.appUrl).toString();
     const safeLoginUrl = escapeHtml(loginUrl);
-    const html = htmlWrapper('BotParty login temporarily locked', `
+    const html = htmlWrapper(
+      'BotParty login temporarily locked',
+      `
       <h1>Login temporarily locked</h1>
       <p>We detected too many failed login attempts for your account.</p>
       <p>Your login is temporarily blocked for about <strong>${escapeHtml(String(lockoutMinutes))} minutes</strong>.</p>
       <a href="${safeLoginUrl}" class="btn">Open BotParty login</a>
       <hr class="divider">
       <p>If this was not you, reset your password immediately after the lockout ends.</p>
-    `);
+    `,
+    );
 
     await this.enqueueMailJob({
       to: email,
@@ -158,10 +177,16 @@ export class MailService {
     });
   }
 
-  async sendRaw(to: string, subject: string, html: string, text: string, from?: string): Promise<void> {
+  async sendRaw(
+    to: string,
+    subject: string,
+    html: string,
+    text: string,
+    from?: string,
+    messageId?: string,
+  ): Promise<void> {
     if (!this.transport) {
-      this.logger.warn(`SMTP not configured; skipping email to ${to}: ${subject}`);
-      return;
+      throw new ServiceUnavailableException('Email delivery is not configured.');
     }
 
     await this.transport.sendMail({
@@ -170,6 +195,7 @@ export class MailService {
       subject,
       html,
       text,
+      messageId,
     });
   }
 

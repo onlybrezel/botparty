@@ -33,7 +33,7 @@ export class RobotRoomStateHelper {
     return robot;
   }
 
-  async appendChatMessage(robotId: string, userId: string | null | undefined, content: string, timestampMs: number) {
+  async appendChatMessage(robotId: string, userId: string | null | undefined, content: string, timestampMs: number, clientMessageId: string) {
     if (!userId || userId.startsWith('guest:')) {
       return;
     }
@@ -43,6 +43,7 @@ export class RobotRoomStateHelper {
       userId,
       content,
       timestampMs,
+      clientMessageId,
     });
   }
 

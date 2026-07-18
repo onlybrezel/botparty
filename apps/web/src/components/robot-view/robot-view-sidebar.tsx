@@ -1,32 +1,14 @@
 import Link from 'next/link';
-import dynamic from 'next/dynamic';
 import { useState } from 'react';
 import { Gamepad2, Heart, Video } from 'lucide-react';
 import { formatCountdown } from '@/components/robot-view/controls';
 import { DonationDialog } from '@/components/robot-view/donation-dialog';
 import { useAuth } from '@/lib/store';
 import type { RobotViewState } from './use-robot-view-state';
-
-const RobotViewersList = dynamic(
-  () => import('@/components/robot-view/viewers-list').then((module) => module.RobotViewersList),
-  {
-    ssr: false,
-  },
-);
-
-const RobotQueuePanel = dynamic(
-  () => import('@/components/robot-view/queue-panel').then((module) => module.RobotQueuePanel),
-  {
-    ssr: false,
-  },
-);
-
-const RobotChatPanel = dynamic(
-  () => import('@/components/robot-view/chat-panel').then((module) => module.RobotChatPanel),
-  {
-    ssr: false,
-  },
-);
+import { releaseFeatures } from '@/lib/release-features';
+import { RobotViewersList } from './viewers-list';
+import { RobotQueuePanel } from './queue-panel';
+import { RobotChatPanel } from './chat-panel';
 
 type Props = {
   state: RobotViewState;
@@ -38,7 +20,7 @@ export function RobotViewSidebar({ state }: Props) {
   const ownerName = state.robot.owner.displayName ?? state.robot.owner.username;
   return (
     <div className="space-y-4">
-      {donateOpen && (
+      {releaseFeatures.donations && donateOpen && (
         <DonationDialog
           robotId={state.robot.id}
           robotName={state.robot.name}
@@ -90,7 +72,7 @@ export function RobotViewSidebar({ state }: Props) {
           </div>
         </div>
 
-        {accessToken && (
+        {releaseFeatures.donations && accessToken && (
           <button
             type="button"
             onClick={() => setDonateOpen(true)}
@@ -122,7 +104,7 @@ export function RobotViewSidebar({ state }: Props) {
             {state.robot.tags.map((tag) => (
               <Link
                 key={tag}
-                href={`/explore?tag=${encodeURIComponent(tag)}`}
+                href={`/explore/search?tag=${encodeURIComponent(tag)}`}
                 className="rounded-full bg-[var(--secondary)] px-2 py-0.5 text-xs text-[var(--secondary-foreground)]/80 transition hover:bg-[var(--primary)]/20"
               >
                 {tag}
@@ -214,11 +196,9 @@ export function RobotViewSidebar({ state }: Props) {
         setChatInput={state.setChatInput}
         chatRestriction={state.chatRestriction}
         focusMode={state.focusMode}
-        setFocusMode={state.setFocusMode}
         currentViewerId={state.currentViewerId}
         canModerate={state.canModerate}
         moderatingUserId={state.moderatingUserId}
-        tabSwitchOnlyWhenEmpty={state.tabSwitchOnlyWhenEmpty}
         chatScrollRef={state.chatScrollRef}
         chatPanelRef={state.chatPanelRef}
         chatInputRef={state.chatInputRef}

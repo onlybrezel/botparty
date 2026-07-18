@@ -7,24 +7,46 @@ export const metadata: Metadata = {
 
 const cookieRows = [
   {
-    name: 'Session storage and auth state',
-    purpose: 'Keeps signed-in sessions, refreshed access, and temporary room access grants working across pages.',
-    type: 'Essential',
+    name: 'bp_access',
+    purpose: 'Authenticated API session',
+    storage: 'Cookie',
+    lifetime: '15 minutes',
   },
   {
-    name: 'Guest session identifier',
-    purpose: 'Lets public visitors keep a stable guest identity for presence, room access, and live session behavior.',
-    type: 'Essential',
+    name: 'bp_refresh',
+    purpose: 'Renews the authenticated session',
+    storage: 'Cookie',
+    lifetime: '7 days',
   },
   {
-    name: 'UI preferences',
-    purpose: 'Stores dashboard and keyboard preferences such as hidden tokens, focus behavior, and related settings.',
-    type: 'Functional',
+    name: 'bp_csrf',
+    purpose: 'Protects authenticated form and API requests',
+    storage: 'Cookie',
+    lifetime: '7 days',
   },
   {
-    name: 'Temporary chat and room state',
-    purpose: 'May cache recent chat or room convenience state locally to make reconnects and UI continuity smoother.',
-    type: 'Functional',
+    name: 'botparty.auth.session.v1',
+    purpose: 'Restores account display state after a page reload',
+    storage: 'Session storage',
+    lifetime: 'Until the browser tab closes',
+  },
+  {
+    name: 'botparty.room-access.&lt;robot-id&gt;',
+    purpose: 'Keeps a room access grant during navigation',
+    storage: 'Session storage',
+    lifetime: 'Until the browser tab closes',
+  },
+  {
+    name: 'botparty.guestSessionId.v1',
+    purpose: 'Maintains queue and room identity for guests',
+    storage: 'Local storage',
+    lifetime: 'Until local site data is cleared',
+  },
+  {
+    name: 'botparty.preferences.v2 and room display keys',
+    purpose: 'Stores theme, notification, audio, layout and analytics-consent preferences',
+    storage: 'Local storage',
+    lifetime: 'Until local site data is cleared',
   },
 ];
 
@@ -40,27 +62,28 @@ export default function CookieNoticePage() {
       </div>
 
       <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)]">
-        <div className="grid grid-cols-1 border-b border-[var(--border)] bg-[var(--muted)]/30 px-5 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--muted-foreground)] sm:grid-cols-[1.1fr,0.8fr,2fr]">
+        <div className="grid grid-cols-1 border-b border-[var(--border)] bg-[var(--muted)]/30 px-5 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--muted-foreground)] sm:grid-cols-[1.1fr,0.8fr,2fr,1fr]">
           <div>Name</div>
-          <div>Type</div>
+          <div>Storage</div>
           <div>Purpose</div>
+          <div>Lifetime</div>
         </div>
         {cookieRows.map((row) => (
           <div
             key={row.name}
-            className="grid grid-cols-1 gap-2 border-b border-[var(--border)] px-5 py-4 text-sm last:border-b-0 sm:grid-cols-[1.1fr,0.8fr,2fr]"
+            className="grid grid-cols-1 gap-2 border-b border-[var(--border)] px-5 py-4 text-sm last:border-b-0 sm:grid-cols-[1.1fr,0.8fr,2fr,1fr]"
           >
             <div className="font-medium text-[var(--foreground)]">{row.name}</div>
-            <div className="text-[var(--muted-foreground)]">{row.type}</div>
+            <div className="text-[var(--muted-foreground)]">{row.storage}</div>
             <div className="text-[var(--muted-foreground)]">{row.purpose}</div>
+            <div className="text-[var(--muted-foreground)]">{row.lifetime}</div>
           </div>
         ))}
       </div>
 
       <div className="mt-6 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5 text-sm leading-7 text-[var(--muted-foreground)]">
-        <p>BotParty currently relies on essential and functional storage to operate live rooms and account features.</p>
-        <p className="mt-3">You can accept or decline non-essential categories from the cookie banner and review the current consent state later in Settings.</p>
-        <p className="mt-3">If analytics, advertising, or third-party tracking are introduced later, this notice should be expanded and any required consent flow should be added before those technologies are enabled.</p>
+        <p>These entries are provided by this BotParty deployment and are used only to deliver requested account, room and interface functions.</p>
+        <p className="mt-3">No advertising or cross-site tracking storage is used. Optional product analytics is stored on the server only after a signed-in user enables it in Settings.</p>
       </div>
     </div>
   );

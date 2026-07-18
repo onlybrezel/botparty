@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { createRobotSchema, updateRobotSchema, LIMITS } from '@botparty/shared';
 import type { Prisma } from '@botparty/prisma';
-import { randomBytes } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import { hash } from 'argon2';
 import type { z } from 'zod';
 import { isStaffRole } from '../common/robot-access';
@@ -75,8 +75,8 @@ export class RobotWriteHelper {
         inviteCode,
         metadata: metadata as Prisma.InputJsonValue,
         slug,
-        streamKey,
-        claimToken,
+        streamKeyHash: createHash('sha256').update(streamKey).digest('hex'),
+        claimTokenHash: createHash('sha256').update(claimToken).digest('hex'),
         ownerId,
       },
       include: {
@@ -96,7 +96,7 @@ export class RobotWriteHelper {
       })),
     });
 
-    return sanitizeManagedRobot(robot);
+    return { ...sanitizeManagedRobot(robot), streamKey, claimToken };
   }
 
   async applyRobotUpdate(
@@ -158,16 +158,18 @@ export class RobotWriteHelper {
 
   async regenerateClaimToken(robot: { id: string; metadata: unknown }) {
     const claimToken = randomBytes(32).toString('hex');
-    return this.prisma.robot.update({
+    const rotated = await this.prisma.robot.update({
       where: { id: robot.id },
       data: {
-        claimToken,
+        claimTokenHash: createHash('sha256').update(claimToken).digest('hex'),
+        deviceTokenVersion: { increment: 1 },
         metadata: this.deviceService.withClaimTokenIssuedAt(
           this.deviceService.clearBoundDeviceMetadata(robot.metadata),
         ) as Prisma.InputJsonValue,
       },
-      select: { id: true, claimToken: true },
+      select: { id: true },
     });
+    return { ...rotated, claimToken };
   }
 
   async regenerateInviteCode(robotId: string) {

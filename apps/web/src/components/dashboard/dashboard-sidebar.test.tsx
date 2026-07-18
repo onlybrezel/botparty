@@ -63,6 +63,9 @@ describe('DashboardSidebar', () => {
     expect(screen.getByRole('button', { name: 'Jump to Operations section' })).toHaveFocus();
 
     await user.tab();
+    expect(screen.getByRole('button', { name: 'Jump to Webhooks section' })).toHaveFocus();
+
+    await user.tab();
     expect(screen.getByRole('button', { name: 'Jump to Monitoring section' })).toHaveFocus();
 
     await user.tab();

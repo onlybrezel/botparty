@@ -18,18 +18,18 @@ services:
   # ═══════════════════════════════════════════════════
   postgres:
     image: postgres:16-alpine
-    container_name: botparty-postgres
     restart: on-failure:10
     environment:
       POSTGRES_DB: botparty
       POSTGRES_USER: botparty
-      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
     ports:
       # Exposed on 5433 (not 5432) to avoid clashing with a local Postgres install.
       # The API container connects on the default 5432 via the internal Docker network.
-      - "127.0.0.1:5433:5432"
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ${BOTPARTY_SECRET_DIR:-./docker/secrets}:/run/secrets:ro
     networks:
       - internal
     healthcheck:
@@ -37,52 +37,69 @@ services:
       interval: 2s
       timeout: 2s
       retries: 15
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1024M
 
   # ═══════════════════════════════════════════════════
   # Redis
   # ═══════════════════════════════════════════════════
   redis:
     image: redis:7-alpine
-    container_name: botparty-redis
     restart: on-failure:10
-    command: redis-server /usr/local/etc/redis/redis.conf --requirepass ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
+    entrypoint: ["/bin/sh", "-ec"]
+    command: ['exec redis-server /usr/local/etc/redis/redis.conf --requirepass "$$(cat /run/secrets/redis_password)"']
     ports:
-      - "127.0.0.1:6379:6379"
+      - "127.0.0.1:${REDIS_HOST_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
       - ./docker/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - ${BOTPARTY_SECRET_DIR:-./docker/secrets}:/run/secrets:ro
     networks:
       - internal
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a \"${REDIS_PASSWORD}\" --no-auth-warning ping | grep -q PONG"]
+      test: ["CMD-SHELL", "REDISCLI_AUTH=$$(cat /run/secrets/redis_password) redis-cli --no-auth-warning ping | grep -q PONG"]
       interval: 2s
       timeout: 2s
       retries: 15
+    deploy:
+      resources:
+        limits:
+          cpus: '0.75'
+          memory: 384M
 
   minio:
     image: minio/minio:latest
-    container_name: botparty-minio
     restart: on-failure:10
-    command: server /data --console-address :9001
+    entrypoint: ["/bin/sh", "-ec"]
+    command: ['export MINIO_ROOT_PASSWORD="$$(cat /run/secrets/minio_root_password)"; exec minio server /data --console-address :9001']
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-botpartyminio}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD}
     ports:
-      - "127.0.0.1:9001:9001"
+      - "127.0.0.1:${MINIO_API_HOST_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_HOST_PORT:-9001}:9001"
     volumes:
       - minio_data:/data
+      - ${BOTPARTY_SECRET_DIR:-./docker/secrets}:/run/secrets:ro
     networks:
       - frontend
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1024M
 
   minio-init:
     image: minio/mc:latest
-    container_name: botparty-minio-init
     restart: on-failure:10
     entrypoint: /bin/sh
     command:
       - -c
       - |
-        until mc alias set local http://minio:9000 "${MINIO_ROOT_USER:-botpartyminio}" "${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD}"; do
+        minio_password="$$(cat /run/secrets/minio_root_password)"
+        until mc alias set local http://minio:9000 "${MINIO_ROOT_USER:-botpartyminio}" "$${minio_password}"; do
           echo "waiting for minio..."
           sleep 2
         done
@@ -98,60 +115,67 @@ services:
         condition: service_started
     networks:
       - frontend
+    volumes:
+      - ${BOTPARTY_SECRET_DIR:-./docker/secrets}:/run/secrets:ro
+
+  livekit-config:
+    image: node:22-alpine
+    restart: "no"
+    environment:
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?Set LIVEKIT_API_KEY (must not be devkey)}
+      LIVEKIT_WHIP_BASE_URL: ${LIVEKIT_WHIP_BASE_URL:-https://botparty.live/whip}
+    command: ["node", "/scripts/render-livekit-config.mjs", "/output"]
+    volumes:
+      - ./scripts/render-livekit-config.mjs:/scripts/render-livekit-config.mjs:ro
+      - ${BOTPARTY_SECRET_DIR:-./docker/secrets}:/run/secrets:ro
+      - livekit_runtime_config:/output
+    networks:
+      - internal
 
   # ═══════════════════════════════════════════════════
   # LiveKit Server (SFU)
   # ═══════════════════════════════════════════════════
   livekit:
     image: livekit/livekit-server:v1.8
-    container_name: botparty-livekit
     restart: on-failure:10
-    command: --config /etc/livekit.yaml
-    environment:
-      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:?Set LIVEKIT_API_KEY (must not be devkey)}: ${LIVEKIT_API_SECRET:?Set LIVEKIT_API_SECRET}"
-      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
     ports:
       - "7880:7880"
       - "7881:7881/tcp"
       - "50000-50100:50000-50100/udp"
     depends_on:
+      livekit-config:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     networks:
       - internal
       - frontend
     volumes:
-      - ./docker/livekit/livekit.yaml:/etc/livekit.yaml:ro
+      - livekit_runtime_config:/run/livekit-config:ro
+    command: --config /run/livekit-config/livekit.json
     healthcheck:
       test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:7880 2>/dev/null && echo ok || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2048M
 
   livekit-ingress:
     image: livekit/ingress:v1.4
-    container_name: botparty-livekit-ingress
     restart: on-failure:10
     ports:
       - "8080:8080"
       - "7882:7882/tcp"
       - "7885:7885/udp"
     environment:
-      INGRESS_CONFIG_BODY: |
-        api_key: ${LIVEKIT_API_KEY:?Set LIVEKIT_API_KEY (must not be devkey)}
-        api_secret: ${LIVEKIT_API_SECRET:?Set LIVEKIT_API_SECRET}
-        ws_url: ws://livekit:7880
-        redis:
-          address: redis:6379
-          password: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
-        log_level: info
-        health_port: 9091
-        whip_port: 8080
-        rtc_config:
-          use_external_ip: true
-          tcp_port: 7882
-          udp_port: 7885
+      INGRESS_CONFIG_FILE: /run/livekit-config/ingress.json
     depends_on:
+      livekit-config:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       livekit:
@@ -159,27 +183,27 @@ services:
     networks:
       - internal
       - frontend
+    volumes:
+      - livekit_runtime_config:/run/livekit-config:ro
     healthcheck:
       test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:9091/ 2>/dev/null && echo ok || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 1536M
 
   livekit-egress:
     image: livekit/egress:v1.8
-    container_name: botparty-livekit-egress
     restart: on-failure:10
     environment:
-      EGRESS_CONFIG_BODY: |
-        api_key: ${LIVEKIT_API_KEY:?Set LIVEKIT_API_KEY (must not be devkey)}
-        api_secret: ${LIVEKIT_API_SECRET:?Set LIVEKIT_API_SECRET}
-        ws_url: ws://livekit:7880
-        redis:
-          address: redis:6379
-          password: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
-        log_level: warn
-        health_port: 9090
+      EGRESS_CONFIG_FILE: /run/livekit-config/egress.json
     depends_on:
+      livekit-config:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       livekit:
@@ -189,15 +213,22 @@ services:
     networks:
       - internal
       - frontend
+    volumes:
+      - livekit_runtime_config:/run/livekit-config:ro
     healthcheck:
       test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:9090/ 2>/dev/null && echo ok || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2048M
 
   cadvisor:
+    profiles: ["observability"]
     image: gcr.io/cadvisor/cadvisor:v0.49.2
-    container_name: botparty-cadvisor
     restart: on-failure:10
     # privileged: required by cAdvisor to read hardware and container metrics from /sys and /dev.
     # All volume mounts below are read-only — the elevated privilege is limited to kernel metric access.
@@ -227,33 +258,34 @@ services:
       context: .
       dockerfile: docker/api/Dockerfile
     image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-onlybrezel}/botparty-api:${APP_VERSION:-latest}
-    container_name: botparty-api
     restart: on-failure:10
     expose:
       - "4000"
     environment:
       NODE_ENV: production
       PORT: 4000
-      DATABASE_URL: postgresql://botparty:${DB_PASSWORD:?Set DB_PASSWORD}@postgres:5432/botparty?schema=public&connection_limit=10&pool_timeout=30&sslmode=disable
       DATABASE_URL_FILE: ${DATABASE_URL_FILE:-/run/secrets/api_database_url}
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
       REDIS_PASSWORD_FILE: ${REDIS_PASSWORD_FILE:-/run/secrets/redis_password}
-      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET}
       JWT_SECRET_FILE: ${JWT_SECRET_FILE:-/run/secrets/jwt_secret}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?Set JWT_REFRESH_SECRET}
       JWT_REFRESH_SECRET_FILE: ${JWT_REFRESH_SECRET_FILE:-/run/secrets/jwt_refresh_secret}
-      ROBOT_JWT_SECRET: ${ROBOT_JWT_SECRET:?Set ROBOT_JWT_SECRET}
       ROBOT_JWT_SECRET_FILE: ${ROBOT_JWT_SECRET_FILE:-/run/secrets/robot_jwt_secret}
-      WEBHOOK_SECRET_ENCRYPTION_KEY: ${WEBHOOK_SECRET_ENCRYPTION_KEY:?Set WEBHOOK_SECRET_ENCRYPTION_KEY}
       WEBHOOK_SECRET_ENCRYPTION_KEY_FILE: ${WEBHOOK_SECRET_ENCRYPTION_KEY_FILE:-/run/secrets/webhook_secret_encryption_key}
       REQUIRE_EMAIL_VERIFICATION: ${REQUIRE_EMAIL_VERIFICATION:-false}
+      PAYOUT_DESTINATION_ENCRYPTION_KEY_FILE: ${PAYOUT_DESTINATION_ENCRYPTION_KEY_FILE:-/run/secrets/payout_destination_encryption_key}
+      FEATURE_BILLING_ENABLED: ${FEATURE_BILLING_ENABLED:-false}
+      FEATURE_DONATIONS_ENABLED: ${FEATURE_DONATIONS_ENABLED:-false}
+      FEATURE_PAYOUTS_ENABLED: ${FEATURE_PAYOUTS_ENABLED:-false}
+      FEATURE_PAID_CONTROLS_ENABLED: ${FEATURE_PAID_CONTROLS_ENABLED:-false}
+      FEATURE_SUBSCRIPTIONS_ENABLED: ${FEATURE_SUBSCRIPTIONS_ENABLED:-false}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
       JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-7d}
+      AUTH_COOKIE_SAMESITE: ${AUTH_COOKIE_SAMESITE:-Strict}
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-true}
       METRICS_AUTH_REQUIRED: ${METRICS_AUTH_REQUIRED:-true}
       METRICS_USERNAME: ${METRICS_USERNAME:-metrics}
-      METRICS_PASSWORD: ${METRICS_PASSWORD:-}
+      METRICS_PASSWORD_FILE: ${METRICS_PASSWORD_FILE:-/run/secrets/metrics_password}
       PASSWORD_RESET_TTL_SEC: ${PASSWORD_RESET_TTL_SEC:-3600}
       RECORDING_SIGNED_URL_TTL_SEC: ${RECORDING_SIGNED_URL_TTL_SEC:-300}
       APP_URL: ${APP_URL:-https://botparty.live}
@@ -261,38 +293,41 @@ services:
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_SECURE: ${SMTP_SECURE:-false}
       SMTP_USER: ${SMTP_USER:-}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_PASSWORD_FILE: ${SMTP_PASSWORD_FILE:-/run/secrets/smtp_password}
       SMTP_FROM: ${SMTP_FROM:-BotParty <no-reply@botparty.live>}
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?Set LIVEKIT_API_KEY (must not be devkey)}
-      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?Set LIVEKIT_API_SECRET}
       LIVEKIT_API_SECRET_FILE: ${LIVEKIT_API_SECRET_FILE:-/run/secrets/livekit_api_secret}
       LIVEKIT_URL: ${LIVEKIT_URL:-ws://livekit:7880}
       LIVEKIT_PUBLIC_URL: ${LIVEKIT_PUBLIC_URL:-wss://botparty.live/rtc}
-      LIVEKIT_RECORDING_OBJECT_KEY_TEMPLATE: ${LIVEKIT_RECORDING_OBJECT_KEY_TEMPLATE:-{room_name}-{time}.mp4}
+      LIVEKIT_RECORDING_OBJECT_KEY_TEMPLATE: ${LIVEKIT_RECORDING_OBJECT_KEY_TEMPLATE:-sessions/{session_id}/{camera_id}-{time}.mp4}
       LIVEKIT_RECORDINGS_S3_BUCKET: ${LIVEKIT_RECORDINGS_S3_BUCKET:-botparty-recordings}
       LIVEKIT_RECORDINGS_S3_REGION: ${LIVEKIT_RECORDINGS_S3_REGION:-us-east-1}
       LIVEKIT_RECORDINGS_S3_ENDPOINT: ${LIVEKIT_RECORDINGS_S3_ENDPOINT:-http://minio:9000}
       LIVEKIT_RECORDINGS_S3_ACCESS_KEY_ID: ${LIVEKIT_RECORDINGS_S3_ACCESS_KEY_ID:-botpartyminio}
-      LIVEKIT_RECORDINGS_S3_SECRET_ACCESS_KEY: ${LIVEKIT_RECORDINGS_S3_SECRET_ACCESS_KEY:-}
+      LIVEKIT_RECORDINGS_S3_SECRET_ACCESS_KEY_FILE: ${LIVEKIT_RECORDINGS_S3_SECRET_ACCESS_KEY_FILE:-/run/secrets/minio_root_password}
       LIVEKIT_RECORDINGS_S3_FORCE_PATH_STYLE: ${LIVEKIT_RECORDINGS_S3_FORCE_PATH_STYLE:-true}
       RECORDING_RETENTION_DAYS: ${RECORDING_RETENTION_DAYS:-30}
       CADVISOR_URL: ${CADVISOR_URL:-http://cadvisor:8080}
       CORS_ORIGIN: ${CORS_ORIGIN:-https://botparty.live}
       THROTTLE_TTL: ${THROTTLE_TTL:-60000}
       THROTTLE_LIMIT: ${THROTTLE_LIMIT:-100}
-      FASTIFY_BODY_LIMIT: ${FASTIFY_BODY_LIMIT:-5242880}
+      FASTIFY_BODY_LIMIT: ${FASTIFY_BODY_LIMIT:-1048576}
       THUMBNAIL_PUBLIC_BASE_URL: ${THUMBNAIL_PUBLIC_BASE_URL:-https://botparty.live/storage/botparty-thumbnails}
       THUMBNAIL_S3_BUCKET: ${THUMBNAIL_S3_BUCKET:-botparty-thumbnails}
       THUMBNAIL_S3_REGION: ${THUMBNAIL_S3_REGION:-us-east-1}
       THUMBNAIL_S3_ENDPOINT: ${THUMBNAIL_S3_ENDPOINT:-http://minio:9000}
       THUMBNAIL_S3_ACCESS_KEY_ID: ${THUMBNAIL_S3_ACCESS_KEY_ID:-botpartyminio}
-      THUMBNAIL_S3_SECRET_ACCESS_KEY: ${THUMBNAIL_S3_SECRET_ACCESS_KEY:-}
+      THUMBNAIL_S3_SECRET_ACCESS_KEY_FILE: ${THUMBNAIL_S3_SECRET_ACCESS_KEY_FILE:-/run/secrets/minio_root_password}
       THUMBNAIL_S3_FORCE_PATH_STYLE: ${THUMBNAIL_S3_FORCE_PATH_STYLE:-true}
-      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
       SEED_ADMIN_PASSWORD_FILE: ${SEED_ADMIN_PASSWORD_FILE:-/run/secrets/seed_admin_password}
-      SEED_DEMO_USER_PASSWORD: ${SEED_DEMO_USER_PASSWORD:-}
       SEED_DEMO_USER_PASSWORD_FILE: ${SEED_DEMO_USER_PASSWORD_FILE:-/run/secrets/seed_demo_user_password}
+      STRIPE_SECRET_KEY_FILE: ${STRIPE_SECRET_KEY_FILE:-/run/secrets/stripe_secret_key}
+      STRIPE_WEBHOOK_SECRET_FILE: ${STRIPE_WEBHOOK_SECRET_FILE:-/run/secrets/stripe_webhook_secret}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
+      PAYPAL_CLIENT_ID: ${PAYPAL_CLIENT_ID:-}
+      PAYPAL_CLIENT_SECRET_FILE: ${PAYPAL_CLIENT_SECRET_FILE:-/run/secrets/paypal_client_secret}
+      PAYPAL_WEBHOOK_ID_FILE: ${PAYPAL_WEBHOOK_ID_FILE:-/run/secrets/paypal_webhook_id}
+      PAYPAL_ENV: ${PAYPAL_ENV:-sandbox}
     depends_on:
       postgres:
         condition: service_healthy
@@ -302,21 +337,27 @@ services:
         condition: service_started
       livekit-ingress:
         condition: service_started
-      cadvisor:
-        condition: service_started
       minio:
         condition: service_started
     networks:
       - internal
       - frontend
     volumes:
-      - ./docker/secrets:/run/secrets:ro
+      - ${BOTPARTY_SECRET_DIR:-./docker/secrets}:/run/secrets:ro
     healthcheck:
-      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:4000/api/v1/health/live 2>/dev/null && echo ok || exit 1"]
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:4000/api/v1/health/ready 2>/dev/null && echo ok || exit 1"]
       interval: 3s
       timeout: 2s
       start_period: 5s
       retries: 15
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1536M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
 
   # ═══════════════════════════════════════════════════
   # BotParty Web (Next.js)
@@ -327,8 +368,25 @@ services:
       dockerfile: docker/web/Dockerfile
       args:
         NEXT_PUBLIC_APP_VERSION: ${NEXT_PUBLIC_APP_VERSION:-dev}
+        PUBLIC_DEPLOYMENT: ${PUBLIC_DEPLOYMENT:-true}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
+        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-}
+        NEXT_PUBLIC_LIVEKIT_URL: ${NEXT_PUBLIC_LIVEKIT_URL:-}
+        NEXT_PUBLIC_LEGAL_OPERATOR_NAME: ${NEXT_PUBLIC_LEGAL_OPERATOR_NAME:-}
+        NEXT_PUBLIC_LEGAL_OPERATOR_EMAIL: ${NEXT_PUBLIC_LEGAL_OPERATOR_EMAIL:-}
+        NEXT_PUBLIC_LEGAL_OPERATOR_ADDRESS: ${NEXT_PUBLIC_LEGAL_OPERATOR_ADDRESS:-}
+        NEXT_PUBLIC_LEGAL_OPERATOR_COUNTRY: ${NEXT_PUBLIC_LEGAL_OPERATOR_COUNTRY:-}
+        NEXT_PUBLIC_LEGAL_GOVERNING_LAW: ${NEXT_PUBLIC_LEGAL_GOVERNING_LAW:-}
+        NEXT_PUBLIC_LEGAL_VAT_ID: ${NEXT_PUBLIC_LEGAL_VAT_ID:-}
+        NEXT_PUBLIC_LEGAL_COMMERCIAL_REGISTER: ${NEXT_PUBLIC_LEGAL_COMMERCIAL_REGISTER:-}
+        NEXT_PUBLIC_LEGAL_SUPPORT_URL: ${NEXT_PUBLIC_LEGAL_SUPPORT_URL:-}
+        NEXT_PUBLIC_IMAGE_REMOTE_HOSTS: ${NEXT_PUBLIC_IMAGE_REMOTE_HOSTS:-}
+        NEXT_PUBLIC_FEATURE_BILLING: ${FEATURE_BILLING_ENABLED:-false}
+        NEXT_PUBLIC_FEATURE_DONATIONS: ${FEATURE_DONATIONS_ENABLED:-false}
+        NEXT_PUBLIC_FEATURE_PAYOUTS: ${FEATURE_PAYOUTS_ENABLED:-false}
+        NEXT_PUBLIC_FEATURE_PAID_CONTROLS: ${FEATURE_PAID_CONTROLS_ENABLED:-false}
     image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-onlybrezel}/botparty-web:${APP_VERSION:-latest}
-    container_name: botparty-web
     restart: on-failure:10
     environment:
       # SSR-internal URL (used by Next.js server-side fetch, container-to-container)
@@ -358,13 +416,20 @@ services:
       timeout: 2s
       start_period: 5s
       retries: 15
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 1024M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
 
   # ═══════════════════════════════════════════════════
   # NGINX Reverse Proxy
   # ═══════════════════════════════════════════════════
   nginx:
     image: nginx:1.27-alpine
-    container_name: botparty-nginx
     restart: on-failure:10
     ports:
       - "80:80"
@@ -380,10 +445,60 @@ services:
     networks:
       - frontend
     healthcheck:
-      test: ["CMD-SHELL", "wget --spider -q --no-check-certificate https://127.0.0.1/api/v1/health 2>/dev/null && echo ok || exit 1"]
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1/api/v1/health/live 2>/dev/null && echo ok || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  prometheus:
+    profiles: ["observability"]
+    image: prom/prometheus:v3.5.0
+    restart: on-failure:10
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=30d
+      - --web.enable-lifecycle
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./docker/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - ${BOTPARTY_SECRET_DIR:-./docker/secrets}/metrics_password:/run/secrets/metrics_password:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      api:
+        condition: service_started
+      alertmanager:
+        condition: service_started
+    networks:
+      - internal
+      - frontend
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1024M
+
+  alertmanager:
+    profiles: ["observability"]
+    image: prom/alertmanager:v0.28.1
+    restart: on-failure:10
+    entrypoint: ["/bin/sh", "/etc/alertmanager/entrypoint.sh"]
+    volumes:
+      - ./docker/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./docker/alertmanager/entrypoint.sh:/etc/alertmanager/entrypoint.sh:ro
+      - ${BOTPARTY_SECRET_DIR:-./docker/secrets}/alertmanager_webhook_url:/run/secrets/alertmanager_webhook_url:ro
+      - alertmanager_data:/alertmanager
+    networks:
+      - frontend
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
 
   # ═══════════════════════════════════════════════════
   # Optional centralized logs (Loki + Promtail)
@@ -391,18 +506,21 @@ services:
   loki:
     profiles: ["observability-logs"]
     image: grafana/loki:3.2.1
-    container_name: botparty-loki
     restart: on-failure:10
     command: ["-config.file=/etc/loki/config.yaml"]
     volumes:
       - ./docker/loki/config.yaml:/etc/loki/config.yaml:ro
     networks:
       - frontend
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1024M
 
   promtail:
     profiles: ["observability-logs"]
     image: grafana/promtail:3.2.1
-    container_name: botparty-promtail
     restart: on-failure:10
     command: ["-config.file=/etc/promtail/config.yaml"]
     volumes:
@@ -414,11 +532,19 @@ services:
         condition: service_started
     networks:
       - frontend
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
 
 volumes:
   postgres_data:
   redis_data:
   minio_data:
+  prometheus_data:
+  alertmanager_data:
+  livekit_runtime_config:
 
 networks:
   # SEC: internal blocks all external/internet traffic – db, cache, livekit

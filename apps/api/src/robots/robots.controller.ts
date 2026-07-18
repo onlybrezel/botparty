@@ -95,6 +95,14 @@ export class RobotsController {
     return this.robotsService.findPrivateByUsernameAndSlugForUser(username, slug, user.sub);
   }
 
+  @Get(':id/onboarding')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get the server-verified host go-live checklist' })
+  getOnboardingStatus(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.robotsService.getOnboardingStatus(id, user.sub);
+  }
+
   @Get(':slug')
   @ApiOperation({ summary: 'Get robot by slug (legacy route)' })
   async findBySlug(@Param('slug') slug: string) {
@@ -123,7 +131,7 @@ export class RobotsController {
 
   @Put('admin/:id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN, Role.MOD)
+  @Roles(Role.ADMIN)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update robot settings as staff' })
   async updateAsStaff(@Param('id') id: string, @Body() body: UpdateRobotInput) {
@@ -142,7 +150,7 @@ export class RobotsController {
   @Delete('admin/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN, Role.MOD)
+  @Roles(Role.ADMIN)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Delete robot as staff' })
   async deleteAsStaff(@Param('id') id: string) {

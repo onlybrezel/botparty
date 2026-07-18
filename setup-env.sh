@@ -83,7 +83,7 @@ fi
 header "1 / 4  Deployment type"
 echo ""
 echo "  (1) Local development  — everything on localhost, no SSL needed"
-echo "  (2) Server / VPS       — public URL, optional HTTPS"
+echo "  (2) Server / VPS       — public URL with HTTPS"
 echo ""
 printf "  Choose [1/2]: "
 read -r DEPLOY_TYPE
@@ -109,6 +109,7 @@ if [[ "$IS_LOCAL" == "y" ]]; then
   SMTP_USER=""
   SMTP_PASSWORD=""
   SMTP_FROM="BotParty <no-reply@localhost>"
+  ALERTMANAGER_WEBHOOK_URL=""
   CORS_ORIGIN="http://localhost:3000"
   success "Using localhost defaults. SMTP is disabled unless you configure it manually."
   NGINX_CONF_VALUE=./docker/nginx/nginx.conf
@@ -119,19 +120,16 @@ else
   # SSL choice
   echo ""
   echo "  SSL / HTTPS:"
-  echo "  (1) HTTP only — no SSL (not recommended for production)"
-  echo "  (2) Let's Encrypt — free cert via certbot"
-  echo "  (3) Own certificate — you already have fullchain.pem + privkey.pem"
+  echo "  (1) Let's Encrypt — free cert via certbot"
+  echo "  (2) Own certificate — you already have fullchain.pem + privkey.pem"
   echo ""
-  printf "  Choose [1/2/3]: "
+  printf "  Choose [1/2]: "
   read -r SSL_CHOICE
   [[ -z "$SSL_CHOICE" ]] && SSL_CHOICE="1"
 
-  case "$SSL_CHOICE" in
-    2|3) PROTO="https"; WS_PROTO="wss"; USE_SSL="y" ;;
-    *)   PROTO="http";  WS_PROTO="ws";  USE_SSL="n" ;;
-  esac
-  [[ "$USE_SSL" == "y" ]] && NGINX_CONF_VALUE=./docker/nginx/nginx.ssl.conf || NGINX_CONF_VALUE=./docker/nginx/nginx.conf
+  [[ "$SSL_CHOICE" == "1" || "$SSL_CHOICE" == "2" ]] || die "Choose 1 or 2."
+  PROTO="https"; WS_PROTO="wss"; USE_SSL="y"
+  NGINX_CONF_VALUE=./docker/nginx/nginx.ssl.conf
 
   API_URL="${PROTO}://${DOMAIN}/api"
   WS_URL="${WS_PROTO}://${DOMAIN}"
@@ -150,6 +148,26 @@ else
   ask SMTP_USER "SMTP username" ""
   ask SMTP_PASSWORD "SMTP password" ""
   ask SMTP_FROM "SMTP from address" "BotParty <no-reply@${DOMAIN}>"
+  [[ -n "$SMTP_HOST" && -n "$SMTP_FROM" ]] || die "SMTP host and from address are required for server deployments."
+
+  ask ALERTMANAGER_WEBHOOK_URL "Alert webhook URL"
+  [[ "$ALERTMANAGER_WEBHOOK_URL" == http://* || "$ALERTMANAGER_WEBHOOK_URL" == https://* ]] || die "A valid alert webhook URL is required for server deployments."
+
+  echo ""
+  ask LEGAL_OPERATOR_NAME "Legal operator name"
+  ask LEGAL_OPERATOR_EMAIL "Legal operator email"
+  ask LEGAL_OPERATOR_ADDRESS "Legal operator postal address"
+  ask LEGAL_OPERATOR_COUNTRY "Operator country" "Germany"
+  ask LEGAL_GOVERNING_LAW "Governing law" "$LEGAL_OPERATOR_COUNTRY"
+  [[ -n "$LEGAL_OPERATOR_NAME" && -n "$LEGAL_OPERATOR_EMAIL" && -n "$LEGAL_OPERATOR_ADDRESS" ]] || die "Complete legal operator details are required."
+fi
+
+if [[ "$IS_LOCAL" == "y" ]]; then
+  LEGAL_OPERATOR_NAME="Local development"
+  LEGAL_OPERATOR_EMAIL="developer@localhost.invalid"
+  LEGAL_OPERATOR_ADDRESS="Local development environment"
+  LEGAL_OPERATOR_COUNTRY="Germany"
+  LEGAL_GOVERNING_LAW="Germany"
 fi
 
 # ─── 3. Secrets ───────────────────────────────────────────────────────────────
@@ -162,6 +180,8 @@ JWT_SECRET=$(gen_secret)
 JWT_REFRESH_SECRET=$(gen_secret)
 ROBOT_JWT_SECRET=$(gen_secret)
 WEBHOOK_SECRET_ENCRYPTION_KEY=$(gen_secret)
+PAYOUT_DESTINATION_ENCRYPTION_KEY=$(gen_secret)
+METRICS_PASSWORD=$(gen_secret)
 DB_PASSWORD=$(gen_secret | head -c 24)
 REDIS_PASSWORD=$(gen_secret | head -c 24)
 MINIO_ROOT_USER=botpartyminio
@@ -175,9 +195,14 @@ ask LIVEKIT_API_SECRET "LiveKit API secret (leave empty to generate)" ""
 [[ -z "$LIVEKIT_API_KEY" ]]    && LIVEKIT_API_KEY="botparty-$(gen_secret | head -c 8)"
 [[ -z "$LIVEKIT_API_SECRET" ]] && LIVEKIT_API_SECRET=$(gen_secret)
 
-# Seed admin password
+# Optional initial administrator
 echo ""
-ask SEED_ADMIN_PASSWORD "Demo admin password (for the seeded admin@botparty.live account)" "admin123456"
+ask SEED_ADMIN_EMAIL "Initial admin email (leave empty to skip)" ""
+SEED_ADMIN_PASSWORD=""
+if [[ -n "$SEED_ADMIN_EMAIL" ]]; then
+  ask SEED_ADMIN_PASSWORD "Initial admin password (minimum 16 characters)" ""
+  [[ ${#SEED_ADMIN_PASSWORD} -ge 16 ]] || die "Initial admin password must contain at least 16 characters."
+fi
 
 success "Secrets ready."
 
@@ -186,31 +211,58 @@ success "Secrets ready."
 header "4 / 4  Writing .env"
 echo ""
 
+[[ "$IS_LOCAL" == "y" ]] && APP_ENVIRONMENT=development || APP_ENVIRONMENT=production
+
+SECRET_DIR="docker/secrets"
+mkdir -p "$SECRET_DIR"
+chmod 700 "$SECRET_DIR"
+write_secret() {
+  printf '%s' "$2" > "${SECRET_DIR}/$1"
+  chmod 600 "${SECRET_DIR}/$1"
+}
+write_secret db_password "$DB_PASSWORD"
+write_secret api_database_url "postgresql://botparty:${DB_PASSWORD}@postgres:5432/botparty?schema=public&connection_limit=10&pool_timeout=30"
+write_secret redis_password "$REDIS_PASSWORD"
+write_secret minio_root_password "$MINIO_ROOT_PASSWORD"
+write_secret jwt_secret "$JWT_SECRET"
+write_secret jwt_refresh_secret "$JWT_REFRESH_SECRET"
+write_secret robot_jwt_secret "$ROBOT_JWT_SECRET"
+write_secret webhook_secret_encryption_key "$WEBHOOK_SECRET_ENCRYPTION_KEY"
+write_secret payout_destination_encryption_key "$PAYOUT_DESTINATION_ENCRYPTION_KEY"
+write_secret livekit_api_secret "$LIVEKIT_API_SECRET"
+write_secret metrics_password "$METRICS_PASSWORD"
+write_secret smtp_password "$SMTP_PASSWORD"
+write_secret alertmanager_webhook_url "$ALERTMANAGER_WEBHOOK_URL"
+write_secret seed_admin_password "$SEED_ADMIN_PASSWORD"
+write_secret seed_demo_user_password ""
+
 cat > .env <<EOF
 # Generated by setup-env.sh on $(date -u '+%Y-%m-%d %H:%M UTC')
 # Re-run  bash setup-env.sh  to regenerate.
 
 # ─── General ──────────────────────────────────────────
-NODE_ENV=production
+NODE_ENV=${APP_ENVIRONMENT}
+PUBLIC_DEPLOYMENT=$([[ "$IS_LOCAL" == "y" ]] && printf false || printf true)
 PORT=4000
 
 # ─── Database ─────────────────────────────────────────
-# DB_PASSWORD is read directly by docker-compose for the postgres container.
-DB_PASSWORD=${DB_PASSWORD}
-DATABASE_URL=postgresql://botparty:${DB_PASSWORD}@postgres:5432/botparty?schema=public&connection_limit=10&pool_timeout=30
+DATABASE_URL_FILE=/run/secrets/api_database_url
 
 # ─── Redis ────────────────────────────────────────────
 REDIS_HOST=redis
 REDIS_PORT=6379
-REDIS_PASSWORD=${REDIS_PASSWORD}
+REDIS_PASSWORD_FILE=/run/secrets/redis_password
 
 # ─── JWT / Auth ───────────────────────────────────────
-JWT_SECRET=${JWT_SECRET}
+JWT_SECRET_FILE=/run/secrets/jwt_secret
 JWT_EXPIRES_IN=15m
-JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
-ROBOT_JWT_SECRET=${ROBOT_JWT_SECRET}
-WEBHOOK_SECRET_ENCRYPTION_KEY=${WEBHOOK_SECRET_ENCRYPTION_KEY}
+JWT_REFRESH_SECRET_FILE=/run/secrets/jwt_refresh_secret
+ROBOT_JWT_SECRET_FILE=/run/secrets/robot_jwt_secret
+WEBHOOK_SECRET_ENCRYPTION_KEY_FILE=/run/secrets/webhook_secret_encryption_key
+PAYOUT_DESTINATION_ENCRYPTION_KEY_FILE=/run/secrets/payout_destination_encryption_key
 JWT_REFRESH_EXPIRES_IN=7d
+AUTH_COOKIE_SAMESITE=Strict
+AUTH_COOKIE_SECURE=$([[ "$IS_LOCAL" == "y" ]] && printf false || printf true)
 PASSWORD_RESET_TTL_SEC=3600
 
 # ─── Email / Password Reset ───────────────────────────
@@ -219,18 +271,25 @@ SMTP_HOST=${SMTP_HOST}
 SMTP_PORT=${SMTP_PORT}
 SMTP_SECURE=${SMTP_SECURE}
 SMTP_USER=${SMTP_USER}
-SMTP_PASSWORD=${SMTP_PASSWORD}
+SMTP_PASSWORD_FILE=/run/secrets/smtp_password
 SMTP_FROM=${SMTP_FROM}
 
 # ─── LiveKit ──────────────────────────────────────────
 LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
-LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
+LIVEKIT_API_SECRET_FILE=/run/secrets/livekit_api_secret
 LIVEKIT_URL=${LIVEKIT_URL}
+LIVEKIT_WHIP_BASE_URL=${APP_URL}/whip
 
 # ─── Frontend ─────────────────────────────────────────
 NEXT_PUBLIC_API_URL=${API_URL}
 NEXT_PUBLIC_WS_URL=${WS_URL}
 NEXT_PUBLIC_LIVEKIT_URL=${LIVEKIT_EXT_URL}
+NEXT_PUBLIC_APP_URL=${APP_URL}
+NEXT_PUBLIC_LEGAL_OPERATOR_NAME=${LEGAL_OPERATOR_NAME}
+NEXT_PUBLIC_LEGAL_OPERATOR_EMAIL=${LEGAL_OPERATOR_EMAIL}
+NEXT_PUBLIC_LEGAL_OPERATOR_ADDRESS=${LEGAL_OPERATOR_ADDRESS}
+NEXT_PUBLIC_LEGAL_OPERATOR_COUNTRY=${LEGAL_OPERATOR_COUNTRY}
+NEXT_PUBLIC_LEGAL_GOVERNING_LAW=${LEGAL_GOVERNING_LAW}
 
 # ─── CORS ─────────────────────────────────────────────
 CORS_ORIGIN=${CORS_ORIGIN}
@@ -245,24 +304,40 @@ THUMBNAIL_S3_BUCKET=botparty-thumbnails
 THUMBNAIL_S3_REGION=us-east-1
 THUMBNAIL_S3_ENDPOINT=http://minio:9000
 THUMBNAIL_S3_ACCESS_KEY_ID=${MINIO_ROOT_USER}
-THUMBNAIL_S3_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
+THUMBNAIL_S3_SECRET_ACCESS_KEY_FILE=/run/secrets/minio_root_password
 THUMBNAIL_S3_FORCE_PATH_STYLE=true
 
 # ─── Recording Storage ────────────────────────────────
-LIVEKIT_RECORDING_OBJECT_KEY_TEMPLATE={room_name}-{time}.mp4
+LIVEKIT_RECORDING_OBJECT_KEY_TEMPLATE=sessions/{session_id}/{camera_id}-{time}.mp4
 LIVEKIT_RECORDINGS_S3_BUCKET=botparty-recordings
 LIVEKIT_RECORDINGS_S3_REGION=us-east-1
 LIVEKIT_RECORDINGS_S3_ENDPOINT=http://minio:9000
 LIVEKIT_RECORDINGS_S3_ACCESS_KEY_ID=${MINIO_ROOT_USER}
-LIVEKIT_RECORDINGS_S3_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
+LIVEKIT_RECORDINGS_S3_SECRET_ACCESS_KEY_FILE=/run/secrets/minio_root_password
 LIVEKIT_RECORDINGS_S3_FORCE_PATH_STYLE=true
 
 # ─── MinIO / Object Storage ──────────────────────────
 MINIO_ROOT_USER=${MINIO_ROOT_USER}
-MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+
+# ─── Metrics ─────────────────────────────────────────
+METRICS_AUTH_REQUIRED=true
+METRICS_USERNAME=metrics
+METRICS_PASSWORD_FILE=/run/secrets/metrics_password
 
 # ─── Seeding ──────────────────────────────────────────
-SEED_ADMIN_PASSWORD=${SEED_ADMIN_PASSWORD}
+SEED_ADMIN_EMAIL=${SEED_ADMIN_EMAIL}
+SEED_ADMIN_PASSWORD_FILE=/run/secrets/seed_admin_password
+
+# ─── Release gates (fail closed) ──────────────────────
+FEATURE_BILLING_ENABLED=false
+FEATURE_DONATIONS_ENABLED=false
+FEATURE_PAYOUTS_ENABLED=false
+FEATURE_PAID_CONTROLS_ENABLED=false
+FEATURE_SUBSCRIPTIONS_ENABLED=false
+NEXT_PUBLIC_FEATURE_BILLING=false
+NEXT_PUBLIC_FEATURE_DONATIONS=false
+NEXT_PUBLIC_FEATURE_PAYOUTS=false
+NEXT_PUBLIC_FEATURE_PAID_CONTROLS=false
 
 # ─── nginx ────────────────────────────────────────────
 # For HTTPS production: ./docker/nginx/nginx.ssl.conf (generated below, gitignored)
@@ -283,7 +358,7 @@ if [[ "${USE_SSL:-n}" == "y" ]]; then
   mkdir -p "$SSL_DIR"
 
   case "${SSL_CHOICE:-1}" in
-    2)
+    1)
       # Let's Encrypt
       echo "  To get a certificate from Let's Encrypt:"
       echo ""
@@ -309,7 +384,7 @@ if [[ "${USE_SSL:-n}" == "y" ]]; then
       echo "           docker compose -f $(pwd)/docker-compose.yml exec nginx nginx -s reload"
       echo ""
       ;;
-    3)
+    2)
       # Own cert
       echo "  Copy your certificates to docker/nginx/ssl/:"
       echo "    docker/nginx/ssl/fullchain.pem"
@@ -368,7 +443,4 @@ else
   echo "  API:   ${API_URL}"
 fi
 
-echo ""
-echo "  Demo login (seeded on first start):"
-echo "    admin@botparty.live  /  ${SEED_ADMIN_PASSWORD}"
 echo ""

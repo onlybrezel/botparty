@@ -1,11 +1,7 @@
-'use client';
-
 import Link from 'next/link';
 import Image from 'next/image';
-import { motion } from 'framer-motion';
 import { Bot } from 'lucide-react';
 import type { RobotPublic } from '@botparty/shared';
-import { useDesktopMotionPreference } from '@/lib/use-desktop-motion';
 
 function StatusBadge({ status }: { status: RobotPublic['status'] }) {
   if (status === 'ONLINE') {
@@ -43,7 +39,6 @@ interface Props {
 }
 
 export default function RobotCard({ robot }: Props) {
-  const motionEnabled = useDesktopMotionPreference();
   const seed = robot.slug
     .split('')
     .reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
@@ -57,15 +52,10 @@ export default function RobotCard({ robot }: Props) {
     robot.thumbnailUrl?.startsWith('/api/') || robot.thumbnailUrl?.startsWith('http') || false;
 
   return (
-    <motion.div
-      initial={motionEnabled ? { opacity: 0, y: 18 } : false}
-      animate={motionEnabled ? { opacity: 1, y: 0 } : undefined}
-      whileHover={motionEnabled ? { y: -6, scale: 1.01 } : undefined}
-      whileTap={motionEnabled ? { scale: 0.995 } : undefined}
-      transition={{ duration: 0.24, ease: 'easeOut' }}
-    >
+    <div className="transition-transform duration-200 motion-safe:hover:-translate-y-1">
       <Link
         href={`/robot/${robot.owner.username}/${robot.slug}`}
+        prefetch={false}
         className="group block overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] transition duration-200 hover:border-violet-500/40 hover:-translate-y-0.5"
       >
         {/* Thumbnail */}
@@ -169,6 +159,6 @@ export default function RobotCard({ robot }: Props) {
         </div>
         </div>
       </Link>
-    </motion.div>
+    </div>
   );
 }

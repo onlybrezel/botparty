@@ -1,0 +1,442 @@
+name: CI
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  dependency-audit:
+    name: Production dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: pnpm/action-setup@7088e561eb65bb68695d245aa206f005ef30921d # v4.1.0
+        with:
+          version: 9
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --prod --audit-level high
+
+  migrations:
+    name: Fresh + upgrade migrations
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: botparty
+          POSTGRES_PASSWORD: botparty_ci
+          POSTGRES_DB: migration_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U botparty -d migration_test"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: pnpm/action-setup@7088e561eb65bb68695d245aa206f005ef30921d # v4.1.0
+        with:
+          version: 9
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:generate
+      - run: pnpm db:verify-migrations
+        env:
+          MIGRATION_TEST_DATABASE_URL: postgresql://botparty:botparty_ci@127.0.0.1:5432/migration_test?schema=public
+
+  lint-and-typecheck:
+    name: Lint + Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: pnpm/action-setup@7088e561eb65bb68695d245aa206f005ef30921d # v4.1.0
+        with:
+          version: 9
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Check environment documentation parity
+        run: pnpm env:check
+
+      - name: Check web module architecture budgets
+        run: pnpm architecture:check
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+  observability-config:
+    name: Prometheus and Alertmanager config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Validate Prometheus configuration and rules
+        run: |
+          docker run --rm --entrypoint /bin/promtool -v "$PWD/docker/prometheus:/etc/prometheus:ro" prom/prometheus:v3.5.0 check config /etc/prometheus/prometheus.yml
+          docker run --rm --entrypoint /bin/promtool -v "$PWD/docker/prometheus:/etc/prometheus:ro" prom/prometheus:v3.5.0 check rules /etc/prometheus/alerts.yml
+          docker run --rm --entrypoint /bin/promtool -v "$PWD/docker/prometheus:/etc/prometheus:ro" -w /etc/prometheus prom/prometheus:v3.5.0 test rules alerts.test.yml
+      - name: Validate Alertmanager configuration
+        run: |
+          sh -n docker/alertmanager/entrypoint.sh
+          printf 'https://alerts.example.invalid/botparty\n' > /tmp/alertmanager_webhook_url
+          docker run --rm \
+            -v "$PWD/docker/alertmanager:/etc/alertmanager:ro" \
+            -v /tmp/alertmanager_webhook_url:/run/secrets/alertmanager_webhook_url:ro \
+            --entrypoint /bin/sh prom/alertmanager:v0.28.1 \
+            /etc/alertmanager/entrypoint.sh --check
+
+  dev-compose:
+    name: Development Compose images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Validate merged development configuration
+        run: docker compose -f docker-compose.yml -f docker-compose.dev.yml config --quiet
+        env:
+          LIVEKIT_API_KEY: botparty-ci-livekit-key
+      - name: Build hot-reload API and Web images
+        run: docker compose -f docker-compose.yml -f docker-compose.dev.yml build api web
+        env:
+          LIVEKIT_API_KEY: botparty-ci-livekit-key
+      - name: Start hot-reload stack and verify runtime health
+        run: DEV_COMPOSE_SKIP_BUILD=true ./scripts/smoke-dev-compose.sh
+
+  queue-benchmark:
+    name: Queue 1,000-entry budget
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: botparty
+          POSTGRES_PASSWORD: botparty_ci
+          POSTGRES_DB: queue_benchmark
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U botparty -d queue_benchmark"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: [6379:6379]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: pnpm/action-setup@7088e561eb65bb68695d245aa206f005ef30921d # v4.1.0
+        with: { version: 9 }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with: { node-version: '24', cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:generate
+      - run: pnpm --filter @botparty/prisma db:migrate:prod
+        env:
+          DATABASE_URL: postgresql://botparty:botparty_ci@127.0.0.1:5432/queue_benchmark?schema=public
+      - run: pnpm benchmark:queue
+        env:
+          DATABASE_URL: postgresql://botparty:botparty_ci@127.0.0.1:5432/queue_benchmark?schema=public
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: 6379
+          QUEUE_BENCHMARK_ALLOW_WRITES: 'true'
+
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    needs: lint-and-typecheck
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: pnpm/action-setup@7088e561eb65bb68695d245aa206f005ef30921d # v4.1.0
+        with:
+          version: 9
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Run API tests
+        run: pnpm --filter @botparty/api test
+
+      - name: Run Web tests
+        run: pnpm --filter @botparty/web test
+
+  coverage:
+    name: Coverage Report
+    runs-on: ubuntu-latest
+    needs: lint-and-typecheck
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: pnpm/action-setup@7088e561eb65bb68695d245aa206f005ef30921d # v4.1.0
+        with:
+          version: 9
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Run API coverage
+        run: pnpm --filter @botparty/api test:coverage
+
+      - name: Run Web coverage
+        run: pnpm --filter @botparty/web test:coverage
+
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-reports
+          path: |
+            apps/api/coverage
+            apps/web/coverage
+          if-no-files-found: error
+
+  e2e:
+    name: Web E2E Tests
+    runs-on: ubuntu-latest
+    needs: lint-and-typecheck
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: botparty
+          POSTGRES_PASSWORD: botparty_ci
+          POSTGRES_DB: botparty
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U botparty -d botparty"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: pnpm/action-setup@7088e561eb65bb68695d245aa206f005ef30921d # v4.1.0
+        with:
+          version: 9
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browser
+        run: pnpm --filter @botparty/web exec playwright install --with-deps chromium
+
+      - name: Provision API schema and deterministic fixtures
+        run: |
+          pnpm --filter @botparty/prisma db:migrate:prod
+          pnpm --filter @botparty/prisma db:seed
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgresql://botparty:botparty_ci@127.0.0.1:5432/botparty?schema=public
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: 6379
+          REDIS_PASSWORD: ''
+          CORS_ORIGIN: http://127.0.0.1:3000
+          PUBLIC_WEB_URL: http://127.0.0.1:3000
+          JWT_SECRET: test-jwt-secret-that-is-at-least-32-chars
+          JWT_REFRESH_SECRET: test-refresh-secret-that-is-at-least-32-chars
+          ROBOT_JWT_SECRET: test-robot-secret-that-is-at-least-32-chars
+          LIVEKIT_API_KEY: test-livekit-key
+          LIVEKIT_API_SECRET: test-livekit-secret-that-is-at-least-32-chars
+          LIVEKIT_URL: ws://127.0.0.1:7880
+          WEBHOOK_SECRET_ENCRYPTION_KEY: test-webhook-secret-that-is-at-least-32-chars
+          SEED_ADMIN_EMAIL: admin@botparty.test
+          SEED_ADMIN_USERNAME: e2e_admin
+          SEED_ADMIN_PASSWORD: e2e-admin-password-at-least-16
+          SEED_DEMO_USER_PASSWORD: e2e-user-password
+          SEED_E2E_FIXTURES: 'true'
+
+      - name: Run Web E2E tests
+        run: pnpm --filter @botparty/web test:e2e --project=chromium
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgresql://botparty:botparty_ci@127.0.0.1:5432/botparty?schema=public
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: 6379
+          REDIS_PASSWORD: ''
+          CORS_ORIGIN: http://127.0.0.1:3000
+          PUBLIC_WEB_URL: http://127.0.0.1:3000
+          JWT_SECRET: test-jwt-secret-that-is-at-least-32-chars
+          JWT_REFRESH_SECRET: test-refresh-secret-that-is-at-least-32-chars
+          ROBOT_JWT_SECRET: test-robot-secret-that-is-at-least-32-chars
+          LIVEKIT_API_KEY: test-livekit-key
+          LIVEKIT_API_SECRET: test-livekit-secret-that-is-at-least-32-chars
+          LIVEKIT_URL: ws://127.0.0.1:7880
+          WEBHOOK_SECRET_ENCRYPTION_KEY: test-webhook-secret-that-is-at-least-32-chars
+          NEXT_PUBLIC_API_URL: http://127.0.0.1:4000
+          NEXT_PUBLIC_APP_URL: http://127.0.0.1:3000
+          NEXT_PUBLIC_WS_URL: ws://127.0.0.1:4000
+          NEXT_PUBLIC_LIVEKIT_URL: ws://127.0.0.1:7880
+          API_URL: http://127.0.0.1:4000
+
+      - name: Build applications for Lighthouse
+        run: pnpm build
+        env:
+          NEXT_PUBLIC_API_URL: http://127.0.0.1:4000
+          NEXT_PUBLIC_APP_URL: http://127.0.0.1:3000
+          NEXT_PUBLIC_WS_URL: ws://127.0.0.1:4000
+          NEXT_PUBLIC_LIVEKIT_URL: ws://127.0.0.1:7880
+          NEXT_PUBLIC_LEGAL_OPERATOR_NAME: BotParty CI Operator
+          NEXT_PUBLIC_LEGAL_OPERATOR_EMAIL: operator@example.com
+          NEXT_PUBLIC_LEGAL_OPERATOR_ADDRESS: 1 CI Street, Test City
+          NEXT_PUBLIC_LEGAL_OPERATOR_COUNTRY: Germany
+          NEXT_PUBLIC_LEGAL_GOVERNING_LAW: Germany
+          API_URL: http://127.0.0.1:4000
+
+      - name: Run Lighthouse mobile budgets
+        run: pnpm --filter @botparty/web performance:lighthouse
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgresql://botparty:botparty_ci@127.0.0.1:5432/botparty?schema=public
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: 6379
+          REDIS_PASSWORD: ''
+          CORS_ORIGIN: http://127.0.0.1:3000
+          PUBLIC_WEB_URL: http://127.0.0.1:3000
+          JWT_SECRET: test-jwt-secret-that-is-at-least-32-chars
+          JWT_REFRESH_SECRET: test-refresh-secret-that-is-at-least-32-chars
+          ROBOT_JWT_SECRET: test-robot-secret-that-is-at-least-32-chars
+          LIVEKIT_API_KEY: test-livekit-key
+          LIVEKIT_API_SECRET: test-livekit-secret-that-is-at-least-32-chars
+          LIVEKIT_URL: ws://127.0.0.1:7880
+          WEBHOOK_SECRET_ENCRYPTION_KEY: test-webhook-secret-that-is-at-least-32-chars
+          API_URL: http://127.0.0.1:4000
+          NEXT_PUBLIC_API_URL: http://127.0.0.1:4000
+          NEXT_PUBLIC_APP_URL: http://127.0.0.1:3000
+          NEXT_PUBLIC_WS_URL: ws://127.0.0.1:4000
+          NEXT_PUBLIC_LIVEKIT_URL: ws://127.0.0.1:7880
+          LHCI_ADMIN_EMAIL: admin@botparty.test
+          LHCI_ADMIN_PASSWORD: e2e-admin-password-at-least-16
+
+      - name: Upload Lighthouse reports
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: lighthouse-reports
+          path: apps/web/.lighthouseci
+          if-no-files-found: error
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs:
+      [
+        dependency-audit,
+        dev-compose,
+        migrations,
+        observability-config,
+        queue-benchmark,
+        lint-and-typecheck,
+        test,
+        coverage,
+        e2e,
+      ]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: pnpm/action-setup@7088e561eb65bb68695d245aa206f005ef30921d # v4.1.0
+        with:
+          version: 9
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Build
+        run: pnpm build
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:4000
+          NEXT_PUBLIC_APP_URL: http://localhost:3000
+          NEXT_PUBLIC_WS_URL: ws://localhost:4000
+          NEXT_PUBLIC_LIVEKIT_URL: ws://localhost:7880
+          NEXT_PUBLIC_LEGAL_OPERATOR_NAME: BotParty CI Operator
+          NEXT_PUBLIC_LEGAL_OPERATOR_EMAIL: operator@example.com
+          NEXT_PUBLIC_LEGAL_OPERATOR_ADDRESS: 1 CI Street, Test City
+          NEXT_PUBLIC_LEGAL_OPERATOR_COUNTRY: Germany
+          NEXT_PUBLIC_LEGAL_GOVERNING_LAW: Germany
+          API_URL: http://localhost:4000
+
+      - name: Enforce route bundle budgets
+        run: pnpm --filter @botparty/web performance:budget
+
+      - name: Export OpenAPI spec
+        run: node apps/api/dist/openapi/export-openapi.js docs/openapi.json
+        env:
+          DATABASE_URL: postgresql://botparty:botparty@localhost:5432/botparty?schema=public
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: 6379
+          REDIS_PASSWORD: ''
+          CORS_ORIGIN: http://localhost:3000
+          JWT_SECRET: test-jwt-secret-that-is-at-least-32-chars
+          JWT_REFRESH_SECRET: test-refresh-secret-that-is-at-least-32-chars
+          ROBOT_JWT_SECRET: test-robot-secret-that-is-at-least-32-chars
+          LIVEKIT_API_KEY: test-livekit-key
+          LIVEKIT_API_SECRET: test-livekit-secret-that-is-at-least-32-chars
+
+      - name: Regenerate client contracts
+        run: |
+          pnpm docs:api-client
+          pnpm generate:ts-api-client
+
+      - name: Check OpenAPI drift
+        run: git diff --exit-code -- docs/openapi.json docs/api-client.md apps/web/src/lib/generated/openapi-client
+
+      - name: Upload OpenAPI artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: openapi-spec
+          path: docs/openapi.json
+          if-no-files-found: error

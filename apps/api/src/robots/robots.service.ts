@@ -32,6 +32,7 @@ import {
   toPublicRobot,
   type RobotStreamCameraDescriptor,
 } from './robots.service.helpers';
+import { NotificationsService } from '../notifications/notifications.service';
 
 export type GuestAccess = 'ALL' | 'AUTHENTICATED' | 'DISABLED';
 
@@ -112,6 +113,7 @@ export class RobotsService implements OnModuleDestroy {
     private readonly actionQueueService: RobotActionQueueService,
     private readonly publicOverviewService: RobotPublicOverviewService,
     private readonly platformUser: PlatformUserService,
+    private readonly notifications: NotificationsService,
   ) {
     this.maxRobotsPerOwner = readNonNegativeIntegerEnv(this.configService, 'MAX_ROBOTS_PER_OWNER', 25);
     this.platformUserId = this.platformUser.getPlatformUserId();
@@ -250,12 +252,30 @@ export class RobotsService implements OnModuleDestroy {
       throw new ForbiddenException('Not your robot');
     }
 
+    await this.assertPublicationReady(robot, input, ownerId);
+
     return this.writeHelper.applyRobotUpdate(robot, input);
   }
 
   async updateByStaff(id: string, input: z.infer<typeof updateRobotSchema>) {
     const existing = await this.findById(id);
+    await this.assertPublicationReady(existing, input, existing.ownerId);
     return this.writeHelper.applyRobotUpdate(existing, input);
+  }
+
+  private async assertPublicationReady(
+    robot: { id: string; visibility: string },
+    input: z.infer<typeof updateRobotSchema>,
+    ownerId: string,
+  ) {
+    if (input.visibility !== 'PUBLIC' || robot.visibility === 'PUBLIC') return;
+    const onboarding = await this.getOnboardingStatus(robot.id, ownerId);
+    if (onboarding.canPublish) return;
+    throw new BadRequestException({
+      code: 'ROBOT_ONBOARDING_INCOMPLETE',
+      message: 'Complete the required go-live checks before publishing this robot.',
+      missingSteps: onboarding.steps.filter((step) => step.required && !step.complete).map((step) => step.id),
+    });
   }
 
   async delete(id: string, ownerId: string) {
@@ -383,11 +403,22 @@ export class RobotsService implements OnModuleDestroy {
         status,
         lastOnlineAt: status === 'ONLINE' ? new Date() : undefined,
       },
-      select: { id: true, name: true, slug: true, status: true },
+      select: { id: true, name: true, slug: true, status: true, ownerId: true },
     });
     if (previous?.status !== updated.status) {
       this.webhooks.emitRobotStatus(updated);
       await this.roomStateHelper.invalidatePublicOverviewCache();
+      if (updated.status === 'OFFLINE') {
+        void this.notifications.publishSafely({
+          userId: updated.ownerId,
+          kind: 'ROBOT_OFFLINE',
+          category: 'ROBOT',
+          title: `${updated.name} is offline`,
+          body: 'The robot stopped reporting. Check its connection and power before reopening control.',
+          actionUrl: '/dashboard',
+          dedupeKey: `robot-offline:${updated.id}:${Date.now()}`,
+        });
+      }
     }
     return updated;
   }
@@ -412,6 +443,10 @@ export class RobotsService implements OnModuleDestroy {
 
   async findByClaimToken(claimToken: string) {
     return this.deviceService.findByClaimToken(claimToken);
+  }
+
+  async validateRobotAuth(robotId: string, deviceHash: string, tokenVersion: number) {
+    return this.deviceService.validateRobotAuth(robotId, deviceHash, tokenVersion);
   }
 
   async enqueueAction(robotId: string, ownerId: string, payload: RobotActionPayload) {
@@ -453,10 +488,51 @@ export class RobotsService implements OnModuleDestroy {
       livekitConnected?: boolean;
       commandsReceived?: number;
       cameraFrames?: number;
+      emergencyStopVerified?: boolean;
     },
   ) {
     await this.findById(robotId);
     return this.telemetry.ingestTelemetryByRobotId(robotId, payload);
+  }
+
+  async getOnboardingStatus(robotId: string, ownerId: string) {
+    const robot = await this.prisma.robot.findUnique({
+      where: { id: robotId },
+      select: { id: true, ownerId: true, status: true, accessMode: true, metadata: true },
+    });
+    if (!robot) throw new NotFoundException('Robot not found');
+    if (robot.ownerId !== ownerId) throw new ForbiddenException('Not your robot');
+
+    const [rawTelemetry, buttonCount] = await Promise.all([
+      this.redis.get(`robot:telemetry:${robotId}:latest`),
+      this.prisma.controlButton.count({ where: { robotId, isEnabled: true } }),
+    ]);
+    let telemetry: Record<string, unknown> = {};
+    try {
+      telemetry = rawTelemetry ? JSON.parse(rawTelemetry) as Record<string, unknown> : {};
+    } catch {
+      telemetry = {};
+    }
+    const fresh = typeof telemetry.ts === 'number' && Date.now() - telemetry.ts < 180_000;
+    const access = await this.getAccessPolicy(robotId);
+    const videoRequired = access.video !== 'DISABLED';
+    const controlRequired = access.control !== 'DISABLED';
+    const connected = fresh && (robot.status === 'ONLINE' || robot.status === 'BUSY');
+    const steps = [
+      { id: 'claim' as const, label: 'Robot claimed', required: true, complete: connected },
+      { id: 'connectivity' as const, label: 'Connection healthy', required: true, complete: connected && telemetry.controlConnected === true },
+      { id: 'camera' as const, label: 'Camera publishing', required: videoRequired, complete: !videoRequired || (fresh && telemetry.livekitConnected === true && Number(telemetry.cameraFrames ?? 0) > 0) },
+      { id: 'control' as const, label: 'Control command received', required: controlRequired, complete: !controlRequired || (fresh && telemetry.controlConnected === true && Number(telemetry.commandsReceived ?? 0) > 0) },
+      { id: 'emergency_stop' as const, label: 'Hardware E-Stop verified', required: controlRequired, complete: !controlRequired || (fresh && telemetry.emergencyStopVerified === true) },
+      { id: 'access' as const, label: 'Room access configured', required: true, complete: Boolean(robot.accessMode) },
+      { id: 'moderation' as const, label: 'Control policy configured', required: controlRequired, complete: !controlRequired || buttonCount > 0 },
+      { id: 'preview' as const, label: 'Live preview ready', required: videoRequired, complete: !videoRequired || (fresh && telemetry.livekitConnected === true && Number(telemetry.cameraFrames ?? 0) > 0) },
+    ];
+    return {
+      canPublish: steps.every((step) => !step.required || step.complete),
+      generatedAt: new Date().toISOString(),
+      steps,
+    };
   }
 
   async getRobotTelemetry(robotId: string, ownerId: string) {
@@ -479,8 +555,8 @@ export class RobotsService implements OnModuleDestroy {
     return this.roomStateHelper.findByIdCached(id, () => this.findById(id));
   }
 
-  async appendChatMessage(robotId: string, userId: string | null | undefined, content: string, timestampMs: number) {
-    return this.roomStateHelper.appendChatMessage(robotId, userId, content, timestampMs);
+  async appendChatMessage(robotId: string, userId: string | null | undefined, content: string, timestampMs: number, clientMessageId: string) {
+    return this.roomStateHelper.appendChatMessage(robotId, userId, content, timestampMs, clientMessageId);
   }
 
   async getRecentChatMessages(robotId: string, limit?: number): Promise<ChatHistoryMessage[]> {

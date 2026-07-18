@@ -36,12 +36,6 @@ export default function ImprintPage() {
         </p>
       </div>
 
-      {!legal.isConfigured ? (
-        <div className="mb-5 rounded-2xl border border-amber-500/40 bg-amber-100 text-amber-950 p-4 text-sm dark:bg-amber-500/10 dark:text-amber-100">
-          This deployment has not configured final operator details yet. Set the `NEXT_PUBLIC_LEGAL_*` variables before public launch.
-        </div>
-      ) : null}
-
       <div className="space-y-5">
         <Section title="Operator">
           <p><strong className="text-[var(--foreground)]">Responsible entity:</strong> {legal.operatorName}</p>
@@ -51,8 +45,8 @@ export default function ImprintPage() {
         </Section>
 
         <Section title="Register information">
-          <p><strong className="text-[var(--foreground)]">Commercial register:</strong> {legal.commercialRegister ?? 'Not provided for this deployment.'}</p>
-          <p><strong className="text-[var(--foreground)]">VAT ID:</strong> {legal.vatId ?? 'Not provided for this deployment.'}</p>
+          <p><strong className="text-[var(--foreground)]">Commercial register:</strong> {legal.commercialRegister ?? 'Not applicable'}</p>
+          <p><strong className="text-[var(--foreground)]">VAT ID:</strong> {legal.vatId ?? 'Not applicable'}</p>
         </Section>
 
         <Section title="Support and dispute contact">
@@ -67,7 +61,7 @@ export default function ImprintPage() {
                 {legal.supportUrl}
               </a>
             ) : (
-              'Not configured for this deployment.'
+              'Contact us by email.'
             )}
           </p>
         </Section>

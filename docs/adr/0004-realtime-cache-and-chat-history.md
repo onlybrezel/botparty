@@ -10,7 +10,7 @@ Realtime control and chat handlers were repeatedly hitting PostgreSQL for the sa
 ## Decision
 
 1. Add a short-lived cache-first lookup for robot rows used by realtime handlers.
-2. Persist authenticated websocket chat messages into `chat_messages`.
+2. Persist accepted websocket chat messages with a stable `clientMessageId` in `chat_messages`.
 3. Replay recent chat history on room join.
 4. Keep cache TTL short (30s) to reduce stale data risk while removing hot-path database load.
 
@@ -18,10 +18,9 @@ Realtime control and chat handlers were repeatedly hitting PostgreSQL for the sa
 
 - Lower read pressure on database during high-frequency control traffic.
 - New joiners receive recent chat context from server state.
-- Guest chat messages remain ephemeral because the current schema requires `userId`.
-- Eventual consistency window up to cache TTL for robot metadata.
+- Guest messages keep their guest identity without requiring a user row.
+- Robot writes publish cache invalidations across replicas; the short TTL remains a recovery bound.
 
-## Follow-up
+## Operations
 
-- Consider explicit cache invalidation on every robot write path.
-- Monitor chat queue throughput and add queue-depth alerting if burst load increases.
+Chat persistence failures and cache/pub-sub health are part of the API metrics and alert set.

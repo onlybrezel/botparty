@@ -36,6 +36,7 @@ describe('RobotRuntimeHandler', () => {
     };
     const robotsService = {
       findByIdCached: jest.fn().mockResolvedValue({ id: 'robot-1', name: 'Mars Rover' }),
+      validateRobotAuth: jest.fn().mockResolvedValue(true),
       updateStatus: jest.fn().mockResolvedValue(undefined),
       touchHeartbeat: jest.fn().mockResolvedValue(undefined),
       ingestRobotTelemetryByRobotId: jest.fn().mockResolvedValue(undefined),
@@ -62,22 +63,49 @@ describe('RobotRuntimeHandler', () => {
     const { runtime, runtimeMock, robotsService, queueService, syncTurnLifecycle } = createDeps();
     runtimeMock.parseWsPayload.mockReturnValue({ robotAuthToken: 'bad-token', protocolVersion: 2 });
     runtimeMock.resolveRobotSocketIdentity.mockReturnValue(null);
-    const handler = new RobotRuntimeHandler(runtime, robotsService, queueService, syncTurnLifecycle);
+    const handler = new RobotRuntimeHandler(
+      runtime,
+      robotsService,
+      queueService,
+      syncTurnLifecycle,
+    );
     const client = createClient();
 
     await expect(handler.handleRobotClaim(client, {})).resolves.toBeUndefined();
-    expect(client.send).toHaveBeenCalledWith(JSON.stringify({
-      event: WS_EVENTS.ERROR,
-      data: { message: 'Invalid robot authorization' },
-    }));
+    expect(client.send).toHaveBeenCalledWith(
+      JSON.stringify({
+        event: WS_EVENTS.ERROR,
+        data: { message: 'Invalid robot authorization' },
+      }),
+    );
     expect(client.close).toHaveBeenCalledWith(1008, 'Invalid robot authorization');
   });
 
   it('claims a robot socket and synchronizes the queue lifecycle', async () => {
-    const { runtime, runtimeMock, robotsService, robotsMock, queueService, queueMock, syncTurnLifecycle } = createDeps();
-    runtimeMock.parseWsPayload.mockReturnValue({ robotAuthToken: 'good-token', protocolVersion: 2 });
-    runtimeMock.resolveRobotSocketIdentity.mockReturnValue('robot-1');
-    const handler = new RobotRuntimeHandler(runtime, robotsService, queueService, syncTurnLifecycle);
+    const {
+      runtime,
+      runtimeMock,
+      robotsService,
+      robotsMock,
+      queueService,
+      queueMock,
+      syncTurnLifecycle,
+    } = createDeps();
+    runtimeMock.parseWsPayload.mockReturnValue({
+      robotAuthToken: 'good-token',
+      protocolVersion: 2,
+    });
+    runtimeMock.resolveRobotSocketIdentity.mockReturnValue({
+      robotId: 'robot-1',
+      deviceHash: 'a'.repeat(64),
+      tokenVersion: 1,
+    });
+    const handler = new RobotRuntimeHandler(
+      runtime,
+      robotsService,
+      queueService,
+      syncTurnLifecycle,
+    );
     const client = createClient();
 
     const result = await handler.handleRobotClaim(client, {});
@@ -86,10 +114,16 @@ describe('RobotRuntimeHandler', () => {
     expect(robotsMock.updateStatus).toHaveBeenCalledWith('robot-1', 'ONLINE');
     expect(queueMock.getQueue).toHaveBeenCalledWith('robot-1');
     expect(syncTurnLifecycle).toHaveBeenCalledWith('robot-1', { queue: [] });
-    expect(runtimeMock.broadcastToRoomLocally).toHaveBeenCalledWith('robot-1', WS_EVENTS.QUEUE_UPDATE, {
-      queue: { queue: [] },
+    expect(runtimeMock.broadcastToRoomLocally).toHaveBeenCalledWith(
+      'robot-1',
+      WS_EVENTS.QUEUE_UPDATE,
+      {
+        queue: { queue: [] },
+      },
+    );
+    expect(runtimeMock.broadcastToRoom).toHaveBeenCalledWith('robot-1', WS_EVENTS.ROBOT_STATUS, {
+      status: 'ONLINE',
     });
-    expect(runtimeMock.broadcastToRoom).toHaveBeenCalledWith('robot-1', WS_EVENTS.ROBOT_STATUS, { status: 'ONLINE' });
     expect(result).toEqual({
       event: WS_EVENTS.ROBOT_CLAIM,
       data: {
@@ -104,43 +138,86 @@ describe('RobotRuntimeHandler', () => {
 
   it('rejects duplicate claims when the cross-instance lock cannot be acquired', async () => {
     const { runtime, runtimeMock, robotsService, queueService, syncTurnLifecycle } = createDeps();
-    runtimeMock.parseWsPayload.mockReturnValue({ robotAuthToken: 'good-token', protocolVersion: 2 });
-    runtimeMock.resolveRobotSocketIdentity.mockReturnValue('robot-1');
+    runtimeMock.parseWsPayload.mockReturnValue({
+      robotAuthToken: 'good-token',
+      protocolVersion: 2,
+    });
+    runtimeMock.resolveRobotSocketIdentity.mockReturnValue({
+      robotId: 'robot-1',
+      deviceHash: 'a'.repeat(64),
+      tokenVersion: 1,
+    });
     runtimeMock.acquireRobotClaimLock.mockResolvedValueOnce(false);
-    const handler = new RobotRuntimeHandler(runtime, robotsService, queueService, syncTurnLifecycle);
+    const handler = new RobotRuntimeHandler(
+      runtime,
+      robotsService,
+      queueService,
+      syncTurnLifecycle,
+    );
     const client = createClient();
 
     await handler.handleRobotClaim(client, {});
 
-    expect(client.send).toHaveBeenCalledWith(JSON.stringify({
-      event: WS_EVENTS.ERROR,
-      data: { message: 'Robot control channel is already connected' },
-    }));
+    expect(client.send).toHaveBeenCalledWith(
+      JSON.stringify({
+        event: WS_EVENTS.ERROR,
+        data: { message: 'Robot control channel is already connected' },
+      }),
+    );
     expect(client.close).toHaveBeenCalledWith(1008, 'Robot already connected');
   });
 
   it('replaces an existing robot socket when the lock transfer succeeds', async () => {
     const { runtime, runtimeMock, robotsService, queueService, syncTurnLifecycle } = createDeps();
-    runtimeMock.parseWsPayload.mockReturnValue({ robotAuthToken: 'good-token', protocolVersion: 2 });
-    runtimeMock.resolveRobotSocketIdentity.mockReturnValue('robot-1');
+    runtimeMock.parseWsPayload.mockReturnValue({
+      robotAuthToken: 'good-token',
+      protocolVersion: 2,
+    });
+    runtimeMock.resolveRobotSocketIdentity.mockReturnValue({
+      robotId: 'robot-1',
+      deviceHash: 'a'.repeat(64),
+      tokenVersion: 1,
+    });
     const existingClient = createClient();
     runtimeMock.getOpenRobotClient.mockReturnValue(existingClient);
-    const handler = new RobotRuntimeHandler(runtime, robotsService, queueService, syncTurnLifecycle);
+    const handler = new RobotRuntimeHandler(
+      runtime,
+      robotsService,
+      queueService,
+      syncTurnLifecycle,
+    );
     const client = createClient();
 
     await handler.handleRobotClaim(client, {});
 
-    expect(runtimeMock.transferRobotClaimLock).toHaveBeenCalledWith('robot-1', existingClient.id, client.id);
+    expect(runtimeMock.transferRobotClaimLock).toHaveBeenCalledWith(
+      'robot-1',
+      existingClient.id,
+      client.id,
+    );
     expect(existingClient.close).toHaveBeenCalledWith(1012, 'Replaced by newer robot claim');
     expect(runtimeMock.robotClients.get('robot-1')).toBe(client);
   });
 
   it('releases the claim lock when claim processing fails after a robot was bound', async () => {
-    const { runtime, runtimeMock, robotsService, robotsMock, queueService, syncTurnLifecycle } = createDeps();
-    runtimeMock.parseWsPayload.mockReturnValue({ robotAuthToken: 'good-token', protocolVersion: 2 });
-    runtimeMock.resolveRobotSocketIdentity.mockReturnValue('robot-1');
+    const { runtime, runtimeMock, robotsService, robotsMock, queueService, syncTurnLifecycle } =
+      createDeps();
+    runtimeMock.parseWsPayload.mockReturnValue({
+      robotAuthToken: 'good-token',
+      protocolVersion: 2,
+    });
+    runtimeMock.resolveRobotSocketIdentity.mockReturnValue({
+      robotId: 'robot-1',
+      deviceHash: 'a'.repeat(64),
+      tokenVersion: 1,
+    });
     robotsMock.findByIdCached.mockRejectedValueOnce(new Error('boom'));
-    const handler = new RobotRuntimeHandler(runtime, robotsService, queueService, syncTurnLifecycle);
+    const handler = new RobotRuntimeHandler(
+      runtime,
+      robotsService,
+      queueService,
+      syncTurnLifecycle,
+    );
     const client = createClient();
     client.robotId = 'robot-1';
 
@@ -152,8 +229,14 @@ describe('RobotRuntimeHandler', () => {
   });
 
   it('handles heartbeat, telemetry, action polling, and emergency stop validation', async () => {
-    const { runtime, runtimeMock, robotsService, robotsMock, queueService, syncTurnLifecycle } = createDeps();
-    const handler = new RobotRuntimeHandler(runtime, robotsService, queueService, syncTurnLifecycle);
+    const { runtime, runtimeMock, robotsService, robotsMock, queueService, syncTurnLifecycle } =
+      createDeps();
+    const handler = new RobotRuntimeHandler(
+      runtime,
+      robotsService,
+      queueService,
+      syncTurnLifecycle,
+    );
     const client = createClient();
     client.isRobot = true;
     client.robotId = 'robot-1';
@@ -168,34 +251,49 @@ describe('RobotRuntimeHandler', () => {
 
     runtimeMock.parseWsPayload.mockReturnValue({ battery: 95 });
     await handler.handleTelemetry(client, {});
-    expect(robotsMock.ingestRobotTelemetryByRobotId).toHaveBeenCalledWith('robot-1', { battery: 95 });
+    expect(robotsMock.ingestRobotTelemetryByRobotId).toHaveBeenCalledWith('robot-1', {
+      battery: 95,
+    });
 
     runtimeMock.parseWsPayload.mockReturnValue({});
     await handler.handleRobotActionsPull(client, {});
-    expect(client.send).toHaveBeenCalledWith(JSON.stringify({
-      event: WS_EVENTS.ROBOT_ACTIONS,
-      data: { items: [{ id: 'action-1' }] },
-    }));
+    expect(client.send).toHaveBeenCalledWith(
+      JSON.stringify({
+        event: WS_EVENTS.ROBOT_ACTIONS,
+        data: { items: [{ id: 'action-1' }] },
+      }),
+    );
 
     runtimeMock.parseWsPayload.mockReturnValue({ robotId: 'robot-1' });
     await handler.handleEmergencyStopMessage(client, {});
-    expect(runtimeMock.triggerEmergencyStop).toHaveBeenCalledWith('robot-1', 'Manual E-STOP by user-1');
+    expect(runtimeMock.triggerEmergencyStop).toHaveBeenCalledWith(
+      'robot-1',
+      'Manual E-STOP by user-1',
+    );
   });
 
   it('blocks emergency stop when the access policy forbids it', async () => {
-    const { runtime, runtimeMock, robotsService, robotsMock, queueService, syncTurnLifecycle } = createDeps();
+    const { runtime, runtimeMock, robotsService, robotsMock, queueService, syncTurnLifecycle } =
+      createDeps();
     runtimeMock.parseWsPayload.mockReturnValue({ robotId: 'robot-1' });
     robotsMock.getAccessPolicy.mockResolvedValueOnce({ estop: 'DISABLED' });
-    const handler = new RobotRuntimeHandler(runtime, robotsService, queueService, syncTurnLifecycle);
+    const handler = new RobotRuntimeHandler(
+      runtime,
+      robotsService,
+      queueService,
+      syncTurnLifecycle,
+    );
     const client = createClient();
     client.watchingRobotId = 'robot-1';
     client.userId = 'user-1';
 
     await handler.handleEmergencyStopMessage(client, {});
 
-    expect(client.send).toHaveBeenCalledWith(JSON.stringify({
-      event: WS_EVENTS.ERROR,
-      data: { message: 'E-STOP is disabled for this room' },
-    }));
+    expect(client.send).toHaveBeenCalledWith(
+      JSON.stringify({
+        event: WS_EVENTS.ERROR,
+        data: { message: 'E-STOP is disabled for this room' },
+      }),
+    );
   });
 });

@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
-import { Heart, X } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { X } from 'lucide-react';
 import { api } from '@/lib/api';
+import { Dialog } from '@/components/ui/dialog';
 
 type Props = {
   robotId: string;
@@ -20,6 +21,7 @@ export function DonationDialog({ robotId, robotName, ownerName, onClose, onDonat
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const idempotencyKey = useRef(crypto.randomUUID());
 
   const submit = async () => {
     if (!Number.isFinite(amount) || amount <= 0) {
@@ -29,7 +31,10 @@ export function DonationDialog({ robotId, robotName, ownerName, onClose, onDonat
     setSubmitting(true);
     setError(null);
     try {
-      await api.wallet.donate({ robotId, amount, message: message.trim() || undefined });
+      await api.wallet.donate(
+        { robotId, amount, message: message.trim() || undefined },
+        idempotencyKey.current,
+      );
       setSuccess(true);
       onDonated?.();
       setTimeout(onClose, 1200);
@@ -42,34 +47,22 @@ export function DonationDialog({ robotId, robotName, ownerName, onClose, onDonat
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
-      role="dialog"
-      aria-modal="true"
-      onClick={onClose}
+    <Dialog
+      open
+      title={ownerName ? `Support ${ownerName}` : 'Support creator'}
+      description={`Donate credits to ${robotName}. 10% goes to the platform, the rest to the creator.`}
+      onClose={onClose}
     >
-      <div
-        className="w-full max-w-md rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <header className="mb-3 flex items-center justify-between">
-          <h2 className="flex items-center gap-2 text-base font-semibold">
-            <Heart className="h-4 w-4 text-pink-400" />
-            {ownerName ? `Support ${ownerName}` : 'Support creator'}
-          </h2>
+        <header className="mb-3 flex items-center justify-end">
           <button
             type="button"
             onClick={onClose}
+            aria-label="Close donation dialog"
             className="rounded p-1 text-[var(--muted-foreground)] hover:bg-[var(--muted)]"
           >
             <X className="h-4 w-4" />
           </button>
         </header>
-
-        <p className="mb-3 text-sm text-[var(--muted-foreground)]">
-          Donate credits to <span className="text-[var(--foreground)]">{robotName}</span>. 10% goes
-          to the platform, the rest to the creator.
-        </p>
 
         {success ? (
           <div className="rounded-lg border border-green-500/30 bg-green-500/10 p-3 text-sm text-green-300">
@@ -141,7 +134,6 @@ export function DonationDialog({ robotId, robotName, ownerName, onClose, onDonat
             </div>
           </>
         )}
-      </div>
-    </div>
+    </Dialog>
   );
 }

@@ -3,9 +3,11 @@
 import { formatClientBuild } from './telemetry-utils';
 import type { RemoteActionType } from './types';
 import type { RobotTelemetryPoint } from '@/lib/api';
+import type { RobotOnboardingStatus } from '@botparty/shared';
 
 type Props = {
   telemetry: { latest: RobotTelemetryPoint | null };
+  onboarding: RobotOnboardingStatus | null;
   opLoading: string | null;
   pendingActionTypes: RemoteActionType[];
   logsLoading: boolean;
@@ -16,6 +18,7 @@ type Props = {
 
 export function DashboardOperationsSection({
   telemetry,
+  onboarding,
   opLoading,
   pendingActionTypes,
   logsLoading,
@@ -33,9 +36,28 @@ export function DashboardOperationsSection({
       </div>
 
       <div className="order-4 rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
+        <div className="mb-4 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">Go-live checks</p>
+            <span className={`text-xs font-semibold ${onboarding?.canPublish ? 'text-emerald-300' : 'text-amber-300'}`}>
+              {onboarding?.canPublish ? 'Ready to publish' : 'Checks pending'}
+            </span>
+          </div>
+          <ul className="grid gap-1.5 sm:grid-cols-2">
+            {(onboarding?.steps ?? []).map((step) => (
+              <li key={step.id} className="flex items-center gap-2 text-xs">
+                <span aria-hidden="true" className={step.complete ? 'text-emerald-300' : step.required ? 'text-amber-300' : 'text-[var(--muted-foreground)]'}>
+                  {step.complete ? '✓' : step.required ? '○' : '–'}
+                </span>
+                <span>{step.label}</span>
+              </li>
+            ))}
+          </ul>
+          {!onboarding ? <p className="text-xs text-[var(--muted-foreground)]">Waiting for robot diagnostics.</p> : null}
+        </div>
         <p className="mb-2 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Remote Operations</p>
         <p className="mb-3 text-xs text-[var(--muted-foreground)]">
-          Run maintenance actions on the robot client without SSH. Commands are queued and picked up on the next poll cycle.
+          Restart robot services, install client updates, or collect short diagnostic logs.
         </p>
 
         {telemetry.latest && (

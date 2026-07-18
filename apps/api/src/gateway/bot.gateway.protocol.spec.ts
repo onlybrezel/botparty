@@ -16,6 +16,9 @@ import { ModerationService } from '../moderation/moderation.service';
 import { ControlsService } from '../controls/controls.service';
 import { AuthService } from '../auth/auth.service';
 import { WalletService } from '../wallet/wallet.service';
+import { LivekitService } from '../livekit/livekit.service';
+import { FeatureFlagsService } from '../common/feature-flags.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 describe('BotGateway protocol exchange', () => {
   let gateway: BotGateway;
@@ -66,6 +69,7 @@ describe('BotGateway protocol exchange', () => {
             findByIdCached: jest.fn().mockResolvedValue(robotRecord),
             resolveRoomAccessActorId: jest.fn().mockResolvedValue(null),
             validateRoomAccess: jest.fn().mockResolvedValue(true),
+            validateRobotAuth: jest.fn().mockResolvedValue(true),
             setViewerCount: jest.fn().mockResolvedValue(undefined),
             getRecentChatMessages: jest.fn().mockResolvedValue([]),
             updateStatus: jest.fn().mockResolvedValue(undefined),
@@ -155,6 +159,21 @@ describe('BotGateway protocol exchange', () => {
             getBalance: jest.fn().mockResolvedValue(0),
           } as any,
         },
+        {
+          provide: LivekitService,
+          useValue: {
+            revokeController: jest.fn().mockResolvedValue(undefined),
+            stopRoomRecording: jest.fn().mockResolvedValue({ active: false, outputs: [] }),
+          } as any,
+        },
+        {
+          provide: FeatureFlagsService,
+          useValue: { isEnabled: jest.fn().mockReturnValue(false) } as any,
+        },
+        {
+          provide: NotificationsService,
+          useValue: { publishSafely: jest.fn().mockResolvedValue(null) } as any,
+        },
       ],
     }).compile();
 
@@ -166,7 +185,7 @@ describe('BotGateway protocol exchange', () => {
   });
 
   afterEach(async () => {
-    await module.close();
+    await module?.close();
   });
 
   it('returns protocol metadata in room join responses', async () => {
@@ -204,6 +223,7 @@ describe('BotGateway protocol exchange', () => {
       sub: robotId,
       scope: 'robot',
       deviceHash: 'a'.repeat(64),
+      tokenVersion: 0,
     } as never);
 
     const result = await gateway.handleRobotClaim(client, {
@@ -243,6 +263,7 @@ describe('BotGateway protocol exchange', () => {
       sub: robotId,
       scope: 'robot',
       deviceHash: 'a'.repeat(64),
+      tokenVersion: 0,
     } as never);
     (gateway as any).robotClients.set(robotId, existingClient);
 

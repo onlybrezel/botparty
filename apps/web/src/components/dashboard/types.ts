@@ -90,7 +90,7 @@ export const DEFAULT_CREATE_FORM: RobotFormState = {
   slug: '',
   description: '',
   thumbnailUrl: '',
-  roomMode: 'PUBLIC',
+  roomMode: 'PRIVATE',
   queueMode: 'FIRST_COME',
   aclVideo: 'AUTHENTICATED',
   aclControl: 'AUTHENTICATED',

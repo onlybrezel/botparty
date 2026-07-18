@@ -24,6 +24,19 @@ COPY apps/api/package.json          apps/api/package.json
 RUN --mount=type=cache,id=pnpm-store-api,target=/pnpm/store \
     pnpm install --frozen-lockfile --store-dir=/pnpm/store
 
+FROM deps AS dev
+WORKDIR /app
+COPY packages/ packages/
+COPY apps/api/ apps/api/
+COPY docker/api/dev-entrypoint.sh /usr/local/bin/botparty-dev-entrypoint
+COPY docker/api/load-file-secrets.sh /usr/local/lib/botparty-load-file-secrets.sh
+RUN pnpm --filter @botparty/prisma db:generate \
+ && pnpm --filter @botparty/shared build \
+ && chmod +x /usr/local/bin/botparty-dev-entrypoint
+EXPOSE 4000
+ENTRYPOINT ["botparty-dev-entrypoint"]
+CMD ["pnpm", "--filter", "@botparty/api", "dev"]
+
 # ─── build-shared: compile @botparty/shared ───
 FROM deps AS build-shared
 COPY packages/shared/ packages/shared/
@@ -74,12 +87,15 @@ COPY --from=prod-deps --chown=botparty:botparty /app/apps/api/package.json      
 COPY --from=build-api --chown=botparty:botparty /app/packages/prisma/generated  ./packages/prisma/generated
 COPY --from=build-api --chown=botparty:botparty /app/packages/prisma/prisma     ./packages/prisma/prisma
 COPY --from=build-api --chown=botparty:botparty /app/packages/prisma/seed.ts    ./packages/prisma/seed.ts
+COPY --chown=botparty:botparty scripts/prepare-prisma-baseline.mjs              ./scripts/prepare-prisma-baseline.mjs
+COPY --chown=botparty:botparty scripts/migrate-webhook-secrets.mjs              ./scripts/migrate-webhook-secrets.mjs
 
 # Shared + API compiled output
 COPY --from=build-shared --chown=botparty:botparty /app/packages/shared/dist   ./packages/shared/dist
 COPY --from=build-api    --chown=botparty:botparty /app/apps/api/dist           ./apps/api/dist
 
 COPY --chown=botparty:botparty docker/api/entrypoint.sh /entrypoint.sh
+COPY --chown=botparty:botparty docker/api/load-file-secrets.sh /load-file-secrets.sh
 RUN chmod +x /entrypoint.sh
 
 EXPOSE 4000

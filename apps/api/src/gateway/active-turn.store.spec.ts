@@ -3,65 +3,66 @@ import type { ActiveTurnState } from './gateway-types';
 import { ActiveTurnStore } from './active-turn.store';
 
 describe('ActiveTurnStore', () => {
-  let redis: {
-    get: jest.Mock;
-    set: jest.Mock;
-    eval: jest.Mock;
-  };
-  let store: ActiveTurnStore;
-
-  const activeTurn: ActiveTurnState = {
+  const now = 1_700_000_000_000;
+  const candidate: ActiveTurnState = {
     sessionId: 'session-1',
     userId: 'user-1',
-    startedAt: 1_700_000_000_000,
-    expiresAt: 1_700_000_060_000,
+    startedAt: now,
+    expiresAt: now + 60_000,
+    ownerId: '',
+    fencingToken: 0,
+    leaseExpiresAt: 0,
   };
+  let redis: { get: jest.Mock; eval: jest.Mock };
+  let store: ActiveTurnStore;
 
   beforeEach(() => {
-    redis = {
-      get: jest.fn().mockResolvedValue(null),
-      set: jest.fn().mockResolvedValue('OK'),
-      eval: jest.fn().mockResolvedValue(null),
-    };
-    store = new ActiveTurnStore(redis as unknown as RedisService);
-    jest.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+    jest.spyOn(Date, 'now').mockReturnValue(now);
+    redis = { get: jest.fn().mockResolvedValue(null), eval: jest.fn() };
+    store = new ActiveTurnStore(redis as unknown as RedisService, 'instance-a');
   });
 
-  afterEach(() => {
-    jest.restoreAllMocks();
-  });
+  afterEach(() => jest.restoreAllMocks());
 
-  it('stores turn state in Redis while keeping a local cache', async () => {
-    await store.set('robot-1', activeTurn);
+  it('acquires the shared lease with a monotonically fenced owner', async () => {
+    const acquired = { ...candidate, ownerId: 'instance-a', fencingToken: 7, leaseExpiresAt: now + 15_000 };
+    redis.eval.mockResolvedValueOnce(JSON.stringify(acquired));
 
-    expect(redis.set).toHaveBeenCalledWith(
+    await expect(store.acquire('robot-1', candidate)).resolves.toEqual(acquired);
+    expect(redis.eval).toHaveBeenCalledWith(
+      expect.stringContaining("redis.call('INCR'"),
+      2,
       'ws:turn:robot-1',
-      JSON.stringify(activeTurn),
-      'PX',
-      60_000,
+      'ws:turn-fence:robot-1',
+      expect.any(String),
+      String(now + 15_000),
+      '15000',
     );
-    expect(store.hasLocal('robot-1')).toBe(true);
-    await expect(store.get('robot-1')).resolves.toEqual(activeTurn);
+    expect(store.getLocal('robot-1')).toEqual(acquired);
   });
 
-  it('clears turn state atomically from Redis and returns the removed payload', async () => {
-    redis.eval.mockResolvedValueOnce(JSON.stringify(activeTurn));
-    store.remember('robot-1', activeTurn);
-
-    const cleared = await store.clear('robot-1');
-
-    expect(redis.eval).toHaveBeenCalledWith(expect.stringContaining('redis.call("get"'), 1, 'ws:turn:robot-1');
-    expect(cleared).toEqual(activeTurn);
-    expect(store.hasLocal('robot-1')).toBe(false);
-  });
-
-  it('falls back to local state when Redis is unavailable', async () => {
-    store.remember('robot-1', activeTurn);
+  it('fails closed instead of creating a local-only owner when Redis is unavailable', async () => {
     redis.eval.mockRejectedValueOnce(new Error('redis down'));
-
-    const cleared = await store.clear('robot-1');
-
-    expect(cleared).toEqual(activeTurn);
+    await expect(store.acquire('robot-1', candidate)).resolves.toBeNull();
     expect(store.hasLocal('robot-1')).toBe(false);
+  });
+
+  it('renews and clears only with the expected owner and fence', async () => {
+    const owned = { ...candidate, ownerId: 'instance-a', fencingToken: 8, leaseExpiresAt: now + 15_000 };
+    store.remember('robot-1', owned);
+    redis.eval
+      .mockResolvedValueOnce(JSON.stringify(owned))
+      .mockResolvedValueOnce(JSON.stringify(owned));
+
+    await store.renewOwned();
+    await expect(store.clear('robot-1', owned)).resolves.toEqual(owned);
+    expect(store.hasLocal('robot-1')).toBe(false);
+    expect(redis.eval).toHaveBeenLastCalledWith(
+      expect.stringContaining("redis.call('DEL'"),
+      1,
+      'ws:turn:robot-1',
+      'instance-a',
+      '8',
+    );
   });
 });

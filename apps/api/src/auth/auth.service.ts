@@ -5,6 +5,7 @@ import {
   Logger,
   BadRequestException,
   ForbiddenException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { JwtService, type JwtSignOptions } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -111,7 +112,11 @@ export class AuthService {
     const passwordHash = await hash(data.password, { type: 2 }); // argon2id
 
     const requireVerification = this.requiresEmailVerification();
+    if (requireVerification && !this.mail.isEnabled()) {
+      throw new ServiceUnavailableException('Registration is temporarily unavailable.');
+    }
     const verificationToken = randomBytes(32).toString('hex');
+    const verificationTokenHash = this.hashResetToken(verificationToken);
     const verificationExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
     const user = await this.prisma.user.create({
@@ -121,15 +126,22 @@ export class AuthService {
         passwordHash,
         displayName: data.displayName ?? data.username,
         emailVerified: !requireVerification,
-        emailVerificationToken: requireVerification ? verificationToken : null,
+        emailVerificationToken: requireVerification ? verificationTokenHash : null,
         emailVerificationExpiry: requireVerification ? verificationExpiry : null,
+        legalAcceptedAt: new Date(),
+        acceptedTermsVersion: data.acceptedTermsVersion,
+        acceptedPrivacyVersion: data.acceptedPrivacyVersion,
       },
     });
 
     if (requireVerification) {
-      this.mail.sendEmailVerification(user.email, verificationToken).catch((err: unknown) => {
-        this.logger.warn(`Failed to send verification email to ${user.email}`, err);
-      });
+      try {
+        await this.mail.sendEmailVerification(user.email, verificationToken);
+      } catch (error) {
+        await this.prisma.user.delete({ where: { id: user.id } });
+        this.logger.error(`Verification email enqueue failed for user ${user.id}`);
+        throw new ServiceUnavailableException('Registration is temporarily unavailable.', { cause: error });
+      }
       return {
         user: this.buildSessionUser(user),
         requiresEmailVerification: true,
@@ -142,9 +154,10 @@ export class AuthService {
   }
 
   async verifyEmail(token: string) {
+    const tokenHash = this.hashResetToken(token);
     const user = await this.prisma.user.findFirst({
       where: {
-        emailVerificationToken: token,
+        emailVerificationToken: tokenHash,
         emailVerificationExpiry: { gt: new Date() },
       },
     });
@@ -166,14 +179,17 @@ export class AuthService {
     return { message: 'Email verified successfully' };
   }
 
-  async login(input: z.infer<typeof loginSchema>): Promise<AuthTokenResult> {
+  async login(input: z.infer<typeof loginSchema>, context?: { remoteIp?: string }): Promise<AuthTokenResult> {
     const data = loginSchema.parse({
       ...input,
       email: input.email.trim().toLowerCase(),
     });
 
-    const lockoutKey = `auth:lockout:${data.email}`;
-    const attemptsKey = `auth:attempts:${data.email}`;
+    const riskHash = createHash('sha256').update(data.email).digest('hex');
+    const clientHash = createHash('sha256').update(`${data.email}|${context?.remoteIp ?? 'unknown'}`).digest('hex');
+    const lockoutKey = `auth:client-lockout:${clientHash}`;
+    const attemptsKey = `auth:client-attempts:${clientHash}`;
+    const accountRiskKey = `auth:account-risk:${riskHash}`;
 
     const lockout = await this.redis.get(lockoutKey);
     if (lockout) {
@@ -185,21 +201,17 @@ export class AuthService {
     });
 
     if (!user || !user.isActive) {
-      await this.redis.incr(attemptsKey);
-      await this.redis.expire(attemptsKey, LOGIN_LOCKOUT_SEC);
+      await this.recordFailedLogin(attemptsKey, lockoutKey, accountRiskKey);
       throw new UnauthorizedException('Invalid credentials');
     }
 
     const valid = await verify(user.passwordHash, data.password);
     if (!valid) {
-      const attempts = await this.redis.incr(attemptsKey);
-      await this.redis.expire(attemptsKey, LOGIN_LOCKOUT_SEC);
-      if (attempts >= MAX_LOGIN_ATTEMPTS) {
-        await this.redis.set(lockoutKey, '1', 'EX', LOGIN_LOCKOUT_SEC);
-        await this.redis.del(attemptsKey);
-        this.logger.warn(`Account locked after ${MAX_LOGIN_ATTEMPTS} failed attempts: ${data.email}`);
+      const attempts = await this.recordFailedLogin(attemptsKey, lockoutKey, accountRiskKey);
+      if (attempts === MAX_LOGIN_ATTEMPTS) {
+        this.logger.warn(`Repeated login failures detected for account ${riskHash.slice(0, 12)}`);
         this.mail.sendAccountLockoutNoticeEmail(data.email, Math.ceil(LOGIN_LOCKOUT_SEC / 60)).catch((error: unknown) => {
-          this.logger.warn(`Failed to send account lockout email to ${data.email}: ${(error as Error).message}`);
+          this.logger.warn(`Failed to send login risk notice: ${(error as Error).message}`);
         });
       }
       throw new UnauthorizedException('Invalid credentials');
@@ -212,7 +224,6 @@ export class AuthService {
 
     // Clear failed attempt counters on successful login
     await this.redis.del(attemptsKey);
-    await this.redis.del(lockoutKey);
 
     // Update last login
     await this.prisma.user.update({
@@ -222,6 +233,24 @@ export class AuthService {
 
     this.logger.log(`User logged in: ${user.username}`);
     return this.generateTokens(user);
+  }
+
+  private async recordFailedLogin(attemptsKey: string, lockoutKey: string, accountRiskKey: string): Promise<number> {
+    const [attempts] = await Promise.all([
+      this.redis.incr(attemptsKey),
+      this.redis.incr(accountRiskKey),
+    ]);
+    await Promise.all([
+      this.redis.expire(attemptsKey, LOGIN_LOCKOUT_SEC),
+      this.redis.expire(accountRiskKey, LOGIN_LOCKOUT_SEC),
+    ]);
+    if (attempts >= MAX_LOGIN_ATTEMPTS) {
+      await this.redis.set(lockoutKey, '1', 'EX', LOGIN_LOCKOUT_SEC);
+    }
+    if (attempts > 3) {
+      await new Promise((resolve) => setTimeout(resolve, Math.min(1_500, attempts * 125)));
+    }
+    return attempts;
   }
 
   async refreshToken(refreshToken: string | null | undefined): Promise<RefreshTokenResult> {
@@ -590,18 +619,17 @@ export class AuthService {
     }
 
     const token = randomBytes(32).toString('hex');
+    const tokenHash = this.hashResetToken(token);
     const expiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
     await this.prisma.user.update({
       where: { id: userId },
       data: {
-        emailVerificationToken: token,
+        emailVerificationToken: tokenHash,
         emailVerificationExpiry: expiry,
       },
     });
 
-    this.mail.sendEmailVerification(email, token).catch((error: unknown) => {
-      this.logger.warn(`Failed to send verification email to ${email}: ${(error as Error).message}`);
-    });
+    await this.mail.sendEmailVerification(email, token);
   }
 
   private hashResetToken(token: string) {

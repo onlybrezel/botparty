@@ -1,0 +1,68 @@
+name: Backup Restore Drill
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 3 1 * *'
+  release:
+    types: [published]
+
+jobs:
+  restore-drill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: pnpm/action-setup@7088e561eb65bb68695d245aa206f005ef30921d # v4.1.0
+        with:
+          version: 9
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:generate
+      - name: Start isolated backup sources
+        run: |
+          docker run -d --name drill-source-pg -e POSTGRES_PASSWORD=source_password -e POSTGRES_DB=botparty -p 127.0.0.1:35432:5432 postgres:16-alpine
+          docker run -d --name drill-source-minio -e MINIO_ROOT_USER=source_access -e MINIO_ROOT_PASSWORD=source_secret_123 -p 127.0.0.1:39000:9000 minio/minio:latest server /data
+          for i in $(seq 1 60); do docker exec drill-source-pg pg_isready -U postgres -d botparty && break; sleep 1; done
+          for i in $(seq 1 60); do curl -fsS http://127.0.0.1:39000/minio/health/live && break; sleep 1; done
+      - name: Provision deterministic database and objects
+        env:
+          DATABASE_URL: postgresql://postgres:source_password@127.0.0.1:35432/botparty?schema=public
+          NODE_ENV: test
+          SEED_E2E_FIXTURES: 'true'
+          SEED_ADMIN_EMAIL: admin@botparty.test
+          SEED_ADMIN_USERNAME: restore_admin
+          SEED_ADMIN_PASSWORD: restore-admin-password-at-least-16
+          SEED_DEMO_USER_PASSWORD: restore-user-password
+        run: |
+          pnpm --filter @botparty/prisma db:migrate:prod
+          pnpm --filter @botparty/prisma db:seed
+          mkdir -p data/drill-object data/drill-secrets
+          printf fixture > data/drill-object/fixture.txt
+          docker run --rm --network host --entrypoint /bin/sh -v "$PWD/data/drill-object:/fixture:ro" minio/mc:latest -c 'mc alias set source http://127.0.0.1:39000 source_access source_secret_123 >/dev/null; for b in botparty-thumbnails botparty-recordings; do mc mb --ignore-existing source/$b; mc cp /fixture/fixture.txt source/$b/fixture.txt; done'
+          for name in api_database_url jwt_secret jwt_refresh_secret robot_jwt_secret webhook_secret_encryption_key payout_destination_encryption_key livekit_api_secret redis_password smtp_password alertmanager_webhook_url; do printf 'drill-value-%s' "$name" > "data/drill-secrets/$name"; done
+      - name: Create release backup
+        env:
+          DATABASE_URL: postgresql://postgres:source_password@127.0.0.1:35432/botparty?schema=public
+          BACKUP_S3_ENDPOINT: http://127.0.0.1:39000
+          BACKUP_S3_ACCESS_KEY: source_access
+          BACKUP_S3_SECRET_KEY: source_secret_123
+        run: ./scripts/backup-release.sh data/backups
+      - name: Restore into a new isolated environment
+        env:
+          RESTORE_SECRET_DIR: ${{ github.workspace }}/data/drill-secrets
+          RESTORE_RPO_SECONDS: 21600
+          RESTORE_RTO_SECONDS: 1800
+        run: ./scripts/restore-drill.sh "$(find data/backups -name 'botparty-release-*.tar.gz' -print -quit)"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: restore-drill-report
+          path: data/restore-drills/*.json
+          if-no-files-found: error

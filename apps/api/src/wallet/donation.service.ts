@@ -3,28 +3,28 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
-  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma, TransactionType } from '@botparty/prisma';
 import { LIMITS } from '@botparty/shared';
+import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { WalletService } from './wallet.service';
 import { PlatformUserService } from './platform-user.service';
+import { FeatureFlagsService } from '../common/feature-flags.service';
 
 const DONATION_RATE_HOUR_KEY = (userId: string) => `wallet:donations:hour:${userId}`;
 const DONATION_DAILY_TOTAL_KEY = (userId: string) => `wallet:donations:dailytotal:${userId}`;
 
 @Injectable()
 export class DonationService {
-  private readonly logger = new Logger(DonationService.name);
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly wallet: WalletService,
     private readonly platform: PlatformUserService,
+    private readonly features: FeatureFlagsService,
   ) {}
 
   async donate(input: {
@@ -33,9 +33,16 @@ export class DonationService {
     amount: number;
     message?: string;
     idempotencyKey?: string;
-    requestMeta?: { ip?: string; userAgent?: string };
   }) {
-    const { donorId, robotId, amount, message, idempotencyKey, requestMeta } = input;
+    const { donorId, robotId, amount, message, idempotencyKey } = input;
+    this.features.assertEnabled('DONATIONS');
+    if (!idempotencyKey?.trim()) {
+      throw new BadRequestException({
+        code: 'IDEMPOTENCY_KEY_REQUIRED',
+        message: 'Idempotency-Key is required for donations.',
+      });
+    }
+    const normalizedKey = idempotencyKey.trim();
 
     if (this.platform.isPlatformUser(donorId)) {
       throw new ForbiddenException('Platform user cannot donate');
@@ -53,67 +60,97 @@ export class DonationService {
       });
     }
 
-    if (idempotencyKey) {
-      const existing = await this.prisma.walletIdempotencyKey.findUnique({
-        where: { userId_scope_key: { userId: donorId, scope: 'donation', key: idempotencyKey } },
-      });
-      if (existing?.result) {
-        return existing.result as Record<string, unknown>;
-      }
+    const requestHash = createHash('sha256')
+      .update(JSON.stringify({ donorId, robotId, amount, message: message?.trim() ?? null }))
+      .digest('hex');
+    const existing = await this.prisma.walletIdempotencyKey.findUnique({
+      where: { userId_scope_key: { userId: donorId, scope: 'donation', key: normalizedKey } },
+    });
+    if (existing) {
+      return this.resolveExisting(existing, requestHash);
     }
 
     await this.enforceRateLimits(donorId, amount);
 
-    const transferOrError = await this.wallet
-      .transfer(donorId, robot.ownerId, amount, {
-        payerType: TransactionType.DONATION_SENT,
-        payeeType: TransactionType.DONATION_RECEIVED,
-        description: `Donation to ${robot.name}`,
-        metadata: {
-          robotId: robot.id,
-          robotName: robot.name,
-          recipientId: robot.ownerId,
-          message: message ?? null,
-          ip: requestMeta?.ip ?? null,
-          userAgent: requestMeta?.userAgent ?? null,
-        } satisfies Prisma.InputJsonValue,
-      })
-      .catch((err) => err);
-
-    if (transferOrError instanceof Error) {
-      // Roll back rate-limit accounting for failed donations.
-      await this.rollbackRateLimits(donorId, amount).catch(() => undefined);
-      throw transferOrError;
-    }
-
-    const result = {
-      ledgerGroupId: transferOrError.ledgerGroupId,
-      donorBalanceAfter: transferOrError.payerBalanceAfter,
-      recipientId: robot.ownerId,
-      received: transferOrError.payeeReceived,
-      fee: transferOrError.fee,
-    };
-
-    if (idempotencyKey) {
-      await this.prisma.walletIdempotencyKey
-        .create({
+    const transferOutcome = await this.wallet
+      .runSerializable(async (tx) => {
+        const reservation = await tx.walletIdempotencyKey.create({
           data: {
             userId: donorId,
             scope: 'donation',
-            key: idempotencyKey,
+            key: normalizedKey,
+            requestHash,
+            status: 'IN_PROGRESS',
+          },
+        });
+        const transfer = await this.wallet.transferInTransaction(
+          tx,
+          donorId,
+          robot.ownerId,
+          amount,
+          {
+            payerType: TransactionType.DONATION_SENT,
+            payeeType: TransactionType.DONATION_RECEIVED,
+            description: `Donation to ${robot.name}`,
+            metadata: {
+              robotId: robot.id,
+              robotName: robot.name,
+              recipientId: robot.ownerId,
+              message: message?.trim() ?? null,
+            } satisfies Prisma.InputJsonValue,
+          },
+        );
+        const result = {
+          ledgerGroupId: transfer.ledgerGroupId,
+          donorBalanceAfter: transfer.payerBalanceAfter,
+          recipientId: robot.ownerId,
+          received: transfer.payeeReceived,
+          fee: transfer.fee,
+        };
+        await tx.walletIdempotencyKey.update({
+          where: { id: reservation.id },
+          data: {
+            transactionId: transfer.ledgerGroupId,
+            status: 'COMPLETED',
             result: result as Prisma.InputJsonValue,
           },
-        })
-        .catch((err: unknown) => {
-          if ((err as { code?: string }).code === 'P2002') {
-            // Concurrent duplicate — fine, original wins.
-            return;
-          }
-          throw err;
         });
-    }
+        return result;
+      })
+      .then((value) => ({ ok: true as const, value }))
+      .catch((error: unknown) => ({ ok: false as const, error }));
 
-    return result;
+    if (!transferOutcome.ok) {
+      const transferError = transferOutcome.error;
+      await this.rollbackRateLimits(donorId, amount).catch(() => undefined);
+      if ((transferError as { code?: string } | null)?.code === 'P2002') {
+        const winner = await this.prisma.walletIdempotencyKey.findUnique({
+          where: { userId_scope_key: { userId: donorId, scope: 'donation', key: normalizedKey } },
+        });
+        if (winner) return this.resolveExisting(winner, requestHash);
+      }
+      throw transferError;
+    }
+    return transferOutcome.value;
+  }
+
+  private resolveExisting(
+    existing: { requestHash: string; status: string; result: Prisma.JsonValue | null },
+    requestHash: string,
+  ) {
+    if (existing.requestHash !== requestHash) {
+      throw new ConflictException({
+        code: 'IDEMPOTENCY_KEY_REUSED',
+        message: 'This Idempotency-Key belongs to a different donation request.',
+      });
+    }
+    if (existing.status === 'COMPLETED' && existing.result) {
+      return existing.result as Record<string, unknown>;
+    }
+    throw new ConflictException({
+      code: 'IDEMPOTENCY_IN_PROGRESS',
+      message: 'The donation is still being processed.',
+    });
   }
 
   private async enforceRateLimits(userId: string, amount: number) {

@@ -3,7 +3,7 @@
 import path from 'node:path';
 import { generate } from 'openapi-typescript-codegen';
 
-const DEFAULT_INPUT = 'http://localhost:4000/docs-json';
+const DEFAULT_INPUT = 'docs/openapi.json';
 const DEFAULT_OUTPUT = 'apps/web/src/lib/generated/openapi-client';
 
 function parseArgs(argv) {

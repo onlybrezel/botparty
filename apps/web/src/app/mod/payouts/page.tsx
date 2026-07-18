@@ -55,7 +55,7 @@ export default function ModPayoutsPage() {
     }
   };
 
-  if (!accessToken || (role !== 'ADMIN' && role !== 'MOD')) {
+  if (!accessToken || role !== 'ADMIN') {
     return (
       <main className="mx-auto max-w-3xl px-4 py-12">
         <h1 className="mb-4 text-2xl font-semibold">Payouts</h1>
@@ -117,7 +117,7 @@ export default function ModPayoutsPage() {
                     </span>
                   </div>
                   <p className="mt-1 text-sm text-[var(--muted-foreground)]">
-                    {p.user ? `${p.user.username} · ${p.user.email}` : '—'}
+                    {p.user?.username ?? '—'}
                   </p>
                   <p className="mt-1 text-xs text-[var(--muted-foreground)]">
                     {new Date(p.createdAt).toLocaleString()} · Destination: {p.destination}
@@ -156,7 +156,12 @@ export default function ModPayoutsPage() {
                     <button
                       type="button"
                       disabled={busyId === p.id}
-                      onClick={() => act(p.id, () => api.wallet.markPayoutPaid(p.id))}
+                      onClick={() => {
+                        const reference = window.prompt('Payment reference');
+                        if (reference?.trim()) {
+                          void act(p.id, () => api.wallet.markPayoutPaid(p.id, reference.trim()));
+                        }
+                      }}
                       className="rounded-md border border-green-500/40 bg-green-500/10 px-3 py-1.5 text-sm text-green-300 hover:bg-green-500/20 disabled:opacity-50"
                     >
                       Mark as paid

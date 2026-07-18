@@ -100,7 +100,7 @@ export default function MultiCameraDocsPage() {
         <div className="mt-6 rounded-xl border border-[var(--border)] bg-[var(--background)] p-5">
           <p className="text-sm font-semibold">Implementation order</p>
           <ol className="mt-3 space-y-3 text-sm text-[var(--muted-foreground)]">
-            <li>1. Normalize robot-client config so single-camera and multi-camera map into one internal camera list.</li>
+            <li>1. Use the same camera entries for single- and multi-camera setups.</li>
             <li>2. Publish one video track per camera with stable IDs or metadata.</li>
             <li>3. Expose optional camera descriptors through shared types and robot metadata.</li>
             <li>4. Update the web player to collect multiple camera tracks instead of picking the first one.</li>

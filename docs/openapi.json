@@ -1,6 +1,217 @@
 {
   "openapi": "3.0.0",
   "paths": {
+    "/notifications": {
+      "get": {
+        "operationId": "NotificationsController_list",
+        "parameters": [
+          {
+            "name": "cursor",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List notifications for the current user",
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/notifications/{id}/read": {
+      "patch": {
+        "operationId": "NotificationsController_markRead",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Mark one notification as read",
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/notifications/read-all": {
+      "post": {
+        "operationId": "NotificationsController_markAllRead",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Mark all notifications as read",
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/notifications/preferences": {
+      "get": {
+        "operationId": "NotificationsController_getPreferences",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get notification preferences",
+        "tags": [
+          "notifications"
+        ]
+      },
+      "patch": {
+        "operationId": "NotificationsController_updatePreferences",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update notification preferences",
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/analytics/consent": {
+      "get": {
+        "operationId": "AnalyticsController_consent",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get current product analytics consent",
+        "tags": [
+          "analytics"
+        ]
+      },
+      "patch": {
+        "operationId": "AnalyticsController_updateConsent",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Set or withdraw product analytics consent",
+        "tags": [
+          "analytics"
+        ]
+      }
+    },
+    "/analytics/events": {
+      "post": {
+        "operationId": "AnalyticsController_ingest",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Record a consented first-party product event",
+        "tags": [
+          "analytics"
+        ]
+      }
+    },
+    "/analytics/admin/dashboard": {
+      "get": {
+        "operationId": "AnalyticsController_dashboard",
+        "parameters": [
+          {
+            "name": "days",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get reproducible product funnel metrics",
+        "tags": [
+          "analytics"
+        ]
+      }
+    },
     "/auth/register": {
       "post": {
         "operationId": "AuthController_register",
@@ -71,6 +282,26 @@
           }
         },
         "summary": "Logout / revoke refresh tokens",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/logout-all": {
+      "post": {
+        "operationId": "AuthController_logoutAll",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Revoke all refresh tokens for the current user (sign out everywhere)",
         "tags": [
           "auth"
         ]
@@ -167,16 +398,6 @@
       "patch": {
         "operationId": "UsersController_updateMe",
         "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateMeDto"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "description": ""
@@ -212,8 +433,46 @@
       }
     },
     "/users/me/export": {
-      "get": {
+      "post": {
         "operationId": "UsersController_exportMe",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Export own account data",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/users/me/avatar": {
+      "post": {
+        "operationId": "UsersController_uploadAvatar",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Upload own avatar to platform storage",
+        "tags": [
+          "users"
+        ]
+      },
+      "delete": {
+        "operationId": "UsersController_deleteAvatar",
         "parameters": [],
         "responses": {
           "200": {
@@ -225,7 +484,7 @@
             "bearer": []
           }
         ],
-        "summary": "Export own account data",
+        "summary": "Remove own avatar",
         "tags": [
           "users"
         ]
@@ -281,16 +540,6 @@
             }
           }
         ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateAdminUserDto"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "description": ""
@@ -348,6 +597,14 @@
           },
           {
             "name": "period",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "metric",
             "required": true,
             "in": "query",
             "schema": {
@@ -430,20 +687,30 @@
         ]
       }
     },
+    "/wallet/transactions/export": {
+      "get": {
+        "operationId": "WalletController_exportTransactions",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Export the complete filtered wallet ledger",
+        "tags": [
+          "wallet"
+        ]
+      }
+    },
     "/wallet/donations": {
       "post": {
         "operationId": "WalletController_donate",
         "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DonationDto"
-              }
-            }
-          }
-        },
         "responses": {
           "201": {
             "description": ""
@@ -658,6 +925,35 @@
         ]
       }
     },
+    "/robots/{id}/onboarding": {
+      "get": {
+        "operationId": "RobotsController_getOnboardingStatus",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get the server-verified host go-live checklist",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
     "/robots/{slug}": {
       "get": {
         "operationId": "RobotsController_findBySlug",
@@ -794,196 +1090,6 @@
         ]
       }
     },
-    "/robots/{id}/webhooks": {
-      "get": {
-        "operationId": "RobotsController_listWebhooks",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "List robot webhooks (owner only)",
-        "tags": [
-          "robots"
-        ]
-      },
-      "post": {
-        "operationId": "RobotsController_createWebhook",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateRobotWebhookDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Create robot webhook (owner only)",
-        "tags": [
-          "robots"
-        ]
-      }
-    },
-    "/robots/{id}/webhooks/{webhookId}": {
-      "delete": {
-        "operationId": "RobotsController_deleteWebhook",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "webhookId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Delete robot webhook (owner only)",
-        "tags": [
-          "robots"
-        ]
-      }
-    },
-    "/robots/{id}/regenerate-token": {
-      "post": {
-        "operationId": "RobotsController_regenerateToken",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Regenerate claim token",
-        "tags": [
-          "robots"
-        ]
-      }
-    },
-    "/robots/{id}/regenerate-invite": {
-      "post": {
-        "operationId": "RobotsController_regenerateInviteCode",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Regenerate invite code for link-only access",
-        "tags": [
-          "robots"
-        ]
-      }
-    },
-    "/robots/{id}/ensure-invite": {
-      "post": {
-        "operationId": "RobotsController_ensureInviteCode",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Ensure a stable invite code exists for a robot (owner only)",
-        "tags": [
-          "robots"
-        ]
-      }
-    },
     "/robots/{id}/thumbnail": {
       "post": {
         "operationId": "RobotsController_uploadThumbnail",
@@ -1035,7 +1141,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "204": {
             "description": ""
           }
         },
@@ -1177,109 +1283,6 @@
         ]
       }
     },
-    "/robots/{id}/ingress-cameras": {
-      "get": {
-        "operationId": "RobotsController_listIngressCameras",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "List WHIP camera ingresses for a robot (owner only)",
-        "tags": [
-          "robots"
-        ]
-      },
-      "post": {
-        "operationId": "RobotsController_createIngressCamera",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateIngressCameraDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Create or update a WHIP camera ingress for OBS/manual streaming (owner only)",
-        "tags": [
-          "robots"
-        ]
-      }
-    },
-    "/robots/{id}/ingress-cameras/{ingressId}": {
-      "delete": {
-        "operationId": "RobotsController_deleteIngressCamera",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "ingressId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Delete an external camera WHIP ingress (owner only)",
-        "tags": [
-          "robots"
-        ]
-      }
-    },
     "/robots/{id}/access/verify": {
       "post": {
         "operationId": "RobotsController_verifyRoomAccess",
@@ -1370,9 +1373,41 @@
         ]
       }
     },
+    "/robots/{username}/{slug}": {
+      "get": {
+        "operationId": "RobotsController_findByUsernameAndSlug",
+        "parameters": [
+          {
+            "name": "username",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Get robot by owner username + slug",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
     "/robots/claim": {
       "post": {
-        "operationId": "RobotsController_claim",
+        "operationId": "RobotRuntimeController_claim",
         "parameters": [],
         "requestBody": {
           "required": true,
@@ -1397,7 +1432,7 @@
     },
     "/robots/heartbeat": {
       "post": {
-        "operationId": "RobotsController_heartbeat",
+        "operationId": "RobotRuntimeController_heartbeat",
         "parameters": [
           {
             "name": "authorization",
@@ -1421,7 +1456,7 @@
     },
     "/robots/{id}/actions": {
       "post": {
-        "operationId": "RobotsController_enqueueAction",
+        "operationId": "RobotRuntimeController_enqueueAction",
         "parameters": [
           {
             "name": "id",
@@ -1460,7 +1495,7 @@
     },
     "/robots/{id}/actions/pending": {
       "get": {
-        "operationId": "RobotsController_getPendingActions",
+        "operationId": "RobotRuntimeController_getPendingActions",
         "parameters": [
           {
             "name": "id",
@@ -1489,7 +1524,7 @@
     },
     "/robots/actions/poll": {
       "post": {
-        "operationId": "RobotsController_pollActions",
+        "operationId": "RobotRuntimeController_pollActions",
         "parameters": [
           {
             "name": "authorization",
@@ -1513,7 +1548,7 @@
     },
     "/robots/logs": {
       "post": {
-        "operationId": "RobotsController_pushLogs",
+        "operationId": "RobotRuntimeController_pushLogs",
         "parameters": [],
         "requestBody": {
           "required": true,
@@ -1538,7 +1573,7 @@
     },
     "/robots/telemetry": {
       "post": {
-        "operationId": "RobotsController_pushTelemetry",
+        "operationId": "RobotRuntimeController_pushTelemetry",
         "parameters": [],
         "requestBody": {
           "required": true,
@@ -1563,7 +1598,7 @@
     },
     "/robots/{id}/logs": {
       "get": {
-        "operationId": "RobotsController_getLogs",
+        "operationId": "RobotRuntimeController_getLogs",
         "parameters": [
           {
             "name": "id",
@@ -1592,7 +1627,7 @@
     },
     "/robots/{id}/telemetry": {
       "get": {
-        "operationId": "RobotsController_getTelemetry",
+        "operationId": "RobotRuntimeController_getTelemetry",
         "parameters": [
           {
             "name": "id",
@@ -1619,20 +1654,12 @@
         ]
       }
     },
-    "/robots/{username}/{slug}": {
+    "/robots/{id}/webhooks": {
       "get": {
-        "operationId": "RobotsController_findByUsernameAndSlug",
+        "operationId": "RobotWebhooksController_listWebhooks",
         "parameters": [
           {
-            "name": "username",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "slug",
+            "name": "id",
             "required": true,
             "in": "path",
             "schema": {
@@ -1645,7 +1672,276 @@
             "description": ""
           }
         },
-        "summary": "Get robot by owner username + slug",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List robot webhooks (owner only)",
+        "tags": [
+          "robots"
+        ]
+      },
+      "post": {
+        "operationId": "RobotWebhooksController_createWebhook",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRobotWebhookDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create robot webhook (owner only)",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/{id}/webhooks/{webhookId}": {
+      "delete": {
+        "operationId": "RobotWebhooksController_deleteWebhook",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "webhookId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete robot webhook (owner only)",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/{id}/ingress-cameras": {
+      "get": {
+        "operationId": "RobotCamerasController_listIngressCameras",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List WHIP camera ingresses for a robot (owner only)",
+        "tags": [
+          "robots"
+        ]
+      },
+      "post": {
+        "operationId": "RobotCamerasController_createIngressCamera",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateIngressCameraDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create or update a WHIP camera ingress for OBS/manual streaming (owner only)",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/{id}/ingress-cameras/{ingressId}": {
+      "delete": {
+        "operationId": "RobotCamerasController_deleteIngressCamera",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ingressId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete an external camera WHIP ingress (owner only)",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/{id}/regenerate-token": {
+      "post": {
+        "operationId": "RobotSecretsController_regenerateToken",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Regenerate claim token",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/{id}/regenerate-invite": {
+      "post": {
+        "operationId": "RobotSecretsController_regenerateInviteCode",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Regenerate invite code for link-only access",
+        "tags": [
+          "robots"
+        ]
+      }
+    },
+    "/robots/{id}/ensure-invite": {
+      "post": {
+        "operationId": "RobotSecretsController_ensureInviteCode",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Ensure a stable invite code exists for a robot (owner only)",
         "tags": [
           "robots"
         ]
@@ -2712,6 +3008,21 @@
         ]
       }
     },
+    "/health/ready": {
+      "get": {
+        "operationId": "HealthController_ready",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Readiness check for traffic routing",
+        "tags": [
+          "health"
+        ]
+      }
+    },
     "/health/live": {
       "get": {
         "operationId": "HealthController_live",
@@ -2760,18 +3071,9 @@
     "/health/csp-report": {
       "post": {
         "operationId": "HealthController_cspReport",
-        "parameters": [
-          {
-            "name": "user-agent",
-            "required": true,
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
+        "parameters": [],
         "responses": {
-          "201": {
+          "204": {
             "description": ""
           }
         },
@@ -2796,20 +3098,25 @@
         ]
       }
     },
+    "/billing/subscription-plans": {
+      "get": {
+        "operationId": "BillingController_listSubscriptionPlans",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "List available subscription plans",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
     "/billing/checkout": {
       "post": {
         "operationId": "BillingController_checkout",
         "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CheckoutDto"
-              }
-            }
-          }
-        },
         "responses": {
           "201": {
             "description": ""
@@ -2821,6 +3128,55 @@
           }
         ],
         "summary": "Create a credit purchase checkout session",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
+    "/billing/admin/webhook-events": {
+      "get": {
+        "operationId": "BillingController_listWebhookEvents",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List billing webhook events for staff review",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
+    "/billing/admin/webhook-events/{eventId}/replay": {
+      "post": {
+        "operationId": "BillingController_replayWebhookEvent",
+        "parameters": [
+          {
+            "name": "eventId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Replay a stored billing webhook event",
         "tags": [
           "billing"
         ]
@@ -2880,16 +3236,6 @@
       "post": {
         "operationId": "PayoutsController_create",
         "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreatePayoutRequestDto"
-              }
-            }
-          }
-        },
         "responses": {
           "201": {
             "description": ""
@@ -3025,6 +3371,16 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkPaidPayoutDto"
+              }
+            }
+          }
+        },
         "responses": {
           "201": {
             "description": ""
@@ -3036,6 +3392,35 @@
           }
         ],
         "summary": "Mark approved payout as paid and debit wallet (staff)",
+        "tags": [
+          "payouts"
+        ]
+      }
+    },
+    "/payouts/{id}/destination": {
+      "get": {
+        "operationId": "PayoutsController_revealDestination",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Reveal an approved payout destination to the independent payer",
         "tags": [
           "payouts"
         ]
@@ -3084,31 +3469,11 @@
       }
     },
     "schemas": {
-      "UpdateMeDto": {
-        "type": "object",
-        "properties": {}
-      },
-      "UpdateAdminUserDto": {
-        "type": "object",
-        "properties": {}
-      },
-      "DonationDto": {
-        "type": "object",
-        "properties": {}
-      },
-      "CreateRobotWebhookDto": {
-        "type": "object",
-        "properties": {}
-      },
       "UploadThumbnailDto": {
         "type": "object",
         "properties": {}
       },
       "AddAllowedUserDto": {
-        "type": "object",
-        "properties": {}
-      },
-      "CreateIngressCameraDto": {
         "type": "object",
         "properties": {}
       },
@@ -3132,6 +3497,14 @@
         "type": "object",
         "properties": {}
       },
+      "CreateRobotWebhookDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "CreateIngressCameraDto": {
+        "type": "object",
+        "properties": {}
+      },
       "ModerateUserDto": {
         "type": "object",
         "properties": {}
@@ -3148,15 +3521,11 @@
         "type": "object",
         "properties": {}
       },
-      "CheckoutDto": {
-        "type": "object",
-        "properties": {}
-      },
-      "CreatePayoutRequestDto": {
-        "type": "object",
-        "properties": {}
-      },
       "RejectPayoutDto": {
+        "type": "object",
+        "properties": {}
+      },
+      "MarkPaidPayoutDto": {
         "type": "object",
         "properties": {}
       }

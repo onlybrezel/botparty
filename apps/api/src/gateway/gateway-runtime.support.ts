@@ -39,8 +39,10 @@ export class GatewayRuntimeSupport {
   private pingInterval: ReturnType<typeof setInterval> | null = null;
   private controlCooldownFallbackCleanupInterval: ReturnType<typeof setInterval> | null = null;
   private authRevalidationInterval: ReturnType<typeof setInterval> | null = null;
+  private turnLeaseInterval: ReturnType<typeof setInterval> | null = null;
   private authRevalidationInFlight = false;
   private controlCooldownRedisFallbackActive = false;
+  private readonly emergencyStopAt = new Map<string, number>();
   private shuttingDown = false;
 
   constructor(
@@ -52,7 +54,7 @@ export class GatewayRuntimeSupport {
   ) {
     this.presence = new PresenceHandler(this.redis, this.instanceId);
     this.claimLock = new RobotClaimLockHandler(this.redis);
-    this.activeTurns = new ActiveTurnStore(this.redis);
+    this.activeTurns = new ActiveTurnStore(this.redis, this.instanceId);
     this.allowedWsOrigins = new Set(
       (this.configService.get<string>('CORS_ORIGIN') ?? 'http://localhost:3000')
         .split(',')
@@ -87,6 +89,10 @@ export class GatewayRuntimeSupport {
       void this.revalidateAuthenticatedSockets();
     }, WS_AUTH_REVALIDATE_INTERVAL_MS);
 
+    this.turnLeaseInterval = setInterval(() => {
+      void this.activeTurns.renewOwned();
+    }, 5_000);
+
   }
 
   stop() {
@@ -101,6 +107,10 @@ export class GatewayRuntimeSupport {
     if (this.authRevalidationInterval) {
       clearInterval(this.authRevalidationInterval);
       this.authRevalidationInterval = null;
+    }
+    if (this.turnLeaseInterval) {
+      clearInterval(this.turnLeaseInterval);
+      this.turnLeaseInterval = null;
     }
   }
 
@@ -135,10 +145,7 @@ export class GatewayRuntimeSupport {
     client: WsClient,
     context: {
       leaveRoom(client: WsClient): Promise<void>;
-      clearTurnState(robotId: string): Promise<void>;
-      clearQueue(robotId: string): Promise<unknown>;
-      updateRobotStatus(robotId: string, status: 'OFFLINE'): Promise<unknown>;
-      stopRoomRecording(robotId: string): Promise<unknown>;
+      scheduleRobotDisconnect(robotId: string): void;
     },
   ) {
     this.clients.delete(client.id);
@@ -165,12 +172,8 @@ export class GatewayRuntimeSupport {
       return;
     }
 
-    void context.clearTurnState(client.robotId);
-    void context.clearQueue(client.robotId).catch(() => {});
-    void context.updateRobotStatus(client.robotId, 'OFFLINE').catch(() => {});
-    void context.stopRoomRecording(client.robotId).catch(() => {});
-    this.broadcastToRoom(client.robotId, WS_EVENTS.ROBOT_STATUS, { status: 'OFFLINE' });
-    this.logger.log(`Robot disconnected: ${client.robotId}`);
+    context.scheduleRobotDisconnect(client.robotId);
+    this.logger.log(`Robot disconnected; grace period started: ${client.robotId}`);
   }
 
   async revalidateAuthenticatedSockets() {
@@ -357,14 +360,14 @@ export class GatewayRuntimeSupport {
     return this.authService.resolveValidAccessTokenPayload(token);
   }
 
-  resolveRobotSocketIdentity(robotAuthToken?: string): string | null {
+  resolveRobotSocketIdentity(robotAuthToken?: string): { robotId: string; deviceHash: string; tokenVersion: number } | null {
     const token = robotAuthToken?.trim();
     if (!token) {
       return null;
     }
 
     try {
-      const payload = this.jwtService.verify<{ sub?: string; scope?: string; deviceHash?: string }>(token, {
+      const payload = this.jwtService.verify<{ sub?: string; scope?: string; deviceHash?: string; tokenVersion?: number }>(token, {
         secret: this.configService.getOrThrow<string>('ROBOT_JWT_SECRET'),
       });
       if (payload.scope !== 'robot' || typeof payload.sub !== 'string' || !payload.sub.trim()) {
@@ -373,7 +376,8 @@ export class GatewayRuntimeSupport {
       if (typeof payload.deviceHash !== 'string' || !/^[a-f0-9]{64}$/i.test(payload.deviceHash)) {
         return null;
       }
-      return payload.sub;
+      if (!Number.isInteger(payload.tokenVersion)) return null;
+      return { robotId: payload.sub, deviceHash: payload.deviceHash, tokenVersion: payload.tokenVersion! };
     } catch {
       return null;
     }
@@ -486,10 +490,13 @@ export class GatewayRuntimeSupport {
   }
 
   triggerEmergencyStop(robotId: string, reason: string) {
+    const now = Date.now();
+    if (now - (this.emergencyStopAt.get(robotId) ?? 0) < 1_000) return;
+    this.emergencyStopAt.set(robotId, now);
     const robotClient = this.getOpenRobotClient(robotId);
     if (robotClient) {
       robotClient.send(
-        JSON.stringify({ event: WS_EVENTS.CONTROL_EMERGENCY_STOP, data: { reason, timestamp: Date.now() } }),
+        JSON.stringify({ event: WS_EVENTS.CONTROL_EMERGENCY_STOP, data: { reason, timestamp: now } }),
       );
     }
     this.broadcastToRoom(robotId, WS_EVENTS.CONTROL_EMERGENCY_STOP, { reason });

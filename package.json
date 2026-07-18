@@ -6,7 +6,7 @@
   "license": "MIT",
   "packageManager": "pnpm@9.15.4",
   "engines": {
-    "node": ">=22.0.0",
+    "node": ">=24.0.0",
     "pnpm": ">=9.15.0"
   },
   "scripts": {
@@ -27,6 +27,15 @@
     "db:generate": "turbo run db:generate",
     "db:push": "turbo run db:push",
     "db:migrate": "turbo run db:migrate",
+    "db:verify-migrations": "node scripts/verify-prisma-migrations.mjs",
+    "env:check": "node scripts/check-env-parity.mjs",
+    "architecture:check": "node scripts/check-web-module-size.mjs",
+    "secrets:smoke": "./scripts/smoke-file-secrets.sh",
+    "dev:smoke": "./scripts/smoke-dev-compose.sh",
+    "backup:release": "./scripts/backup-release.sh",
+    "restore:drill": "./scripts/restore-drill.sh",
+    "benchmark:queue": "pnpm --filter @botparty/prisma exec tsx ../../scripts/benchmark-queue.ts",
+    "web:budget": "pnpm --filter @botparty/web performance:budget",
     "db:studio": "pnpm --filter @botparty/prisma db:studio",
     "clean": "turbo run clean && rm -rf node_modules",
     "typecheck": "turbo run typecheck"
@@ -37,5 +46,18 @@
     "openapi-typescript-codegen": "^0.29.0",
     "prettier": "^3.5.3",
     "turbo": "^2.5.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "@grpc/grpc-js": "1.14.4",
+      "defu": "6.1.7",
+      "effect": "3.22.0",
+      "fast-uri": "3.1.2",
+      "fast-xml-builder": "1.3.0",
+      "lodash": "4.18.1",
+      "path-to-regexp": "8.4.2",
+      "protobufjs@<8": "7.6.1",
+      "protobufjs@>=8": "8.7.1"
+    }
   }
 }

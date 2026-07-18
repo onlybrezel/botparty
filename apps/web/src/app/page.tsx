@@ -1,65 +1,7 @@
 import Link from 'next/link';
-import type { PublicRobotOverview, RobotPublic } from '@botparty/shared';
-import RobotCard from '@/components/robot-card';
-import { ArrowRight, Bot, Gamepad2, Shield, Sparkles, TimerReset, Users } from 'lucide-react';
-import { getServerApiUrl } from '@/lib/server-api-url';
+import { ArrowRight, Bot, Gamepad2, Shield } from 'lucide-react';
 
-export const revalidate = 10;
-
-interface PlatformStats {
-  totalUsers: number;
-  totalRobots: number;
-  liveRobots: number;
-  totalLiveViewers: number;
-  activeQueueEntries: number;
-  totalSessions: number;
-}
-
-async function getPublicRobots(): Promise<RobotPublic[]> {
-  const apiUrl = getServerApiUrl();
-  try {
-    const res = await fetch(`${apiUrl}/api/v1/robots`);
-    if (!res.ok) return [];
-    return res.json() as Promise<RobotPublic[]>;
-  } catch {
-    return [];
-  }
-}
-
-async function getPlatformStats(): Promise<PlatformStats | null> {
-  const apiUrl = getServerApiUrl();
-  try {
-    const res = await fetch(`${apiUrl}/api/v1/health/stats`);
-    if (!res.ok) return null;
-    return res.json() as Promise<PlatformStats>;
-  } catch {
-    return null;
-  }
-}
-
-async function getRobotsOverview(): Promise<PublicRobotOverview | null> {
-  const apiUrl = getServerApiUrl();
-  try {
-    const res = await fetch(`${apiUrl}/api/v1/robots/overview`, {
-      next: { revalidate: 10 },
-    });
-    if (!res.ok) return null;
-    return res.json() as Promise<PublicRobotOverview>;
-  } catch {
-    return null;
-  }
-}
-
-export default async function HomePage() {
-  const [robots, stats, overview] = await Promise.all([
-    getPublicRobots(),
-    getPlatformStats(),
-    getRobotsOverview(),
-  ]);
-  const featured = overview?.featured.length
-    ? robots.filter((robot) => overview.featured.some((featuredRobot) => featuredRobot.id === robot.id)).slice(0, 3)
-    : robots.slice(0, 3);
-
+export default function HomePage() {
   return (
     <>
       {/* Hero */}
@@ -94,6 +36,7 @@ export default async function HomePage() {
           <div className="flex w-full flex-col items-stretch gap-3 sm:w-auto sm:flex-row sm:justify-center">
             <Link
               href="/explore"
+              prefetch={false}
               className="inline-flex items-center justify-center gap-2 rounded-xl bg-[var(--primary)] px-7 py-3 text-base font-semibold text-white shadow-lg shadow-sky-500/25 transition hover:bg-[var(--primary-hover)] hover:shadow-sky-500/40"
             >
               Explore robots
@@ -101,6 +44,7 @@ export default async function HomePage() {
             </Link>
             <Link
               href="/login"
+              prefetch={false}
               className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-7 py-3 text-center text-base font-semibold text-[var(--foreground)] transition hover:border-[var(--muted-foreground)]"
             >
               Host a robot
@@ -126,48 +70,8 @@ export default async function HomePage() {
             </span>
           </div>
 
-          {stats && (
-            <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-3 text-left">
-                <p className="text-lg font-bold">{overview?.totals.liveRobots ?? stats.liveRobots}</p>
-                <p className="text-xs text-[var(--muted-foreground)]">Live robots</p>
-              </div>
-              <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-3 text-left">
-                <p className="text-lg font-bold">{overview?.totals.totalViewers ?? stats.totalLiveViewers}</p>
-                <p className="text-xs text-[var(--muted-foreground)]">Live viewers</p>
-              </div>
-              <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-3 text-left">
-                <p className="text-lg font-bold">{stats.totalUsers}</p>
-                <p className="text-xs text-[var(--muted-foreground)]">Registered accounts</p>
-              </div>
-              <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-3 text-left">
-                <p className="text-lg font-bold">{stats.totalSessions}</p>
-                <p className="text-xs text-[var(--muted-foreground)]">Total sessions</p>
-              </div>
-            </div>
-          )}
         </div>
       </section>
-
-      {/* Featured robots */}
-      {featured.length > 0 && (
-        <section className="mx-auto max-w-7xl px-4 py-16 sm:py-20">
-          <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <h2 className="text-xl font-semibold">Live now</h2>
-            <Link
-              href="/explore"
-              className="text-sm text-[var(--muted-foreground)] transition hover:text-[var(--foreground)]"
-            >
-              View all &rarr;
-            </Link>
-          </div>
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {featured.map((robot) => (
-              <RobotCard key={robot.id} robot={robot} />
-            ))}
-          </div>
-        </section>
-      )}
 
       {/* How it works */}
       <section className="border-t border-[var(--border)]">
@@ -206,92 +110,6 @@ export default async function HomePage() {
             ))}
           </div>
 
-          <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5">
-              <div className="mb-3 inline-flex rounded-xl border border-[var(--border)] bg-[var(--muted)] p-2">
-                <TimerReset className="h-5 w-5 text-sky-300" />
-              </div>
-              <h3 className="font-semibold">Turns stay predictable</h3>
-              <p className="mt-2 text-sm leading-relaxed text-[var(--muted-foreground)]">
-                Queue modes, turn timers, and visible position updates make shared control feel fair instead of random.
-              </p>
-            </div>
-            <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5">
-              <div className="mb-3 inline-flex rounded-xl border border-[var(--border)] bg-[var(--muted)] p-2">
-                <Users className="h-5 w-5 text-emerald-300" />
-              </div>
-              <h3 className="font-semibold">Made for crowds</h3>
-              <p className="mt-2 text-sm leading-relaxed text-[var(--muted-foreground)]">
-                Viewer counts, chat, and moderation are built into the room instead of bolted on around it.
-              </p>
-            </div>
-            <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5">
-              <div className="mb-3 inline-flex rounded-xl border border-[var(--border)] bg-[var(--muted)] p-2">
-                <Sparkles className="h-5 w-5 text-violet-300" />
-              </div>
-              <h3 className="font-semibold">Fast to host</h3>
-              <p className="mt-2 text-sm leading-relaxed text-[var(--muted-foreground)]">
-                Create a robot, copy the claim token, bring your client online, and start with conservative defaults.
-              </p>
-            </div>
-          </div>
-
-          {overview && overview.topTags.length > 0 && (
-            <div className="mt-8">
-              <p className="mb-3 text-center text-xs uppercase tracking-[0.2em] text-[var(--muted-foreground)]">
-                Popular tags
-              </p>
-              <div className="flex flex-wrap justify-center gap-2">
-                {overview.topTags.slice(0, 8).map((tag) => (
-                  <Link
-                    key={tag.tag}
-                    href={`/explore?tag=${encodeURIComponent(tag.tag)}`}
-                    className="rounded-full border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-sm text-[var(--muted-foreground)] transition hover:text-[var(--foreground)]"
-                  >
-                    {tag.tag} · {tag.count}
-                  </Link>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      </section>
-
-      <section className="border-t border-[var(--border)] bg-[var(--card)]/30">
-        <div className="mx-auto grid max-w-6xl gap-6 px-4 py-16 sm:grid-cols-[1.2fr_0.8fr] sm:items-center">
-          <div>
-            <p className="text-xs uppercase tracking-[0.2em] text-[var(--muted-foreground)]">For hosts</p>
-            <h2 className="mt-3 text-2xl font-bold tracking-tight sm:text-3xl">
-              Start with a room people can actually trust
-            </h2>
-            <p className="mt-3 max-w-2xl text-sm leading-relaxed text-[var(--muted-foreground)] sm:text-base">
-              The best BotParty rooms are the ones with clear controls, short turn times, a working E-STOP path, and a host who keeps access sane before opening things up.
-            </p>
-          </div>
-          <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5">
-            <p className="text-sm font-semibold text-[var(--foreground)]">Good first-room defaults</p>
-            <ul className="mt-3 space-y-2 text-sm text-[var(--muted-foreground)]">
-              <li>Authenticated chat and control</li>
-              <li>Short turns with a visible queue</li>
-              <li>Emergency stop tested before sharing</li>
-              <li>One clear camera angle before fancy extras</li>
-            </ul>
-            <div className="mt-4 flex flex-wrap gap-3">
-              <Link
-                href="/docs/getting-started"
-                className="inline-flex items-center gap-2 text-sm font-medium text-[var(--foreground)] transition hover:text-sky-300"
-              >
-                Read setup guide
-                <ArrowRight className="h-4 w-4" />
-              </Link>
-              <Link
-                href="/dashboard"
-                className="inline-flex items-center gap-2 text-sm font-medium text-[var(--muted-foreground)] transition hover:text-[var(--foreground)]"
-              >
-                Open dashboard
-              </Link>
-            </div>
-          </div>
         </div>
       </section>
     </>

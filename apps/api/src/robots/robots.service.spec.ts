@@ -122,6 +122,7 @@ function buildService(prismaOverrides?: Record<string, unknown>, configValues?: 
     mockActionQueue as never,
     publicOverviewService,
     mockPlatformUser as never,
+    { publishSafely: jest.fn().mockResolvedValue(null) } as never,
   );
 
   return { service, mockPrisma, mockRedis, mockAccess, mockConfig, mockActionQueue };

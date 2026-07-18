@@ -130,7 +130,7 @@ export function DashboardWebhooksSection({
               <li>`x-botparty-signature` = `sha256=...`</li>
             </ul>
             <p className="mt-3 text-xs text-[var(--muted-foreground)]">
-              Deliveries retry automatically on transient failures. Block internal targets by using a public HTTPS endpoint only.
+              Use a public HTTPS endpoint. Failed deliveries are retried automatically.
             </p>
           </div>
         </div>

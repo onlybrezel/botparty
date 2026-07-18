@@ -2,6 +2,7 @@
 const { FlatCompat } = require('@eslint/eslintrc');
 const js = require('@eslint/js');
 const nextPlugin = require('@next/eslint-plugin-next');
+const reactHooksPlugin = require('eslint-plugin-react-hooks');
 const path = require('path');
 
 const compat = new FlatCompat({
@@ -16,9 +17,16 @@ module.exports = [
     ignores: ['.next/**', 'node_modules/**', '.turbo/**'],
   },
   ...compat.extends('@botparty/eslint-config'),
-  nextPlugin.configs['core-web-vitals'],
+  {
+    plugins: { '@next/next': nextPlugin },
+    rules: {
+      ...nextPlugin.configs.recommended.rules,
+      ...nextPlugin.configs['core-web-vitals'].rules,
+    },
+  },
   {
     files: ['**/*.ts', '**/*.tsx'],
+    plugins: { 'react-hooks': reactHooksPlugin },
     languageOptions: {
       parserOptions: {
         project: './tsconfig.json',
@@ -26,7 +34,7 @@ module.exports = [
       },
     },
     rules: {
-      'react-hooks/exhaustive-deps': 'off',
+      'react-hooks/exhaustive-deps': 'error',
       '@typescript-eslint/no-empty-object-type': 'off',
     },
   },

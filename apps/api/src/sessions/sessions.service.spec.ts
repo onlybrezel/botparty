@@ -28,6 +28,9 @@ describe('SessionsService', () => {
   let recordingAdminService: {
     findReplayCandidatesForSession: jest.Mock;
   };
+  let analytics: {
+    recordConsented: jest.Mock;
+  };
   let service: SessionsService;
 
   beforeEach(() => {
@@ -49,8 +52,10 @@ describe('SessionsService', () => {
       session,
       robot,
       analyticsEvent: { create: jest.fn().mockResolvedValue(undefined) },
-      $transaction: jest.fn(async (callback: (tx: { session: typeof session; robot: typeof robot }) => unknown) =>
-        callback({ session, robot })),
+      $transaction: jest.fn(
+        async (callback: (tx: { session: typeof session; robot: typeof robot }) => unknown) =>
+          callback({ session, robot }),
+      ),
     };
     robotsService = {
       validateRoomAccess: jest.fn(),
@@ -63,11 +68,13 @@ describe('SessionsService', () => {
     recordingAdminService = {
       findReplayCandidatesForSession: jest.fn().mockResolvedValue([]),
     };
+    analytics = { recordConsented: jest.fn().mockResolvedValue({ accepted: true }) };
     service = new SessionsService(
       prisma as never,
       robotsService as never,
       robotWebhookService as never,
       recordingAdminService as never,
+      analytics as never,
     );
   });
 
@@ -76,22 +83,23 @@ describe('SessionsService', () => {
     jest.restoreAllMocks();
   });
 
-  it('ends prior active sessions before creating a new one', async () => {
-    const startedAt = new Date('2024-01-01T00:00:00.000Z');
-    const now = new Date('2024-01-01T00:01:00.000Z');
-    jest.useFakeTimers().setSystemTime(now);
-    prisma.session.findMany.mockResolvedValue([{ id: 'old-session', startedAt }]);
-    prisma.session.create.mockResolvedValue({ id: 'new-session', robotId: 'robot-1', userId: 'user-1' });
+  it('creates a session atomically and relies on the active-session database constraint', async () => {
+    prisma.session.create.mockResolvedValue({
+      id: 'new-session',
+      robotId: 'robot-1',
+      userId: 'user-1',
+    });
     prisma.robot.update.mockResolvedValue({ id: 'robot-1' });
 
     const session = await service.create('robot-1', 'user-1');
 
-    expect(prisma.session.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: 'old-session' },
-        data: expect.objectContaining({ status: 'ENDED', durationMs: 60_000 }),
-      }),
-    );
+    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      isolationLevel: 'Serializable',
+    });
+    expect(prisma.session.create).toHaveBeenCalledWith({
+      data: { id: undefined, robotId: 'robot-1', userId: 'user-1' },
+    });
+    expect(prisma.session.update).not.toHaveBeenCalled();
     expect(robotWebhookService.emitSessionStarted).toHaveBeenCalledWith({
       id: 'new-session',
       robotId: 'robot-1',
@@ -123,9 +131,14 @@ describe('SessionsService', () => {
 
     expect(ended?.status).toBe('ENDED');
     expect(ended?.durationMs).toBeGreaterThanOrEqual(45_000);
-    expect(robotWebhookService.emitSessionEnded).toHaveBeenCalledWith(expect.objectContaining({ id: 'session-1' }));
-    expect(prisma.analyticsEvent.create).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ event: 'session_end' }) }),
+    expect(robotWebhookService.emitSessionEnded).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'session-1' }),
+    );
+    expect(analytics.recordConsented).toHaveBeenCalledWith(
+      'user-1',
+      'SESSION_END',
+      'robot-1',
+      expect.objectContaining({ sessionId: 'session-1' }),
     );
   });
 
@@ -133,13 +146,17 @@ describe('SessionsService', () => {
     prisma.robot.findUnique.mockResolvedValue({ id: 'robot-1' });
     robotsService.resolveGuestActorId.mockReturnValue('guest-1');
 
-    await expect(service.findByRobotForRequester('robot-1', null)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.findByRobotForRequester('robot-1', null)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
   });
 
   it('rejects session-history access when the robot does not exist', async () => {
     prisma.robot.findUnique.mockResolvedValue(null);
 
-    await expect(service.findByRobotForRequester('robot-1', 'user-1')).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.findByRobotForRequester('robot-1', 'user-1')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 
   it('returns requester-scoped robot sessions when room access is valid', async () => {
@@ -194,15 +211,15 @@ describe('SessionsService', () => {
       },
     });
     prisma.user.findUnique.mockResolvedValue({ id: 'user-1', role: 'USER' });
-    recordingAdminService.findReplayCandidatesForSession.mockResolvedValue([{ fileName: 'session-1.mp4' }]);
+    recordingAdminService.findReplayCandidatesForSession.mockResolvedValue([
+      { fileName: 'session-1.mp4' },
+    ]);
 
     const session = await service.findDetailForRequester('session-1', 'user-1');
 
-    expect(recordingAdminService.findReplayCandidatesForSession).toHaveBeenCalledWith(
-      expect.objectContaining({
-        robotId: 'robot-1',
-      }),
-    );
+    expect(recordingAdminService.findReplayCandidatesForSession).toHaveBeenCalledWith({
+      sessionId: 'session-1',
+    });
     expect(session).toEqual(
       expect.objectContaining({
         id: 'session-1',

@@ -29,7 +29,7 @@ export class RobotRuntimeService {
     const { deviceHash } = await this.robotsService.validateOrBindRobotDevice(robot.id, body.deviceKey);
     const robotJwtOptions: JwtSignOptions = {
       secret: this.getRobotJwtSecret(),
-      expiresIn: '30d',
+      expiresIn: '15m',
     };
     const configuredRobotExpiry = this.configService.get<string>('ROBOT_JWT_EXPIRES_IN')?.trim();
     if (configuredRobotExpiry) {
@@ -41,6 +41,7 @@ export class RobotRuntimeService {
         sub: robot.id,
         scope: 'robot',
         deviceHash,
+        tokenVersion: robot.deviceTokenVersion,
       },
       robotJwtOptions,
     );
@@ -69,7 +70,7 @@ export class RobotRuntimeService {
   }
 
   async heartbeat(authorization?: string) {
-    const robotId = this.requireRobotAuth(authorization);
+    const robotId = await this.requireRobotAuth(authorization);
     await this.robotsService.touchHeartbeat(robotId);
     return { ok: true };
   }
@@ -97,15 +98,15 @@ export class RobotRuntimeService {
   }
 
   async pollActions(authorization?: string) {
-    return this.robotsService.consumeActionsByRobotId(this.requireRobotAuth(authorization));
+    return this.robotsService.consumeActionsByRobotId(await this.requireRobotAuth(authorization));
   }
 
   async pushLogs(authorization: string | undefined, body: IngestRobotLogsDto) {
-    return this.robotsService.ingestRobotLogsByRobotId(this.requireRobotAuth(authorization), body.lines);
+    return this.robotsService.ingestRobotLogsByRobotId(await this.requireRobotAuth(authorization), body.lines);
   }
 
   async pushTelemetry(authorization: string | undefined, body: PushTelemetryDto) {
-    return this.robotsService.ingestRobotTelemetryByRobotId(this.requireRobotAuth(authorization), body);
+    return this.robotsService.ingestRobotTelemetryByRobotId(await this.requireRobotAuth(authorization), body);
   }
 
   async getLogs(robotId: string, ownerId: string) {
@@ -117,14 +118,14 @@ export class RobotRuntimeService {
     return this.robotsService.getRobotTelemetry(robotId, ownerId);
   }
 
-  private requireRobotAuth(authorization?: string): string {
+  private async requireRobotAuth(authorization?: string): Promise<string> {
     const token = extractBearerToken(authorization);
     if (!token) {
       throw new UnauthorizedException('Robot authorization required');
     }
 
     try {
-      const payload = this.jwtService.verify<{ sub?: string; scope?: string; deviceHash?: string }>(token, {
+      const payload = this.jwtService.verify<{ sub?: string; scope?: string; deviceHash?: string; tokenVersion?: number }>(token, {
         secret: this.getRobotJwtSecret(),
       });
       if (payload.scope !== 'robot' || typeof payload.sub !== 'string' || !payload.sub.trim()) {
@@ -132,6 +133,12 @@ export class RobotRuntimeService {
       }
       if (typeof payload.deviceHash !== 'string' || !/^[a-f0-9]{64}$/i.test(payload.deviceHash)) {
         throw new UnauthorizedException('Invalid robot authorization');
+      }
+      if (
+        !Number.isInteger(payload.tokenVersion)
+        || !(await this.robotsService.validateRobotAuth(payload.sub, payload.deviceHash, payload.tokenVersion!))
+      ) {
+        throw new UnauthorizedException('Robot authorization has been revoked');
       }
       return payload.sub;
     } catch {

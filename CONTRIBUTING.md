@@ -2,19 +2,19 @@
 
 ## Setup
 
-1. Install Node 22+ and pnpm 9+.
+1. Install Node 24+ and pnpm 9.15+.
 2. Run `pnpm install`.
 3. Copy `.env.example` to `.env` and set the required secrets.
-4. Start local infra with `docker compose up -d postgres redis livekit livekit-ingress livekit-egress cadvisor`.
+4. Apply migrations with `pnpm --filter @botparty/prisma db:migrate:prod` and start local infra with `docker compose up -d postgres redis livekit-config livekit`.
 5. Start the apps with `pnpm dev`.
 
 ## Validation
 
 - `pnpm typecheck`
-- `pnpm --filter @botparty/web lint`
+- `pnpm lint`
 - `pnpm --filter @botparty/api test`
-
-Repo-wide lint currently has known legacy failures in `@botparty/api`; keep your changes from adding new ones and prefer targeted package validation while that baseline is being cleaned up.
+- `pnpm --filter @botparty/web test`
+- `pnpm build`
 
 ## Engineering rules
 

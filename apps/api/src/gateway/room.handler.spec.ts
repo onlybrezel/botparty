@@ -46,9 +46,17 @@ describe('RoomHandler', () => {
     const robotsService = {
       resolveRoomAccessActorId: jest.fn().mockResolvedValue('guest:guest123'),
       validateRoomAccess: jest.fn().mockResolvedValue(true),
-      getRecentChatMessages: jest.fn().mockResolvedValue([
-        { id: 'msg-1', userId: 'user-9', username: 'alice', message: 'hello', createdAt: '2026-01-01T00:00:00.000Z' },
-      ]),
+      getRecentChatMessages: jest
+        .fn()
+        .mockResolvedValue([
+          {
+            id: 'msg-1',
+            userId: 'user-9',
+            username: 'alice',
+            message: 'hello',
+            createdAt: '2026-01-01T00:00:00.000Z',
+          },
+        ]),
       setViewerCount: jest.fn().mockResolvedValue(undefined),
     };
     const moderationService = {
@@ -73,15 +81,21 @@ describe('RoomHandler', () => {
     const client = createClient();
 
     await expect(handler.handleJoin(client, {})).resolves.toBeUndefined();
-    expect(client.send).toHaveBeenCalledWith(JSON.stringify({
-      event: WS_EVENTS.ERROR,
-      data: { message: 'Failed to validate session token' },
-    }));
+    expect(client.send).toHaveBeenCalledWith(
+      JSON.stringify({
+        event: WS_EVENTS.ERROR,
+        data: { message: 'Failed to validate session token' },
+      }),
+    );
   });
 
   it('joins a room as a guest, sends presence, and replays chat history', async () => {
     const { runtime, runtimeMock, robotsService, robotsMock, moderationService } = createDeps();
-    runtimeMock.parseWsPayload.mockReturnValue({ robotId: 'robot-1', protocolVersion: 2, roomAccessToken: 'invite-token' });
+    runtimeMock.parseWsPayload.mockReturnValue({
+      robotId: 'robot-1',
+      protocolVersion: 2,
+      roomAccessToken: 'invite-token',
+    });
     runtimeMock.resolveSocketUser.mockResolvedValueOnce(null);
     const handler = new RoomHandler(runtime, robotsService, moderationService);
     const client = createClient();
@@ -100,21 +114,25 @@ describe('RoomHandler', () => {
       { userId: 'guest:guest123', username: 'Guest-guest1' },
       client.id,
     );
-    expect(client.send).toHaveBeenCalledWith(JSON.stringify({
-      event: WS_EVENTS.PRESENCE_UPDATE,
-      data: { viewers: [{ userId: 'user-1', username: 'julien', joinedAt: 100 }] },
-    }));
-    expect(client.send).toHaveBeenCalledWith(JSON.stringify({
-      event: WS_EVENTS.CHAT_MESSAGE,
-      data: {
-        id: 'msg-1',
-        userId: 'user-9',
-        username: 'alice',
-        message: 'hello',
-        createdAt: '2026-01-01T00:00:00.000Z',
-        historical: true,
-      },
-    }));
+    expect(client.send).toHaveBeenCalledWith(
+      JSON.stringify({
+        event: WS_EVENTS.PRESENCE_UPDATE,
+        data: { viewers: [{ userId: 'user-1', username: 'julien', joinedAt: 100 }] },
+      }),
+    );
+    expect(client.send).toHaveBeenCalledWith(
+      JSON.stringify({
+        event: WS_EVENTS.CHAT_MESSAGE,
+        data: {
+          id: 'msg-1',
+          userId: 'user-9',
+          username: 'alice',
+          message: 'hello',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          historical: true,
+        },
+      }),
+    );
     expect(result).toEqual({
       event: WS_EVENTS.ROOM_JOIN,
       data: {
@@ -139,26 +157,38 @@ describe('RoomHandler', () => {
 
     expect(client.userId).toBeUndefined();
     expect(client.watchingRobotId).toBeUndefined();
-    expect(client.send).toHaveBeenCalledWith(JSON.stringify({
-      event: WS_EVENTS.ERROR,
-      data: { message: 'Guest connection limit reached for this IP' },
-    }));
+    expect(client.send).toHaveBeenCalledWith(
+      JSON.stringify({
+        event: WS_EVENTS.ERROR,
+        data: { message: 'Guest connection limit reached for this IP' },
+      }),
+    );
   });
 
   it('disconnects banned users before the room join completes', async () => {
     const { runtime, runtimeMock, robotsService, moderationService, moderationMock } = createDeps();
-    runtimeMock.parseWsPayload.mockReturnValue({ robotId: 'robot-1', protocolVersion: 2, accessToken: 'jwt' });
-    runtimeMock.resolveSocketUser.mockResolvedValueOnce({ sub: 'user-1', username: 'julien', role: 'USER' });
+    runtimeMock.parseWsPayload.mockReturnValue({
+      robotId: 'robot-1',
+      protocolVersion: 2,
+      accessToken: 'jwt',
+    });
+    runtimeMock.resolveSocketUser.mockResolvedValueOnce({
+      sub: 'user-1',
+      username: 'julien',
+      role: 'USER',
+    });
     moderationMock.getActiveRestriction.mockResolvedValueOnce({ action: 'BAN', userId: 'user-1' });
     const handler = new RoomHandler(runtime, robotsService, moderationService);
     const client = createClient();
 
     await handler.handleJoin(client, {});
 
-    expect(client.send).toHaveBeenCalledWith(JSON.stringify({
-      event: WS_EVENTS.MOD_BAN,
-      data: { action: 'BAN', userId: 'user-1' },
-    }));
+    expect(client.send).toHaveBeenCalledWith(
+      JSON.stringify({
+        event: WS_EVENTS.MOD_BAN,
+        data: { action: 'BAN', userId: 'user-1' },
+      }),
+    );
     expect(runtimeMock.rooms.size).toBe(0);
   });
 
@@ -182,7 +212,7 @@ describe('RoomHandler', () => {
     expect(runtimeMock.broadcastToRoom).toHaveBeenCalledWith('robot-1', WS_EVENTS.PRESENCE_UPDATE, {
       viewers: [],
     });
-    expect(robotsMock.setViewerCount).toHaveBeenCalledWith('robot-1', 0);
+    expect(robotsMock.setViewerCount).not.toHaveBeenCalled();
     expect(client.watchingRobotId).toBeUndefined();
     expect(runtimeMock.rooms.has('robot-1')).toBe(false);
   });

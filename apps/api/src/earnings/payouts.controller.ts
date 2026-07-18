@@ -10,10 +10,12 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { payoutRequestSchema, Role, type JwtPayload, type PayoutRequestInput } from '@botparty/shared';
 import { PayoutsService } from './payouts.service';
-import { RejectPayoutDto } from './payouts.dto';
+import { MarkPaidPayoutDto, RejectPayoutDto } from './payouts.dto';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 
 @ApiTags('payouts')
@@ -30,6 +32,7 @@ export class PayoutsController {
       userId: user.sub,
       amount: dto.amount,
       destination: dto.destination,
+      destinationType: dto.destinationType,
       notes: dto.notes,
     });
   }
@@ -41,40 +44,61 @@ export class PayoutsController {
   }
 
   @Get('review')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'List pending payout requests (staff)' })
   async listReview(@CurrentUser() user: JwtPayload) {
-    this.assertStaff(user);
+    this.assertFinance(user);
     return { items: await this.payouts.listForReview() };
   }
 
   @Post(':id/approve')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Approve a payout request (staff)' })
   async approve(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
-    this.assertStaff(user);
+    this.assertFinance(user);
     return this.payouts.approve(id, user.sub);
   }
 
   @Post(':id/reject')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Reject a payout request (staff)' })
   async reject(
     @CurrentUser() user: JwtPayload,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: RejectPayoutDto,
   ) {
-    this.assertStaff(user);
+    this.assertFinance(user);
     return this.payouts.reject(id, user.sub, dto.reason);
   }
 
   @Post(':id/mark-paid')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Mark approved payout as paid and debit wallet (staff)' })
-  async markPaid(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
-    this.assertStaff(user);
-    return this.payouts.markPaid(id, user.sub);
+  async markPaid(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: MarkPaidPayoutDto,
+  ) {
+    this.assertFinance(user);
+    return this.payouts.markPaid(id, user.sub, dto.providerRef);
   }
 
-  private assertStaff(user: JwtPayload) {
-    if (user.role !== Role.ADMIN && user.role !== Role.MOD) {
-      throw new ForbiddenException('Staff access required');
+  @Get(':id/destination')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Reveal an approved payout destination to the independent payer' })
+  revealDestination(@CurrentUser() user: JwtPayload, @Param('id', ParseUUIDPipe) id: string) {
+    this.assertFinance(user);
+    return this.payouts.revealDestination(id, user.sub);
+  }
+
+  private assertFinance(user: JwtPayload) {
+    if (user.role !== Role.ADMIN) {
+      throw new ForbiddenException('Finance access required');
     }
   }
 }

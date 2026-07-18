@@ -118,6 +118,7 @@ export default function DashboardPage() {
     logsLoading,
     diagLogs,
     telemetry,
+    onboarding,
     preview,
     previewVersion,
     controlButtons,
@@ -338,6 +339,7 @@ export default function DashboardPage() {
 
                     <DashboardOperationsSection
                       telemetry={telemetry}
+                      onboarding={onboarding}
                       opLoading={opLoading}
                       pendingActionTypes={pendingActionTypes}
                       logsLoading={logsLoading}

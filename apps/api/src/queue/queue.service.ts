@@ -51,17 +51,18 @@ export class QueueService {
       throw new ForbiddenException('Room access verification required');
     }
 
-    if (this.maxActiveQueueEntriesPerUser > 0) {
-      const existingEntries = await this.prisma.queueEntry.count({ where: { userId } });
-      if (existingEntries >= this.maxActiveQueueEntriesPerUser) {
-        throw new BadRequestException(
-          `Maximum of ${this.maxActiveQueueEntriesPerUser} active queue entries allowed per user`,
-        );
-      }
-    }
-
-    const entry = await this.prisma.$transaction(
+    const entry = await this.withSerializableRetry(() => this.prisma.$transaction(
       async (tx) => {
+        await tx.$executeRaw`SELECT id FROM robots WHERE id = ${robotId}::uuid FOR UPDATE`;
+        if (this.maxActiveQueueEntriesPerUser > 0) {
+          await tx.$executeRaw`SELECT id FROM users WHERE id = ${userId}::uuid FOR UPDATE`;
+          const existingEntries = await tx.queueEntry.count({ where: { userId } });
+          if (existingEntries >= this.maxActiveQueueEntriesPerUser) {
+            throw new BadRequestException(
+              `Maximum of ${this.maxActiveQueueEntriesPerUser} active queue entries allowed per user`,
+            );
+          }
+        }
         const existing = await tx.queueEntry.findUnique({
           where: { robotId_userId: { robotId, userId } },
         });
@@ -83,10 +84,9 @@ export class QueueService {
         });
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-    );
+    ));
 
     await this.removeVotingFootprint(robotId, userId);
-    await this.recomputeQueueVotes(robotId);
 
     // Publish queue update via Redis for real-time sync
     await this.redis.publish(`queue:${robotId}`, JSON.stringify({ type: 'join', entry }));
@@ -96,7 +96,6 @@ export class QueueService {
   }
 
   async leave(robotId: string, userId: string) {
-    const orderBy = await this.getQueueOrderBy(robotId);
     const result = await this.prisma.$transaction(
       async (tx) => {
         const existing = await tx.queueEntry.findUnique({
@@ -112,19 +111,6 @@ export class QueueService {
           where: { robotId_userId: { robotId, userId } },
         });
 
-        const entries = await tx.queueEntry.findMany({
-          where: { robotId },
-          orderBy,
-          select: { id: true },
-        });
-
-        for (const [index, entry] of entries.entries()) {
-          await tx.queueEntry.update({
-            where: { id: entry.id },
-            data: { position: index + 1 },
-          });
-        }
-
         return { removed: true };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
@@ -135,7 +121,6 @@ export class QueueService {
     }
 
     await this.removeVotingFootprint(robotId, userId);
-    await this.recomputeQueueVotes(robotId);
 
     await this.redis.publish(`queue:${robotId}`, JSON.stringify({ type: 'leave', userId }));
     return result;
@@ -143,7 +128,7 @@ export class QueueService {
 
   async getQueue(robotId: string) {
     const orderBy = await this.getQueueOrderBy(robotId);
-    return this.prisma.queueEntry.findMany({
+    const entries = await this.prisma.queueEntry.findMany({
       where: { robotId },
       orderBy,
       include: {
@@ -152,6 +137,24 @@ export class QueueService {
         },
       },
     });
+    const robot = await this.prisma.robot.findUnique({ where: { id: robotId }, select: { queueMode: true } });
+    if (robot?.queueMode === 'VOTING') {
+      const ballots = await this.redis.hgetall(this.voteBallotKey(robotId));
+      const queued = new Set(entries.map((entry) => entry.userId));
+      const votes = new Map<string, number>();
+      for (const [voter, target] of Object.entries(ballots)) {
+        if (voter !== target && queued.has(voter) && queued.has(target)) {
+          votes.set(target, (votes.get(target) ?? 0) + 1);
+        }
+      }
+      entries.sort((left, right) =>
+        Number(right.isPriority) - Number(left.isPriority)
+        || (votes.get(right.userId) ?? 0) - (votes.get(left.userId) ?? 0)
+        || left.joinedAt.getTime() - right.joinedAt.getTime(),
+      );
+      return entries.map((entry, index) => ({ ...entry, votes: votes.get(entry.userId) ?? 0, position: index + 1 }));
+    }
+    return entries.map((entry, index) => ({ ...entry, position: index + 1 }));
   }
 
   async getQueueForRequester(
@@ -186,26 +189,11 @@ export class QueueService {
   }
 
   async getNextInQueue(robotId: string) {
-    const orderBy = await this.getQueueOrderBy(robotId);
-    return this.prisma.queueEntry.findFirst({
-      where: { robotId },
-      orderBy,
-      include: {
-        user: {
-          select: { id: true, username: true, displayName: true },
-        },
-      },
-    });
+    return (await this.getQueue(robotId))[0] ?? null;
   }
 
   async getCurrentControllerUserId(robotId: string): Promise<string | null> {
-    const orderBy = await this.getQueueOrderBy(robotId);
-    const next = await this.prisma.queueEntry.findFirst({
-      where: { robotId },
-      orderBy,
-      select: { userId: true },
-    });
-
+    const next = await this.getNextInQueue(robotId);
     return next?.userId ?? null;
   }
 
@@ -255,14 +243,9 @@ export class QueueService {
 
     await this.redis.hset(this.voteBallotKey(robotId), voterUserId, targetUserId);
     await this.redis.expire(this.voteBallotKey(robotId), 12 * 60 * 60);
-    await this.recomputeQueueVotes(robotId);
-
-    const updated = await this.prisma.queueEntry.findUnique({
-      where: { id: entry.id },
-    });
 
     await this.redis.publish(`queue:${robotId}`, JSON.stringify({ type: 'vote', userId: targetUserId }));
-    return updated;
+    return (await this.getQueue(robotId)).find((item) => item.id === entry.id) ?? null;
   }
 
   async clearQueue(robotId: string) {
@@ -275,16 +258,15 @@ export class QueueService {
     await this.prisma.queueEntry.deleteMany();
   }
 
-  private async getQueueOrderBy(robotId: string): Promise<Prisma.QueueEntryOrderByWithRelationInput[]> {
-    const robot = await this.prisma.robot.findUnique({
-      where: { id: robotId },
-      select: { queueMode: true },
+  async listQueuedRobotIds(): Promise<string[]> {
+    const rows = await this.prisma.queueEntry.findMany({
+      distinct: ['robotId'],
+      select: { robotId: true },
     });
+    return rows.map((row) => row.robotId);
+  }
 
-    if (robot?.queueMode === 'VOTING') {
-      return [{ isPriority: 'desc' }, { votes: 'desc' }, { joinedAt: 'asc' }, { position: 'asc' }];
-    }
-
+  private async getQueueOrderBy(_robotId: string): Promise<Prisma.QueueEntryOrderByWithRelationInput[]> {
     return [{ isPriority: 'desc' }, { position: 'asc' }, { joinedAt: 'asc' }];
   }
 
@@ -294,76 +276,34 @@ export class QueueService {
 
   private async removeVotingFootprint(robotId: string, userId: string) {
     const ballotKey = this.voteBallotKey(robotId);
-    const ballots = await this.redis.hgetall(ballotKey);
-    if (!Object.keys(ballots).length) {
-      return;
-    }
-
-    const pipeline = this.redis.pipeline();
-    pipeline.hdel(ballotKey, userId);
-
-    for (const [voterUserId, targetUserId] of Object.entries(ballots)) {
-      if (targetUserId === userId) {
-        pipeline.hdel(ballotKey, voterUserId);
-      }
-    }
-
-    await pipeline.exec();
+    await this.redis.eval(
+      `
+        local entries = redis.call('HGETALL', KEYS[1])
+        redis.call('HDEL', KEYS[1], ARGV[1])
+        for index = 1, #entries, 2 do
+          if entries[index + 1] == ARGV[1] then
+            redis.call('HDEL', KEYS[1], entries[index])
+          end
+        end
+        return 1
+      `,
+      1,
+      ballotKey,
+      userId,
+    );
   }
 
-  private async recomputeQueueVotes(robotId: string) {
-    const robot = await this.prisma.robot.findUnique({
-      where: { id: robotId },
-      select: { queueMode: true },
-    });
-    if (!robot || robot.queueMode !== 'VOTING') {
-      await this.prisma.queueEntry.updateMany({
-        where: { robotId, votes: { not: 0 } },
-        data: { votes: 0 },
-      });
-      await this.redis.del(this.voteBallotKey(robotId));
-      return;
-    }
-
-    const entries = await this.prisma.queueEntry.findMany({
-      where: { robotId },
-      select: { id: true, userId: true, votes: true },
-    });
-    const queuedUserIds = new Set(entries.map((entry) => entry.userId));
-    const ballots = await this.redis.hgetall(this.voteBallotKey(robotId));
-    const nextVotes = new Map<string, number>();
-    const cleanupPipeline = this.redis.pipeline();
-    let hasCleanup = false;
-
-    for (const [voterUserId, targetUserId] of Object.entries(ballots)) {
-      const valid =
-        queuedUserIds.has(voterUserId) &&
-        queuedUserIds.has(targetUserId) &&
-        voterUserId !== targetUserId;
-      if (!valid) {
-        cleanupPipeline.hdel(this.voteBallotKey(robotId), voterUserId);
-        hasCleanup = true;
-        continue;
+  private async withSerializableRetry<T>(operation: () => Promise<T>): Promise<T> {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await operation();
+      } catch (error) {
+        if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2034' || attempt >= 8) {
+          throw error;
+        }
+        const backoffMs = Math.min(250, 5 * 2 ** attempt) + Math.floor(Math.random() * 10);
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
       }
-
-      nextVotes.set(targetUserId, (nextVotes.get(targetUserId) ?? 0) + 1);
     }
-
-    if (hasCleanup) {
-      await cleanupPipeline.exec();
-    }
-
-    await this.prisma.$transaction(async (tx) => {
-      await Promise.all(
-        entries
-          .filter((entry) => entry.votes !== (nextVotes.get(entry.userId) ?? 0))
-          .map((entry) =>
-            tx.queueEntry.update({
-              where: { id: entry.id },
-              data: { votes: nextVotes.get(entry.userId) ?? 0 },
-            }),
-          ),
-      );
-    });
   }
 }

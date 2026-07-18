@@ -28,8 +28,15 @@ export class RobotRuntimeHandler {
     client.protocolVersion = parsed.protocolVersion;
 
     try {
-      const robotId = this.runtime.resolveRobotSocketIdentity(parsed.robotAuthToken);
-      if (!robotId) {
+      const identity = this.runtime.resolveRobotSocketIdentity(parsed.robotAuthToken);
+      if (
+        !identity
+        || !(await this.robotsService.validateRobotAuth(
+          identity.robotId,
+          identity.deviceHash,
+          identity.tokenVersion,
+        ))
+      ) {
         client.send(JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Invalid robot authorization' } }));
         try {
           client.close(1008, 'Invalid robot authorization');
@@ -38,7 +45,7 @@ export class RobotRuntimeHandler {
         }
         return;
       }
-      const robot = await this.robotsService.findByIdCached(robotId);
+      const robot = await this.robotsService.findByIdCached(identity.robotId);
 
       const existingRobotClient = this.runtime.getOpenRobotClient(robot.id);
       if (existingRobotClient && existingRobotClient !== client) {

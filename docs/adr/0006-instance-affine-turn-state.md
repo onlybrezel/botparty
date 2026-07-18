@@ -1,30 +1,21 @@
-# ADR-0006: Instance-Affine Turn State Until Redis Arbitration Exists
+# ADR-0006: Redis-Leased Active Turn State
 
-- Date: 2026-04-19
-- Status: Accepted
+- Date: 2026-07-17
+- Status: Accepted; supersedes the original instance-affine design
 
 ## Context
 
-BotParty already uses Redis for room broadcasts, presence fan-out, and robot claim locks, but queue turn execution still depends on in-process gateway state:
-
-1. `activeTurns`
-2. `turnTimeouts`
-3. `controlCooldowns`
-
-That state is fast and simple, but it means turn arbitration is not fully stateless across horizontally scaled API replicas.
+Queue entries and sessions are durable in PostgreSQL, while room fan-out and short-lived coordination use Redis. Process-local turn ownership allowed two replicas to advance the same robot after a crash or reconnect.
 
 ## Decision
 
-Keep turn timers and cooldown enforcement instance-affine for now, and document websocket room affinity as an operational requirement.
+Each active turn is represented by a Redis lease containing its absolute deadline and a monotonically increasing fencing token. Only the current lease holder can advance or end the turn. The durable session row records the corresponding fence. A replacement replica acquires the next fence and reconstructs the remaining timeout from the stored deadline.
 
-## Rationale
-
-1. The current in-memory path is low-latency and predictable for hot control traffic.
-2. Moving timers and cooldown arbitration into Redis is feasible, but it adds complexity around leases, timer ownership, and failover semantics.
-3. The platform already has a safe cross-instance primitive for the most critical invariant: exactly one robot control socket per robot.
+Robot disconnects use a bounded grace lease. Queue entries remain intact during that window and are advanced only after the grace period expires.
 
 ## Consequences
 
-1. Horizontal scaling is supported for broadcast and failover, but not for arbitrary room sharding without affinity.
-2. Load balancers should keep `/ws` traffic for a hot robot room on the same API instance when possible.
-3. A future Redis-backed turn state migration remains the follow-up path for truly stateless websocket scaling.
+1. API replicas do not need sticky routing for correctness.
+2. A delayed callback from a former owner cannot mutate a newer turn.
+3. Redis persistence and `noeviction` are required because leases are correctness-critical.
+4. Graceful connection draining remains useful during rollout, but replica loss no longer creates concurrent turn owners.

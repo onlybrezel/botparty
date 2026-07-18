@@ -1,9 +1,9 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { loginSchema, registerSchema } from '@botparty/shared';
+import { LEGAL_POLICY_VERSIONS, loginSchema, registerSchema } from '@botparty/shared';
 import { api } from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/store';
@@ -21,9 +21,13 @@ type AuthDraft = {
   password: string;
 };
 
-function collectFieldErrors(mode: Mode, draft: AuthDraft) {
+function collectFieldErrors(mode: Mode, draft: AuthDraft, legalAccepted: boolean) {
   const result = (mode === 'login' ? loginSchema : registerSchema).safeParse({
-    ...(mode === 'register' ? { username: draft.username } : {}),
+    ...(mode === 'register' ? {
+      username: draft.username,
+      acceptedTermsVersion: legalAccepted ? LEGAL_POLICY_VERSIONS.TERMS : undefined,
+      acceptedPrivacyVersion: legalAccepted ? LEGAL_POLICY_VERSIONS.PRIVACY : undefined,
+    } : {}),
     email: draft.email,
     password: draft.password,
   });
@@ -43,20 +47,23 @@ function collectFieldErrors(mode: Mode, draft: AuthDraft) {
 
 export default function LoginPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const { login } = useAuth();
 
   const [mode, setMode] = useState<Mode>('login');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [resetSucceeded, setResetSucceeded] = useState(false);
+  const [legalAccepted, setLegalAccepted] = useState(false);
   const [touched, setTouched] = useState<Partial<Record<AuthField, boolean>>>({});
   const [draft, setDraft] = useState<AuthDraft>({
     username: '',
     email: '',
     password: '',
   });
-  const resetSucceeded = searchParams.get('reset') === 'success';
-  const fieldErrors = useMemo(() => collectFieldErrors(mode, draft), [draft, mode]);
+  useEffect(() => {
+    setResetSucceeded(new URLSearchParams(window.location.search).get('reset') === 'success');
+  }, []);
+  const fieldErrors = useMemo(() => collectFieldErrors(mode, draft, legalAccepted), [draft, legalAccepted, mode]);
   const visibleFieldErrors = useMemo(
     () =>
       Object.entries(fieldErrors).reduce<Partial<Record<AuthField, string>>>((acc, [field, message]) => {
@@ -74,11 +81,11 @@ export default function LoginPage() {
     if (!draft.email.trim() || !draft.password) {
       return false;
     }
-    if (mode === 'register' && !draft.username.trim()) {
+    if (mode === 'register' && (!draft.username.trim() || !legalAccepted)) {
       return false;
     }
     return Object.keys(fieldErrors).length === 0;
-  }, [draft.email, draft.password, draft.username, fieldErrors, loading, mode]);
+  }, [draft.email, draft.password, draft.username, fieldErrors, legalAccepted, loading, mode]);
 
   function updateField(field: AuthField, value: string) {
     setDraft((current) => ({ ...current, [field]: value }));
@@ -118,7 +125,13 @@ export default function LoginPage() {
         router.push('/explore');
       } else {
         const username = draft.username.trim();
-        const result = await api.auth.register({ username, email, password });
+        const result = await api.auth.register({
+          username,
+          email,
+          password,
+          acceptedTermsVersion: LEGAL_POLICY_VERSIONS.TERMS,
+          acceptedPrivacyVersion: LEGAL_POLICY_VERSIONS.PRIVACY,
+        });
         if (result.accessToken) {
           api.setToken(result.accessToken);
           login({
@@ -128,7 +141,7 @@ export default function LoginPage() {
             displayName: result.user.displayName,
             role: result.user.role,
           });
-          router.push('/explore?onboarding=welcome');
+          router.push('/dashboard/robots/new');
           return;
         }
 
@@ -196,7 +209,7 @@ export default function LoginPage() {
         <Card className="w-full rounded-2xl border-[var(--border)] bg-[var(--card)]/95 shadow-2xl shadow-black/30">
           <CardContent className="p-6 sm:p-8">
             <div className="mb-6 text-center">
-              <Link href="/" className="inline-flex items-center gap-2 text-lg font-bold">
+              <Link href="/" prefetch={false} className="inline-flex items-center gap-2 text-lg font-bold">
                 <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--primary)] text-sm font-black text-white">
                   BP
                 </span>
@@ -297,12 +310,20 @@ export default function LoginPage() {
                 ) : null}
               </div>
 
+              {mode === 'register' ? (
+                <label className="flex items-start gap-3 text-sm text-[var(--muted-foreground)]">
+                  <input type="checkbox" className="mt-1" checked={legalAccepted} onChange={(event) => setLegalAccepted(event.target.checked)} required />
+                  <span>I accept the <Link className="underline" href="/terms" prefetch={false}>Terms of Service</Link> and acknowledge the <Link className="underline" href="/privacy" prefetch={false}>Privacy Policy</Link>.</span>
+                </label>
+              ) : null}
+
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <Label htmlFor="password">Password</Label>
                   {mode === 'login' && (
                     <Link
                       href="/forgot-password"
+                      prefetch={false}
                       className="text-xs text-[var(--muted-foreground)] transition hover:text-[var(--foreground)]"
                     >
                       Forgot password?
@@ -353,7 +374,7 @@ export default function LoginPage() {
             </form>
 
             <p className="mt-6 text-center text-xs text-[var(--muted-foreground)]">
-              By signing in, you agree to follow the platform rules and use shared robots fairly.
+              <Link className="underline" href="/terms">Terms</Link> · <Link className="underline" href="/privacy">Privacy</Link>
             </p>
           </CardContent>
         </Card>

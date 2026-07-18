@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { AccessToken, EgressClient, IngressClient, IngressInput, RoomServiceClient } from 'livekit-server-sdk';
 import { EncodedFileOutput, EncodedFileType, S3Upload, TrackType } from '@livekit/protocol';
 import type { EgressInfo, IngressInfo } from '@livekit/protocol';
+import { PrismaService } from '../prisma/prisma.service';
 import {
   resolveS3CompatibleStorageConfig,
   type S3CompatibleStorageConfig,
@@ -60,7 +61,10 @@ export class LivekitService {
   private readonly ingressService: IngressClient;
   private readonly egressService: EgressClient;
 
-  constructor(private readonly config: ConfigService) {
+  constructor(
+    private readonly config: ConfigService,
+    private readonly prisma: PrismaService,
+  ) {
     this.apiKey = config.getOrThrow<string>('LIVEKIT_API_KEY');
     this.apiSecret = config.getOrThrow<string>('LIVEKIT_API_SECRET');
     this.livekitUrl = config.getOrThrow<string>('LIVEKIT_URL');
@@ -91,7 +95,7 @@ export class LivekitService {
     const at = new AccessToken(this.apiKey, this.apiSecret, {
       identity: `robot-${robotId}`,
       name: robotName,
-      ttl: '24h',
+      ttl: '15m',
     });
 
     at.addGrant({
@@ -124,7 +128,7 @@ export class LivekitService {
       const at = new AccessToken(this.apiKey, this.apiSecret, {
         identity: `robot-media:${robotId}:${cameraId}`,
         name: `${robotName} ${label}`.trim(),
-        ttl: '24h',
+        ttl: '15m',
       });
 
       at.addGrant({
@@ -155,7 +159,7 @@ export class LivekitService {
     const at = new AccessToken(this.apiKey, this.apiSecret, {
       identity: `user-${userId}`,
       name: username,
-      ttl: '4h',
+      ttl: canControl ? '2m' : '15m',
     });
 
     at.addGrant({
@@ -184,6 +188,15 @@ export class LivekitService {
     return this.roomService.listParticipants(roomName);
   }
 
+  async revokeController(robotId: string, userId: string): Promise<void> {
+    const roomName = `robot-${robotId}`;
+    try {
+      await this.roomService.removeParticipant(roomName, `user-${userId}`);
+    } catch (error) {
+      this.logger.debug(`Controller participant already absent from ${roomName}: ${(error as Error).message}`);
+    }
+  }
+
   async getRoomRecordingStatus(robotId: string): Promise<RecordingStatus> {
     const roomName = `robot-${robotId}`;
     const [rooms, activeEgress] = await Promise.all([
@@ -200,7 +213,7 @@ export class LivekitService {
     return this.toRecordingStatus(roomName, activeEgress, Boolean(room?.activeRecording), trackCameraLookup);
   }
 
-  async startRoomRecording(robotId: string): Promise<RecordingStatus> {
+  async startRoomRecording(robotId: string, sessionId: string): Promise<RecordingStatus> {
     const roomName = `robot-${robotId}`;
     const rooms = await this.roomService.listRooms([roomName]);
     const room = rooms.find((entry) => entry.name === roomName) ?? null;
@@ -234,7 +247,8 @@ export class LivekitService {
     const recordingObjectStorage = this._requireRecordingObjectStorageConfig();
     const created: Awaited<ReturnType<EgressClient['startTrackCompositeEgress']>>[] = [];
     for (const target of pendingTargets) {
-      const output = this.buildRecordingFileOutput(roomName, target.cameraId, recordingObjectStorage);
+      const objectKey = this.resolveRecordingObjectKey(roomName, target.cameraId, sessionId);
+      const output = this.buildRecordingFileOutput(objectKey, recordingObjectStorage);
 
       const session = await this.withTimeout(
         this.egressService.startTrackCompositeEgress(roomName, output, {
@@ -244,6 +258,18 @@ export class LivekitService {
         `start room recording${target.cameraId ? ` (${target.cameraId})` : ''}`,
       );
       created.push(session);
+      if (session.egressId) {
+        await this.prisma.recording.create({
+          data: {
+            sessionId,
+            robotId,
+            cameraId: target.cameraId,
+            egressId: session.egressId,
+            objectKey,
+            startedAt: new Date(),
+          },
+        });
+      }
     }
 
     return this.toRecordingStatus(roomName, [...activeEgress, ...created], true, trackCameraLookup);
@@ -256,6 +282,8 @@ export class LivekitService {
       'list active recording before stop',
     );
 
+    const egressIds = activeEgress.map((entry) => entry.egressId).filter((id): id is string => Boolean(id));
+
     await Promise.all(
       activeEgress
         .map((entry) => entry.egressId)
@@ -264,6 +292,12 @@ export class LivekitService {
     );
 
     await this.waitForActiveEgressCount(roomName, 0);
+    if (egressIds.length > 0) {
+      await this.prisma.recording.updateMany({
+        where: { egressId: { in: egressIds }, endedAt: null },
+        data: { endedAt: new Date() },
+      });
+    }
 
     return this.toRecordingStatus(roomName, [], false, new Map());
   }
@@ -535,11 +569,9 @@ export class LivekitService {
   }
 
   private buildRecordingFileOutput(
-    roomName: string,
-    cameraId: string | null,
+    objectKey: string,
     objectStorage: S3CompatibleStorageConfig,
   ): EncodedFileOutput {
-    const objectKey = this.resolveRecordingObjectKey(roomName, cameraId);
     return new EncodedFileOutput({
       fileType: EncodedFileType.MP4,
       filepath: objectKey,
@@ -560,12 +592,15 @@ export class LivekitService {
     });
   }
 
-  private resolveRecordingObjectKey(roomName: string, cameraId: string | null): string {
+  private resolveRecordingObjectKey(roomName: string, cameraId: string | null, sessionId: string): string {
     const template = this.config
       .get<string>('LIVEKIT_RECORDING_OBJECT_KEY_TEMPLATE')
-      ?.trim() || '{room_name}-{time}.mp4';
-    const resolved = this.resolveRecordingTemplate(template, roomName, cameraId);
-    return resolved.split(/[\\/]+/).filter(Boolean).at(-1) ?? resolved;
+      ?.trim() || 'sessions/{session_id}/{camera_id}-{time}.mp4';
+    return this.resolveRecordingTemplate(template, roomName, cameraId)
+      .replaceAll('{session_id}', this.sanitizePathSegment(sessionId))
+      .split(/[\\/]+/)
+      .filter(Boolean)
+      .join('/');
   }
 
   private resolveRecordingTemplate(template: string, roomName: string, cameraId: string | null): string {

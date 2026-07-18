@@ -1,0 +1,13 @@
+{
+  "profile": "mobile",
+  "policy": "Each route is capped by the lower of its absolute budget and 110% of the checked-in baseline.",
+  "routes": [
+    { "route": "/", "manifestKey": "/page", "baselineBytes": 359071, "maxBytes": 552000 },
+    { "route": "/explore", "manifestKey": "/explore/page", "baselineBytes": 372645, "maxBytes": 612000 },
+    { "route": "/robot/[...parts]", "manifestKey": "/robot/[...parts]/page", "baselineBytes": 397789, "maxBytes": 650000 },
+    { "route": "/login", "manifestKey": "/login/page", "baselineBytes": 500788, "maxBytes": 551000 },
+    { "route": "/pricing", "manifestKey": "/pricing/page", "baselineBytes": 466299, "maxBytes": 513000 },
+    { "route": "/dashboard", "manifestKey": "/dashboard/page", "baselineBytes": 589887, "maxBytes": 750000 },
+    { "route": "/mod", "manifestKey": "/mod/page", "baselineBytes": 568796, "maxBytes": 800000 }
+  ]
+}

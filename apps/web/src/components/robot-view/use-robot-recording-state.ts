@@ -3,6 +3,7 @@ import type { RobotPublic } from '@botparty/shared';
 import { api, type AdminRobotRecordingStatus } from '@/lib/api';
 import { pushToast } from '@/lib/toast';
 import { getErrorMessage, isRobotOnline } from './robot-view-state.helpers';
+import { useVisibilityPolling } from '@/lib/use-visibility-polling';
 
 function hasSameRecordingState(
   current: AdminRobotRecordingStatus | null,
@@ -86,14 +87,14 @@ export function useRobotRecordingState({
       setRecordingLoading(false);
     });
 
-    const intervalId = window.setInterval(() => {
-      void refreshRecordingStatus();
-    }, 7000);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
   }, [accessToken, isAdmin, refreshRecordingStatus]);
+
+  useVisibilityPolling(refreshRecordingStatus, {
+    enabled: Boolean(isAdmin && accessToken),
+    intervalMs: 15_000,
+    hiddenIntervalMs: null,
+    runImmediately: false,
+  });
 
   const toggleRecording = useCallback(async () => {
     if (!isAdmin || !accessToken || recordingAction) {

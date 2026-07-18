@@ -14,6 +14,7 @@ import {
 } from '@/components/dashboard/types';
 import type { ControlButtonAccess } from '@botparty/shared';
 import { Plus } from 'lucide-react';
+import { releaseFeatures } from '@/lib/release-features';
 
 type Props = {
   controlButtons: ControlButtonRecord[];
@@ -261,17 +262,19 @@ export function ControlButtonEditor({
         setControlDraft((prev) => ({ ...prev, cooldownMs: event.target.value }))
       }
     />
-    <input
-      type="number"
-      min={0}
-      className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
-      placeholder="Cost (cr)"
-      title="Cost per press in credits (0 = free)"
-      value={controlDraft.costCredits}
-      onChange={(event) =>
-        setControlDraft((prev) => ({ ...prev, costCredits: event.target.value }))
-      }
-    />
+    {releaseFeatures.paidControls ? (
+      <input
+        type="number"
+        min={0}
+        className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
+        placeholder="Cost (cr)"
+        title="Cost per press in credits (0 = free)"
+        value={controlDraft.costCredits}
+        onChange={(event) =>
+          setControlDraft((prev) => ({ ...prev, costCredits: event.target.value }))
+        }
+      />
+    ) : null}
     <Select
       className="bg-[var(--card)]"
       value={controlDraft.access}
@@ -541,15 +544,17 @@ export function ControlButtonEditor({
           value={controlEditDraft.cooldownMs}
           onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, cooldownMs: event.target.value } : prev))}
         />
-        <input
-          type="number"
-          min={0}
-          className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
-          placeholder="Cost (cr)"
-          title="Cost per press in credits (0 = free)"
-          value={controlEditDraft.costCredits}
-          onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, costCredits: event.target.value } : prev))}
-        />
+        {releaseFeatures.paidControls ? (
+          <input
+            type="number"
+            min={0}
+            className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
+            placeholder="Cost (cr)"
+            title="Cost per press in credits (0 = free)"
+            value={controlEditDraft.costCredits}
+            onChange={(event) => setControlEditDraft((prev) => (prev ? { ...prev, costCredits: event.target.value } : prev))}
+          />
+        ) : null}
         <Select
           className="bg-[var(--background)]"
           value={controlEditDraft.access}
@@ -646,7 +651,7 @@ export function ControlButtonEditor({
               </div>
               <p className="mt-1 text-xs text-[var(--muted-foreground)]">
                 Access: {button.access} · Cooldown: {button.cooldownMs}ms
-                {button.costCredits > 0 ? ` · Cost: ${button.costCredits} cr` : ''}
+                {releaseFeatures.paidControls && button.costCredits > 0 ? ` · Cost: ${button.costCredits} cr` : ''}
                 {button.hotKey ? ` · Hotkey: ${button.hotKey}` : ''}
                 {button.icon?.startsWith('widget:') ? ` · Widget: ${button.icon}` : ''}
                 {button.color ? ` · Color: ${button.color}` : ''}

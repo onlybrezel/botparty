@@ -1,9 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import {
-  WS_EVENTS,
-  WS_PROTOCOL_VERSION,
-} from '@botparty/shared';
+import { WS_EVENTS, WS_PROTOCOL_VERSION } from '@botparty/shared';
 
 function parsePythonWsEvents(source: string): Record<string, string> {
   const dictMatch = source.match(/WS_EVENTS(?:\s*:[^=]+)?\s*=\s*\{([\s\S]*?)^\}/m);
@@ -21,12 +18,29 @@ function parsePythonWsEvents(source: string): Record<string, string> {
   );
 }
 
-function parsePythonProtocolVersion(source: string): number {
+function parsePythonProtocolVersion(source: string, sourcePath: string): number {
   const versionMatch = source.match(/WS_PROTOCOL_VERSION\s*=\s*(\d+)/);
-  if (!versionMatch) {
-    throw new Error('Unable to locate WS_PROTOCOL_VERSION in Python protocol file');
+  if (versionMatch) {
+    return Number(versionMatch[1]);
   }
-  return Number(versionMatch[1]);
+
+  const importedAlias = source.match(
+    /from\s+\.([a-zA-Z0-9_]+)\s+import\s+([A-Z0-9_]+)[\s\S]*?WS_PROTOCOL_VERSION\s*=\s*\2/,
+  );
+  if (importedAlias) {
+    const importedModule = importedAlias[1];
+    const importedName = importedAlias[2];
+    const importedPath = path.resolve(path.dirname(sourcePath), `${importedModule}.py`);
+    if (importedName && existsSync(importedPath)) {
+      const importedSource = readFileSync(importedPath, 'utf-8');
+      const importedVersion = importedSource.match(
+        new RegExp(`^${importedName}\\s*=\\s*(\\d+)`, 'm'),
+      );
+      if (importedVersion) return Number(importedVersion[1]);
+    }
+  }
+
+  throw new Error('Unable to locate WS_PROTOCOL_VERSION in Python protocol file');
 }
 
 const pythonProtocolPath = process.env.BOTPARTY_CLIENT_PROTOCOL_FILE
@@ -50,6 +64,6 @@ const pythonProtocolPath = process.env.BOTPARTY_CLIENT_PROTOCOL_FILE
   });
 
   it('shares the websocket protocol version', () => {
-    expect(parsePythonProtocolVersion(source)).toBe(WS_PROTOCOL_VERSION);
+    expect(parsePythonProtocolVersion(source, pythonProtocolPath)).toBe(WS_PROTOCOL_VERSION);
   });
 });

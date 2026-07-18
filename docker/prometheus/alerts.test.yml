@@ -1,0 +1,178 @@
+rule_files:
+  - alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: availability and dependency game day
+    interval: 1m
+    input_series:
+      - series: 'up{job="botparty-api"}'
+        values: '0x6'
+      - series: 'botparty_dependency_database_up'
+        values: '0x6'
+      - series: 'botparty_dependency_redis_up'
+        values: '1x6'
+      - series: 'botparty_dependency_livekit_up'
+        values: '1x6'
+      - series: 'botparty_dependency_object_storage_up'
+        values: '0x6'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: BotPartyApiUnavailable
+        exp_alerts:
+          - exp_labels: { job: botparty-api, severity: critical, owner: platform }
+            exp_annotations:
+              summary: BotParty API metrics target is unavailable
+              runbook_url: docs/runbook.md#api-container-crash-loop
+      - eval_time: 3m
+        alertname: BotPartyCoreDependencyDown
+        exp_alerts:
+          - exp_labels: { severity: critical, owner: platform }
+            exp_annotations:
+              summary: A required BotParty dependency is unavailable
+              runbook_url: docs/runbook.md#incident-response-by-alert
+      - eval_time: 6m
+        alertname: BotPartyObjectStorageDown
+        exp_alerts:
+          - exp_labels: { severity: warning, owner: platform }
+            exp_annotations:
+              summary: Recording and image storage is unavailable
+              runbook_url: docs/runbook.md#incident-response-by-alert
+
+  - name: product flow game day
+    interval: 1m
+    input_series:
+      - series: 'botparty_queue_oldest_entry_age_seconds'
+        values: '1000x8'
+      - series: 'botparty_queue_depth'
+        values: '2x8'
+      - series: 'botparty_billing_needs_review'
+        values: '1x8'
+      - series: 'botparty_notification_email_failed'
+        values: '1x8'
+      - series: 'botparty_webhook_delivery_failed'
+        values: '1x13'
+      - series: 'botparty_ws_connected_robot_clients'
+        values: '0x8'
+      - series: 'botparty_retention_cleanup_runs_total{outcome="failure"}'
+        values: '0 0 1 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: BotPartyQueueStalled
+        exp_alerts:
+          - exp_labels: { severity: warning, owner: realtime }
+            exp_annotations:
+              summary: A queue entry has waited more than 15 minutes
+              runbook_url: docs/runbook.md#incident-response-by-alert
+      - eval_time: 6m
+        alertname: BotPartyBillingNeedsReview
+        exp_alerts:
+          - exp_labels: { severity: critical, owner: finance }
+            exp_annotations:
+              summary: A billing intent requires manual review
+              runbook_url: docs/runbook.md#incident-response-by-alert
+      - eval_time: 6m
+        alertname: BotPartyNotificationEmailFailed
+        exp_alerts:
+          - exp_labels: { severity: warning, owner: application }
+            exp_annotations:
+              summary: Notification emails exhausted all retries
+              runbook_url: docs/runbook.md#incident-response-by-alert
+      - eval_time: 3m
+        alertname: BotPartyRetentionCleanupFailed
+        exp_alerts:
+          - exp_labels: { outcome: failure, severity: warning, owner: compliance }
+            exp_annotations:
+              summary: A retention cleanup job failed
+              runbook_url: docs/runbook.md#incident-response-by-alert
+      - eval_time: 11m
+        alertname: BotPartyWebhookDeliveryFailed
+        exp_alerts:
+          - exp_labels: { severity: warning, owner: application }
+            exp_annotations:
+              summary: One or more active robot webhooks keep failing
+              runbook_url: docs/runbook.md#incident-response-by-alert
+      - eval_time: 6m
+        alertname: BotPartyQueueWithoutRobot
+        exp_alerts:
+          - exp_labels: { severity: critical, owner: realtime }
+            exp_annotations:
+              summary: Users are queued while no robot control connection is available
+              runbook_url: docs/runbook.md#incident-response-by-alert
+
+  - name: api error budget and latency game day
+    interval: 1m
+    input_series:
+      - series: 'botparty_http_requests_total{status="500",method="GET",route="/audit"}'
+        values: '0+10x24'
+      - series: 'botparty_http_requests_total{status="200",method="GET",route="/audit"}'
+        values: '0+90x24'
+      - series: 'botparty_http_request_duration_seconds_bucket{le="0.1",method="GET",route="/audit"}'
+        values: '0+0x24'
+      - series: 'botparty_http_request_duration_seconds_bucket{le="0.5",method="GET",route="/audit"}'
+        values: '0+0x24'
+      - series: 'botparty_http_request_duration_seconds_bucket{le="1",method="GET",route="/audit"}'
+        values: '0+100x24'
+      - series: 'botparty_http_request_duration_seconds_bucket{le="+Inf",method="GET",route="/audit"}'
+        values: '0+100x24'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: BotPartyApiErrorBudgetBurn
+        exp_alerts:
+          - exp_labels: { severity: critical, owner: application }
+            exp_annotations:
+              summary: API 5xx rate exceeds the 99.5% availability SLO burn threshold
+              runbook_url: docs/runbook.md#incident-response-by-alert
+      - eval_time: 21m
+        alertname: BotPartyApiLatencyHigh
+        exp_alerts:
+          - exp_labels: { severity: warning, owner: application }
+            exp_annotations:
+              summary: API p95 latency exceeds 500 ms
+              runbook_url: docs/runbook.md#incident-response-by-alert
+
+  - name: capacity game day
+    interval: 1m
+    input_series:
+      - series: 'botparty_redis_memory_used_bytes'
+        values: '250000000x13'
+      - series: 'botparty_database_connections'
+        values: '81x13'
+      - series: 'container_memory_working_set_bytes{name="botparty-api"}'
+        values: '950x13'
+      - series: 'container_spec_memory_limit_bytes{name="botparty-api"}'
+        values: '1000x13'
+      - series: 'container_fs_usage_bytes{name="botparty-api"}'
+        values: '950x13'
+      - series: 'container_fs_limit_bytes{name="botparty-api"}'
+        values: '1000x13'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: BotPartyRedisMemoryHigh
+        exp_alerts:
+          - exp_labels: { severity: warning, owner: platform }
+            exp_annotations:
+              summary: Redis uses more than 90% of its 256 MiB data limit
+              runbook_url: docs/runbook.md#redis-oom--redis-down
+      - eval_time: 11m
+        alertname: BotPartyDatabaseConnectionsHigh
+        exp_alerts:
+          - exp_labels: { severity: warning, owner: platform }
+            exp_annotations:
+              summary: PostgreSQL connection use is near the default limit
+              runbook_url: docs/runbook.md#prisma-pool-tuning
+      - eval_time: 11m
+        alertname: BotPartyContainerMemoryHigh
+        exp_alerts:
+          - exp_labels: { name: botparty-api, severity: warning, owner: platform }
+            exp_annotations:
+              summary: A BotParty container uses more than 90% of its memory limit
+              runbook_url: docs/runbook.md#incident-response-by-alert
+      - eval_time: 11m
+        alertname: BotPartyContainerDiskHigh
+        exp_alerts:
+          - exp_labels: { name: botparty-api, severity: critical, owner: platform }
+            exp_annotations:
+              summary: A BotParty container filesystem uses more than 90% of its limit
+              runbook_url: docs/runbook.md#disk-full

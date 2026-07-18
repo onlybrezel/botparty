@@ -5,11 +5,9 @@ import {
   Headers,
   Post,
   Query,
-  Req,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import type { FastifyRequest } from 'fastify';
 import { TransactionType } from '@botparty/prisma';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -18,6 +16,7 @@ import { WalletService } from './wallet.service';
 import { DonationService } from './donation.service';
 import { ListTransactionsQueryDto } from './wallet.dto';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
+import { Throttle } from '@nestjs/throttler';
 
 @ApiTags('wallet')
 @Controller('wallet')
@@ -57,7 +56,33 @@ export class WalletController {
       limit: query.limit,
       cursor: query.cursor,
       type,
+      from: query.from ? new Date(query.from) : undefined,
+      to: query.to ? new Date(query.to) : undefined,
+      robotId: query.robotId,
     });
+  }
+
+  @Get('transactions/export')
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 2, ttl: 60_000 } })
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Export the complete filtered wallet ledger' })
+  async exportTransactions(
+    @CurrentUser() user: JwtPayload,
+    @Query() query: ListTransactionsQueryDto,
+  ) {
+    const type = query.type && Object.values(TransactionType).includes(query.type as TransactionType)
+      ? (query.type as TransactionType)
+      : undefined;
+    return {
+      exportedAt: new Date().toISOString(),
+      items: await this.wallet.exportTransactions(user.sub, {
+        type,
+        from: query.from ? new Date(query.from) : undefined,
+        to: query.to ? new Date(query.to) : undefined,
+        robotId: query.robotId,
+      }),
+    };
   }
 
   @Post('donations')
@@ -68,7 +93,6 @@ export class WalletController {
     @CurrentUser() user: JwtPayload,
     @Body(new ZodValidationPipe(donationRequestSchema)) dto: DonationRequest,
     @Headers('idempotency-key') idempotencyKey: string | undefined,
-    @Req() req: FastifyRequest,
   ) {
     return this.donations.donate({
       donorId: user.sub,
@@ -76,10 +100,6 @@ export class WalletController {
       amount: dto.amount,
       message: dto.message,
       idempotencyKey: idempotencyKey?.slice(0, 128),
-      requestMeta: {
-        ip: req.ip,
-        userAgent: req.headers['user-agent']?.toString().slice(0, 255),
-      },
     });
   }
 }

@@ -16,7 +16,7 @@ type Props = {
 
 export function CreateRobotPanel({ createForm, setCreateForm, onSubmit, creating, loading, slugOwner }: Props) {
   return (
-    <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+    <section id="new-robot" className="scroll-mt-24 grid grid-cols-1 gap-6 lg:grid-cols-2">
       <form onSubmit={onSubmit} autoComplete="off" className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 sm:p-5">
         <h2 className="mb-4 text-lg font-bold">Create Robot</h2>
 
@@ -142,7 +142,7 @@ export function CreateRobotPanel({ createForm, setCreateForm, onSubmit, creating
         <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--background)] p-3">
           <div className="flex items-center gap-2 text-sm font-semibold">
             <Cable className="h-4 w-4 text-violet-300" />
-            Controller schema
+            Connection path
           </div>
           <p className="mt-2 text-sm text-[var(--muted-foreground)]">
             Browser UI → BotParty API + LiveKit → Python robot client → hardware adapter

@@ -28,13 +28,13 @@ const dataFlowRows = [
     data: 'Account profile (username, email, password hash, display name)',
     purpose: 'Sign-in, account recovery, operator identity, abuse handling',
     storage: 'PostgreSQL users table, password reset + verification mail queue',
-    retention: 'Until account deletion, except legal or fraud-related retention duties',
+    retention: 'Until account deletion; the login profile is then anonymized',
   },
   {
     data: 'Refresh/session state, CSRF token, guest session id',
     purpose: 'Session continuity, fraud prevention, queue continuity for guests',
-    storage: 'HTTP-only cookies, browser storage, Redis ephemeral session data',
-    retention: 'Short-lived; usually minutes to days depending on token/session TTL',
+    storage: 'HTTP-only cookies, browser storage, Redis session state',
+    retention: 'Access cookie: 15 minutes; refresh cookie: 7 days; room grants: browser session',
   },
   {
     data: 'Robot metadata, access settings, schedule, webhooks, thumbnails',
@@ -45,26 +45,38 @@ const dataFlowRows = [
   {
     data: 'Queue events, chat messages, moderation actions, room presence',
     purpose: 'Realtime coordination, moderation, abuse review, safety enforcement',
-    storage: 'Redis ephemeral state plus PostgreSQL audit/moderation tables',
-    retention: 'Queue/presence data is short-lived; moderation and chat records follow product and abuse-retention policy',
+    storage: 'Redis realtime state plus PostgreSQL queue, chat, session, audit and moderation tables',
+    retention: 'Presence expires with the room; queue entries expire by session policy; chat: 30 days; inactive moderation records: 180 days',
   },
   {
     data: 'Session telemetry, runtime diagnostics, rate-limit signals',
     purpose: 'Reliability, debugging, incident response, anti-abuse controls',
     storage: 'PostgreSQL, Redis, application logs, optional observability stack',
-    retention: 'Operational retention policy; analytics defaults to 90 days unless operator config changes it',
+    retention: 'Runtime telemetry: 90 days; application logs: 30 days',
   },
   {
     data: 'Billing intents, webhook events, wallet ledger, payouts',
     purpose: 'Credit purchases, refunds, disputes, manual payout review, accounting',
     storage: 'PostgreSQL billing and wallet tables',
-    retention: 'As long as needed for accounting, fraud review, and statutory finance retention obligations',
+    retention: '10 years after the financial event',
   },
   {
     data: 'Room recordings and recording metadata',
     purpose: 'Moderation evidence, incident review, operator safety audits',
     storage: 'LiveKit egress object storage and session metadata',
-    retention: 'Operator-defined object-storage retention; delete-on-account-removal cleanup removes owned recordings when storage is configured',
+    retention: '30 days by default; incident evidence may be held for 180 days',
+  },
+  {
+    data: 'Product analytics events',
+    purpose: 'Measure discovery, queue, control and host-onboarding funnels',
+    storage: 'First-party PostgreSQL analytics table; no advertising profile',
+    retention: 'Only after opt-in; 90 days, or deleted immediately when consent is withdrawn',
+  },
+  {
+    data: 'In-app and email notifications',
+    purpose: 'Queue-turn, robot-state and financial updates requested in account settings',
+    storage: 'PostgreSQL notification feed and email outbox',
+    retention: 'Up to 180 days; delivery preferences remain until changed or the account is deleted',
   },
 ];
 
@@ -81,12 +93,6 @@ export default function PrivacyPage() {
         </p>
       </div>
 
-      {!legal.isConfigured ? (
-        <div className="mb-5 rounded-2xl border border-amber-500/40 bg-amber-100 text-amber-950 p-4 text-sm dark:bg-amber-500/10 dark:text-amber-100">
-          Final operator details are still missing for this deployment. Configure the `NEXT_PUBLIC_LEGAL_*` variables before public launch.
-        </div>
-      ) : null}
-
       <div className="space-y-5">
         <Section title="What we collect">
           <p>We collect account data such as username, email address, password hash, and optional profile fields.</p>
@@ -99,7 +105,7 @@ export default function PrivacyPage() {
           <p>Operational logs and diagnostics may be processed to investigate outages, rate limits, queue issues, or security events.</p>
         </Section>
 
-        <Section title="Data flow overview (GDPR-ready operator template)">
+        <Section title="Data flow overview">
           <div className="overflow-x-auto">
             <table className="min-w-full border-collapse text-left text-sm">
               <thead>
@@ -122,9 +128,6 @@ export default function PrivacyPage() {
               </tbody>
             </table>
           </div>
-          <p>
-            Operators should adapt the retention column to match their hosting setup, backup policy, and statutory obligations before public launch.
-          </p>
         </Section>
 
         <Section title="Realtime and safety data">
@@ -134,7 +137,8 @@ export default function PrivacyPage() {
 
         <Section title="Cookies and browser storage">
           <p>BotParty uses essential browser storage for sign-in state, guest session identifiers, room access grants, UI settings, and temporary chat/session convenience features.</p>
-          <p>See the Cookie Notice for details on storage categories and purpose.</p>
+          <p>Product analytics does not set an analytics cookie. Signed-in users can opt in from Settings and withdraw consent at any time.</p>
+          <p>See the Cookie Notice for the exact names, purposes, and lifetimes.</p>
         </Section>
 
         <Section title="Sharing and retention">
@@ -154,7 +158,7 @@ export default function PrivacyPage() {
             <strong className="text-[var(--foreground)]">Privacy contact:</strong>{' '}
             <a className="underline" href={`mailto:${legal.operatorEmail}`}>{legal.operatorEmail}</a>
           </p>
-          <p>When data practices change materially, this page should be updated together with the related product behavior.</p>
+          <p>Policy version: 2026-07-17</p>
         </Section>
       </div>
     </div>

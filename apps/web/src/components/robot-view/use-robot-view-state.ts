@@ -31,13 +31,15 @@ import {
   type QueueEntryWire,
   type ReconnectNotice,
   type Viewer,
-  WASD,
   buildGuestMessageId,
   getOrCreateGuestSessionId,
   normalizeQueueEntries,
   resolveWsUrl,
 } from './types';
 import { useRobotRecordingState } from './use-robot-recording-state';
+import { useVisibilityPolling } from '@/lib/use-visibility-polling';
+import { releaseFeatures } from '@/lib/release-features';
+import { useControlKeyboard, useGamepadControl, useHeldControlRepeater } from './use-control-inputs';
 
 function createInitialMessages(robotName: string): ChatMsg[] {
   return [
@@ -56,11 +58,16 @@ export function useRobotViewState(robot: RobotPublic) {
   const searchParams = useSearchParams();
   const { accessToken, userId, username, role, hasHydrated } = useAuth();
   const preferencesHydrated = usePreferences((state) => state.hydrated);
-  const tabSwitchOnlyWhenEmpty = usePreferences((state) => state.keyboardTabSwitchOnlyWhenEmpty);
   const queuePositionNotifications = usePreferences((state) => state.queuePositionNotifications);
   const queueTurnNotifications = usePreferences((state) => state.queueTurnNotifications);
   const robotRoomOnboardingSeen = usePreferences((state) => state.robotRoomOnboardingSeen);
   const updatePreference = usePreferences((state) => state.updatePreference);
+
+  useEffect(() => {
+    if (!hasHydrated || !accessToken) return;
+    api.setToken(accessToken);
+    void api.analytics.event('DISCOVERY_ROBOT_VIEW', robot.id).catch(() => undefined);
+  }, [accessToken, hasHydrated, robot.id]);
 
   const [focusMode, setFocusMode] = useState<FocusMode>('controls');
   const [controlButtons, setControlButtons] = useState<ControlButton[]>([]);
@@ -101,6 +108,7 @@ export function useRobotViewState(robot: RobotPublic) {
   const [queueAction, setQueueAction] = useState<'join' | 'leave' | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
+  const wsEventHandlerRef = useRef<(event: string, data: Record<string, unknown>) => void>(() => undefined);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<HTMLInputElement>(null);
   const controlsPanelRef = useRef<HTMLDivElement>(null);
@@ -120,7 +128,6 @@ export function useRobotViewState(robot: RobotPublic) {
   const wasMyTurnRef = useRef(false);
   const wasOnlineRef = useRef(robot.status === 'ONLINE' || robot.status === 'BUSY');
   const previousQueuePositionRef = useRef<number | null>(null);
-  const activeGamepadCommandsRef = useRef<Set<string>>(new Set());
 
   // ─── Fetch controls ────────────────────────────────────────────────────────
 
@@ -161,9 +168,7 @@ export function useRobotViewState(robot: RobotPublic) {
     accessToken,
   });
 
-  useEffect(() => {
-    let active = true;
-
+  useVisibilityPolling(async () => {
     const sameButton = (a: ControlButton, b: ControlButton) =>
       a.id === b.id &&
       a.label === b.label &&
@@ -176,34 +181,21 @@ export function useRobotViewState(robot: RobotPublic) {
       a.position === b.position &&
       a.color === b.color;
 
-    const syncControls = () => {
-      api.controls
-        .getControls(robot.id)
-        .then((next) => {
-          if (!active) return;
-          setControlButtons((prev) => {
-            if (
-              prev.length === next.length &&
-              prev.every((entry, index) => sameButton(entry, next[index]!))
-            ) {
-              return prev;
-            }
-            return next;
-          });
-        })
-        .catch(() => {
-          // Keep last known buttons when refresh fails.
-        });
-    };
-
-    syncControls();
-    const timer = setInterval(syncControls, 3000);
-
-    return () => {
-      active = false;
-      clearInterval(timer);
-    };
-  }, [accessToken, robot.id, roomAccessToken]);
+    try {
+      const next = await api.controls.getControls(robot.id);
+      setControlButtons((prev) => {
+        if (
+          prev.length === next.length &&
+          prev.every((entry, index) => sameButton(entry, next[index]!))
+        ) {
+          return prev;
+        }
+        return next;
+      });
+    } catch {
+      // Keep last known buttons when the low-frequency fallback refresh fails.
+    }
+  }, { intervalMs: 30_000, hiddenIntervalMs: null });
 
   useEffect(() => {
     initialChatScrollDoneRef.current = false;
@@ -551,7 +543,7 @@ export function useRobotViewState(robot: RobotPublic) {
             event: string;
             data: Record<string, unknown>;
           };
-          handleWsEvent(event, data);
+          wsEventHandlerRef.current(event, data);
         } catch {
           //
         }
@@ -620,20 +612,21 @@ export function useRobotViewState(robot: RobotPublic) {
       }),
     [currentViewerId, livekitCreds, refreshViewerToken, robot.status],
   );
+  wsEventHandlerRef.current = handleWsEvent;
 
   // ─── Controls ─────────────────────────────────────────────────────────────
 
   const sendCommand = useCallback(
     (
       command: string,
-      options?: { cooldownMs?: number; access?: ControlButton['access']; value?: unknown },
+      options?: { cooldownMs?: number; access?: ControlButton['access']; value?: unknown; buttonId?: string },
     ) => {
       const cooldownMs = options?.cooldownMs ?? 150;
       const buttonAccess = options?.access ?? 'QUEUE_TURN';
 
       if (robot.queueMode !== 'DISABLED' && buttonAccess === 'QUEUE_TURN') {
         const myPos = getQueuePosition(queue, currentViewerId);
-        const myTurn = myPos > 0 && myPos === 1;
+        const myTurn = activeSession?.userId === currentViewerId;
         if (!myTurn) {
           pushThrottledToast(
             lastErrorToastRef,
@@ -662,6 +655,8 @@ export function useRobotViewState(robot: RobotPublic) {
         JSON.stringify({
           event: 'control:command',
           data: {
+            commandId: crypto.randomUUID(),
+            buttonId: options?.buttonId,
             robotId: robot.id,
             command,
             value: options?.value,
@@ -670,7 +665,7 @@ export function useRobotViewState(robot: RobotPublic) {
         }),
       );
     },
-    [currentViewerId, queue, robot.id, robot.queueMode],
+    [activeSession?.userId, currentViewerId, queue, robot.id, robot.queueMode],
   );
 
   const sendImmediateStop = useCallback(() => {
@@ -681,28 +676,12 @@ export function useRobotViewState(robot: RobotPublic) {
     wsRef.current.send(
       JSON.stringify({
         event: 'control:command',
-        data: { robotId: robot.id, command: 'stop', timestamp: Date.now() },
+        data: { commandId: crypto.randomUUID(), robotId: robot.id, command: 'stop', timestamp: Date.now() },
       }),
     );
   }, [robot.id]);
 
-  useEffect(() => {
-    const heldMotionCommands = [...activeCommands].filter((command) =>
-      ['forward', 'backward', 'left', 'right'].includes(command),
-    );
-
-    if (heldMotionCommands.length === 0) {
-      return;
-    }
-
-    const interval = window.setInterval(() => {
-      for (const command of heldMotionCommands) {
-        sendCommand(command, { cooldownMs: 0, access: 'QUEUE_TURN' });
-      }
-    }, 400);
-
-    return () => window.clearInterval(interval);
-  }, [activeCommands, sendCommand]);
+  useHeldControlRepeater({ activeCommands, controlButtons, sendCommand });
 
   const releaseLocalControls = useCallback(
     (sendStop = false) => {
@@ -740,110 +719,18 @@ export function useRobotViewState(robot: RobotPublic) {
     setTimeout(() => chatInputRef.current?.focus(), 50);
   }, [scrollToPanel]);
 
-  // ─── Keyboard ─────────────────────────────────────────────────────────────
-
-  useEffect(() => {
-    const keyToBtn = new Map<string, ControlButton>(
-      controlButtons.filter((b) => b.hotKey).map((b) => [b.hotKey!.toLowerCase(), b]),
-    );
-
-    const onKeyDown = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-      const inInput = ['INPUT', 'TEXTAREA'].includes(target.tagName);
-      const inContentEditable = target.isContentEditable;
-      const inChatInput = target === chatInputRef.current;
-
-      if (e.ctrlKey || e.metaKey || e.altKey) {
-        return;
-      }
-
-      if (e.key === 'Tab') {
-        if (inInput) {
-          const value =
-            (e.target as HTMLInputElement | HTMLTextAreaElement | null)?.value?.trim() ?? '';
-          if (tabSwitchOnlyWhenEmpty && value.length > 0) {
-            return;
-          }
-        }
-        e.preventDefault();
-        setFocusMode((m) => {
-          const next = m === 'controls' ? 'chat' : 'controls';
-          if (next === 'chat') setTimeout(() => chatInputRef.current?.focus(), 50);
-          return next;
-        });
-        return;
-      }
-
-      if (e.key === 'Escape' && canUseEStop) {
-        triggerEStop();
-        return;
-      }
-      // Prevent controls if in ANY input field or in chat focus mode
-      if (inInput || inContentEditable || focusMode === 'chat' || inChatInput) return;
-
-      const key = e.key.toLowerCase();
-      if (WASD[key] && !e.repeat) {
-        e.preventDefault();
-        const btn = keyToBtn.get(key) ?? null;
-        const command = btn?.command ?? WASD[key];
-        setActiveKeys((s) => new Set(s).add(key));
-        setActiveCommands((s) => new Set(s).add(command));
-        activeMotionKeysRef.current.add(key);
-        sendCommand(command, {
-          cooldownMs: btn?.cooldownMs,
-          access: btn?.access ?? 'QUEUE_TURN',
-        });
-      } else if (keyToBtn.has(key) && !e.repeat) {
-        e.preventDefault();
-        const btn = keyToBtn.get(key)!;
-        setActiveKeys((s) => new Set(s).add(key));
-        sendCommand(btn.command, { cooldownMs: btn.cooldownMs, access: btn.access });
-      }
-    };
-
-    const onKeyUp = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-      const inInput = ['INPUT', 'TEXTAREA'].includes(target.tagName);
-      const inContentEditable = target.isContentEditable;
-      const inChatInput = target === chatInputRef.current;
-      if (inInput || inContentEditable || focusMode === 'chat' || inChatInput) return;
-
-      const key = e.key.toLowerCase();
-      setActiveKeys((s) => {
-        const n = new Set(s);
-        n.delete(key);
-        return n;
-      });
-      if (WASD[key]) {
-        const command = WASD[key];
-        setActiveCommands((s) => {
-          const n = new Set(s);
-          n.delete(command);
-          return n;
-        });
-        activeMotionKeysRef.current.delete(key);
-        if (activeMotionKeysRef.current.size === 0) {
-          sendCommand('stop', { cooldownMs: 0, access: 'QUEUE_TURN' });
-        }
-      }
-    };
-
-    window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('keyup', onKeyUp);
-    return () => {
-      window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('keyup', onKeyUp);
-      releaseLocalControls(false);
-    };
-  }, [
-    focusMode,
+  useControlKeyboard({
     controlButtons,
+    focusMode,
+    chatInputRef,
+    activeMotionKeysRef,
+    setActiveKeys,
+    setActiveCommands,
+    canUseEStop,
     sendCommand,
     triggerEStop,
-    canUseEStop,
     releaseLocalControls,
-    tabSwitchOnlyWhenEmpty,
-  ]);
+  });
 
   // ─── Chat ─────────────────────────────────────────────────────────────────
 
@@ -1100,7 +987,7 @@ export function useRobotViewState(robot: RobotPublic) {
   const isOnline = isRobotOnline(robotStatus);
   const queueEnabled = robot.queueMode !== 'DISABLED';
   const myQueuePosition = getQueuePosition(queue, currentViewerId);
-  const isMyTurn = !queueEnabled || (myQueuePosition > 0 && myQueuePosition === 1);
+  const isMyTurn = !queueEnabled || activeSession?.userId === currentViewerId;
   const reconnectSeconds =
     reconnectCountdownMs !== null ? Math.max(1, Math.ceil(reconnectCountdownMs / 1000)) : null;
   const viewerLabel = connected
@@ -1112,12 +999,15 @@ export function useRobotViewState(robot: RobotPublic) {
     ? inQueue
       ? isMyTurn
         ? 'Your turn is live'
+        : myQueuePosition === 1
+          ? 'Next up'
         : `Queue #${Math.max(myQueuePosition, 1)}`
       : 'Join queue'
     : 'Open controls';
   const showRoomOnboarding = preferencesHydrated && !robotRoomOnboardingSeen;
   const canUseButton = useCallback(
     (button: ControlButton) => {
+      if (button.costCredits > 0 && !releaseFeatures.paidControls) return false;
       if (button.access === 'EVERYONE') return true;
       if (button.access === 'QUEUE_TURN') return isMyTurn;
       if (button.access === 'MODERATOR') return canModerate;
@@ -1136,7 +1026,7 @@ export function useRobotViewState(robot: RobotPublic) {
       return;
     }
     setInQueue(queue.some((entry) => entry.userId === currentViewerId));
-  }, [currentViewerId, queue]);
+  }, [currentViewerId, queue, userId]);
 
   useEffect(() => {
     if (!isMyTurn && activeMotionKeysRef.current.size > 0) {
@@ -1144,57 +1034,12 @@ export function useRobotViewState(robot: RobotPublic) {
     }
   }, [isMyTurn, releaseLocalControls]);
 
-  useEffect(() => {
-    if (!isOnline || focusMode === 'chat') {
-      return;
-    }
-
-    let frame = 0;
-    const threshold = 0.45;
-
-    const syncGamepad = () => {
-      const pads = navigator.getGamepads?.() ?? [];
-      const pad = pads.find((entry) => entry?.connected);
-      const nextCommands = new Set<string>();
-
-      if (pad && isMyTurn) {
-        const x = pad.axes[0] ?? 0;
-        const y = pad.axes[1] ?? 0;
-
-        if (y <= -threshold || pad.buttons[12]?.pressed) nextCommands.add('forward');
-        if (y >= threshold || pad.buttons[13]?.pressed) nextCommands.add('backward');
-        if (x <= -threshold || pad.buttons[14]?.pressed) nextCommands.add('left');
-        if (x >= threshold || pad.buttons[15]?.pressed) nextCommands.add('right');
-      }
-
-      const previousCommands = activeGamepadCommandsRef.current;
-
-      for (const command of nextCommands) {
-        if (!previousCommands.has(command)) {
-          sendCommand(command, { cooldownMs: 0, access: 'QUEUE_TURN' });
-        }
-      }
-
-      const hadCommands = previousCommands.size > 0;
-      activeGamepadCommandsRef.current = nextCommands;
-
-      if (hadCommands && nextCommands.size === 0) {
-        sendCommand('stop', { cooldownMs: 0, access: 'QUEUE_TURN' });
-      }
-
-      frame = window.setTimeout(syncGamepad, 120);
-    };
-
-    frame = window.setTimeout(syncGamepad, 120);
-
-    return () => {
-      window.clearTimeout(frame);
-      if (activeGamepadCommandsRef.current.size > 0) {
-        activeGamepadCommandsRef.current.clear();
-        sendCommand('stop', { cooldownMs: 0, access: 'QUEUE_TURN' });
-      }
-    };
-  }, [focusMode, isMyTurn, isOnline, sendCommand]);
+  useGamepadControl({
+    enabled: isOnline && focusMode !== 'chat',
+    isMyTurn,
+    controlButtons,
+    sendCommand,
+  });
 
   useEffect(() => {
     const previousPosition = previousQueuePositionRef.current;
@@ -1268,7 +1113,6 @@ export function useRobotViewState(robot: RobotPublic) {
     role,
     hasHydrated,
     preferencesHydrated,
-    tabSwitchOnlyWhenEmpty,
     queuePositionNotifications,
     queueTurnNotifications,
     robotRoomOnboardingSeen,

@@ -10,9 +10,16 @@ function build() {
       aggregate: jest.fn(),
       findMany: jest.fn(),
     },
+    $queryRaw: jest.fn(),
   } as unknown as PrismaService;
   const svc = new EarningsService(prisma);
-  return { svc, prisma: prisma as unknown as { transaction: { aggregate: jest.Mock; findMany: jest.Mock } } };
+  return {
+    svc,
+    prisma: prisma as unknown as {
+      transaction: { aggregate: jest.Mock; findMany: jest.Mock };
+      $queryRaw: jest.Mock;
+    },
+  };
 }
 
 describe('EarningsService.getOwnerSummary', () => {
@@ -23,14 +30,34 @@ describe('EarningsService.getOwnerSummary', () => {
     prisma.transaction.aggregate.mockResolvedValue({ _sum: { amount: 270 }, _count: 4 });
 
     const recent = [
-      { id: 't1', type: TransactionType.BUTTON_PAYOUT, amount: 90, createdAt: now, metadata: { robotId: 'r1' } },
-      { id: 't2', type: TransactionType.DONATION_RECEIVED, amount: 90, createdAt: now, metadata: { robotId: 'r1' } },
-      { id: 't3', type: TransactionType.BUTTON_PAYOUT, amount: 45, createdAt: now, metadata: { robotId: 'r2' } },
+      {
+        id: 't1',
+        type: TransactionType.BUTTON_PAYOUT,
+        amount: 90,
+        createdAt: now,
+        metadata: { robotId: 'r1' },
+      },
+      {
+        id: 't2',
+        type: TransactionType.DONATION_RECEIVED,
+        amount: 90,
+        createdAt: now,
+        metadata: { robotId: 'r1' },
+      },
+      {
+        id: 't3',
+        type: TransactionType.BUTTON_PAYOUT,
+        amount: 45,
+        createdAt: now,
+        metadata: { robotId: 'r2' },
+      },
       { id: 't4', type: TransactionType.BUTTON_PAYOUT, amount: 45, createdAt: now, metadata: null },
     ];
-    prisma.transaction.findMany
-      .mockResolvedValueOnce(recent) // first call: recent
-      .mockResolvedValueOnce(recent); // second call: sample
+    prisma.transaction.findMany.mockResolvedValueOnce(recent);
+    prisma.$queryRaw.mockResolvedValue([
+      { robotId: 'r1', pressEarned: 90, donationEarned: 90 },
+      { robotId: 'r2', pressEarned: 45, donationEarned: 0 },
+    ]);
 
     const result = await svc.getOwnerSummary(userId);
 
@@ -52,6 +79,7 @@ describe('EarningsService.getOwnerSummary', () => {
     const { svc, prisma } = build();
     prisma.transaction.aggregate.mockResolvedValue({ _sum: { amount: null }, _count: 0 });
     prisma.transaction.findMany.mockResolvedValue([]);
+    prisma.$queryRaw.mockResolvedValue([]);
 
     const result = await svc.getOwnerSummary(userId);
     expect(result.lifetimeCredits).toBe(0);

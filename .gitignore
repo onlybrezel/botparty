@@ -23,7 +23,7 @@ out/
 *.swp
 *.swo
 *~
-.github/
+.github/prompts/
 design-system/
 
 # OS
@@ -41,6 +41,8 @@ venv/
 
 # Docker
 docker-compose.override.yml
+docker/secrets/*
+!docker/secrets/.gitkeep
 
 # nginx: generated SSL config (created by setup-env.sh, never committed)
 docker/nginx/nginx.ssl.conf
@@ -52,9 +54,13 @@ packages/prisma/generated/
 *.log
 logs/
 
+# Runtime backup and restore artifacts
+/data/
+
 # Coverage
 coverage/
 .nyc_output/
+.lighthouseci/
 
 # Misc
 *.pem

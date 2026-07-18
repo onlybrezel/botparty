@@ -20,7 +20,7 @@ export function LiveKitPlayer({ token, livekitUrl, onStreamStalled, streamConfig
     <LiveKitRoom
       token={token}
       serverUrl={livekitUrl}
-      options={{ adaptiveStream: false, dynacast: false }}
+      options={{ adaptiveStream: true, dynacast: true, disconnectOnPageLeave: true }}
       video={false}
       audio={false}
       className="relative h-full w-full"
@@ -39,4 +39,3 @@ export function LiveKitPlayer({ token, livekitUrl, onStreamStalled, streamConfig
     </LiveKitRoom>
   );
 }
-

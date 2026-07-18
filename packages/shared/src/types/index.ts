@@ -13,6 +13,8 @@ import type {
   checkoutRequestSchema,
   subscriptionCheckoutRequestSchema,
   payoutRequestSchema,
+  updateNotificationPreferencesSchema,
+  analyticsEventSchema,
 } from '../schemas/index.js';
 import type { Role, RobotVisibility, RobotAccessMode, QueueMode, RobotStatus, ControlButtonAccess, TransactionType } from '../constants/index.js';
 
@@ -36,6 +38,8 @@ export type DonationRequest = z.infer<typeof donationRequestSchema>;
 export type CheckoutRequest = z.infer<typeof checkoutRequestSchema>;
 export type SubscriptionCheckoutRequest = z.infer<typeof subscriptionCheckoutRequestSchema>;
 export type PayoutRequestInput = z.infer<typeof payoutRequestSchema>;
+export type UpdateNotificationPreferencesInput = z.infer<typeof updateNotificationPreferencesSchema>;
+export type AnalyticsEventInput = z.infer<typeof analyticsEventSchema>;
 
 export interface WalletTransactionRecord {
   id: string;
@@ -44,6 +48,10 @@ export interface WalletTransactionRecord {
   balanceAfter: number;
   description: string | null;
   ledgerGroupId: string | null;
+  billingIntentId?: string | null;
+  payoutRequestId?: string | null;
+  controlCommandId?: string | null;
+  reconciliationId?: string;
   metadata: Record<string, unknown> | null;
   createdAt: string;
 }
@@ -145,6 +153,17 @@ export interface RobotStreamCameraConfig {
   role?: 'primary' | 'secondary' | 'rear' | 'arm' | 'dock' | string;
   enabled?: boolean;
   publishMode?: 'always_on' | 'preview_only' | 'on_demand' | string;
+}
+
+export interface RobotOnboardingStatus {
+  canPublish: boolean;
+  generatedAt: string;
+  steps: Array<{
+    id: 'claim' | 'connectivity' | 'camera' | 'control' | 'emergency_stop' | 'access' | 'moderation' | 'preview';
+    label: string;
+    required: boolean;
+    complete: boolean;
+  }>;
 }
 
 // ─── Robot Public ────────────────────────────────────
@@ -341,6 +360,43 @@ export interface WsChatSystemPayload {
   level?: 'info' | 'warning' | 'error';
 }
 
+export type NotificationCategory = 'TURN' | 'ROBOT' | 'FINANCE';
+export type NotificationKind = 'TURN_SOON' | 'TURN_NOW' | 'ROBOT_OFFLINE' | 'PAYMENT_FINAL' | 'PAYOUT_STATUS';
+
+export interface NotificationPreferenceRecord {
+  inAppEnabled: boolean;
+  browserEnabled: boolean;
+  emailTurn: boolean;
+  emailRobot: boolean;
+  emailFinance: boolean;
+  quietStartMin: number | null;
+  quietEndMin: number | null;
+  timezone: string;
+}
+
+export interface NotificationRecord {
+  id: string;
+  kind: NotificationKind;
+  category: NotificationCategory;
+  title: string;
+  body: string;
+  actionUrl: string | null;
+  browserRequested: boolean;
+  readAt: string | null;
+  createdAt: string;
+}
+
+export interface AnalyticsDashboard {
+  window: { days: number; from: string; to: string };
+  definitions: Record<string, string>;
+  discovery: number;
+  hostActivation: { robotsCreated: number; robotsPublished: number; publishRate: number | null };
+  turns: { started: number; completed: number; successRate: number | null; averageDurationMs: number | null };
+  monetization: { checkoutIntents: number; paidIntents: number; grossAmountCents: number; conversionRate: number | null };
+  webVitals: { sampleCount: number; lcpP75Ms: number | null; inpP75Ms: number | null; clsP75: number | null };
+  eventQuality: { schemaVersion: number; retainedDays: number; counts: Array<{ event: string; schemaVersion: number; count: number }> };
+}
+
   // ─── API Response Types ──────────────────────────────
   // Canonical response shapes shared between API and web.
 
@@ -370,6 +426,7 @@ export interface WsChatSystemPayload {
     livekitConnected: boolean;
     commandsReceived: number;
     cameraFrames: number;
+    emergencyStopVerified: boolean;
   }
 
   export interface RobotCameraIngress {

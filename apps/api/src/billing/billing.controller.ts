@@ -59,36 +59,14 @@ export class BillingController {
       packageId: dto.packageId,
       successUrl: dto.successUrl,
       cancelUrl: dto.cancelUrl,
-    });
-  }
-
-  @Post('subscription-checkout')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Create a subscription checkout session' })
-  async subscriptionCheckout(@CurrentUser() user: JwtPayload, @Body() dto: any) {
-    // Validate input
-    if (!dto.provider || !['stripe'].includes(dto.provider)) {
-      throw new Error('Invalid or unsupported provider for subscriptions');
-    }
-    if (!dto.planId || typeof dto.planId !== 'string') {
-      throw new Error('Missing or invalid planId');
-    }
-    if (!dto.successUrl || !dto.cancelUrl) {
-      throw new Error('Missing successUrl or cancelUrl');
-    }
-    return this.billing.createSubscriptionCheckout({
-      userId: user.sub,
-      provider: dto.provider,
-      planId: dto.planId,
-      successUrl: dto.successUrl,
-      cancelUrl: dto.cancelUrl,
+      termsVersion: dto.termsVersion,
+      immediateDeliveryConsent: dto.immediateDeliveryConsent,
     });
   }
 
   @Get('admin/webhook-events')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN, Role.MOD)
+  @Roles(Role.ADMIN)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'List billing webhook events for staff review' })
   listWebhookEvents() {
@@ -97,7 +75,7 @@ export class BillingController {
 
   @Post('admin/webhook-events/:eventId/replay')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN, Role.MOD)
+  @Roles(Role.ADMIN)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Replay a stored billing webhook event' })
   replayWebhookEvent(@Param('eventId') eventId: string) {

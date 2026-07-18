@@ -111,7 +111,6 @@ export class RoomHandler {
 
     client.presenceJoinedAt = Date.now();
     const presenceSnapshot = await this.runtime.presence.refresh(client, parsed.robotId);
-    this.robotsService.setViewerCount(parsed.robotId, presenceSnapshot.viewerCount).catch(() => {});
 
     if (presenceSnapshot.focusUserConnections === 1) {
       this.runtime.broadcastToRoom(
@@ -190,7 +189,6 @@ export class RoomHandler {
         viewers: snapshot.presenceList,
       });
     }
-    this.robotsService.setViewerCount(robotId, snapshot.viewerCount).catch(() => {});
   }
 
   private resetViewerIdentity(client: WsClient) {

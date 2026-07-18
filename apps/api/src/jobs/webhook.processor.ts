@@ -5,12 +5,13 @@ import { Job } from 'bullmq';
 import { createHmac, randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { JOBS_QUEUE_WEBHOOK, type WebhookJobData } from './jobs.constants';
-import { assertSafeWebhookTarget } from '../common/webhook-target';
+import { postWebhookSafely } from '../common/webhook-target';
+import { AeadCipher } from '../common/aead-cipher';
 
 @Processor(JOBS_QUEUE_WEBHOOK, { concurrency: 4 })
 export class WebhookProcessor extends WorkerHost {
   private readonly logger = new Logger(WebhookProcessor.name);
-  private readonly secretKey: string;
+  private readonly secretCipher: AeadCipher;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -19,12 +20,19 @@ export class WebhookProcessor extends WorkerHost {
     super();
     const explicitKey = this.config.get<string>('WEBHOOK_SECRET_ENCRYPTION_KEY')?.trim();
     if (explicitKey) {
-      this.secretKey = explicitKey;
+      this.secretCipher = new AeadCipher(
+        explicitKey,
+        (this.config.get<string>('WEBHOOK_SECRET_ENCRYPTION_KEY_PREVIOUS') ?? '')
+          .split(',')
+          .map((key) => key.trim()),
+      );
     } else if (process.env.NODE_ENV === 'production') {
       throw new Error('WEBHOOK_SECRET_ENCRYPTION_KEY is required in production');
     } else {
-      this.secretKey =
-        this.config.get<string>('JWT_SECRET')?.trim() || 'botparty-webhook-secret-fallback';
+      this.secretCipher = new AeadCipher(
+        this.config.get<string>('JWT_SECRET')?.trim() ||
+          'botparty-webhook-secret-fallback-32-characters',
+      );
       this.logger.warn(
         'WEBHOOK_SECRET_ENCRYPTION_KEY not set — falling back to JWT_SECRET (dev only).',
       );
@@ -46,19 +54,18 @@ export class WebhookProcessor extends WorkerHost {
     const signature = createHmac('sha256', signingSecret).update(body).digest('hex');
 
     try {
-      const target = await assertSafeWebhookTarget(hook.url);
-      const response = await fetch(target, {
-        method: 'POST',
-        headers: {
+      const response = await postWebhookSafely(
+        hook.url,
+        body,
+        {
           'content-type': 'application/json',
           'user-agent': 'BotParty-Webhooks/1.0',
           'x-botparty-event': event,
           'x-botparty-delivery-id': deliveryId,
           'x-botparty-signature': `sha256=${signature}`,
         },
-        body,
-        signal: AbortSignal.timeout(8000),
-      });
+        { timeoutMs: 8_000, maxRedirects: 3 },
+      );
 
       await this.prisma.robotWebhook.update({
         where: { id: hook.id },
@@ -79,17 +86,6 @@ export class WebhookProcessor extends WorkerHost {
   }
 
   private _decryptSecret(webhookId: string, storedSecret: string): string {
-    // Backward compatibility: plaintext legacy secrets are stored as 64-char hex strings.
-    if (/^[a-f0-9]{64}$/i.test(storedSecret)) {
-      return storedSecret;
-    }
-
-    const encrypted = Buffer.from(storedSecret, 'base64url');
-    const keyStream = createHmac('sha256', this.secretKey).update(webhookId).digest();
-    const decrypted = Buffer.alloc(encrypted.length);
-    for (let i = 0; i < encrypted.length; i += 1) {
-      decrypted[i] = encrypted[i]! ^ keyStream[i % keyStream.length]!;
-    }
-    return decrypted.toString('hex');
+    return this.secretCipher.decrypt(storedSecret, `robot-webhook:${webhookId}`).plaintext;
   }
 }

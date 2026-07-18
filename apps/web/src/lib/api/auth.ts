@@ -3,7 +3,14 @@ import type { RequestFn, AuthSessionResponse } from './types';
 export class AuthApi {
   constructor(private readonly req: RequestFn) {}
 
-  async register(data: { username: string; email: string; password: string; displayName?: string }) {
+  async register(data: {
+    username: string;
+    email: string;
+    password: string;
+    displayName?: string;
+    acceptedTermsVersion: '2026-07-17';
+    acceptedPrivacyVersion: '2026-07-17';
+  }) {
     return this.req<AuthSessionResponse>('/auth/register', {
       method: 'POST',
       body: JSON.stringify(data),

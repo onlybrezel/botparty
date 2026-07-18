@@ -1,0 +1,113 @@
+groups:
+  - name: botparty-availability
+    rules:
+      - alert: BotPartyApiUnavailable
+        expr: up{job="botparty-api"} == 0
+        for: 2m
+        labels: { severity: critical, owner: platform }
+        annotations:
+          summary: BotParty API metrics target is unavailable
+          runbook_url: docs/runbook.md#api-container-crash-loop
+      - alert: BotPartyCoreDependencyDown
+        expr: min({__name__=~"botparty_dependency_(database|redis|livekit)_up"}) == 0
+        for: 2m
+        labels: { severity: critical, owner: platform }
+        annotations:
+          summary: A required BotParty dependency is unavailable
+          runbook_url: docs/runbook.md#incident-response-by-alert
+      - alert: BotPartyObjectStorageDown
+        expr: botparty_dependency_object_storage_up == 0
+        for: 5m
+        labels: { severity: warning, owner: platform }
+        annotations:
+          summary: Recording and image storage is unavailable
+          runbook_url: docs/runbook.md#incident-response-by-alert
+      - alert: BotPartyApiErrorBudgetBurn
+        expr: sum(rate(botparty_http_requests_total{status=~"5.."}[5m])) / clamp_min(sum(rate(botparty_http_requests_total[5m])), 0.001) > 0.02
+        for: 10m
+        labels: { severity: critical, owner: application }
+        annotations:
+          summary: API 5xx rate exceeds the 99.5% availability SLO burn threshold
+          runbook_url: docs/runbook.md#incident-response-by-alert
+      - alert: BotPartyApiLatencyHigh
+        expr: histogram_quantile(0.95, sum by (le) (rate(botparty_http_request_duration_seconds_bucket[10m]))) > 0.5
+        for: 15m
+        labels: { severity: warning, owner: application }
+        annotations:
+          summary: API p95 latency exceeds 500 ms
+          runbook_url: docs/runbook.md#incident-response-by-alert
+
+  - name: botparty-product-flows
+    rules:
+      - alert: BotPartyQueueStalled
+        expr: botparty_queue_oldest_entry_age_seconds > 900 and botparty_queue_depth > 0
+        for: 5m
+        labels: { severity: warning, owner: realtime }
+        annotations:
+          summary: A queue entry has waited more than 15 minutes
+          runbook_url: docs/runbook.md#incident-response-by-alert
+      - alert: BotPartyBillingNeedsReview
+        expr: botparty_billing_needs_review > 0
+        for: 5m
+        labels: { severity: critical, owner: finance }
+        annotations:
+          summary: A billing intent requires manual review
+          runbook_url: docs/runbook.md#incident-response-by-alert
+      - alert: BotPartyNotificationEmailFailed
+        expr: botparty_notification_email_failed > 0
+        for: 5m
+        labels: { severity: warning, owner: application }
+        annotations:
+          summary: Notification emails exhausted all retries
+          runbook_url: docs/runbook.md#incident-response-by-alert
+      - alert: BotPartyWebhookDeliveryFailed
+        expr: botparty_webhook_delivery_failed > 0
+        for: 10m
+        labels: { severity: warning, owner: application }
+        annotations:
+          summary: One or more active robot webhooks keep failing
+          runbook_url: docs/runbook.md#incident-response-by-alert
+      - alert: BotPartyQueueWithoutRobot
+        expr: botparty_queue_depth > 0 and botparty_ws_connected_robot_clients == 0
+        for: 5m
+        labels: { severity: critical, owner: realtime }
+        annotations:
+          summary: Users are queued while no robot control connection is available
+          runbook_url: docs/runbook.md#incident-response-by-alert
+      - alert: BotPartyRetentionCleanupFailed
+        expr: increase(botparty_retention_cleanup_runs_total{outcome="failure"}[30m]) > 0
+        labels: { severity: warning, owner: compliance }
+        annotations:
+          summary: A retention cleanup job failed
+          runbook_url: docs/runbook.md#incident-response-by-alert
+
+  - name: botparty-capacity
+    rules:
+      - alert: BotPartyRedisMemoryHigh
+        expr: botparty_redis_memory_used_bytes > 241591910
+        for: 10m
+        labels: { severity: warning, owner: platform }
+        annotations:
+          summary: Redis uses more than 90% of its 256 MiB data limit
+          runbook_url: docs/runbook.md#redis-oom--redis-down
+      - alert: BotPartyDatabaseConnectionsHigh
+        expr: botparty_database_connections > 80
+        for: 10m
+        labels: { severity: warning, owner: platform }
+        annotations:
+          summary: PostgreSQL connection use is near the default limit
+          runbook_url: docs/runbook.md#prisma-pool-tuning
+      - alert: BotPartyContainerMemoryHigh
+        expr: container_memory_working_set_bytes{name=~"botparty-.+"} / clamp_min(container_spec_memory_limit_bytes{name=~"botparty-.+"}, 1) > 0.9
+        for: 10m
+        labels: { severity: warning, owner: platform }
+        annotations:
+          summary: A BotParty container uses more than 90% of its memory limit
+          runbook_url: docs/runbook.md#incident-response-by-alert
+      - alert: BotPartyContainerDiskHigh
+        expr: container_fs_usage_bytes{name=~"botparty-.+"} / clamp_min(container_fs_limit_bytes{name=~"botparty-.+"}, 1) > 0.9
+        for: 10m
+        labels: { severity: critical, owner: platform }
+        annotations:
+          summary: A BotParty container filesystem uses more than 90% of its limit
+          runbook_url: docs/runbook.md#disk-full

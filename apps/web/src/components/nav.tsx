@@ -2,16 +2,25 @@
 
 import Link from 'next/link';
 import Image from 'next/image';
+import dynamic from 'next/dynamic';
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { Menu, X } from 'lucide-react';
 import { AUTH_SYNC_STORAGE_KEY, useAuth } from '@/lib/store';
 import { api } from '@/lib/api';
-import { LocaleSwitcher } from '@/components/locale-switcher';
 import { Badge } from '@/components/ui/badge';
 import { localizePath } from '@/lib/i18n';
 import { useLocale } from '@/lib/use-locale';
 import { usePreferences } from '@/lib/preferences';
+
+const NotificationCenter = dynamic(
+  () => import('./notification-center').then((module) => module.NotificationCenter),
+  { ssr: false },
+);
+const WebVitalsReporter = dynamic(
+  () => import('./web-vitals-reporter').then((module) => module.WebVitalsReporter),
+  { ssr: false },
+);
 
 export default function Nav() {
   const pathname = usePathname();
@@ -23,6 +32,7 @@ export default function Nav() {
   const [balance, setBalance] = useState<number | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const theme = usePreferences((state) => state.theme);
+  const productAnalyticsEnabled = usePreferences((state) => state.productAnalyticsEnabled);
   const updatePreference = usePreferences((state) => state.updatePreference);
 
   useEffect(() => {
@@ -41,7 +51,11 @@ export default function Nav() {
 
     const bootstrap = async () => {
       api.syncTokenFromStore();
-      await api.restoreSession().catch(() => undefined);
+      const restored = await api.restoreSession().catch(() => false);
+      if (restored) {
+        const consent = await api.analytics.consent().catch(() => null);
+        updatePreference('productAnalyticsEnabled', Boolean(consent?.productAnalyticsEnabled));
+      }
       if (!cancelled) {
         setMounted(true);
       }
@@ -52,7 +66,7 @@ export default function Nav() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [updatePreference]);
 
   useEffect(() => {
     if (!mounted || accessToken) return;
@@ -140,9 +154,10 @@ export default function Nav() {
 
   return (
     <header className="sticky top-0 z-50 border-b border-[var(--border)] bg-[var(--background)]/92 backdrop-blur-md">
+      {mounted && accessToken && productAnalyticsEnabled ? <WebVitalsReporter /> : null}
       <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         {/* Logo */}
-        <Link href={localized('/')} className="flex items-center gap-2 text-lg font-bold tracking-tight">
+        <Link href={localized('/')} prefetch={false} className="flex items-center gap-2 text-lg font-bold tracking-tight">
           <span className="flex h-7 w-7 items-center justify-center overflow-hidden rounded-lg shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
             <Image
               src="/brand/icon-64.png"
@@ -169,6 +184,7 @@ export default function Nav() {
             <Link
               key={item.href}
               href={localized(item.href)}
+              prefetch={false}
               className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
                 item.active
                   ? 'bg-[var(--muted)] text-[var(--foreground)]'
@@ -204,8 +220,10 @@ export default function Nav() {
             <div className="hidden h-8 w-20 rounded-lg bg-[var(--muted)] animate-pulse sm:block" />
           ) : accessToken && username ? (
             <div className="relative flex items-center gap-2" ref={dropdownRef}>
+              <NotificationCenter enabled={Boolean(accessToken)} />
               <Link
                 href={localized('/wallet')}
+                prefetch={false}
                 className="hidden items-center gap-1 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-300 transition hover:bg-amber-500/20 sm:inline-flex"
                 title="Wallet"
               >
@@ -234,6 +252,7 @@ export default function Nav() {
                 >
                   <Link
                     href={localized('/dashboard')}
+                    prefetch={false}
                     onClick={() => setDropdownOpen(false)}
                     className="block px-4 py-2 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition"
                   >
@@ -241,6 +260,7 @@ export default function Nav() {
                   </Link>
                   <Link
                     href={localized('/wallet')}
+                    prefetch={false}
                     onClick={() => setDropdownOpen(false)}
                     className="block px-4 py-2 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition"
                   >
@@ -249,14 +269,26 @@ export default function Nav() {
                   {(role === 'ADMIN' || role === 'MOD') && (
                     <Link
                       href={localized('/mod')}
+                      prefetch={false}
                       onClick={() => setDropdownOpen(false)}
                       className="block px-4 py-2 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition"
                     >
                       Mod Dashboard
                     </Link>
                   )}
+                  {role === 'ADMIN' && (
+                    <Link
+                      href={localized('/mod/analytics')}
+                      prefetch={false}
+                      onClick={() => setDropdownOpen(false)}
+                      className="block px-4 py-2 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition"
+                    >
+                      Product Analytics
+                    </Link>
+                  )}
                   <Link
                     href={localized('/settings')}
+                    prefetch={false}
                     onClick={() => setDropdownOpen(false)}
                     className="block px-4 py-2 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition"
                   >
@@ -264,6 +296,7 @@ export default function Nav() {
                   </Link>
                   <Link
                     href={localized('/sessions')}
+                    prefetch={false}
                     onClick={() => setDropdownOpen(false)}
                     className="block px-4 py-2 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition"
                   >
@@ -313,6 +346,7 @@ export default function Nav() {
               </span>
               <Link
                 href={localized('/login')}
+                prefetch={false}
                 className="rounded-lg bg-[var(--primary)] px-4 py-1.5 text-sm font-semibold text-white transition hover:bg-[var(--primary-hover)]"
               >
                 Sign in
@@ -329,6 +363,7 @@ export default function Nav() {
               <Link
                 key={item.href}
                 href={localized(item.href)}
+                prefetch={false}
                 className={`rounded-xl px-4 py-3 text-sm font-medium transition-colors ${
                   item.active
                     ? 'bg-[var(--muted)] text-[var(--foreground)]'
@@ -366,21 +401,21 @@ export default function Nav() {
                   </div>
                 </div>
                 <div className="flex flex-col gap-2">
-                  <Link href={localized('/dashboard')} className="rounded-xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--foreground)]">
+                  <Link href={localized('/dashboard')} prefetch={false} className="rounded-xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--foreground)]">
                     Robots Dashboard
                   </Link>
-                  <Link href={localized('/wallet')} className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm font-medium text-amber-200">
+                  <Link href={localized('/wallet')} prefetch={false} className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm font-medium text-amber-200">
                     Wallet{balance !== null ? ` · ${balance.toLocaleString()} cr` : ''}
                   </Link>
                   {(role === 'ADMIN' || role === 'MOD') && (
-                    <Link href={localized('/mod')} className="rounded-xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--foreground)]">
+                    <Link href={localized('/mod')} prefetch={false} className="rounded-xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--foreground)]">
                       Mod Dashboard
                     </Link>
                   )}
-                  <Link href={localized('/settings')} className="rounded-xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--foreground)]">
+                  <Link href={localized('/settings')} prefetch={false} className="rounded-xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--foreground)]">
                     Settings
                   </Link>
-                  <Link href={localized('/sessions')} className="rounded-xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--foreground)]">
+                  <Link href={localized('/sessions')} prefetch={false} className="rounded-xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--foreground)]">
                     Sessions
                   </Link>
                   <button
@@ -405,6 +440,7 @@ export default function Nav() {
                 </p>
                 <Link
                   href={localized('/login')}
+                  prefetch={false}
                   className="block rounded-xl bg-[var(--primary)] px-4 py-3 text-center text-sm font-semibold text-white"
                 >
                   Sign in

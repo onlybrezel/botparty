@@ -5,11 +5,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   api,
-  type AllowedUserRecord,
-  type ControlButtonRecord,
   type RobotCameraIngress,
   type RobotManaged,
-  type RobotTelemetryPoint,
   type RobotWebhookRecord,
 } from '@/lib/api';
 import { useAuth } from '@/lib/store';
@@ -24,9 +21,9 @@ import {
   toUpdatePayload,
   validateRobotFormSchedule,
   formFromRobot,
-  buildWidgetSpec,
-  draftFromControl,
 } from '@/components/dashboard/types';
+import { useDashboardControls } from './use-dashboard-controls';
+import { useDashboardRobotPolling } from './use-dashboard-robot-polling';
 
 async function waitForRenderableVideoFrame(
   video: HTMLVideoElement,
@@ -172,27 +169,11 @@ export function useDashboardPage() {
   const [regenerating, setRegenerating] = useState(false);
   const [regeneratingInvite, setRegeneratingInvite] = useState(false);
   const [opLoading, setOpLoading] = useState<string | null>(null);
-  const [pendingActionTypes, setPendingActionTypes] = useState<RemoteActionType[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
-  const [diagLogs, setDiagLogs] = useState<Array<{ ts: number; line: string }>>([]);
-  const [telemetry, setTelemetry] = useState<{
-    latest: RobotTelemetryPoint | null;
-    history: RobotTelemetryPoint[];
-  }>({
-    latest: null,
-    history: [],
-  });
   const [preview, setPreview] = useState<{ token: string; url: string } | null>(null);
   const [previewVersion, setPreviewVersion] = useState(0);
   const selectedRobotId = selectedRobot?.id ?? null;
   const selectedRobotStatus = selectedRobot?.status ?? null;
-  const [controlButtons, setControlButtons] = useState<ControlButtonRecord[]>([]);
-  const [controlsLoading, setControlsLoading] = useState(false);
-  const [creatingControl, setCreatingControl] = useState(false);
-  const [controlOp, setControlOp] = useState<string | null>(null);
-  const [allowedUsers, setAllowedUsers] = useState<AllowedUserRecord[]>([]);
-  const [allowlistLoading, setAllowlistLoading] = useState(false);
-  const [allowlistOp, setAllowlistOp] = useState<string | null>(null);
   const [ingressCameras, setIngressCameras] = useState<RobotCameraIngress[]>([]);
   const [ingressLoading, setIngressLoading] = useState(false);
   const [ingressOp, setIngressOp] = useState<string | null>(null);
@@ -215,6 +196,30 @@ export function useDashboardPage() {
   const previewContainerRef = useRef<HTMLDivElement>(null);
   const autoThumbnailAttemptedRef = useRef<Set<string>>(new Set());
   const [thumbnailOp, setThumbnailOp] = useState<'upload' | 'snapshot' | 'remove' | null>(null);
+  const {
+    pendingActionTypes,
+    setPendingActionTypes,
+    diagLogs,
+    setDiagLogs,
+    telemetry,
+    onboarding,
+  } = useDashboardRobotPolling({ accessToken, robotId: selectedRobotId });
+  const controls = useDashboardControls({
+    accessToken,
+    selectedRobotId,
+    roomMode: editForm.roomMode,
+    controlDraft,
+    resetControlDraft,
+    editingControlId,
+    setEditingControlId,
+    controlEditDraft,
+    setControlEditDraft,
+    clearControlEditDraft,
+    setControlEditPreset,
+    allowlistUsername,
+    resetAllowlistUsername,
+    setError,
+  });
 
   useEffect(() => {
     if (!hasHydrated) {
@@ -260,72 +265,6 @@ export function useDashboardPage() {
 
   useEffect(() => {
     if (!accessToken || !selectedRobot) {
-      setControlButtons([]);
-      return;
-    }
-
-    let active = true;
-
-    const loadControls = async () => {
-      setControlsLoading(true);
-      try {
-        api.setToken(accessToken);
-        const buttons = await api.controls.getAllControls(selectedRobot.id);
-        if (active) {
-          setControlButtons(buttons.sort((a, b) => a.position - b.position));
-        }
-      } catch {
-        if (active) {
-          setControlButtons([]);
-        }
-      } finally {
-        if (active) {
-          setControlsLoading(false);
-        }
-      }
-    };
-
-    void loadControls();
-    return () => {
-      active = false;
-    };
-  }, [selectedRobot?.id, accessToken]);
-
-  useEffect(() => {
-    if (!accessToken || !selectedRobot || editForm.roomMode !== 'ALLOWED_USERS') {
-      setAllowedUsers([]);
-      return;
-    }
-
-    let active = true;
-    setAllowlistLoading(true);
-
-    api.setToken(accessToken);
-    api.robots
-      .getAllowedUsers(selectedRobot.id)
-      .then((rows) => {
-        if (active) {
-          setAllowedUsers(rows);
-        }
-      })
-      .catch(() => {
-        if (active) {
-          setAllowedUsers([]);
-        }
-      })
-      .finally(() => {
-        if (active) {
-          setAllowlistLoading(false);
-        }
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [selectedRobot?.id, editForm.roomMode, accessToken]);
-
-  useEffect(() => {
-    if (!accessToken || !selectedRobot) {
       setIngressCameras([]);
       return;
     }
@@ -355,7 +294,7 @@ export function useDashboardPage() {
     return () => {
       active = false;
     };
-  }, [selectedRobot?.id, accessToken]);
+  }, [selectedRobot, accessToken]);
 
   useEffect(() => {
     if (!accessToken || !selectedRobot) {
@@ -389,7 +328,7 @@ export function useDashboardPage() {
     return () => {
       active = false;
     };
-  }, [selectedRobot?.id, accessToken]);
+  }, [selectedRobot, accessToken]);
 
   useEffect(() => {
     if (!selectedRobot) {
@@ -425,7 +364,7 @@ export function useDashboardPage() {
 
     setActiveSectionId('section-settings');
     return () => observer.disconnect();
-  }, [selectedRobot?.id]);
+  }, [selectedRobot, setActiveSectionId]);
 
   const refreshPreview = useCallback(
     async (forceRemount = false) => {
@@ -481,110 +420,6 @@ export function useDashboardPage() {
 
     void refreshPreview(true);
   }, [pendingActionTypes, selectedRobotId, selectedRobotStatus, accessToken, refreshPreview]);
-
-  useEffect(() => {
-    if (!accessToken || !selectedRobot) {
-      setPendingActionTypes([]);
-      return;
-    }
-
-    let active = true;
-    const poll = async () => {
-      try {
-        api.setToken(accessToken);
-        const result = await api.robots.getPendingRobotActions(selectedRobot.id);
-        if (active) {
-          const nextTypes = Array.from(
-            new Set(
-              result.actions
-                .map((action) => action.type)
-                .filter(
-                  (type): type is RemoteActionType =>
-                    type === 'restart_video' ||
-                    type === 'restart_control' ||
-                    type === 'restart_chat' ||
-                    type === 'update_client' ||
-                    type === 'set_log_stream',
-                ),
-            ),
-          );
-          setPendingActionTypes(nextTypes);
-        }
-      } catch {
-        // ignore pending action polling errors
-      }
-    };
-
-    poll().catch(() => {});
-    const interval = setInterval(() => {
-      poll().catch(() => {});
-    }, 3000);
-
-    return () => {
-      active = false;
-      clearInterval(interval);
-    };
-  }, [selectedRobot?.id, accessToken]);
-
-  useEffect(() => {
-    if (!accessToken || !selectedRobot) {
-      setDiagLogs([]);
-      return;
-    }
-
-    let active = true;
-    const poll = async () => {
-      try {
-        api.setToken(accessToken);
-        const result = await api.robots.getRobotLogs(selectedRobot.id);
-        if (active) {
-          setDiagLogs(result.logs.slice(-150));
-        }
-      } catch {
-        // ignore polling errors
-      }
-    };
-
-    poll().catch(() => {});
-    const interval = setInterval(() => {
-      poll().catch(() => {});
-    }, 3000);
-
-    return () => {
-      active = false;
-      clearInterval(interval);
-    };
-  }, [selectedRobot?.id, accessToken]);
-
-  useEffect(() => {
-    if (!accessToken || !selectedRobot) {
-      setTelemetry({ latest: null, history: [] });
-      return;
-    }
-
-    let active = true;
-    const poll = async () => {
-      try {
-        api.setToken(accessToken);
-        const result = await api.robots.getRobotTelemetry(selectedRobot.id);
-        if (active) {
-          setTelemetry(result);
-        }
-      } catch {
-        // ignore telemetry polling errors
-      }
-    };
-
-    poll().catch(() => {});
-    const interval = setInterval(() => {
-      poll().catch(() => {});
-    }, 5000);
-
-    return () => {
-      active = false;
-      clearInterval(interval);
-    };
-  }, [selectedRobot?.id, accessToken]);
 
   const handleCreate = async (event: FormEvent) => {
     event.preventDefault();
@@ -1261,210 +1096,24 @@ export function useDashboardPage() {
     }
   };
 
-  const handleCreateControl = async () => {
-    if (!accessToken || !selectedRobot) return;
-
-    const label = controlDraft.label.trim();
-    const command = controlDraft.command.trim();
-    if (!label || !command) {
-      pushToast('Label and command are required for a control button.', 'error', 2600);
-      return;
-    }
-
-    setCreatingControl(true);
-    setError(null);
-    try {
-      api.setToken(accessToken);
-      const next = await api.controls.createControl(selectedRobot.id, {
-        label,
-        command,
-        hotKey: controlDraft.hotKey.trim() || undefined,
-        icon: buildWidgetSpec(controlDraft),
-        cooldownMs: Number(controlDraft.cooldownMs),
-        costCredits: Math.max(0, Number(controlDraft.costCredits) || 0),
-        access: controlDraft.access,
-        color: controlDraft.color.trim() || undefined,
-      });
-
-      setControlButtons((prev) => [...prev, next].sort((a, b) => a.position - b.position));
-      resetControlDraft();
-      pushToast('Control button created.', 'success', 2500);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to create control button';
-      setError(message);
-      pushToast(message, 'error', 3200);
-    } finally {
-      setCreatingControl(false);
-    }
-  };
-
-  const handleToggleControl = async (button: ControlButtonRecord) => {
-    if (!accessToken) return;
-
-    setControlOp(button.id);
-    try {
-      api.setToken(accessToken);
-      const updated = await api.controls.updateControl(button.id, { isEnabled: !button.isEnabled });
-      setControlButtons((prev) => prev.map((entry) => (entry.id === button.id ? updated : entry)));
-    } catch (err) {
-      pushToast(err instanceof Error ? err.message : 'Failed to update control.', 'error');
-    } finally {
-      setControlOp(null);
-    }
-  };
-
-  const startEditControl = (button: ControlButtonRecord) => {
-    setEditingControlId(button.id);
-    const draft = draftFromControl(button);
-    setControlEditDraft(draft);
-    if (draft.controlKind === 'xy') {
-      setControlEditPreset('arm-xy');
-      return;
-    }
-    if (draft.controlKind === 'slider' && draft.sliderDirection === 'vertical') {
-      setControlEditPreset('ptz-tilt');
-      return;
-    }
-    if (draft.command === 'set_speed') {
-      setControlEditPreset('drive-speed');
-      return;
-    }
-    if (draft.command === 'gripper') {
-      setControlEditPreset('gripper');
-      return;
-    }
-    setControlEditPreset('ptz-pan');
-  };
-
-  const saveControlEdit = async () => {
-    if (!accessToken || !editingControlId || !controlEditDraft) return;
-
-    const label = controlEditDraft.label.trim();
-    const command = controlEditDraft.command.trim();
-    if (!label || !command) {
-      pushToast('Label and command are required for a control button.', 'error', 2600);
-      return;
-    }
-
-    setControlOp(editingControlId);
-    try {
-      api.setToken(accessToken);
-      const updated = await api.controls.updateControl(editingControlId, {
-        label,
-        command,
-        hotKey: controlEditDraft.hotKey.trim() || undefined,
-        icon: buildWidgetSpec(controlEditDraft),
-        cooldownMs: Number(controlEditDraft.cooldownMs),
-        costCredits: Math.max(0, Number(controlEditDraft.costCredits) || 0),
-        access: controlEditDraft.access,
-        color: controlEditDraft.color.trim() || null,
-      });
-      setControlButtons((prev) => prev.map((entry) => (entry.id === updated.id ? updated : entry)));
-      setEditingControlId(null);
-      clearControlEditDraft();
-      pushToast('Control button updated.', 'success', 2200);
-    } catch (err) {
-      pushToast(err instanceof Error ? err.message : 'Failed to update control.', 'error');
-    } finally {
-      setControlOp(null);
-    }
-  };
-
-  const handleDeleteControl = async (button: ControlButtonRecord) => {
-    if (!accessToken || !selectedRobot) return;
-    if (!window.confirm(`Delete control button ${button.label}?`)) return;
-
-    setControlOp(button.id);
-    try {
-      api.setToken(accessToken);
-      await api.controls.deleteControl(button.id);
-      const nextButtons = controlButtons
-        .filter((entry) => entry.id !== button.id)
-        .map((entry, index) => ({ ...entry, position: index }));
-      setControlButtons(nextButtons);
-      await api.controls.reorderControls(
-        selectedRobot.id,
-        nextButtons.map((entry, index) => ({ id: entry.id, position: index })),
-      );
-      pushToast('Control button deleted.', 'success', 2200);
-    } catch (err) {
-      pushToast(err instanceof Error ? err.message : 'Failed to delete control.', 'error');
-    } finally {
-      setControlOp(null);
-    }
-  };
-
-  const moveControl = async (buttonId: string, direction: -1 | 1) => {
-    if (!accessToken || !selectedRobot) return;
-
-    const currentIndex = controlButtons.findIndex((entry) => entry.id === buttonId);
-    const targetIndex = currentIndex + direction;
-    if (currentIndex < 0 || targetIndex < 0 || targetIndex >= controlButtons.length) {
-      return;
-    }
-
-    const nextButtons = [...controlButtons];
-    const [moved] = nextButtons.splice(currentIndex, 1);
-    if (!moved) {
-      return;
-    }
-    nextButtons.splice(targetIndex, 0, moved);
-    const normalized = nextButtons.map((entry, index) => ({ ...entry, position: index }));
-
-    setControlButtons(normalized);
-    setControlOp(buttonId);
-    try {
-      api.setToken(accessToken);
-      await api.controls.reorderControls(
-        selectedRobot.id,
-        normalized.map((entry, index) => ({ id: entry.id, position: index })),
-      );
-    } catch (err) {
-      pushToast(err instanceof Error ? err.message : 'Failed to reorder controls.', 'error');
-    } finally {
-      setControlOp(null);
-    }
-  };
-
-  const addAllowedUser = async () => {
-    if (!accessToken || !selectedRobot) return;
-    const username = allowlistUsername.trim();
-    if (!username) return;
-
-    setAllowlistOp('add');
-    try {
-      api.setToken(accessToken);
-      const added = await api.robots.addAllowedUser(selectedRobot.id, username);
-      setAllowedUsers((prev) => {
-        if (prev.some((entry) => entry.id === added.id)) return prev;
-        return [...prev, added];
-      });
-      resetAllowlistUsername();
-      pushToast('User added to allow list.', 'success', 2200);
-    } catch (err) {
-      pushToast(err instanceof Error ? err.message : 'Failed to add user.', 'error');
-    } finally {
-      setAllowlistOp(null);
-    }
-  };
-
-  const removeAllowedUser = async (user: AllowedUserRecord) => {
-    if (!accessToken || !selectedRobot) return;
-
-    setAllowlistOp(user.id);
-    try {
-      api.setToken(accessToken);
-      await api.robots.removeAllowedUser(selectedRobot.id, user.id);
-      setAllowedUsers((prev) => prev.filter((entry) => entry.id !== user.id));
-      pushToast('User removed from allow list.', 'success', 2200);
-    } catch (err) {
-      pushToast(err instanceof Error ? err.message : 'Failed to remove user.', 'error');
-    } finally {
-      setAllowlistOp(null);
-    }
-  };
-
   const createSlugOwner = username?.trim() ? username : 'your-username';
+  const {
+    controlButtons,
+    controlsLoading,
+    creatingControl,
+    controlOp,
+    allowedUsers,
+    allowlistLoading,
+    allowlistOp,
+    handleCreateControl,
+    handleToggleControl,
+    startEditControl,
+    saveControlEdit,
+    handleDeleteControl,
+    moveControl,
+    addAllowedUser,
+    removeAllowedUser,
+  } = controls;
 
   return {
     accessToken,
@@ -1515,6 +1164,7 @@ export function useDashboardPage() {
     logsLoading,
     diagLogs,
     telemetry,
+    onboarding,
     preview,
     previewVersion,
     controlButtons,

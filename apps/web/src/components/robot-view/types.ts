@@ -156,7 +156,7 @@ export function normalizeQueueEntries(rows: QueueEntryWire[] | undefined): Queue
 }
 
 export function buildGuestMessageId() {
-  return `guest-msg-${crypto.randomUUID()}`;
+  return crypto.randomUUID();
 }
 
 export function clamp(value: number, min: number, max: number): number {

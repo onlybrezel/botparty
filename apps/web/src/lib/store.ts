@@ -98,9 +98,6 @@ export const useAuth = create<AuthState & AuthActions>()(
         displayName: state.displayName,
         role: state.role,
       }),
-      onRehydrateStorage: () => (state) => {
-        state?.setHasHydrated(true);
-      },
     },
   ),
 );

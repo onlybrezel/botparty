@@ -57,7 +57,6 @@ export function RobotViewMobileBar({ state }: Props) {
         <button
           type="button"
           onClick={state.triggerEStop}
-          onPointerDown={state.triggerEStop}
           aria-label="Emergency stop"
           className="rounded-xl bg-[var(--destructive)] px-3 py-2 text-xs font-black text-white"
         >
