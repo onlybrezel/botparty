@@ -46,7 +46,7 @@
     "typecheck": "turbo run typecheck"
   },
   "devDependencies": {
-    "prettier": "^3.5.3",
+    "prettier": "^3.9.5",
     "turbo": "^2.10.5"
   },
   "pnpm": {
