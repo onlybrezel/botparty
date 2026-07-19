@@ -74,6 +74,13 @@ const environmentSchema = z
         message: 'requires FEATURE_BILLING_ENABLED=true',
       });
     }
+    if (env.NODE_ENV === 'production' && env.FEATURE_SUBSCRIPTIONS_ENABLED) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['FEATURE_SUBSCRIPTIONS_ENABLED'],
+        message: 'must remain false until the recurring billing lifecycle is release-enabled',
+      });
+    }
     if (env.NODE_ENV === 'production' && (!env.SMTP_HOST || !env.SMTP_FROM)) {
       context.addIssue({
         code: z.ZodIssueCode.custom,

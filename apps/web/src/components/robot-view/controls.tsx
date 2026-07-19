@@ -129,7 +129,7 @@ export function SliderControl({
           setValue(config.start);
           emit(config.start);
         }}
-        className={`accent-[var(--primary)] ${config.direction === 'vertical' ? 'h-28 w-6 [writing-mode:vertical-lr] [-webkit-appearance:slider-vertical]' : 'w-full'}`}
+        className={`accent-[var(--primary)] ${config.direction === 'vertical' ? 'h-28 w-6 [direction:rtl] [writing-mode:vertical-lr]' : 'w-full'}`}
       />
       <div className="mt-1 flex items-center justify-between text-[10px] text-[var(--muted-foreground)]">
         <span>{config.min}</span>

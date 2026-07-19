@@ -57,15 +57,15 @@ export default function ModPayoutsPage() {
 
   if (!accessToken || role !== 'ADMIN') {
     return (
-      <main className="mx-auto max-w-3xl px-4 py-12">
+      <div className="mx-auto max-w-3xl px-4 py-12">
         <h1 className="mb-4 text-2xl font-semibold">Payouts</h1>
         <p className="text-[var(--muted-foreground)]">Staff only.</p>
-      </main>
+      </div>
     );
   }
 
   return (
-    <main className="mx-auto max-w-4xl px-4 py-8">
+    <div className="mx-auto max-w-4xl px-4 py-8">
       <header className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Payouts</h1>
         <div className="flex gap-2">
@@ -173,6 +173,6 @@ export default function ModPayoutsPage() {
           ))}
         </ul>
       )}
-    </main>
+    </div>
   );
 }

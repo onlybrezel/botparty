@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './support/fixtures';
 
 test('home page loads', async ({ page }) => {
   await page.goto('/');
@@ -6,7 +6,7 @@ test('home page loads', async ({ page }) => {
     page.getByRole('navigation').getByRole('link', { name: 'Explore', exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByRole('heading', { name: /Real robots.*Shared control that stays fun/i }),
+    page.getByRole('heading', { name: 'Watch and control real robots online.' }),
   ).toBeVisible();
 });
 

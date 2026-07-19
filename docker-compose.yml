@@ -40,7 +40,10 @@ services:
     networks:
       - internal
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U botparty"]
+      # The image starts a temporary PostgreSQL process while initializing a
+      # fresh volume. Wait for the final PID 1 server so one-shot migration
+      # containers cannot enter during the initialization shutdown window.
+      test: ["CMD-SHELL", "test \"$$(head -n 1 /var/lib/postgresql/data/postmaster.pid 2>/dev/null)\" = '1' && pg_isready -U botparty -d botparty"]
       interval: 2s
       timeout: 2s
       retries: 15

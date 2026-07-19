@@ -1,7 +1,8 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { Bot, Save, Trash2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Plus, Save, Trash2 } from 'lucide-react';
 import { CreateRobotPanel } from '@/components/dashboard/create-robot-panel';
 import { DashboardAllowlistSection } from '@/components/dashboard/dashboard-allowlist-section';
 import { DashboardFleetSummary } from '@/components/dashboard/dashboard-fleet-summary';
@@ -70,6 +71,18 @@ const DashboardWebhooksSection = dynamic(
 );
 
 export default function DashboardPage() {
+  const [createPanelOpen, setCreatePanelOpen] = useState(false);
+  useEffect(() => {
+    const openCreatePanelFromHash = () => {
+      if (window.location.hash === '#new-robot') {
+        setCreatePanelOpen(true);
+      }
+    };
+
+    openCreatePanelFromHash();
+    window.addEventListener('hashchange', openCreatePanelFromHash);
+    return () => window.removeEventListener('hashchange', openCreatePanelFromHash);
+  }, []);
   const {
     accessToken,
     hasHydrated,
@@ -184,77 +197,59 @@ export default function DashboardPage() {
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
-      <section className="mb-6 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6 sm:p-8">
-        <div className="flex items-center gap-3">
-          <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--primary)]/15">
-            <Bot className="h-5 w-5 text-violet-300" />
-          </span>
-          <div>
-            <h1 className="text-3xl font-black tracking-tight">Robots Dashboard</h1>
-            <p className="text-sm text-[var(--muted-foreground)]">
-              Create robots, configure settings, and copy claim tokens for your Linux robot client.
-            </p>
-          </div>
+      <header className="mb-6 flex flex-col gap-4 border-b border-[var(--border)] pb-5 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Robots</h1>
+          <p className="mt-1 text-sm text-[var(--muted-foreground)]">
+            Create robots, manage access and operate connected clients.
+          </p>
         </div>
-      </section>
+        {!loading && robots.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => setCreatePanelOpen((open) => !open)}
+            aria-expanded={createPanelOpen}
+            className="inline-flex w-fit items-center gap-2 rounded-lg border border-[var(--border)] px-4 py-2 text-sm font-semibold hover:bg-[var(--muted)]"
+          >
+            <Plus className="h-4 w-4" />
+            {createPanelOpen ? 'Close form' : 'Add robot'}
+          </button>
+        ) : null}
+      </header>
 
       {error && (
-        <p className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+        <p className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-800 dark:text-red-300">
           {error}
         </p>
       )}
       {status && (
-        <p className="mb-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300">
+        <p className="mb-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-800 dark:text-emerald-300">
           {status}
         </p>
       )}
 
-      <CreateRobotPanel
-        createForm={createForm}
-        setCreateForm={setCreateForm}
-        onSubmit={handleCreate}
-        creating={creating}
-        loading={loading}
-        slugOwner={createSlugOwner}
-      />
+      {createPanelOpen || (!loading && robots.length === 0) ? (
+        <CreateRobotPanel
+          createForm={createForm}
+          setCreateForm={setCreateForm}
+          onSubmit={handleCreate}
+          creating={creating}
+          loading={loading}
+          slugOwner={createSlugOwner}
+        />
+      ) : null}
 
-      <section className="mt-6 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 sm:p-5">
-        <h2 className="mb-4 text-lg font-bold">My Robots</h2>
+      <section className="mt-8 border-t border-[var(--border)] pt-6">
+        <h2 className="mb-4 text-lg font-bold">Your robots</h2>
 
         {loading ? (
           <RobotCardGridSkeleton />
         ) : robots.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-[var(--border)] p-6 text-center">
+          <div className="border border-dashed border-[var(--border)] p-8 text-center">
             <p className="text-base font-semibold">No robots yet</p>
             <p className="mt-1 text-sm text-[var(--muted-foreground)]">
-              Create your first robot using the form above, then follow these steps to go live:
+              Complete the form above to create your first robot room.
             </p>
-            <ol className="mx-auto mt-4 max-w-sm space-y-2 text-left text-sm text-[var(--muted-foreground)]">
-              <li className="flex items-start gap-2">
-                <span className="shrink-0 font-bold text-violet-400">1.</span>Create a robot profile
-                &amp; grab the claim token.
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="shrink-0 font-bold text-violet-400">2.</span>Install the robot
-                client on your hardware (
-                <a
-                  href="/docs/getting-started"
-                  className="underline hover:text-[var(--foreground)]"
-                >
-                  Getting Started guide
-                </a>
-                ).
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="shrink-0 font-bold text-violet-400">3.</span>Configure{' '}
-                <code className="rounded bg-[var(--muted)] px-1 py-0.5 text-xs">config.yaml</code>{' '}
-                with your claim token &amp; start the client.
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="shrink-0 font-bold text-violet-400">4.</span>Return here — the
-                robot will appear as Online once connected.
-              </li>
-            </ol>
           </div>
         ) : (
           <>
@@ -412,7 +407,7 @@ export default function DashboardPage() {
                         type="button"
                         disabled={deleting}
                         onClick={() => void handleDelete()}
-                        className="inline-flex items-center gap-2 rounded-lg border border-red-500/40 px-4 py-2 text-sm font-semibold text-red-300 disabled:opacity-60"
+                        className="inline-flex items-center gap-2 rounded-lg border border-red-500/40 px-4 py-2 text-sm font-semibold text-red-700 disabled:opacity-60 dark:text-red-300"
                       >
                         <Trash2 className="h-4 w-4" />
                         {deleting ? 'Deleting...' : 'Delete robot'}

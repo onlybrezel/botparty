@@ -77,18 +77,14 @@ export async function ExploreResults({
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-6 sm:py-8">
-      <div className="mb-6 flex flex-col gap-3 sm:mb-7 sm:flex-row sm:items-end sm:justify-between">
+      <div className="mb-6 sm:mb-7">
         <div>
-          <h1 className="text-3xl font-black tracking-tight">Explore robot rooms</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Explore robot rooms</h1>
           <p className="mt-1 text-sm text-[var(--muted-foreground)]">
             {robots.length === 0
               ? 'No robots found'
               : `${robots.length} room${robots.length !== 1 ? 's' : ''} listed · ${liveCount} live right now`}
           </p>
-        </div>
-        <div className="inline-flex w-fit items-center gap-2 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-200">
-          <span className="h-2 w-2 rounded-full bg-emerald-400" />
-          {liveCount} available right now
         </div>
       </div>
 
@@ -110,7 +106,7 @@ export async function ExploreResults({
               <a
                 key={tag.tag}
                 href={`/explore/search?tag=${encodeURIComponent(tag.tag)}`}
-                className={`rounded-full border px-3 py-2 text-sm transition ${
+                className={`rounded-md border px-3 py-2 text-sm transition ${
                   params.tag === tag.tag
                     ? 'border-[var(--primary)] bg-[var(--primary)]/10'
                     : 'border-[var(--border)] bg-[var(--card)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
@@ -124,27 +120,27 @@ export async function ExploreResults({
       )}
 
       {robots.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-[var(--border)] py-20 text-center">
-          <div className="mb-3 rounded-xl border border-[var(--border)] bg-[var(--muted)] p-3">
+        <div className="flex flex-col items-center justify-center border border-dashed border-[var(--border)] py-16 text-center">
+          <div className="mb-3 rounded-lg border border-[var(--border)] bg-[var(--muted)] p-3">
             <Bot className="h-8 w-8 text-[var(--muted-foreground)]" />
           </div>
           <p className="font-medium text-[var(--muted-foreground)]">No robots found</p>
           <p className="mt-1 text-sm text-[var(--muted-foreground)]">
             {params.q || params.status || params.tag
               ? 'Try a different host, status, or exact tag'
-              : 'Nothing is listed yet. The first good room sets the tone.'}
+              : 'No public rooms are available yet.'}
           </p>
           {!(params.q || params.status || params.tag) && (
             <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
               <a
                 href="/dashboard/robots/new"
-                className="rounded-full bg-[var(--primary)] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--primary-hover)]"
+                className="rounded-lg bg-[var(--primary)] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--primary-hover)]"
               >
                 Host the first robot
               </a>
               <a
                 href="/docs"
-                className="rounded-full border border-[var(--border)] bg-[var(--card)] px-5 py-2.5 text-sm font-semibold text-[var(--foreground)] transition hover:border-[var(--primary)]"
+                className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-5 py-2.5 text-sm font-semibold text-[var(--foreground)] transition hover:border-[var(--primary)]"
               >
                 Read the host guide
               </a>
@@ -162,7 +158,7 @@ export async function ExploreResults({
             <div className="mt-8 flex justify-center">
               <a
                 href={`/explore/search?${nextParams.toString()}`}
-                className="rounded-full border border-[var(--border)] bg-[var(--card)] px-5 py-2.5 text-sm font-semibold text-[var(--foreground)] transition hover:border-[var(--primary)]"
+                className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-5 py-2.5 text-sm font-semibold text-[var(--foreground)] transition hover:border-[var(--primary)]"
               >
                 Load more rooms
               </a>

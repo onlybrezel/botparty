@@ -1,4 +1,5 @@
 import { IsDateString, IsInt, IsOptional, IsString, IsUUID, Max, Min } from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class ListTransactionsQueryDto {
   @IsOptional()
@@ -6,6 +7,7 @@ export class ListTransactionsQueryDto {
   cursor?: string;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(200)

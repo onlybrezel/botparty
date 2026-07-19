@@ -71,6 +71,8 @@ export default function SettingsPage() {
       return;
     }
 
+    let active = true;
+
     if (typeof window !== 'undefined') {
       setNotificationPermission('Notification' in window ? Notification.permission : 'unsupported');
     }
@@ -79,15 +81,42 @@ export default function SettingsPage() {
     api
       .users.getMe()
       .then((me) => {
+        if (!active) return;
         setDisplayName(me.displayName ?? '');
         setAvatarUrl(me.avatarUrl ?? '');
       })
       .catch(() => {
-        pushToast('Failed to load profile.', 'error');
+        if (active) {
+          pushToast('Failed to load profile.', 'error');
+        }
       })
-      .finally(() => setLoading(false));
-    void api.notifications.preferences().then(setNotificationPreferences).catch((error: unknown) => console.error('Failed to load notification preferences', error));
-    void api.analytics.consent().then(({ productAnalyticsEnabled }) => updatePreference('productAnalyticsEnabled', productAnalyticsEnabled)).catch((error: unknown) => console.error('Failed to load analytics consent', error));
+      .finally(() => {
+        if (active) {
+          setLoading(false);
+        }
+      });
+    void api.notifications.preferences().then((preferences) => {
+      if (active) {
+        setNotificationPreferences(preferences);
+      }
+    }).catch(() => {
+      if (active) {
+        pushToast('Failed to load notification settings.', 'error');
+      }
+    });
+    void api.analytics.consent().then(({ productAnalyticsEnabled: enabled }) => {
+      if (active) {
+        updatePreference('productAnalyticsEnabled', enabled);
+      }
+    }).catch(() => {
+      if (active) {
+        pushToast('Failed to load analytics settings.', 'error');
+      }
+    });
+
+    return () => {
+      active = false;
+    };
   }, [accessToken, hasHydrated, router, updatePreference]);
 
   const notificationSummary = useMemo(() => {
@@ -176,16 +205,20 @@ export default function SettingsPage() {
       return;
     }
 
-    const permission = await Notification.requestPermission();
-    setNotificationPermission(permission);
-    if (permission === 'granted') {
-      const updated = await api.notifications.updatePreferences({ browserEnabled: true });
-      setNotificationPreferences(updated);
+    try {
+      const permission = await Notification.requestPermission();
+      setNotificationPermission(permission);
+      if (permission === 'granted') {
+        const updated = await api.notifications.updatePreferences({ browserEnabled: true });
+        setNotificationPreferences(updated);
+      }
+      pushToast(
+        permission === 'granted' ? 'Desktop notifications enabled.' : 'Desktop notifications not enabled.',
+        permission === 'granted' ? 'success' : 'info',
+      );
+    } catch {
+      pushToast('Desktop notifications require HTTPS and browser permission.', 'error');
     }
-    pushToast(
-      permission === 'granted' ? 'Desktop notifications enabled.' : 'Desktop notifications not enabled.',
-      permission === 'granted' ? 'success' : 'info',
-    );
   };
 
   const updateNotifications = async (input: Partial<NotificationPreferenceRecord>) => {
@@ -271,17 +304,12 @@ export default function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8">
-      <section className="mb-6 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-3xl font-black tracking-tight">Settings</h1>
-            <p className="mt-1 text-sm text-[var(--muted-foreground)]">
-              Manage your profile, theme, queue notifications, and local control preferences.
-            </p>
-          </div>
-          <Badge tone="success">Local preferences synced</Badge>
-        </div>
-      </section>
+      <header className="mb-6 border-b border-[var(--border)] pb-5">
+        <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
+        <p className="mt-1 text-sm text-[var(--muted-foreground)]">
+          Profile, appearance, notifications and privacy.
+        </p>
+      </header>
 
       <section className="grid gap-6 lg:grid-cols-2">
         <form onSubmit={handleSaveProfile} className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-5">
@@ -294,8 +322,9 @@ export default function SettingsPage() {
             <p className="text-sm text-[var(--muted-foreground)]">Loading profile...</p>
           ) : (
             <>
-              <label className="mb-2 block text-sm font-medium">Display Name</label>
+              <label htmlFor="display-name" className="mb-2 block text-sm font-medium">Display Name</label>
               <input
+                id="display-name"
                 value={displayName}
                 onChange={(event) => setDisplayName(event.target.value)}
                 className="mb-4 w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
@@ -395,7 +424,7 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-5">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-5 lg:row-span-3">
           <h2 className="mb-4 flex items-center gap-2 text-lg font-bold">
             <BellRing className="h-5 w-5 text-amber-300" />
             Notifications
@@ -538,7 +567,7 @@ export default function SettingsPage() {
         </div>
 
         <div className="rounded-xl border border-red-800/50 bg-[var(--card)] p-5 lg:col-span-2">
-          <h2 className="mb-1 flex items-center gap-2 text-lg font-bold text-red-400">
+          <h2 className="mb-1 flex items-center gap-2 text-lg font-bold text-red-700 dark:text-red-400">
             <ShieldAlert className="h-5 w-5" />
             Danger Zone
           </h2>
@@ -548,7 +577,7 @@ export default function SettingsPage() {
           <button
             type="button"
             onClick={() => setDeleteDialogOpen(true)}
-            className="inline-flex items-center gap-2 rounded-lg border border-red-700/60 px-4 py-2 text-sm font-semibold text-red-400 hover:bg-red-900/20"
+            className="inline-flex items-center gap-2 rounded-lg border border-red-700/60 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-900/20 dark:text-red-400"
           >
             <Trash2 className="h-4 w-4" />
             Delete my account

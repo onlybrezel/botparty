@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './support/fixtures';
+import { e2ePassword, waitForLoginForm } from './support/auth';
 
 test('core pages run under the enforced content security policy', async ({ page }) => {
   const violations: string[] = [];
@@ -14,13 +15,17 @@ test('core pages run under the enforced content security policy', async ({ page 
     const nonce = csp?.match(/'nonce-([^']+)'/)?.[1];
     expect(nonce).toBeTruthy();
     await expect(page.locator('main')).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Sign in' })).toBeVisible();
 
-    const frameworkNonces = await page.locator('script[src]').evaluateAll((scripts) =>
-      scripts.map((script) => (script as HTMLScriptElement).nonce),
-    );
+    const frameworkNonces = await page
+      .locator('script[src]')
+      .evaluateAll((scripts) => scripts.map((script) => (script as HTMLScriptElement).nonce));
     expect(frameworkNonces.length).toBeGreaterThan(0);
     expect(frameworkNonces).toContain(nonce);
-    expect(frameworkNonces.filter(Boolean).every((scriptNonce) => scriptNonce === nonce)).toBe(true);
+    expect(frameworkNonces.filter(Boolean).every((scriptNonce) => scriptNonce === nonce)).toBe(
+      true,
+    );
+    await page.waitForLoadState('networkidle');
   }
 
   expect(violations).toEqual([]);
@@ -29,6 +34,8 @@ test('core pages run under the enforced content security policy', async ({ page 
 test('Tab keeps normal browser focus movement in the robot room', async ({ page }) => {
   await page.goto('/robot/test-robot');
   await expect(page.locator('main')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Sign in' })).toBeVisible();
+  await page.waitForLoadState('networkidle');
 
   await page.keyboard.press('Tab');
   const first = await page.evaluate(() => {
@@ -49,4 +56,21 @@ test('Tab keeps normal browser focus movement in the robot room', async ({ page 
   expect(second).not.toBe('');
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
   expect(second).not.toBe(first);
+});
+
+test('opening a second tab does not invalidate the first tab login form', async ({ context, page }) => {
+  await page.goto('/login');
+  await waitForLoginForm(page);
+
+  const secondTab = await context.newPage();
+  await secondTab.goto('/login');
+  await waitForLoginForm(secondTab);
+
+  await page.getByLabel('Email').fill('viewer@botparty.test');
+  await page.getByLabel('Password').fill(e2ePassword());
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await expect(page).toHaveURL(/\/explore$/);
+  await expect(page.getByRole('button', { name: /notifications/i })).toBeVisible();
+
+  await secondTab.close();
 });

@@ -6,7 +6,7 @@ import type { RobotPublic } from '@botparty/shared';
 function StatusBadge({ status }: { status: RobotPublic['status'] }) {
   if (status === 'ONLINE') {
     return (
-      <span className="flex items-center gap-1 rounded-full bg-[var(--live)]/90 px-2 py-0.5 text-xs font-semibold text-white">
+      <span className="flex items-center gap-1 rounded-md bg-[var(--live)]/90 px-2 py-0.5 text-xs font-semibold text-white">
         <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse-dot" />
         LIVE
       </span>
@@ -14,7 +14,7 @@ function StatusBadge({ status }: { status: RobotPublic['status'] }) {
   }
   if (status === 'BUSY') {
     return (
-      <span className="flex items-center gap-1 rounded-full bg-amber-500/90 px-2 py-0.5 text-xs font-semibold text-white">
+      <span className="flex items-center gap-1 rounded-md bg-amber-500/90 px-2 py-0.5 text-xs font-semibold text-white">
         <span className="h-1.5 w-1.5 rounded-full bg-white" />
         BUSY
       </span>
@@ -22,13 +22,13 @@ function StatusBadge({ status }: { status: RobotPublic['status'] }) {
   }
   if (status === 'MAINTENANCE') {
     return (
-      <span className="flex items-center gap-1 rounded-full bg-orange-600/90 px-2 py-0.5 text-xs font-semibold text-white">
+      <span className="flex items-center gap-1 rounded-md bg-orange-600/90 px-2 py-0.5 text-xs font-semibold text-white">
         MAINTENANCE
       </span>
     );
   }
   return (
-    <span className="flex items-center gap-1 rounded-full bg-zinc-700/90 px-2 py-0.5 text-xs font-medium text-zinc-300">
+    <span className="flex items-center gap-1 rounded-md bg-zinc-700/90 px-2 py-0.5 text-xs font-medium text-zinc-300">
       Offline
     </span>
   );
@@ -52,12 +52,11 @@ export default function RobotCard({ robot }: Props) {
     robot.thumbnailUrl?.startsWith('/api/') || robot.thumbnailUrl?.startsWith('http') || false;
 
   return (
-    <div className="transition-transform duration-200 motion-safe:hover:-translate-y-1">
-      <Link
-        href={`/robot/${robot.owner.username}/${robot.slug}`}
-        prefetch={false}
-        className="group block overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] transition duration-200 hover:border-violet-500/40 hover:-translate-y-0.5"
-      >
+    <Link
+      href={`/robot/${robot.owner.username}/${robot.slug}`}
+      prefetch={false}
+      className="group block overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--card)] transition-colors hover:border-[var(--muted-foreground)]"
+    >
         {/* Thumbnail */}
         <div className="relative aspect-video overflow-hidden bg-[var(--muted)]">
         {robot.thumbnailUrl ? (
@@ -66,18 +65,17 @@ export default function RobotCard({ robot }: Props) {
             alt={robot.name}
             fill
             unoptimized={isUnoptimizedThumbnail}
-            className="object-cover transition duration-300 group-hover:scale-105"
+            className="object-cover"
             sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
           />
         ) : (
           <div
             className="relative flex h-full w-full items-center justify-center"
             style={{
-              background: `linear-gradient(135deg, hsla(${hue}, 75%, 55%, 0.25), hsla(${(hue + 50) % 360}, 80%, 50%, 0.08))`,
+              background: `hsla(${hue}, 55%, 45%, 0.2)`,
             }}
           >
-            <div className="absolute inset-0 opacity-30" style={{ backgroundImage: 'radial-gradient(circle at 20% 20%, rgba(255,255,255,0.25), transparent 45%)' }} />
-            <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl border border-white/20 bg-black/25 text-xl font-black text-white">
+            <div className="relative flex h-14 w-14 items-center justify-center rounded-lg border border-white/20 bg-black/20 text-xl font-bold text-white">
               {initial}
             </div>
             <Bot className="absolute bottom-2 right-2 h-5 w-5 text-white/45" />
@@ -95,7 +93,8 @@ export default function RobotCard({ robot }: Props) {
               <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
               <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" />
             </svg>
-            {robot.viewerCount}
+            <span className="sr-only">{robot.viewerCount} watching</span>
+            <span aria-hidden>{robot.viewerCount}</span>
           </div>
         )}
         </div>
@@ -114,11 +113,6 @@ export default function RobotCard({ robot }: Props) {
               </span>
             </p>
           </div>
-          {robot.viewerCount > 0 && (
-            <span className="rounded-full border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-[10px] font-semibold text-[var(--muted-foreground)]">
-              {robot.viewerCount} watching
-            </span>
-          )}
         </div>
 
         {robot.tags.length > 0 && (
@@ -126,7 +120,7 @@ export default function RobotCard({ robot }: Props) {
             {robot.tags.slice(0, 3).map((tag) => (
               <span
                 key={tag}
-                className="rounded-full bg-[var(--secondary)] px-2.5 py-1 text-xs text-[var(--secondary-foreground)]/80"
+                className="rounded-md bg-[var(--secondary)] px-2 py-1 text-xs text-[var(--secondary-foreground)]/80"
               >
                 {tag}
               </span>
@@ -139,15 +133,15 @@ export default function RobotCard({ robot }: Props) {
           {isTrimmed ? '...' : ''}
         </p>
 
-        <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-medium text-[var(--muted-foreground)]">
-          <span className="rounded-full border border-[var(--border)] bg-[var(--background)] px-2.5 py-1">
+        <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 border-t border-[var(--border)] pt-3 text-xs text-[var(--muted-foreground)]">
+          <span>
             {robot.queueMode === 'VOTING'
               ? 'Voting queue'
               : robot.queueMode === 'DISABLED'
                 ? 'Direct control'
                 : 'Turn queue'}
           </span>
-          <span className="rounded-full border border-[var(--border)] bg-[var(--background)] px-2.5 py-1">
+          <span>
             {robot.accessMode === 'OPEN'
               ? 'Open room'
               : robot.accessMode === 'PASSWORD'
@@ -158,7 +152,6 @@ export default function RobotCard({ robot }: Props) {
           </span>
         </div>
         </div>
-      </Link>
-    </div>
+    </Link>
   );
 }

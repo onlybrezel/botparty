@@ -1,7 +1,7 @@
 'use client';
 
 import type { FormEvent } from 'react';
-import { Cable, ExternalLink, Plus } from 'lucide-react';
+import { ExternalLink, Plus } from 'lucide-react';
 import type { RobotFormState } from './types';
 import { Select } from '@/components/ui/select';
 
@@ -16,9 +16,10 @@ type Props = {
 
 export function CreateRobotPanel({ createForm, setCreateForm, onSubmit, creating, loading, slugOwner }: Props) {
   return (
-    <section id="new-robot" className="scroll-mt-24 grid grid-cols-1 gap-6 lg:grid-cols-2">
-      <form onSubmit={onSubmit} autoComplete="off" className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 sm:p-5">
-        <h2 className="mb-4 text-lg font-bold">Create Robot</h2>
+    <section id="new-robot" className="scroll-mt-24 grid grid-cols-1 border border-[var(--border)] bg-[var(--card)] lg:grid-cols-[minmax(0,1.2fr)_minmax(300px,0.8fr)] lg:divide-x lg:divide-[var(--border)]">
+      <form onSubmit={onSubmit} autoComplete="off" className="p-4 sm:p-5">
+        <h2 className="mb-1 text-lg font-bold">Add a robot</h2>
+        <p className="mb-4 text-sm text-[var(--muted-foreground)]">Create the room first, then connect the robot client with its claim token.</p>
 
         <div className="space-y-3">
           <input
@@ -43,7 +44,7 @@ export function CreateRobotPanel({ createForm, setCreateForm, onSubmit, creating
                   slug: event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''),
                 }))
               }
-              pattern="[a-z0-9][a-z0-9-]*[a-z0-9]"
+              pattern="[a-z0-9](?:[a-z0-9]|-)*[a-z0-9]"
               minLength={3}
               maxLength={50}
               title="3-50 lowercase letters, numbers, and hyphens. No leading or trailing hyphen."
@@ -130,36 +131,24 @@ export function CreateRobotPanel({ createForm, setCreateForm, onSubmit, creating
         </button>
       </form>
 
-      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 sm:p-5">
-        <h2 className="mb-4 text-lg font-bold">Linux Robot Client Quickstart</h2>
-        <ol className="space-y-2 text-sm text-[var(--muted-foreground)]">
-          <li>1. Create a robot and copy the claim token.</li>
-          <li>2. On your robot host: clone the botparty-client repository.</li>
-          <li>3. Create a venv, install requirements, and copy config.example.yaml to config.yaml.</li>
-          <li>4. Paste your claim token in config.yaml.</li>
-          <li>5. Start with python -m botparty_robot.</li>
+      <aside className="border-t border-[var(--border)] p-4 sm:p-5 lg:border-t-0">
+        <h2 className="mb-1 text-lg font-bold">Connect the client</h2>
+        <p className="mb-4 text-sm text-[var(--muted-foreground)]">After creating the room:</p>
+        <ol className="space-y-3 text-sm text-[var(--muted-foreground)]">
+          <li><span className="font-semibold text-[var(--foreground)]">1.</span> Install the BotParty client on the robot host.</li>
+          <li><span className="font-semibold text-[var(--foreground)]">2.</span> Add the claim token to <code className="text-xs">config.yaml</code>.</li>
+          <li><span className="font-semibold text-[var(--foreground)]">3.</span> Start the client and wait for the online status.</li>
         </ol>
-        <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--background)] p-3">
-          <div className="flex items-center gap-2 text-sm font-semibold">
-            <Cable className="h-4 w-4 text-violet-300" />
-            Connection path
-          </div>
-          <p className="mt-2 text-sm text-[var(--muted-foreground)]">
-            Browser UI → BotParty API + LiveKit → Python robot client → hardware adapter
-          </p>
-          <div className="mt-3">
-            <a
-              href="https://github.com/onlybrezel/botparty-client/blob/main/docs/index.md"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--foreground)] transition hover:border-[var(--muted-foreground)]"
-            >
-              <ExternalLink className="h-3.5 w-3.5" />
-              Robot Setup
-            </a>
-          </div>
-        </div>
-      </div>
+        <a
+          href="https://github.com/onlybrezel/botparty-client/blob/main/docs/index.md"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-[var(--foreground)] hover:text-[var(--primary)]"
+        >
+          Full robot setup guide
+          <ExternalLink className="h-3.5 w-3.5" />
+        </a>
+      </aside>
     </section>
   );
 }

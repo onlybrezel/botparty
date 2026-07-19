@@ -48,6 +48,7 @@ export function ControlButtonFields({
   return (
     <>
       <Select
+        aria-label="Control preset"
         className={fieldBackground}
         value={preset}
         onChange={(event) => onPresetChange(event.target.value as ControlPresetKey)}
@@ -66,18 +67,21 @@ export function ControlButtonFields({
         Apply preset
       </button>
       <input
+        aria-label="Control label"
         className={inputClassName}
         placeholder="Label"
         value={draft.label}
         onChange={updateTextField('label')}
       />
       <input
+        aria-label="Control command"
         className={inputClassName}
         placeholder="Command"
         value={draft.command}
         onChange={updateTextField('command')}
       />
       <input
+        aria-label="Control hotkey"
         className={inputClassName}
         placeholder="Hotkey (optional)"
         maxLength={8}
@@ -85,6 +89,7 @@ export function ControlButtonFields({
         onChange={updateTextField('hotKey')}
       />
       <Select
+        aria-label="Control type"
         className={fieldBackground}
         value={draft.controlKind}
         onChange={(event) =>
@@ -97,6 +102,7 @@ export function ControlButtonFields({
       </Select>
       {draft.controlKind === 'button' ? (
         <input
+          aria-label="Control icon"
           className={inputClassName}
           placeholder="Icon/emoji (optional)"
           value={draft.icon}
@@ -105,6 +111,7 @@ export function ControlButtonFields({
       ) : draft.controlKind === 'slider' ? (
         <>
           <input
+            aria-label="Slider minimum"
             type="number"
             className={inputClassName}
             placeholder="Slider min"
@@ -112,6 +119,7 @@ export function ControlButtonFields({
             onChange={updateTextField('sliderMin')}
           />
           <input
+            aria-label="Slider maximum"
             type="number"
             className={inputClassName}
             placeholder="Slider max"
@@ -119,6 +127,7 @@ export function ControlButtonFields({
             onChange={updateTextField('sliderMax')}
           />
           <input
+            aria-label="Slider start value"
             type="number"
             className={inputClassName}
             placeholder="Start value"
@@ -126,6 +135,7 @@ export function ControlButtonFields({
             onChange={updateTextField('sliderStart')}
           />
           <input
+            aria-label="Slider step"
             type="number"
             className={inputClassName}
             placeholder="Step"
@@ -133,6 +143,7 @@ export function ControlButtonFields({
             onChange={updateTextField('sliderStep')}
           />
           <Select
+            aria-label="Slider direction"
             className={fieldBackground}
             value={draft.sliderDirection}
             onChange={(event) =>
@@ -146,6 +157,7 @@ export function ControlButtonFields({
             <option value="vertical">Slider: Vertical</option>
           </Select>
           <Select
+            aria-label="Slider release behavior"
             className={fieldBackground}
             value={draft.widgetReturn}
             onChange={(event) =>
@@ -159,6 +171,7 @@ export function ControlButtonFields({
       ) : (
         <>
           <input
+            aria-label="X minimum"
             type="number"
             className={inputClassName}
             placeholder="X min"
@@ -166,6 +179,7 @@ export function ControlButtonFields({
             onChange={updateTextField('xyXMin')}
           />
           <input
+            aria-label="X maximum"
             type="number"
             className={inputClassName}
             placeholder="X max"
@@ -173,6 +187,7 @@ export function ControlButtonFields({
             onChange={updateTextField('xyXMax')}
           />
           <input
+            aria-label="X start value"
             type="number"
             className={inputClassName}
             placeholder="X start"
@@ -180,6 +195,7 @@ export function ControlButtonFields({
             onChange={updateTextField('xyXStart')}
           />
           <input
+            aria-label="Y minimum"
             type="number"
             className={inputClassName}
             placeholder="Y min"
@@ -187,6 +203,7 @@ export function ControlButtonFields({
             onChange={updateTextField('xyYMin')}
           />
           <input
+            aria-label="Y maximum"
             type="number"
             className={inputClassName}
             placeholder="Y max"
@@ -194,6 +211,7 @@ export function ControlButtonFields({
             onChange={updateTextField('xyYMax')}
           />
           <input
+            aria-label="Y start value"
             type="number"
             className={inputClassName}
             placeholder="Y start"
@@ -203,6 +221,7 @@ export function ControlButtonFields({
         </>
       )}
       <input
+        aria-label="Control cooldown in milliseconds"
         type="number"
         min={50}
         max={10000}
@@ -213,6 +232,7 @@ export function ControlButtonFields({
       />
       {releaseFeatures.paidControls ? (
         <input
+          aria-label="Control cost in credits"
           type="number"
           min={0}
           className={inputClassName}
@@ -223,6 +243,7 @@ export function ControlButtonFields({
         />
       ) : null}
       <Select
+        aria-label="Control access"
         className={fieldBackground}
         value={draft.access}
         onChange={(event) => updateField('access', event.target.value as ControlButtonAccess)}
@@ -234,12 +255,14 @@ export function ControlButtonFields({
         ))}
       </Select>
       <input
+        aria-label="Control color"
         className={inputClassName}
         placeholder="Color (optional, e.g. #22c55e)"
         value={draft.color}
         onChange={updateTextField('color')}
       />
       <input
+        aria-label="Automatic reset delay"
         type="number"
         min={100}
         className={inputClassName}

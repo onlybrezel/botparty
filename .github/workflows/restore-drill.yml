@@ -29,8 +29,28 @@ jobs:
         run: |
           docker run -d --name drill-source-pg -e POSTGRES_PASSWORD=source_password -e POSTGRES_DB=botparty -p 127.0.0.1:35432:5432 postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
           docker run -d --name drill-source-minio -e MINIO_ROOT_USER=source_access -e MINIO_ROOT_PASSWORD=source_secret_123 -p 127.0.0.1:39000:9000 minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e server /data
-          for i in $(seq 1 60); do docker exec drill-source-pg pg_isready -U postgres -d botparty && break; sleep 1; done
-          for i in $(seq 1 60); do curl -fsS http://127.0.0.1:39000/minio/health/live && break; sleep 1; done
+          wait_for_postgres() {
+            for ((attempt = 1; attempt <= 60; attempt++)); do
+              if docker exec drill-source-pg pg_isready -U postgres -d botparty; then
+                return 0
+              fi
+              sleep 1
+            done
+            echo 'PostgreSQL source did not become ready within 60 seconds.' >&2
+            return 1
+          }
+          wait_for_minio() {
+            for ((attempt = 1; attempt <= 60; attempt++)); do
+              if curl -fsS http://127.0.0.1:39000/minio/health/live; then
+                return 0
+              fi
+              sleep 1
+            done
+            echo 'MinIO source did not become ready within 60 seconds.' >&2
+            return 1
+          }
+          wait_for_postgres
+          wait_for_minio
       - name: Provision deterministic database and objects
         env:
           DATABASE_URL: postgresql://postgres:source_password@127.0.0.1:35432/botparty?schema=public

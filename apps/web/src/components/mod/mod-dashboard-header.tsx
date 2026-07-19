@@ -16,6 +16,19 @@ type OverviewCard = {
 type ActionItem = { title: string; detail: string; view: ModView };
 type ViewButton = { id: ModView; label: string; description: string; icon: LucideIcon };
 
+type Props = {
+  refreshing: boolean;
+  onRefresh: () => void;
+  overviewCards: OverviewCard[];
+  actionItems: ActionItem[];
+  generatedAt?: string;
+  ingressKbps?: number;
+  egressKbps?: number;
+  activeView: ModView;
+  onActiveViewChange: (view: ModView) => void;
+  viewButtons: ViewButton[];
+};
+
 export function ModDashboardHeader({
   refreshing,
   onRefresh,
@@ -27,140 +40,111 @@ export function ModDashboardHeader({
   activeView,
   onActiveViewChange,
   viewButtons,
-}: {
-  refreshing: boolean;
-  onRefresh: () => void;
-  overviewCards: OverviewCard[];
-  actionItems: ActionItem[];
-  generatedAt?: string;
-  ingressKbps?: number;
-  egressKbps?: number;
-  activeView: ModView;
-  onActiveViewChange: (view: ModView) => void;
-  viewButtons: ViewButton[];
-}) {
+}: Props) {
   return (
     <>
-      <section className="mb-6 overflow-hidden rounded-[28px] border border-[var(--border)] bg-[var(--card)]">
-        <div className="grid gap-0 xl:grid-cols-[1.35fr,0.95fr]">
-          <div className="border-b border-[var(--border)] bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.18),transparent_38%),linear-gradient(180deg,rgba(15,23,42,0.08),rgba(15,23,42,0))] p-6 xl:border-b-0 xl:border-r">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <p className="text-xs uppercase tracking-[0.22em] text-sky-300">Staff Console</p>
-                <h1 className="mt-2 flex items-center gap-3 text-3xl font-black tracking-tight">
-                  <span className="rounded-2xl border border-sky-400/30 bg-sky-400/10 p-2">
-                    <Shield className="h-7 w-7 text-sky-300" />
-                  </span>
-                  Mod Dashboard
-                </h1>
-                <p className="mt-3 max-w-2xl text-sm text-[var(--muted-foreground)]">
-                  Moderation comes first. Runtime, robot admin and staff user management are separated into focused work areas.
-                </p>
-              </div>
-              <button type="button" onClick={onRefresh} disabled={refreshing} className={secondaryButtonClass}>
-                <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-                {refreshing ? 'Updating...' : 'Update'}
-              </button>
+      <header className="mb-6 border-b border-[var(--border)] pb-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-semibold text-sky-700 dark:text-sky-300">
+              <Shield className="h-4 w-4" />
+              Staff console
             </div>
-
-            <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {overviewCards.map((card) => {
-                const Icon = card.icon;
-                return (
-                  <article
-                    key={card.key}
-                    className="rounded-2xl border border-[var(--border)] bg-[var(--background)]/90 p-4 backdrop-blur transition-transform duration-200 motion-safe:hover:-translate-y-1 motion-safe:hover:scale-[1.01]"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">{card.label}</p>
-                      <Icon className={`h-4 w-4 ${card.accent}`} />
-                    </div>
-                    <p className="mt-3 text-2xl font-black">{card.value}</p>
-                    <p className="mt-1 text-xs text-[var(--muted-foreground)]">{card.detail}</p>
-                  </article>
-                );
-              })}
-            </div>
+            <h1 className="mt-2 text-3xl font-bold tracking-tight">Moderation</h1>
+            <p className="mt-1 text-sm text-[var(--muted-foreground)]">
+              Review reports, operate robots and manage staff access.
+            </p>
           </div>
+          <div className="flex items-center gap-3">
+            <p className="hidden text-xs text-[var(--muted-foreground)] sm:block">
+              Updated {generatedAt ? new Date(generatedAt).toLocaleTimeString() : '-'}
+            </p>
+            <button type="button" onClick={onRefresh} disabled={refreshing} className={secondaryButtonClass}>
+              <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+              {refreshing ? 'Updating...' : 'Refresh'}
+            </button>
+          </div>
+        </div>
 
-          <div className="p-6">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-bold">Action Queue</h2>
-                <p className="text-sm text-[var(--muted-foreground)]">Shortcuts into the area that currently needs attention.</p>
+        <div className="mt-5 grid grid-cols-2 border-y border-[var(--border)] md:grid-cols-3 xl:grid-cols-6">
+          {overviewCards.map((card) => {
+            const Icon = card.icon;
+            return (
+              <div key={card.key} className="border-b border-[var(--border)] px-3 py-3 md:border-r xl:border-b-0 xl:last:border-r-0">
+                <div className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
+                  <Icon className={`h-3.5 w-3.5 ${card.accent}`} />
+                  {card.label}
+                </div>
+                <p className="mt-1 text-xl font-semibold">{card.value}</p>
+                <p className="mt-1 truncate text-xs text-[var(--muted-foreground)]" title={card.detail}>{card.detail}</p>
               </div>
-              <p className="text-xs text-[var(--muted-foreground)]">
-                Snapshot {generatedAt ? new Date(generatedAt).toLocaleTimeString() : '-'}
-              </p>
-            </div>
+            );
+          })}
+        </div>
+      </header>
 
-            <div className="mt-4 space-y-3">
-              {actionItems.map((item, index) => (
+      <section className="mb-6 grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+        <div className="border border-[var(--border)] bg-[var(--card)]">
+          <div className="border-b border-[var(--border)] px-4 py-3">
+            <h2 className="text-sm font-semibold">Needs attention</h2>
+          </div>
+          <div className="divide-y divide-[var(--border)]">
+            {actionItems.length === 0 ? (
+              <p className="px-4 py-4 text-sm text-[var(--muted-foreground)]">Nothing needs immediate action.</p>
+            ) : (
+              actionItems.map((item, index) => (
                 <button
                   key={`${item.title}-${index}`}
                   type="button"
                   onClick={() => onActiveViewChange(item.view)}
-                  className="flex w-full items-start justify-between gap-3 rounded-2xl border border-[var(--border)] bg-[var(--background)] px-4 py-3 text-left transition hover:border-sky-400/40 hover:bg-sky-500/5 motion-safe:hover:translate-x-1"
+                  className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left transition-colors hover:bg-[var(--muted)]"
                 >
                   <div>
                     <p className="text-sm font-semibold">{item.title}</p>
-                    <p className="mt-1 text-xs text-[var(--muted-foreground)]">{item.detail}</p>
+                    <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">{item.detail}</p>
                   </div>
-                  <ChevronRight className="mt-0.5 h-4 w-4 text-[var(--muted-foreground)]" />
+                  <ChevronRight className="h-4 w-4 shrink-0 text-[var(--muted-foreground)]" />
                 </button>
-              ))}
-            </div>
+              ))
+            )}
+          </div>
+        </div>
 
-            <div className="mt-6 grid gap-3 sm:grid-cols-2">
-              <div className="rounded-2xl border border-[var(--border)] bg-[var(--background)] p-4">
-                <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Platform traffic</p>
-                <p className="mt-2 text-lg font-bold">{formatBitrate(ingressKbps)}</p>
-                <p className="text-xs text-[var(--muted-foreground)]">Ingress across tracked containers</p>
-                <p className="mt-3 text-lg font-bold">{formatBitrate(egressKbps)}</p>
-                <p className="text-xs text-[var(--muted-foreground)]">Egress across tracked containers</p>
-              </div>
-              <div className="rounded-2xl border border-[var(--border)] bg-[var(--background)] p-4">
-                <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Current focus</p>
-                <p className="mt-2 text-lg font-bold capitalize">{activeView}</p>
-                <p className="mt-1 text-xs text-[var(--muted-foreground)]">
-                  {viewButtons.find((view) => view.id === activeView)?.description ?? 'No section selected.'}
-                </p>
-              </div>
-            </div>
+        <div className="grid grid-cols-2 border border-[var(--border)] bg-[var(--card)] lg:grid-cols-1 lg:divide-y lg:divide-[var(--border)]">
+          <div className="border-r border-[var(--border)] p-4 lg:border-r-0">
+            <p className="text-xs text-[var(--muted-foreground)]">Platform ingress</p>
+            <p className="mt-1 text-lg font-semibold">{formatBitrate(ingressKbps)}</p>
+          </div>
+          <div className="p-4">
+            <p className="text-xs text-[var(--muted-foreground)]">Platform egress</p>
+            <p className="mt-1 text-lg font-semibold">{formatBitrate(egressKbps)}</p>
           </div>
         </div>
       </section>
 
-      <section className="mb-6">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          {viewButtons.map((view) => {
-            const Icon = view.icon;
-            const active = activeView === view.id;
-            return (
-              <button
-                key={view.id}
-                type="button"
-                onClick={() => onActiveViewChange(view.id)}
-                className={`rounded-2xl border px-4 py-4 text-left transition-transform duration-200 motion-safe:hover:-translate-y-1 motion-safe:hover:scale-[1.01] ${
-                  active
-                    ? 'border-sky-400/50 bg-sky-500/12 shadow-[0_14px_30px_rgba(14,165,233,0.12),inset_0_1px_0_rgba(255,255,255,0.04)]'
-                    : 'border-[var(--border)] bg-[var(--card)] hover:border-sky-400/30 hover:bg-sky-500/5'
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <span className={`rounded-xl p-2 ${active ? 'bg-sky-400/10 text-sky-300' : 'bg-[var(--muted)] text-[var(--muted-foreground)]'}`}>
-                    <Icon className="h-4 w-4" />
-                  </span>
-                  <div>
-                    <p className="text-sm font-semibold">{view.label}</p>
-                    <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">{view.description}</p>
-                  </div>
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </section>
+      <nav aria-label="Moderation sections" className="mb-6 flex gap-1 overflow-x-auto border-b border-[var(--border)]">
+        {viewButtons.map((view) => {
+          const Icon = view.icon;
+          const active = activeView === view.id;
+          return (
+            <button
+              key={view.id}
+              type="button"
+              onClick={() => onActiveViewChange(view.id)}
+              aria-pressed={active}
+              title={view.description}
+              className={`flex shrink-0 items-center gap-2 border-b-2 px-4 py-3 text-sm font-semibold transition-colors ${
+                active
+                  ? 'border-sky-400 text-[var(--foreground)]'
+                  : 'border-transparent text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+              }`}
+            >
+              <Icon className="h-4 w-4" />
+              {view.label}
+            </button>
+          );
+        })}
+      </nav>
     </>
   );
 }

@@ -64,6 +64,16 @@ describe('validateEnvironment', () => {
     }));
   });
 
+  it('keeps subscriptions fail-closed in production', () => {
+    expect(() => validateEnvironment({
+      ...productionEnvironment,
+      FEATURE_BILLING_ENABLED: 'true',
+      FEATURE_SUBSCRIPTIONS_ENABLED: 'true',
+      STRIPE_SECRET_KEY: 'configured-test-secret',
+      STRIPE_WEBHOOK_SECRET: 'configured-test-webhook-secret',
+    })).toThrow(/FEATURE_SUBSCRIPTIONS_ENABLED: must remain false/);
+  });
+
   it('rejects SameSite=None cookies unless Secure is guaranteed', () => {
     expect(() => validateEnvironment({
       NODE_ENV: 'test',

@@ -12,6 +12,7 @@ export default function AnalyticsPage() {
   const router = useRouter();
   const { accessToken, role, hasHydrated } = useAuth();
   const [data, setData] = useState<AnalyticsDashboard | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!hasHydrated) return;
@@ -19,11 +20,26 @@ export default function AnalyticsPage() {
       router.replace('/');
       return;
     }
+    let active = true;
     api.setToken(accessToken);
-    void api.analytics.dashboard(30).then(setData);
+    void api.analytics.dashboard(30).then((dashboard) => {
+      if (active) {
+        setData(dashboard);
+      }
+    }).catch((loadError: unknown) => {
+      if (active) {
+        setError(loadError instanceof Error ? loadError.message : 'Could not load product analytics.');
+      }
+    });
+    return () => {
+      active = false;
+    };
   }, [accessToken, hasHydrated, role, router]);
 
-  if (!data) return <main className="mx-auto max-w-6xl px-4 py-10">Loading analytics...</main>;
+  if (error) {
+    return <div role="alert" className="mx-auto max-w-6xl px-4 py-10">{error}</div>;
+  }
+  if (!data) return <div className="mx-auto max-w-6xl px-4 py-10">Loading analytics...</div>;
   const cards = [
     ['Consented robot views', data.discovery.toLocaleString()],
     ['Host publish rate', percent(data.hostActivation.publishRate)],
@@ -34,7 +50,7 @@ export default function AnalyticsPage() {
     ['INP p75', data.webVitals.inpP75Ms === null ? '—' : `${Math.round(data.webVitals.inpP75Ms)} ms`],
   ];
   return (
-    <main className="mx-auto max-w-6xl px-4 py-10">
+    <div className="mx-auto max-w-6xl px-4 py-10">
       <h1 className="text-3xl font-black">Product analytics</h1>
       <p className="mt-2 text-sm text-[var(--muted-foreground)]">
         Last {data.window.days} days. User events include consented first-party activity only; funnel totals come from product records.
@@ -62,6 +78,6 @@ export default function AnalyticsPage() {
           ))}
         </ul>
       </section>
-    </main>
+    </div>
   );
 }

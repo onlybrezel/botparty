@@ -51,6 +51,12 @@ html.light {
   --live: #dc2626;
 }
 
+html[data-theme-changing='true'] *,
+html[data-theme-changing='true'] *::before,
+html[data-theme-changing='true'] *::after {
+  transition: none !important;
+}
+
 * {
   box-sizing: border-box;
 }

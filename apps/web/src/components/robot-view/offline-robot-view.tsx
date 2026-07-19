@@ -24,7 +24,7 @@ export function OfflineRobotView({ robot }: { robot: RobotPublic }) {
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
-          <div className="flex aspect-video flex-col items-center justify-center gap-3 rounded-xl border border-[var(--border)] bg-black text-[var(--muted-foreground)]">
+          <div className="flex aspect-video flex-col items-center justify-center gap-3 rounded-xl border border-[var(--border)] bg-black text-zinc-300">
             <div className="rounded-xl border border-[var(--border)] bg-[var(--muted)] p-3">
               <Bot className="h-7 w-7" />
             </div>
@@ -52,7 +52,7 @@ export function OfflineRobotView({ robot }: { robot: RobotPublic }) {
                 <h1 className="text-lg font-bold leading-tight">{robot.name}</h1>
                 <p className="text-sm text-[var(--muted-foreground)]">by {ownerName}</p>
               </div>
-              <span className="rounded-full bg-zinc-700/50 px-2 py-0.5 text-xs text-zinc-300">
+              <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-100">
                 {statusLabel}
               </span>
             </div>

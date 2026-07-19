@@ -44,6 +44,9 @@ http {
     gzip on;
     gzip_types text/plain text/css application/json application/javascript text/xml;
     resolver 127.0.0.11 valid=1s ipv6=off;
+    # Bound connection setup so a removed container address does not retain a
+    # browser request for nginx's 60-second default timeout.
+    proxy_connect_timeout 2s;
     proxy_next_upstream error timeout invalid_header http_502 http_504;
     proxy_next_upstream_tries 3;
 
@@ -256,7 +259,7 @@ http {
         }
 
         # ─── Swagger Docs ───────────────────────────
-        location /docs {
+        location /api-docs {
             proxy_pass http://api;
             proxy_set_header Host $host;
         }

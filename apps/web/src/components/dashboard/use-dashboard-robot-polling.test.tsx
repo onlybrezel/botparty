@@ -101,6 +101,7 @@ describe('useDashboardRobotPolling', () => {
   });
 
   it('keeps empty state when diagnostic requests fail', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     mockApi.getPendingRobotActions.mockRejectedValue(new Error('actions unavailable'));
     mockApi.getRobotLogs.mockRejectedValue(new Error('logs unavailable'));
     mockApi.getRobotTelemetry.mockRejectedValue(new Error('telemetry unavailable'));
@@ -114,5 +115,7 @@ describe('useDashboardRobotPolling', () => {
     expect(result.current.diagLogs).toEqual([]);
     expect(result.current.telemetry.latest).toBeNull();
     expect(result.current.onboarding).toBeNull();
+    expect(consoleError).toHaveBeenCalledTimes(3);
+    consoleError.mockRestore();
   });
 });

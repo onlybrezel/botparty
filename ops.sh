@@ -36,6 +36,14 @@ load_env() {
   load_dotenv_file .env
 }
 
+run_production_preflight() {
+  load_env
+  if [[ "${PUBLIC_DEPLOYMENT:-true}" == "true" ]]; then
+    info "Validating public production release gates"
+    ./scripts/production-preflight.sh .env
+  fi
+}
+
 service_list_for_scope() {
   local scope="$1"
   case "$scope" in
@@ -670,6 +678,10 @@ run_restart() {
     git pull --ff-only
   fi
 
+  if [[ "$reason" == "update" ]]; then
+    run_production_preflight
+  fi
+
   if [[ "$scope" == "full" ]]; then
     compose_pull_scope_images "$scope"
   fi
@@ -693,6 +705,8 @@ run_zero_downtime_update() {
     info "Pulling latest changes"
     git pull --ff-only
   fi
+
+  run_production_preflight
 
   if [[ "${OPS_BACKUP_BEFORE_UPDATE:-true}" == true ]]; then
     info "Creating the pre-release database and object-storage archive"
@@ -738,6 +752,8 @@ run_zero_downtime_rollback() {
   load_env
   : "${APP_VERSION:?Set APP_VERSION to the previously verified release tag}"
 
+  run_production_preflight
+
   pull_services_best_effort api web
 
   publish_shutdown_notice rollback "$DEFAULT_UPDATE_RETRY_AFTER_MS" "$(message_for_reason update)" app
@@ -776,6 +792,7 @@ Usage:
   ./ops.sh resume-full
   ./ops.sh announce <reason> [retry_after_ms] [scope]
   ./ops.sh status
+  ./ops.sh preflight
 
 Commands:
   start              Start app services only: api web nginx.
@@ -797,6 +814,7 @@ Commands:
   announce           Only send the realtime shutdown notice to web + robot clients.
                      scope can be app or full (default: app).
   status             Show docker compose service status.
+  preflight          Validate public URLs, review evidence, secrets, TLS files, and Compose configuration.
 EOF
 }
 
@@ -804,9 +822,11 @@ cmd="${1:-}"
 
 case "$cmd" in
   start)
+    run_production_preflight
     compose_up_scope app
     ;;
   full-start)
+    run_production_preflight
     compose_up_scope full
     ;;
   stop)
@@ -847,10 +867,12 @@ case "$cmd" in
     ;;
   resume|maintenance-off)
     info "Starting app services"
+    run_production_preflight
     compose_up_scope app
     ;;
   resume-full|maintenance-off-full)
     info "Starting full stack"
+    run_production_preflight
     compose_up_scope full
     ;;
   announce)
@@ -861,6 +883,9 @@ case "$cmd" in
     ;;
   status)
     docker compose ps
+    ;;
+  preflight)
+    run_production_preflight
     ;;
   ""|-h|--help|help)
     usage

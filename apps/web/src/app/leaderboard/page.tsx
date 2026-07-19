@@ -108,26 +108,26 @@ export default async function LeaderboardPage({
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
-      <section className="mb-8 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6 sm:p-8">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--primary)]/15">
-            <Trophy className="h-5 w-5 text-violet-300" />
-          </span>
-          <div className="flex-1">
-            <h1 className="text-3xl font-black tracking-tight">Leaderboard</h1>
-            <p className="text-sm text-[var(--muted-foreground)]">
-              Live room rankings, seasonal activity, and the newest operators on the platform.
+      <header className="mb-8 border-b border-[var(--border)] pb-5">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h1 className="flex items-center gap-2 text-3xl font-bold tracking-tight">
+              <Trophy className="h-6 w-6 text-[var(--primary)]" />
+              Leaderboard
+            </h1>
+            <p className="mt-1 text-sm text-[var(--muted-foreground)]">
+              Live rooms and creator activity.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex border-b border-[var(--border)]">
             {PERIOD_OPTIONS.map((option) => (
               <Link
                 key={option.id}
                 href={`/leaderboard?period=${option.id}`}
-                className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
+                className={`border-b-2 px-3 py-2 text-xs font-semibold ${
                   selectedPeriod === option.id
-                    ? 'border-sky-500/50 bg-sky-500/15 text-sky-900 dark:text-sky-100'
-                    : 'border-[var(--border)] bg-[var(--background)] text-[var(--muted-foreground)]'
+                    ? 'border-[var(--primary)] text-[var(--foreground)]'
+                    : 'border-transparent text-[var(--muted-foreground)]'
                 }`}
               >
                 {option.label}
@@ -135,7 +135,7 @@ export default async function LeaderboardPage({
             ))}
           </div>
         </div>
-      </section>
+      </header>
 
       {ranked.length === 0 ? (
         <section className="rounded-xl border border-dashed border-[var(--border)] py-16 text-center">
@@ -174,7 +174,7 @@ export default async function LeaderboardPage({
                 </div>
 
                 <span
-                  className={`col-span-3 sm:col-span-2 inline-flex w-fit rounded-full px-2 py-0.5 text-xs font-medium ${statusColor(robot.status)}`}
+                  className={`col-span-3 sm:col-span-2 inline-flex w-fit rounded-md px-2 py-0.5 text-xs font-medium ${statusColor(robot.status)}`}
                 >
                   {robot.status}
                 </span>
@@ -193,35 +193,35 @@ export default async function LeaderboardPage({
         </section>
       )}
 
-      <section className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-          <p className="inline-flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
+      <section className="mt-6 grid grid-cols-3 border-y border-[var(--border)]">
+        <div className="border-r border-[var(--border)] p-4">
+          <p className="inline-flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
             <Radio className="h-4 w-4 text-violet-300" />
             Online robots
           </p>
-          <p className="mt-2 text-2xl font-black">
+          <p className="mt-1 text-xl font-semibold">
             {overview
               ? overview.totals.liveRobots
               : ranked.filter((r) => r.status === 'ONLINE' || r.status === 'BUSY').length}
           </p>
         </div>
-        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-          <p className="inline-flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
+        <div className="border-r border-[var(--border)] p-4">
+          <p className="inline-flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
             <Eye className="h-4 w-4 text-violet-300" />
             Total live viewers
           </p>
-          <p className="mt-2 text-2xl font-black">
+          <p className="mt-1 text-xl font-semibold">
             {overview
               ? overview.totals.totalViewers
               : ranked.reduce((sum, r) => sum + r.viewerCount, 0)}
           </p>
         </div>
-        <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-          <p className="inline-flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--muted-foreground)]">
+        <div className="p-4">
+          <p className="inline-flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
             <Clock3 className="h-4 w-4 text-violet-300" />
             Ranked entries
           </p>
-          <p className="mt-2 text-2xl font-black">{ranked.length}</p>
+          <p className="mt-1 text-xl font-semibold">{ranked.length}</p>
         </div>
       </section>
 
@@ -258,14 +258,14 @@ export default async function LeaderboardPage({
                       <span>{creator.recentSessions} sessions</span>
                       <span>{creator.robotCount} robots</span>
                       {creator.isNewOperator ? (
-                        <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-2 py-0.5 text-emerald-200">
+                        <span className="rounded-full border border-emerald-600/30 bg-emerald-500/10 px-2 py-0.5 text-emerald-700 dark:border-emerald-400/30 dark:text-emerald-200">
                           New operator
                         </span>
                       ) : null}
                     </div>
                   </div>
                 </div>
-                <span className="text-sm font-semibold text-amber-300">
+                <span className="text-sm font-semibold text-amber-700 dark:text-amber-300">
                   {creator.credits} sessions
                 </span>
               </li>

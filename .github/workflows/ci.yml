@@ -84,6 +84,9 @@ jobs:
       - name: Check environment documentation parity
         run: pnpm env:check
 
+      - name: Test production preflight rules
+        run: pnpm production:preflight:test
+
       - name: Check literal dotenv loading
         run: sh scripts/test-dotenv-loader.sh
 

@@ -58,10 +58,11 @@ export function DashboardWebhooksSection({
 
         <div className="grid gap-3 lg:grid-cols-[1.25fr,0.75fr]">
           <div className="space-y-3">
-            <label className="block text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
+            <label htmlFor="webhook-url" className="block text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
               Delivery URL
             </label>
             <input
+              id="webhook-url"
               className="w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
               placeholder="https://example.com/botparty/webhook"
               value={webhookUrl}
@@ -81,7 +82,7 @@ export function DashboardWebhooksSection({
                       aria-pressed={active}
                       className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
                         active
-                          ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+                          ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
                           : 'border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
                       }`}
                     >
@@ -112,10 +113,10 @@ export function DashboardWebhooksSection({
             </button>
 
             {createdWebhookSecret ? (
-              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-3 text-sm text-amber-100">
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-3 text-sm text-amber-900 dark:text-amber-100">
                 <p className="font-semibold">Copy this signing secret now</p>
                 <p className="mt-1 break-all font-mono text-xs">{createdWebhookSecret}</p>
-                <p className="mt-2 text-xs text-amber-200/80">
+                <p className="mt-2 text-xs text-amber-900 dark:text-amber-200">
                   BotParty stores only an encrypted version. Future deliveries use the `x-botparty-signature` HMAC header.
                 </p>
               </div>
@@ -164,7 +165,7 @@ export function DashboardWebhooksSection({
                       type="button"
                       onClick={() => onDeleteWebhook(webhook)}
                       disabled={webhookOp === webhook.id}
-                      className="rounded border border-red-500/40 px-2 py-1 text-xs text-red-300 disabled:opacity-50"
+                      className="rounded border border-red-500/40 px-2 py-1 text-xs text-red-700 disabled:opacity-50 dark:text-red-300"
                     >
                       {webhookOp === webhook.id ? 'Deleting...' : 'Delete'}
                     </button>

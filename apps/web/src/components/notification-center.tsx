@@ -12,6 +12,7 @@ export function NotificationCenter({ enabled }: { enabled: boolean }) {
   const [items, setItems] = useState<NotificationRecord[]>([]);
   const [unread, setUnread] = useState(0);
   const ref = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
 
   const load = useCallback(async () => {
     if (!enabled) return;
@@ -50,6 +51,17 @@ export function NotificationCenter({ enabled }: { enabled: boolean }) {
     return () => document.removeEventListener('mousedown', close);
   }, [open]);
 
+  useEffect(() => {
+    if (!open) return;
+    const closeWithEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setOpen(false);
+      buttonRef.current?.focus();
+    };
+    document.addEventListener('keydown', closeWithEscape);
+    return () => document.removeEventListener('keydown', closeWithEscape);
+  }, [open]);
+
   const markRead = async (item: NotificationRecord) => {
     if (!item.readAt) {
       try {
@@ -68,9 +80,11 @@ export function NotificationCenter({ enabled }: { enabled: boolean }) {
   return (
     <div className="relative" ref={ref}>
       <button
+        ref={buttonRef}
         type="button"
         aria-label={unread > 0 ? `${unread} unread notifications` : 'Notifications'}
         aria-expanded={open}
+        aria-controls="notification-panel"
         onClick={() => setOpen((value) => !value)}
         className="relative inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--card)]"
       >
@@ -82,7 +96,12 @@ export function NotificationCenter({ enabled }: { enabled: boolean }) {
         ) : null}
       </button>
       {open ? (
-        <div className="absolute right-0 top-full z-50 mt-2 w-80 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-xl">
+        <div
+          id="notification-panel"
+          role="dialog"
+          aria-label="Notifications"
+          className="absolute right-0 top-full z-50 mt-2 w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-xl"
+        >
           <div className="flex items-center justify-between border-b border-[var(--border)] px-3 py-2">
             <span className="text-sm font-semibold">Notifications</span>
             {unread > 0 ? (

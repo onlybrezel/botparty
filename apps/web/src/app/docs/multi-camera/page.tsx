@@ -98,7 +98,7 @@ export default function MultiCameraDocsPage() {
         </div>
 
         <div className="mt-6 rounded-xl border border-[var(--border)] bg-[var(--background)] p-5">
-          <p className="text-sm font-semibold">Implementation order</p>
+          <p className="text-sm font-semibold">Setup order</p>
           <ol className="mt-3 space-y-3 text-sm text-[var(--muted-foreground)]">
             <li>1. Use the same camera entries for single- and multi-camera setups.</li>
             <li>2. Publish one video track per camera with stable IDs or metadata.</li>

@@ -4,8 +4,20 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="botparty-e2e-${$}"
 SECRET_DIR="$(mktemp -d)"
-RESULT_DIR="$(mktemp -d)"
+RESULT_DIR="${E2E_RESULT_DIR:-$(mktemp -d)}"
+FAILOVER_SIGNAL_DIR="${RESULT_DIR}/failover-signals"
 RUNNER_IMAGE="mcr.microsoft.com/playwright:v1.59.1-noble@sha256:b0ab6f3cb99aa7803adbc14d9027ec1785fc6e433b97e134e0f8fe61683b6b53"
+RESULT_DIR_IS_TEMP=true
+if [[ -n "${E2E_RESULT_DIR:-}" ]]; then
+  RESULT_DIR_IS_TEMP=false
+  if [[ -d "${RESULT_DIR}" ]] && ! chmod -R u+rwX "${RESULT_DIR}" 2>/dev/null; then
+    docker run --rm \
+      --mount "type=bind,src=${RESULT_DIR},dst=/results" \
+      "${RUNNER_IMAGE}" chmod -R a+rwX /results
+  fi
+  rm -rf "${RESULT_DIR}"
+  mkdir -p "${RESULT_DIR}"
+fi
 COMPOSE=(
   docker compose -p "${PROJECT}"
   -f "${ROOT_DIR}/docker-compose.yml"
@@ -13,6 +25,14 @@ COMPOSE=(
 )
 
 export BOTPARTY_SECRET_DIR="${SECRET_DIR}"
+# The production proxy intentionally allows only a small number of logins per
+# client IP. All browser workers share one Docker IP, so use an isolated copy
+# with a higher auth rate while retaining dedicated 429 behavior tests.
+sed \
+  -e 's/rate=3r\/m/rate=100r\/s/' \
+  -e 's/rate=5r\/m/rate=100r\/s/' \
+  "${ROOT_DIR}/docker/nginx/nginx.conf" > "${SECRET_DIR}/nginx-e2e.conf"
+export NGINX_CONF="${SECRET_DIR}/nginx-e2e.conf"
 export LIVEKIT_API_KEY="botparty-e2e-key"
 export APP_URL="http://nginx"
 export PUBLIC_WEB_URL="http://nginx"
@@ -45,7 +65,17 @@ cleanup() {
   if ! "${COMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1; then
     echo "Warning: failed to remove ${PROJECT} after E2E." >&2
   fi
-  rm -rf "${SECRET_DIR}" "${RESULT_DIR}"
+  if [[ -d "${RESULT_DIR}" ]] && ! chmod -R u+rwX "${RESULT_DIR}" 2>/dev/null; then
+    if ! docker run --rm \
+      --mount "type=bind,src=${RESULT_DIR},dst=/results" \
+      "${RUNNER_IMAGE}" chmod -R a+rwX /results >/dev/null 2>&1; then
+      echo "Warning: failed to restore test result permissions in ${RESULT_DIR}." >&2
+    fi
+  fi
+  rm -rf "${SECRET_DIR}"
+  if [[ "${RESULT_DIR_IS_TEMP}" == true ]]; then
+    rm -rf "${RESULT_DIR}"
+  fi
   return "${exit_code}"
 }
 trap cleanup EXIT
@@ -96,6 +126,46 @@ wait_for_replicas() {
   return 1
 }
 
+wait_for_signal_file() {
+  local path="$1"
+  while [[ ! -f "${path}" ]]; do
+    sleep 0.2
+  done
+}
+
+orchestrate_api_failover() (
+  set -e
+  trap 'printf "%s\n" "Docker failover orchestration failed." > "${FAILOVER_SIGNAL_DIR}/failover-error"' ERR
+
+  wait_for_signal_file "${FAILOVER_SIGNAL_DIR}/failover-ready"
+  mapfile -t api_containers < <("${COMPOSE[@]}" ps -q api)
+  if (( ${#api_containers[@]} != 2 )); then
+    echo "Expected two API containers for failover, found ${#api_containers[@]}." >&2
+    exit 1
+  fi
+
+  docker stop --time 10 "${api_containers[0]}" >/dev/null
+  printf '%s\n' 'stopped' > "${FAILOVER_SIGNAL_DIR}/failover-stopped"
+
+  wait_for_signal_file "${FAILOVER_SIGNAL_DIR}/failover-restart-requested"
+  docker start "${api_containers[0]}" >/dev/null
+
+  local state='starting'
+  for _ in $(seq 1 90); do
+    state="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${api_containers[0]}")"
+    if [[ "${state}" == healthy ]]; then
+      break
+    fi
+    sleep 1
+  done
+  if [[ "${state}" != healthy ]]; then
+    echo "Restarted API remained ${state}." >&2
+    exit 1
+  fi
+  printf '%s\n' 'healthy' > "${FAILOVER_SIGNAL_DIR}/failover-restarted"
+  wait_for_signal_file "${FAILOVER_SIGNAL_DIR}/failover-complete"
+)
+
 "${COMPOSE[@]}" config --quiet
 if [[ "${E2E_SKIP_BUILD:-false}" != true ]]; then
   "${COMPOSE[@]}" build api web
@@ -105,6 +175,15 @@ wait_for_replicas api 2
 wait_for_replicas web 2
 wait_for_replicas nginx 1
 
+FAILOVER_ORCHESTRATOR_PID=''
+if [[ "${E2E_RUN_FAILOVER:-false}" == true ]]; then
+  mkdir -p "${FAILOVER_SIGNAL_DIR}"
+  chmod a+rwx "${FAILOVER_SIGNAL_DIR}"
+  orchestrate_api_failover &
+  FAILOVER_ORCHESTRATOR_PID=$!
+fi
+
+set +e
 docker run --rm --init --ipc=host \
   --name "${PROJECT}-e2e-runner" \
   --network "${PROJECT}_frontend" \
@@ -113,6 +192,7 @@ docker run --rm --init --ipc=host \
   --memory 2g \
   --cpus 2 \
   --mount "type=bind,src=${ROOT_DIR},dst=/work,readonly" \
+  --mount "type=bind,src=${ROOT_DIR}/apps/web/tests/e2e/visual,dst=/work/apps/web/tests/e2e/visual" \
   --mount "type=bind,src=${RESULT_DIR},dst=/results" \
   -e CI=true \
   -e PLAYWRIGHT_EXTERNAL_SERVERS=true \
@@ -121,7 +201,34 @@ docker run --rm --init --ipc=host \
   -e API_URL=http://api:4000 \
   -e E2E_ADMIN_EMAIL=admin@botparty.test \
   -e E2E_ADMIN_PASSWORD='E2eAdminPassword!2026' \
+  -e E2E_USER_PASSWORD='E2eDemoPassword!2026' \
+  -e E2E_TEST_FILE="${E2E_TEST_FILE:-}" \
+  -e E2E_PLAYWRIGHT_PROJECT="${E2E_PLAYWRIGHT_PROJECT:-}" \
+  -e E2E_SKIP_FUNCTIONAL="${E2E_SKIP_FUNCTIONAL:-false}" \
+  -e E2E_SKIP_AUXILIARY="${E2E_SKIP_AUXILIARY:-false}" \
+  -e E2E_RUN_FAILOVER="${E2E_RUN_FAILOVER:-false}" \
+  -e E2E_FAILOVER_SIGNAL_DIR=/results/failover-signals \
+  -e E2E_UPDATE_VISUAL_SNAPSHOTS="${E2E_UPDATE_VISUAL_SNAPSHOTS:-false}" \
   "${RUNNER_IMAGE}" \
-  bash -lc 'cd /work/apps/web; code=0; LOAD_TEST_ALLOW_REMOTE=true LOAD_TEST_MIN_INSTANCES=2 LOAD_TEST_MAX_REQUESTS=20 LOAD_TEST_DURATION_SECONDS=3 LOAD_TEST_CONCURRENCY=1 node /work/scripts/load-smoke.mjs http://nginx/api/v1/health/stats || code=$?; if (( code == 0 )); then /work/node_modules/.bin/playwright test --project=chromium || code=$?; fi; chmod -R a+rwX /results; exit $code'
+  bash -lc 'cd /work/apps/web; code=0; functional_args=(); if [[ -n "$E2E_TEST_FILE" ]]; then functional_args+=("$E2E_TEST_FILE"); fi; if [[ -n "$E2E_PLAYWRIGHT_PROJECT" ]]; then functional_args+=("--project=$E2E_PLAYWRIGHT_PROJECT"); fi; LOAD_TEST_ALLOW_REMOTE=true LOAD_TEST_MIN_INSTANCES=2 LOAD_TEST_MAX_REQUESTS=20 LOAD_TEST_DURATION_SECONDS=3 LOAD_TEST_CONCURRENCY=1 node /work/scripts/load-smoke.mjs http://nginx/api/v1/health/stats || code=$?; if (( code == 0 )) && [[ "$E2E_SKIP_FUNCTIONAL" != true ]]; then PLAYWRIGHT_OUTPUT_DIR=/results/functional /work/node_modules/.bin/playwright test "${functional_args[@]}" || code=$?; fi; if (( code == 0 )) && [[ "$E2E_SKIP_AUXILIARY" != true ]]; then PLAYWRIGHT_OUTPUT_DIR=/results/responsive /work/node_modules/.bin/playwright test --config playwright.responsive.config.ts || code=$?; fi; if (( code == 0 )) && [[ "$E2E_SKIP_AUXILIARY" != true ]]; then visual_args=(); if [[ "$E2E_UPDATE_VISUAL_SNAPSHOTS" == true ]]; then visual_args+=(--update-snapshots=all); fi; PLAYWRIGHT_OUTPUT_DIR=/results/visual /work/node_modules/.bin/playwright test --config playwright.visual.config.ts "${visual_args[@]}" || code=$?; fi; if (( code == 0 )) && [[ "$E2E_RUN_FAILOVER" == true ]]; then PLAYWRIGHT_OUTPUT_DIR=/results/failover /work/node_modules/.bin/playwright test --config playwright.failover.config.ts || code=$?; fi; chmod -R a+rwX /results; exit $code'
+RUNNER_STATUS=$?
+set -e
+
+if [[ -n "${FAILOVER_ORCHESTRATOR_PID}" ]]; then
+  if (( RUNNER_STATUS != 0 )) && kill -0 "${FAILOVER_ORCHESTRATOR_PID}" 2>/dev/null; then
+    kill "${FAILOVER_ORCHESTRATOR_PID}"
+  fi
+  set +e
+  wait "${FAILOVER_ORCHESTRATOR_PID}"
+  FAILOVER_STATUS=$?
+  set -e
+  if (( RUNNER_STATUS == 0 && FAILOVER_STATUS != 0 )); then
+    RUNNER_STATUS=${FAILOVER_STATUS}
+  fi
+fi
+
+if (( RUNNER_STATUS != 0 )); then
+  exit "${RUNNER_STATUS}"
+fi
 
 echo 'Docker E2E suite passed.'

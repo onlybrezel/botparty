@@ -1,10 +1,10 @@
 # Finaler Produktionsreifebericht
 
-Stand: 18.07.2026.
+Stand: 19.07.2026.
 
 ## Entscheidung
 
-Der Docker-basierte technische Core ist für eine geschützte Staging-/Self-Hosting-Abnahme produktionsnah. Ein öffentlicher Go-live mit Zahlungen, Payouts oder realen Robots ist **bedingt freigabefähig**, nicht pauschal freigegeben: externe Provider-, Rechts-, Hardware- und Betreiberabnahmen fehlen. Die betroffenen Features sind ohne vollständige Konfiguration fail-closed.
+Der Docker-basierte technische Core ist für eine geschützte Staging-/Self-Hosting-Abnahme produktionsnah. Ein öffentlicher Go-live ist **nicht pauschal freigegeben**: externe Provider-, Rechts-, Hardware- und Betreiberabnahmen fehlen. Der Produktions-Preflight stoppt öffentliche Starts ohne dokumentierte Rechts-/Datenschutz-, Restore- und Alarmierungsnachweise; Billing, Payouts und Paid Controls verlangen zusätzliche Freigabereferenzen. Subscriptions bleiben in Produktion technisch gesperrt.
 
 ## Untersuchte Komponenten und Rollen
 
@@ -45,32 +45,33 @@ Alle genannten technischen Befunde wurden im Repository repariert und mit Regres
 - Container/Betrieb: `docker-compose*.yml`, `docker/api`, `docker/nginx`, Prometheus/Loki/Promtail-Konfiguration, `ops.sh`, `setup-env.sh` und Backup-/Restore-/Smoke-/Generator-Skripte unter `scripts`.
 - Lieferkette/Dokumentation: `.github/workflows`, `.env.example`, Root-/Workspace-Paketkonfiguration, Lockfile, README, Runbook, OpenAPI/API-Client-Dokumentation, `AUDIT.md` und die 16 Abschlussberichte.
 
-Der Produktionsaudit umfasste 231 geänderte oder neue Pfade einschließlich der damals generierten API-Clientdateien und Berichte. Der anschließende Wartbarkeitsaudit hat nicht genutzte generierte Artefakte entfernt. Es wurde kein Commit erzeugt und kein fremder Arbeitsstand zurückgesetzt.
+Der Produktionsaudit umfasste 231 geänderte oder neue Pfade einschließlich der damals generierten API-Clientdateien und Berichte. Der anschließende Wartbarkeitsaudit hat nicht genutzte generierte Artefakte entfernt. Der technische Auditstand wurde als `c299995` auf den Remote-Branch übertragen; die nachfolgende Frontendabnahme und aktuelle Release-Härtung liegen weiterhin als geschützter, nicht zurückgesetzter Arbeitsstand vor.
 
 ## Abschlussprüfungen
 
-| Prüfung | Ergebnis |
-| --- | --- |
-| frischer Docker-E2E-Build/Migration/Seed | erfolgreich |
-| E2E Browser/API | 21/21 bestanden |
-| API Unit/Integration | 65/65 Suites, 608/608 Tests einschließlich PostgreSQL-/Redis-Testcontainern |
-| Web Unit | 33/33 Dateien, 109/109 Tests |
-| Lint | 0 Fehler, 0 Warnungen |
-| Typecheck | erfolgreich |
-| Produktions-Build / Webbudgets | erfolgreich |
-| Migration 0→aktuell, Legacy, Wiederholung, Drift | erfolgreich, 12 Migrationen |
-| verschlüsseltes Backup/Restore und Negativfälle | erfolgreich; finaler Vollrestore nach allen API-Korrekturen 30 s |
-| API-Ausfall / Redis / PostgreSQL / MinIO / LiveKit | kontrolliert wie dokumentiert |
-| zwei API-Instanzen | erfolgreich, beide Instanz-IDs unter Last |
-| Rollout / Rollback / Rollforward | 25.446 / 23.595 / 22.762 Antworten, ausschließlich HTTP 200; keine Verbindungsfehler |
-| abgewiesener ungesunder Surge | 9.958/9.958 HTTP 200 über alte Replikas, null Fehler |
-| finaler Keep-alive-Rollout | 146.191 HTTP 200; 7 rohe Socket-Reconnects von 146.198 Versuchen (0,0048 %), 0 HTTP-Fehler |
-| Lasttest | bis 1.463,51 rps kurz; 0 Fehler |
-| OpenAPI-/Referenz-Drift | 110 Pfade/126 Operationen; deterministische Generierung |
-| Produktions-/vollständiger Dependency-Audit | keine bekannten Schwachstellen; Exit 0 |
-| Bash/ShellCheck / Compose-Rendering | ohne Befund; Produktion, Entwicklung und E2E gültig |
-| gehärtetes HTTPS-Profil | UID 101, read-only, keine Capabilities, TLS/Redirect/Liveness erfolgreich |
-| Abschließender Diff-/Secret-Check | `git diff --check` Exit 0; keine Hochkonfidenztreffer |
+| Prüfung                                            | Ergebnis                                                                                                                              |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| frischer Docker-E2E-Build/Migration/Seed           | erfolgreich                                                                                                                           |
+| E2E Browser/API                                    | 216/216 Cross-Browser-Funktions-/Accessibility-Fälle, 15/15 Responsive-/Zoom-Fälle, 4/4 visuelle Workflows und API-Failover bestanden |
+| API Unit/Integration                               | 626/626 Tests einschließlich PostgreSQL-/Redis-Testcontainern und Produktionskonfigurationssuite                                      |
+| Web Unit                                           | 121/121 Tests                                                                                                                         |
+| Lint                                               | 0 Fehler, 0 Warnungen                                                                                                                 |
+| Typecheck                                          | erfolgreich                                                                                                                           |
+| Produktions-Build / Webbudgets                     | erfolgreich                                                                                                                           |
+| Migration 0→aktuell, Legacy, Wiederholung, Drift   | erfolgreich, 12 Migrationen                                                                                                           |
+| verschlüsseltes Backup/Restore und Negativfälle    | erfolgreich; finaler Vollrestore nach allen API-Korrekturen 30 s                                                                      |
+| API-Ausfall / Redis / PostgreSQL / MinIO / LiveKit | kontrolliert wie dokumentiert                                                                                                         |
+| zwei API-Instanzen                                 | erfolgreich, beide Instanz-IDs unter Last                                                                                             |
+| Rollout / Rollback / Rollforward                   | 25.446 / 23.595 / 22.762 Antworten, ausschließlich HTTP 200; keine Verbindungsfehler                                                  |
+| abgewiesener ungesunder Surge                      | 9.958/9.958 HTTP 200 über alte Replikas, null Fehler                                                                                  |
+| finaler Keep-alive-Rollout                         | 146.191 HTTP 200; 7 rohe Socket-Reconnects von 146.198 Versuchen (0,0048 %), 0 HTTP-Fehler                                            |
+| Lasttest                                           | bis 1.463,51 rps kurz; 0 Fehler                                                                                                       |
+| OpenAPI-/Referenz-Drift                            | 110 Pfade/126 Operationen; deterministische Generierung                                                                               |
+| Produktions-/vollständiger Dependency-Audit        | keine bekannten Schwachstellen; Exit 0                                                                                                |
+| Bash/ShellCheck / Compose-Rendering                | ohne Befund; Produktion, Entwicklung und E2E gültig                                                                                   |
+| Release-/Preflight-Härtung                         | 7/7 Regeltests; Node-24-ENV-Parität und `actionlint` grün; fehlende `.env` wird fail-closed abgewiesen                                |
+| gehärtetes HTTPS-Profil                            | UID 101, read-only, keine Capabilities, TLS/Redirect/Liveness erfolgreich                                                             |
+| Abschließender Diff-/Secret-Check                  | `git diff --check` Exit 0; keine Hochkonfidenztreffer                                                                                 |
 
 ## Single Points of Failure
 
@@ -78,15 +79,15 @@ Nginx, PostgreSQL-Primary, Redis, MinIO und jede LiveKit-Rolle sind in der Refer
 
 ## Verbleibende Punkte
 
-| Priorität | Komponente / Auswirkung | Reproduktion/Ursache | Verbindlicher nächster Schritt |
-| --- | --- | --- | --- |
-| P0 extern | PayPal/Stripe; reale Geldbewegung nicht endabgenommen | Sandbox-Credentials/Webhook-ID fehlen; Code bleibt deaktiviert | Provider-Sandbox mit echten signierten Webhooks, Capture, Refund und Replay abnehmen |
-| P1 extern | Recht/Datenschutz; Texte und Retention ohne Rechtsfreigabe | Betreiber-/Rechtsentscheidung fehlt | finale Fassungen, Rechtsgrundlagen, Cookiekategorien und Aufbewahrungsmatrix freigeben |
-| P1 extern | Payout/KYC/Steuer; keine reale Auszahlung | Bank-/Providerkonto und Complianceprozess fehlen | kontrollierten Drei-Akteur-Sandboxlauf mit realer Referenz abnehmen |
-| P1 extern | GitHub-Gates; lokale Checks noch nicht branchpflichtig | kein Commit/Push/Branch-Protection in diesem Auftrag erlaubt | Änderungen reviewen, pushen, Actions grün ausführen und Checks verpflichtend setzen |
-| P1 Betrieb | Gesamt-HA; Ausfall einzelner State-Dienste unterbricht Funktionen, Proxyreload rotiert einzelne Idle-Keep-alive-Sockets | Single-Node-Compose mit einem Nginx-Master | Betreiberarchitektur für Postgres/Redis/MinIO/Proxy/LiveKit samt Failover und gestaffeltem Proxyupdate testen |
-| P2 extern | Robot-/Video-Sicherheit und Soak | physische Vier-Kamera-/E-Stop-Hardware fehlt | 30-Minuten-Hardwaretest, Temperatur/Bitrate/CPU und realen E-Stop abnehmen |
-| P2 Betrieb | DR-Ziele | RPO/RTO und Offsite-Ziel nicht festgelegt | Anforderungen festlegen, WAL/PITR und terminierte Restore-Drills betreiben |
+| Priorität  | Komponente / Auswirkung                                                                                                 | Reproduktion/Ursache                                                                                            | Verbindlicher nächster Schritt                                                                                |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| P0 extern  | PayPal/Stripe; reale Geldbewegung nicht endabgenommen                                                                   | Sandbox-Credentials/Webhook-ID fehlen; Code bleibt deaktiviert                                                  | Provider-Sandbox mit echten signierten Webhooks, Capture, Refund und Replay abnehmen                          |
+| P1 extern  | Recht/Datenschutz; Texte und Retention ohne Rechtsfreigabe                                                              | Betreiber-/Rechtsentscheidung fehlt                                                                             | finale Fassungen, Rechtsgrundlagen, Cookiekategorien und Aufbewahrungsmatrix freigeben                        |
+| P1 extern  | Payout/KYC/Steuer; keine reale Auszahlung                                                                               | Bank-/Providerkonto und Complianceprozess fehlen                                                                | kontrollierten Drei-Akteur-Sandboxlauf mit realer Referenz abnehmen                                           |
+| P1 extern  | GitHub-Gates; Branch-/Environment-Schutz und aktueller Runnerlauf noch nicht nachgewiesen                               | Workflows sind auf dem Remote-Branch versioniert, Repositoryeinstellungen sind lokal nicht verbindlich änderbar | Änderungen mergen, `production-release` schützen, Actions grün ausführen und Checks verpflichtend setzen      |
+| P1 Betrieb | Gesamt-HA; Ausfall einzelner State-Dienste unterbricht Funktionen, Proxyreload rotiert einzelne Idle-Keep-alive-Sockets | Single-Node-Compose mit einem Nginx-Master                                                                      | Betreiberarchitektur für Postgres/Redis/MinIO/Proxy/LiveKit samt Failover und gestaffeltem Proxyupdate testen |
+| P2 extern  | Robot-/Video-Sicherheit und Soak                                                                                        | physische Vier-Kamera-/E-Stop-Hardware fehlt                                                                    | 30-Minuten-Hardwaretest, Temperatur/Bitrate/CPU und realen E-Stop abnehmen                                    |
+| P2 Betrieb | DR-Ziele                                                                                                                | RPO/RTO und Offsite-Ziel nicht festgelegt                                                                       | Anforderungen festlegen, WAL/PITR und terminierte Restore-Drills betreiben                                    |
 
 ## Manuelle Freigaben vor Produktion
 

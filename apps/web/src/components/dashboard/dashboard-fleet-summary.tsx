@@ -14,7 +14,7 @@ export function DashboardFleetSummary({ robots, selectedId }: Props) {
   const totalViewers = robots.reduce((sum, robot) => sum + robot.viewerCount, 0);
   const selectedRobot = robots.find((robot) => robot.id === selectedId) ?? null;
 
-  const cards = [
+  const stats = [
     { label: 'Total robots', value: String(robots.length) },
     { label: 'Live now', value: String(liveCount) },
     { label: 'Busy', value: String(busyCount) },
@@ -24,13 +24,13 @@ export function DashboardFleetSummary({ robots, selectedId }: Props) {
   ];
 
   return (
-    <div className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-      {cards.map((card) => (
-        <div key={card.label} className="rounded-xl border border-[var(--border)] bg-[var(--background)] p-4">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--muted-foreground)]">
-            {card.label}
+    <div className="mb-5 grid grid-cols-2 border-y border-[var(--border)] sm:grid-cols-3 xl:grid-cols-6">
+      {stats.map((stat) => (
+        <div key={stat.label} className="border-b border-[var(--border)] px-3 py-3 last:border-b-0 sm:border-b-0 sm:border-r sm:last:border-r-0">
+          <p className="text-xs text-[var(--muted-foreground)]">
+            {stat.label}
           </p>
-          <p className="mt-2 text-lg font-bold text-[var(--foreground)]">{card.value}</p>
+          <p className="mt-1 truncate text-base font-semibold text-[var(--foreground)]">{stat.value}</p>
         </div>
       ))}
     </div>

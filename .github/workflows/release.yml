@@ -7,9 +7,16 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'SemVer tag to publish (for documentation only when rerunning)'
-        required: false
+        description: 'Existing SemVer tag to republish (for example v0.1.4)'
+        required: true
         type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   REGISTRY: ghcr.io
@@ -17,9 +24,87 @@ env:
   WEB_IMAGE: ${{ github.repository_owner }}/botparty-web
 
 jobs:
+  verify-source:
+    name: Verify tagged release source
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+        env:
+          POSTGRES_USER: botparty
+          POSTGRES_PASSWORD: botparty_release
+          POSTGRES_DB: release_migration_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U botparty -d release_migration_test"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 20
+    outputs:
+      version: ${{ steps.source.outputs.version }}
+    steps:
+      - name: Check out complete history
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Require a SemVer tag from main
+        id: source
+        shell: bash
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME}"
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            version="${REQUESTED_VERSION}"
+          fi
+          if [[ ! "${version}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Release version must be a SemVer tag such as v0.1.4" >&2
+            exit 1
+          fi
+          if [[ "${GITHUB_REF}" != "refs/tags/${version}" ]]; then
+            echo "Run the workflow from the existing tag ${version}, not from a branch" >&2
+            exit 1
+          fi
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" refs/remotes/origin/main; then
+            echo "Release tag ${version} is not reachable from origin/main" >&2
+            exit 1
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - uses: pnpm/action-setup@7088e561eb65bb68695d245aa206f005ef30921d # v4.1.0
+        with:
+          version: 9
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+          cache: pnpm
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Generate Prisma client
+        run: pnpm db:generate
+      - name: Verify release quality gates
+        run: |
+          pnpm env:check
+          pnpm architecture:check
+          pnpm lint
+          pnpm typecheck
+          pnpm --filter @botparty/api test
+          pnpm --filter @botparty/web test
+          pnpm audit --prod --audit-level high
+      - name: Verify fresh and upgrade migrations
+        run: pnpm db:verify-migrations
+        env:
+          MIGRATION_TEST_DATABASE_URL: postgresql://botparty:botparty_release@127.0.0.1:5432/release_migration_test?schema=public
+
   publish:
     name: Publish release images
+    needs: verify-source
     runs-on: ubuntu-latest
+    environment: production-release
     permissions:
       contents: write
       packages: write
@@ -45,10 +130,9 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.API_IMAGE }}
           tags: |
-            type=ref,event=tag
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}},enable=${{ !startsWith(github.ref_name, 'v0.') }}
+            type=semver,pattern={{version}},value=${{ needs.verify-source.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.verify-source.outputs.version }}
+            type=semver,pattern={{major}},value=${{ needs.verify-source.outputs.version }},enable=${{ !startsWith(needs.verify-source.outputs.version, 'v0.') }}
             type=raw,value=latest
           labels: |
             org.opencontainers.image.title=BotParty API
@@ -60,10 +144,9 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.WEB_IMAGE }}
           tags: |
-            type=ref,event=tag
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}},enable=${{ !startsWith(github.ref_name, 'v0.') }}
+            type=semver,pattern={{version}},value=${{ needs.verify-source.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.verify-source.outputs.version }}
+            type=semver,pattern={{major}},value=${{ needs.verify-source.outputs.version }},enable=${{ !startsWith(needs.verify-source.outputs.version, 'v0.') }}
             type=raw,value=latest
           labels: |
             org.opencontainers.image.title=BotParty Web
@@ -90,7 +173,7 @@ jobs:
           context: .
           file: docker/web/Dockerfile
           build-args: |
-            NEXT_PUBLIC_APP_VERSION=${{ github.ref_name }}
+            NEXT_PUBLIC_APP_VERSION=${{ needs.verify-source.outputs.version }}
             NEXT_PUBLIC_APP_URL=${{ vars.NEXT_PUBLIC_APP_URL }}
             NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}
             NEXT_PUBLIC_WS_URL=${{ vars.NEXT_PUBLIC_WS_URL }}
@@ -130,7 +213,6 @@ jobs:
         run: cosign sign --yes "${{ env.REGISTRY }}/${{ env.WEB_IMAGE }}@${{ steps.web-build.outputs.digest }}"
 
       - name: Publish operator release notes
-        if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release view "${{ github.ref_name }}" >/dev/null 2>&1 || gh release create "${{ github.ref_name }}" --verify-tag --title "BotParty ${{ github.ref_name }}" --notes-file docs/release-template.md
+        run: gh release view "${{ needs.verify-source.outputs.version }}" >/dev/null 2>&1 || gh release create "${{ needs.verify-source.outputs.version }}" --verify-tag --title "BotParty ${{ needs.verify-source.outputs.version }}" --notes-file docs/release-template.md

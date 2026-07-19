@@ -39,14 +39,14 @@ export function DashboardOperationsSection({
         <div className="mb-4 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
           <div className="mb-2 flex items-center justify-between gap-2">
             <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">Go-live checks</p>
-            <span className={`text-xs font-semibold ${onboarding?.canPublish ? 'text-emerald-300' : 'text-amber-300'}`}>
+            <span className={`text-xs font-semibold ${onboarding?.canPublish ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`}>
               {onboarding?.canPublish ? 'Ready to publish' : 'Checks pending'}
             </span>
           </div>
           <ul className="grid gap-1.5 sm:grid-cols-2">
             {(onboarding?.steps ?? []).map((step) => (
               <li key={step.id} className="flex items-center gap-2 text-xs">
-                <span aria-hidden="true" className={step.complete ? 'text-emerald-300' : step.required ? 'text-amber-300' : 'text-[var(--muted-foreground)]'}>
+                <span aria-hidden="true" className={step.complete ? 'text-emerald-700 dark:text-emerald-300' : step.required ? 'text-amber-700 dark:text-amber-300' : 'text-[var(--muted-foreground)]'}>
                   {step.complete ? '✓' : step.required ? '○' : '–'}
                 </span>
                 <span>{step.label}</span>
@@ -117,7 +117,7 @@ export function DashboardOperationsSection({
             type="button"
             onClick={() => onRunAction('update_client')}
             disabled={opLoading !== null || pendingActionTypes.includes('update_client')}
-            className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/40 px-3 py-1.5 text-xs text-emerald-300 disabled:opacity-60"
+            className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/40 px-3 py-1.5 text-xs text-emerald-700 disabled:opacity-60 dark:text-emerald-300"
           >
             {opLoading === 'update_client'
               ? 'Queueing...'
@@ -129,7 +129,7 @@ export function DashboardOperationsSection({
             type="button"
             onClick={() => onRunAction('set_log_stream', 120)}
             disabled={opLoading !== null || pendingActionTypes.includes('set_log_stream')}
-            className="inline-flex items-center gap-2 rounded-lg border border-amber-500/40 px-3 py-1.5 text-xs text-amber-300 disabled:opacity-60"
+            className="inline-flex items-center gap-2 rounded-lg border border-amber-500/40 px-3 py-1.5 text-xs text-amber-700 disabled:opacity-60 dark:text-amber-300"
           >
             {opLoading === 'set_log_stream'
               ? 'Queueing...'
@@ -153,7 +153,7 @@ export function DashboardOperationsSection({
           </div>
           <div className="max-h-48 overflow-auto rounded border border-[var(--border)] bg-black/70 p-2 font-mono text-[11px] leading-5 text-emerald-300">
             {diagLogs.length === 0 ? (
-              <p className="text-[var(--muted-foreground)]">No logs. Enable diagnostics above.</p>
+              <p className="text-zinc-300">No logs. Enable diagnostics above.</p>
             ) : (
               diagLogs.map((row, idx) => (
                 <p key={`${row.ts}-${idx}`}>[{new Date(row.ts).toLocaleTimeString()}] {row.line}</p>

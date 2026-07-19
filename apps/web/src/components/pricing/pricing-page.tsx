@@ -62,7 +62,7 @@ export function PricingPage() {
   if (!releaseFeatures.billing) {
     return (
       <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6">
-        <h1 className="text-3xl font-black tracking-tight">Pricing</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Pricing</h1>
         <p className="mt-3 text-[var(--muted-foreground)]">Credit purchases are not available on this deployment.</p>
       </div>
     );
@@ -70,27 +70,26 @@ export function PricingPage() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
-      <section className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-6 sm:p-8">
-        <div className="flex items-start gap-4">
-          <span className="rounded-2xl bg-violet-500/15 p-3 text-violet-200"><Coins className="h-5 w-5" /></span>
-          <div>
-            <p className="text-xs uppercase tracking-[0.22em] text-violet-300">Pricing</p>
-            <h1 className="mt-2 text-4xl font-black tracking-tight">Prepaid credits</h1>
-            <p className="mt-3 max-w-2xl text-sm leading-7 text-[var(--muted-foreground)]">
+      <header className="border-b border-[var(--border)] pb-5">
+        <div>
+          <h1 className="flex items-center gap-2 text-3xl font-bold tracking-tight">
+            <Coins className="h-6 w-6 text-[var(--primary)]" />
+            Prepaid credits
+          </h1>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--muted-foreground)]">
               Credits are added after the payment provider confirms settlement. Available methods appear below.
             </p>
-          </div>
         </div>
-        <div className="mt-5 flex items-start gap-2 rounded-2xl border border-[var(--border)] bg-[var(--background)] p-4 text-sm">
+        <div className="mt-4 flex items-start gap-2 text-sm text-[var(--muted-foreground)]">
           <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
           Purchases, refunds and disputes remain linked to the wallet ledger.
         </div>
-      </section>
+      </header>
 
       <section className="mt-8">
         <div className="mb-4 flex items-center justify-between gap-4">
-          <h2 className="text-2xl font-black tracking-tight">Credit packages</h2>
-          <Link href={accessToken ? '/wallet' : '/login'} className="rounded-full border border-[var(--border)] px-4 py-2 text-sm font-semibold">
+          <h2 className="text-xl font-bold tracking-tight">Credit packages</h2>
+          <Link href={accessToken ? '/wallet' : '/login'} className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm font-semibold">
             {accessToken ? 'Open wallet' : 'Sign in'}
           </Link>
         </div>
@@ -109,7 +108,7 @@ export function PricingPage() {
             ) : null}
             <div className="grid gap-4 lg:grid-cols-3">
               {packages.map((creditPackage) => (
-                <article key={creditPackage.id} className="rounded-3xl border border-[var(--border)] bg-[var(--card)] p-5">
+                <article key={creditPackage.id} className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-5">
                   <div className="flex items-start justify-between gap-4">
                     <div><h3 className="font-bold">{creditPackage.label}</h3><p className="text-sm text-[var(--muted-foreground)]">{creditPackage.credits.toLocaleString()} credits</p></div>
                     <strong>{formatMoney(creditPackage.amountCents, creditPackage.currency)}</strong>
@@ -117,12 +116,12 @@ export function PricingPage() {
                   {accessToken ? (
                     <div className="mt-5 grid gap-2">
                       {(['stripe', 'paypal'] as const).map((provider) => (
-                        <button key={provider} type="button" disabled={!deliveryConsent || buyingId !== null} onClick={() => void handleBuy(creditPackage, provider)} className="rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm font-semibold disabled:opacity-50">
+                        <button key={provider} type="button" disabled={!deliveryConsent || buyingId !== null} onClick={() => void handleBuy(creditPackage, provider)} className="rounded-lg border border-[var(--border)] px-4 py-2.5 text-sm font-semibold disabled:opacity-50">
                           {buyingId === `${creditPackage.id}:${provider}` ? 'Opening checkout…' : provider === 'stripe' ? 'Pay by card' : 'Pay with PayPal'}
                         </button>
                       ))}
                     </div>
-                  ) : <Link href="/login" className="mt-5 block rounded-xl bg-[var(--primary)] px-4 py-2.5 text-center text-sm font-semibold text-white">Sign in to buy</Link>}
+                  ) : <Link href="/login" className="mt-5 block rounded-lg bg-[var(--primary)] px-4 py-2.5 text-center text-sm font-semibold text-white">Sign in to buy</Link>}
                 </article>
               ))}
             </div>

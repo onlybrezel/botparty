@@ -26,7 +26,7 @@ describe('robot-view controls', () => {
     expect(onRelease).toHaveBeenCalledTimes(1);
   });
 
-  it('sends slider values and recenters when configured', () => {
+  it('uses the standard vertical range orientation, sends values, and recenters', () => {
     const onSendValue = vi.fn();
 
     render(
@@ -39,7 +39,7 @@ describe('robot-view controls', () => {
           max: 100,
           start: 50,
           step: 10,
-          direction: 'horizontal',
+          direction: 'vertical',
           returnMode: 'center',
           resetOnQueueLoss: false,
           resetOnOffline: false,
@@ -57,6 +57,8 @@ describe('robot-view controls', () => {
     );
 
     const slider = screen.getByLabelText('Speed slider');
+    expect(slider).toHaveClass('[direction:rtl]', '[writing-mode:vertical-lr]');
+    expect(slider.className).not.toContain('appearance');
     fireEvent.change(slider, { target: { value: '80' } });
     fireEvent.pointerUp(slider);
 

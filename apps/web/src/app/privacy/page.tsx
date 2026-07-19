@@ -89,7 +89,7 @@ export default function PrivacyPage() {
         <p className="text-xs uppercase tracking-[0.22em] text-sky-700 dark:text-sky-300">Legal</p>
         <h1 className="mt-2 text-3xl font-black tracking-tight">Privacy Policy</h1>
         <p className="mt-3 max-w-2xl text-sm text-[var(--muted-foreground)]">
-          BotParty handles live robot streams, queue state, chat, moderation, and account data. This page explains what we store and why.
+          BotParty handles live robot streams, queue state, chat, moderation, and account data. Below is what we store and why.
         </p>
       </div>
 

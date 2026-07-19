@@ -32,21 +32,24 @@ export function DashboardPreview({
               LIVE
             </span>
           ) : (
-            <span className="text-xs text-[var(--muted-foreground)]">Offline</span>
+            <span className="text-xs text-zinc-300">Offline</span>
           )}
         </div>
         <a
           href={roomHref}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-xs text-[var(--muted-foreground)] transition hover:text-[var(--foreground)]"
+          className="inline-flex items-center gap-1 text-xs text-zinc-300 transition hover:text-white"
         >
           <ExternalLink className="h-3 w-3" />
           Open
         </a>
       </div>
 
-      <div ref={previewContainerRef} className="relative aspect-video w-full bg-zinc-950">
+      <div
+        ref={previewContainerRef}
+        className={`relative w-full bg-zinc-950 ${preview || robot.status === 'ONLINE' ? 'aspect-video' : 'h-36 sm:h-48'}`}
+      >
         {preview ? (
           <LiveKitPlayer
             key={`${robot.id}-${previewVersion}`}
@@ -56,7 +59,7 @@ export function DashboardPreview({
             onStreamStalled={onStreamStalled}
           />
         ) : (
-          <div className="flex h-full items-center justify-center text-xs text-[var(--muted-foreground)]">
+          <div className="flex h-full items-center justify-center text-xs text-zinc-300">
             {robot.status === 'ONLINE' ? 'Connecting...' : 'Robot is offline'}
           </div>
         )}

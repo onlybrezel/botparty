@@ -27,9 +27,10 @@ export default function Nav() {
   const [mounted, setMounted] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [guestLabel, setGuestLabel] = useState('Guest');
   const [balance, setBalance] = useState<number | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
+  const userMenuButtonRef = useRef<HTMLButtonElement>(null);
   const theme = usePreferences((state) => state.theme);
   const productAnalyticsEnabled = usePreferences((state) => state.productAnalyticsEnabled);
   const updatePreference = usePreferences((state) => state.updatePreference);
@@ -47,15 +48,18 @@ export default function Nav() {
 
   useEffect(() => {
     let cancelled = false;
+    const cancelPendingBootstrap = () => {
+      cancelled = true;
+    };
+    window.addEventListener('pagehide', cancelPendingBootstrap);
 
     const bootstrap = async () => {
       api.syncTokenFromStore();
       const restored = await api.restoreSession().catch(() => false);
       if (restored) {
-        const consent = await api.analytics.consent().catch((error: unknown) => {
-          console.error('Failed to restore analytics consent', error);
-          return null;
-        });
+        // Analytics is opt-in. If consent cannot be restored, keep tracking
+        // disabled until the settings page can load the authoritative value.
+        const consent = await api.analytics.consent().catch(() => null);
         updatePreference('productAnalyticsEnabled', Boolean(consent?.productAnalyticsEnabled));
       }
       if (!cancelled) {
@@ -67,13 +71,9 @@ export default function Nav() {
 
     return () => {
       cancelled = true;
+      window.removeEventListener('pagehide', cancelPendingBootstrap);
     };
   }, [updatePreference]);
-
-  useEffect(() => {
-    if (!mounted || accessToken) return;
-    setGuestLabel('Guest');
-  }, [accessToken, mounted]);
 
   useEffect(() => {
     setMenuOpen(false);
@@ -111,20 +111,45 @@ export default function Nav() {
   }, [menuOpen]);
 
   useEffect(() => {
+    if (!menuOpen && !dropdownOpen) return;
+
+    const closeOpenMenu = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+
+      if (dropdownOpen) {
+        setDropdownOpen(false);
+        userMenuButtonRef.current?.focus();
+      }
+      if (menuOpen) {
+        setMenuOpen(false);
+        mobileMenuButtonRef.current?.focus();
+      }
+    };
+
+    document.addEventListener('keydown', closeOpenMenu);
+    return () => document.removeEventListener('keydown', closeOpenMenu);
+  }, [dropdownOpen, menuOpen]);
+
+  useEffect(() => {
     if (!mounted || !accessToken) {
       setBalance(null);
       return;
     }
     let cancelled = false;
+    const cancelPendingRequest = () => {
+      cancelled = true;
+    };
+    window.addEventListener('pagehide', cancelPendingRequest);
     const load = () => {
       api.wallet
         .me()
         .then((res) => {
           if (!cancelled) setBalance(res.balance);
         })
-        .catch((error: unknown) => {
-          if (!cancelled) setBalance(null);
-          console.error('Failed to refresh wallet balance', error);
+        .catch(() => {
+          if (!cancelled) {
+            setBalance(null);
+          }
         });
     };
     load();
@@ -139,6 +164,7 @@ export default function Nav() {
     window.addEventListener('botparty:wallet-update', onWalletUpdate as EventListener);
     return () => {
       cancelled = true;
+      window.removeEventListener('pagehide', cancelPendingRequest);
       window.removeEventListener('focus', onFocus);
       window.removeEventListener('botparty:wallet-update', onWalletUpdate as EventListener);
     };
@@ -160,9 +186,8 @@ export default function Nav() {
     <header className="sticky top-0 z-50 border-b border-[var(--border)] bg-[var(--background)]/92 backdrop-blur-md">
       {mounted && accessToken && productAnalyticsEnabled ? <WebVitalsReporter /> : null}
       <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
-        {/* Logo */}
-        <Link href={localized('/')} prefetch={false} className="flex items-center gap-2 text-lg font-bold tracking-tight">
-          <span className="flex h-7 w-7 items-center justify-center overflow-hidden rounded-lg shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
+        <Link href={localized('/')} prefetch={false} className="flex items-center gap-2 text-base font-bold tracking-tight">
+          <span className="flex h-7 w-7 items-center justify-center overflow-hidden rounded-md border border-[var(--border)]">
             <Image
               src="/brand/icon-64.png"
               alt="BotParty"
@@ -172,27 +197,19 @@ export default function Nav() {
               priority
             />
           </span>
-          <span className="bg-gradient-to-r from-violet-400 to-purple-300 bg-clip-text text-transparent">
-            BotParty
-          </span>
-          <span className="inline-flex items-center gap-1 pl-0.5">
-            <span className="rounded-full bg-gradient-to-r from-amber-500/20 to-orange-500/20 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-widest text-amber-300 border border-amber-500/30">
-              Alpha
-            </span>
-          </span>
+          <span>BotParty</span>
         </Link>
 
-        {/* Nav links */}
-        <nav className="hidden items-center gap-2 sm:flex">
+        <nav className="hidden h-full items-center gap-1 lg:flex">
           {navLinks.map((item) => (
             <Link
               key={item.href}
               href={localized(item.href)}
               prefetch={false}
-              className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+              className={`flex h-full items-center border-b-2 px-3 text-sm font-medium transition-colors ${
                 item.active
-                  ? 'bg-[var(--muted)] text-[var(--foreground)]'
-                  : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+                  ? 'border-[var(--primary)] text-[var(--foreground)]'
+                  : 'border-transparent text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
               }`}
             >
               {item.label}
@@ -202,32 +219,33 @@ export default function Nav() {
             href="https://github.com/onlybrezel/botparty-client/blob/main/docs/index.md"
             target="_blank"
             rel="noopener noreferrer"
-            className="rounded-lg px-3 py-2 text-sm font-medium text-[var(--muted-foreground)] transition-colors hover:text-[var(--foreground)]"
+            className="flex h-full items-center border-b-2 border-transparent px-3 text-sm font-medium text-[var(--muted-foreground)] transition-colors hover:text-[var(--foreground)]"
           >
             Robot Setup
           </a>
         </nav>
 
-        {/* Auth */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <button
+            ref={mobileMenuButtonRef}
             type="button"
             aria-expanded={menuOpen}
+            aria-controls="mobile-navigation"
             aria-label={menuOpen ? 'Close navigation menu' : 'Open navigation menu'}
             onClick={() => setMenuOpen((open) => !open)}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--card)] text-[var(--foreground)] transition hover:border-[var(--muted-foreground)] sm:hidden"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-[var(--border)] text-[var(--foreground)] transition hover:bg-[var(--muted)] lg:hidden"
           >
             {menuOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
           </button>
           {!mounted ? (
-            <div className="hidden h-8 w-20 rounded-lg bg-[var(--muted)] animate-pulse sm:block" />
+            <div className="hidden h-8 w-20 rounded-lg bg-[var(--muted)] animate-pulse lg:block" />
           ) : accessToken && username ? (
             <div className="relative flex items-center gap-2" ref={dropdownRef}>
               <NotificationCenter enabled={Boolean(accessToken)} />
               <Link
                 href={localized('/wallet')}
                 prefetch={false}
-                className="hidden items-center gap-1 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-300 transition hover:bg-amber-500/20 sm:inline-flex"
+                className="hidden items-center gap-1 border-r border-[var(--border)] pr-3 text-xs font-semibold text-amber-300 transition hover:text-amber-200 lg:inline-flex"
                 title="Wallet"
               >
                 <span aria-hidden>◈</span>
@@ -237,8 +255,13 @@ export default function Nav() {
                 <span className="text-[10px] uppercase tracking-wide opacity-70">cr</span>
               </Link>
               <button
+                ref={userMenuButtonRef}
+                type="button"
+                aria-label={`Open user menu for ${username}`}
+                aria-expanded={dropdownOpen}
+                aria-controls="user-navigation"
                 onClick={() => setDropdownOpen((open) => !open)}
-                className="hidden items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-sm font-medium transition hover:border-[var(--muted-foreground)] sm:flex"
+                className="hidden items-center gap-2 rounded-lg px-2 py-1.5 text-sm font-medium transition hover:bg-[var(--muted)] lg:flex"
               >
                 <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[var(--primary)] text-xs text-white font-bold uppercase">
                   {username[0]}
@@ -251,7 +274,8 @@ export default function Nav() {
 
               {dropdownOpen && (
                 <div
-                  className="absolute right-0 top-full mt-1 w-44 rounded-xl border border-[var(--border)] bg-[var(--card)] py-1 shadow-lg shadow-black/40 animate-fade-in"
+                  id="user-navigation"
+                  className="absolute right-0 top-full mt-2 w-56 rounded-lg border border-[var(--border)] bg-[var(--card)] py-1 shadow-xl shadow-black/25 animate-fade-in"
                 >
                   <Link
                     href={localized('/dashboard')}
@@ -259,7 +283,7 @@ export default function Nav() {
                     onClick={() => setDropdownOpen(false)}
                     className="block px-4 py-2 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition"
                   >
-                    Robots Dashboard
+                    Robots
                   </Link>
                   <Link
                     href={localized('/wallet')}
@@ -276,7 +300,7 @@ export default function Nav() {
                       onClick={() => setDropdownOpen(false)}
                       className="block px-4 py-2 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition"
                     >
-                      Mod Dashboard
+                      Moderation
                     </Link>
                   )}
                   {role === 'ADMIN' && (
@@ -344,14 +368,11 @@ export default function Nav() {
               )}
             </div>
           ) : (
-            <div className="hidden items-center gap-2 sm:flex">
-              <span className="hidden rounded-lg border border-[var(--border)] bg-[var(--card)] px-2.5 py-1 text-xs font-medium text-[var(--muted-foreground)] sm:inline-flex">
-                {guestLabel}
-              </span>
+            <div className="hidden items-center lg:flex">
               <Link
                 href={localized('/login')}
                 prefetch={false}
-                className="rounded-lg bg-[var(--primary)] px-4 py-1.5 text-sm font-semibold text-white transition hover:bg-[var(--primary-hover)]"
+                className="rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[var(--primary-hover)]"
               >
                 Sign in
               </Link>
@@ -361,17 +382,17 @@ export default function Nav() {
       </div>
 
       {menuOpen && (
-        <div className="safe-pb border-t border-[var(--border)] bg-[var(--background)] px-4 py-4 shadow-2xl shadow-black/30 sm:hidden">
-          <nav className="flex flex-col gap-2">
+        <div id="mobile-navigation" className="safe-pb border-t border-[var(--border)] bg-[var(--background)] px-4 py-3 shadow-xl shadow-black/20 lg:hidden">
+          <nav className="divide-y divide-[var(--border)]">
             {navLinks.map((item) => (
               <Link
                 key={item.href}
                 href={localized(item.href)}
                 prefetch={false}
-                className={`rounded-xl px-4 py-3 text-sm font-medium transition-colors ${
+                className={`block px-1 py-3 text-sm font-medium transition-colors ${
                   item.active
-                    ? 'bg-[var(--muted)] text-[var(--foreground)]'
-                    : 'border border-[var(--border)] bg-[var(--card)] text-[var(--muted-foreground)]'
+                    ? 'text-[var(--primary)]'
+                    : 'text-[var(--muted-foreground)]'
                 }`}
               >
                 {item.label}
@@ -381,13 +402,13 @@ export default function Nav() {
               href="https://github.com/onlybrezel/botparty-client/blob/main/docs/index.md"
               target="_blank"
               rel="noopener noreferrer"
-              className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm font-medium text-[var(--muted-foreground)]"
+              className="block px-1 py-3 text-sm font-medium text-[var(--muted-foreground)]"
             >
               Robot Setup
             </a>
           </nav>
 
-          <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
+          <div className="mt-3 border-t border-[var(--border)] pt-4">
             {!mounted ? (
               <div className="h-10 w-full rounded-xl bg-[var(--muted)] animate-pulse" />
             ) : accessToken && username ? (
@@ -401,22 +422,22 @@ export default function Nav() {
                     <p className="text-xs text-[var(--muted-foreground)]">Signed in</p>
                   </div>
                 </div>
-                <div className="flex flex-col gap-2">
-                  <Link href={localized('/dashboard')} prefetch={false} className="rounded-xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--foreground)]">
-                    Robots Dashboard
+                <div className="divide-y divide-[var(--border)] border-y border-[var(--border)]">
+                  <Link href={localized('/dashboard')} prefetch={false} className="block px-1 py-3 text-sm text-[var(--foreground)]">
+                    Robots
                   </Link>
-                  <Link href={localized('/wallet')} prefetch={false} className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm font-medium text-amber-200">
+                  <Link href={localized('/wallet')} prefetch={false} className="block px-1 py-3 text-sm font-medium text-amber-300">
                     Wallet{balance !== null ? ` · ${balance.toLocaleString()} cr` : ''}
                   </Link>
                   {(role === 'ADMIN' || role === 'MOD') && (
-                    <Link href={localized('/mod')} prefetch={false} className="rounded-xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--foreground)]">
-                      Mod Dashboard
+                    <Link href={localized('/mod')} prefetch={false} className="block px-1 py-3 text-sm text-[var(--foreground)]">
+                      Moderation
                     </Link>
                   )}
-                  <Link href={localized('/settings')} prefetch={false} className="rounded-xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--foreground)]">
+                  <Link href={localized('/settings')} prefetch={false} className="block px-1 py-3 text-sm text-[var(--foreground)]">
                     Settings
                   </Link>
-                  <Link href={localized('/sessions')} prefetch={false} className="rounded-xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--foreground)]">
+                  <Link href={localized('/sessions')} prefetch={false} className="block px-1 py-3 text-sm text-[var(--foreground)]">
                     Sessions
                   </Link>
                   <button
@@ -430,7 +451,7 @@ export default function Nav() {
                         setMenuOpen(false);
                       });
                     }}
-                    className="rounded-xl border border-red-500/30 px-4 py-3 text-left text-sm font-medium text-red-300"
+                    className="block w-full px-1 py-3 text-left text-sm font-medium text-red-300"
                   >
                     Sign out
                   </button>
@@ -438,13 +459,10 @@ export default function Nav() {
               </div>
             ) : (
               <div className="space-y-3">
-                <p className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--muted-foreground)]">
-                  {guestLabel}
-                </p>
                 <Link
                   href={localized('/login')}
                   prefetch={false}
-                  className="block rounded-xl bg-[var(--primary)] px-4 py-3 text-center text-sm font-semibold text-white"
+                  className="block rounded-lg bg-[var(--primary)] px-4 py-3 text-center text-sm font-semibold text-white"
                 >
                   Sign in
                 </Link>

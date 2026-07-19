@@ -37,7 +37,9 @@ function bearer(account: RegisteredAccount, extra: Record<string, string> = {}) 
   return { Authorization: `Bearer ${account.token}`, ...extra };
 }
 
-test('private robot data and files remain isolated between owners', async ({ playwright }, testInfo) => {
+test('private robot data and files remain isolated between owners', async ({
+  playwright,
+}, testInfo) => {
   const baseURL = String(testInfo.project.use.baseURL);
   const suffix = `${Date.now().toString(36)}_${Math.random().toString(16).slice(2, 8)}`;
   const ownerContext = await playwright.request.newContext({ baseURL });

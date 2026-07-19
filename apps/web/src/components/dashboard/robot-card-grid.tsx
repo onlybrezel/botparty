@@ -21,11 +21,11 @@ export function RobotCardGrid({ robots, onSelect }: Props) {
             type="button"
             onClick={() => onSelect(robot.id)}
             aria-label={`Open dashboard for ${robot.name}`}
-            className="group overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)] text-left transition hover:border-violet-500/40 hover:-translate-y-0.5"
+            className="group overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--card)] text-left transition-colors hover:border-[var(--muted-foreground)]"
           >
             <div
               className="relative flex h-28 items-center justify-center overflow-hidden"
-              style={!robot.thumbnailUrl ? { background: `linear-gradient(135deg, hsla(${hue}, 75%, 55%, 0.25), hsla(${(hue + 50) % 360}, 80%, 50%, 0.08))` } : undefined}
+              style={!robot.thumbnailUrl ? { background: `hsla(${hue}, 55%, 45%, 0.2)` } : undefined}
             >
               {robot.thumbnailUrl ? (
                 <Image
@@ -38,18 +38,17 @@ export function RobotCardGrid({ robots, onSelect }: Props) {
                 />
               ) : (
                 <>
-                  <div className="absolute inset-0 opacity-30" style={{ backgroundImage: 'radial-gradient(circle at 20% 20%, rgba(255,255,255,0.25), transparent 45%)' }} />
-                  <span className="relative text-3xl font-black text-white/60">{robot.name.trim().charAt(0).toUpperCase()}</span>
+                  <span className="relative text-3xl font-bold text-white/70">{robot.name.trim().charAt(0).toUpperCase()}</span>
                 </>
               )}
               <div className="absolute left-2 top-2">
                 {robot.status === 'ONLINE' ? (
-                  <span className="flex items-center gap-1 rounded-full bg-[var(--live)]/90 px-2 py-0.5 text-[10px] font-semibold text-white">
+                  <span className="flex items-center gap-1 rounded-md bg-[var(--live)]/90 px-2 py-0.5 text-[10px] font-semibold text-white">
                     <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse-dot" />
                     LIVE
                   </span>
                 ) : (
-                  <span className="rounded-full bg-zinc-700/90 px-2 py-0.5 text-[10px] font-medium text-zinc-300">Offline</span>
+                  <span className="rounded-md bg-zinc-700/90 px-2 py-0.5 text-[10px] font-medium text-zinc-300">Offline</span>
                 )}
               </div>
             </div>
@@ -59,7 +58,7 @@ export function RobotCardGrid({ robots, onSelect }: Props) {
               {robot.tags.length > 0 && (
                 <div className="mt-1.5 flex flex-wrap gap-1">
                   {robot.tags.slice(0, 3).map((tag) => (
-                    <span key={tag} className="rounded-full border border-[var(--border)] px-1.5 py-0.5 text-[10px] text-[var(--muted-foreground)]">{tag}</span>
+                    <span key={tag} className="rounded border border-[var(--border)] px-1.5 py-0.5 text-[10px] text-[var(--muted-foreground)]">{tag}</span>
                   ))}
                 </div>
               )}

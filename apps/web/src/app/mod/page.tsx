@@ -529,7 +529,7 @@ export default function ModDashboardPage() {
     if (!editingUserId || !userDraft || !accessToken) return;
     try {
       api.setToken(accessToken);
-      await api.users.updateAdminUser(editingUserId, {
+      const updatedUser = await api.users.updateAdminUser(editingUserId, {
         username: userDraft.username.trim(),
         email: userDraft.email.trim(),
         displayName: userDraft.displayName.trim() || null,
@@ -539,6 +539,9 @@ export default function ModDashboardPage() {
         credits: Number(userDraft.credits),
         balance: Number(userDraft.balance),
       });
+      setUsers((currentUsers) =>
+        currentUsers.map((user) => (user.id === editingUserId ? { ...user, ...updatedUser } : user)),
+      );
       if (editingUserId === authUserId) {
         setSession({
           username: userDraft.username.trim(),
@@ -548,7 +551,6 @@ export default function ModDashboardPage() {
       }
       setEditingUserId(null);
       setUserDraft(null);
-      await refresh();
       pushToast('User updated.', 'success');
     } catch (err) {
       pushToast(err instanceof Error ? err.message : 'Failed to update user.', 'error');

@@ -4,19 +4,35 @@ const usesExternalServers = process.env.PLAYWRIGHT_EXTERNAL_SERVERS === 'true';
 
 export default defineConfig({
   testDir: './tests/e2e',
+  testIgnore: ['multi-instance/**', 'responsive/**', 'visual/**'],
   outputDir: process.env.PLAYWRIGHT_OUTPUT_DIR ?? './test-results',
   timeout: 60_000,
   // The browser suite intentionally shares one deterministic seeded account and
   // robot lifecycle. Parallelism belongs in isolated projects, not within this stateful flow.
   workers: 1,
+  forbidOnly: true,
+  retries: 0,
+  reporter: [['line']],
   projects: [
     {
       name: 'chromium',
       use: { browserName: 'chromium' },
     },
+    {
+      name: 'firefox',
+      use: { browserName: 'firefox' },
+    },
+    {
+      name: 'webkit',
+      use: { browserName: 'webkit' },
+    },
   ],
   use: {
     baseURL: process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:3000',
+    locale: 'en-US',
+    screenshot: 'only-on-failure',
+    trace: 'retain-on-failure',
+    video: 'retain-on-failure',
   },
   webServer: usesExternalServers ? undefined : [
     {

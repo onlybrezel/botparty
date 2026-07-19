@@ -31,7 +31,9 @@ export class RobotsApi {
   }
 
   async getRobot(username: string, slug: string) {
-    return this.req<RobotPublic>(`/robots/${encodeURIComponent(username)}/${encodeURIComponent(slug)}`);
+    return this.req<RobotPublic>(
+      `/robots/${encodeURIComponent(username)}/${encodeURIComponent(slug)}`,
+    );
   }
 
   async getRobotBySlug(slug: string) {
@@ -169,8 +171,9 @@ export class RobotsApi {
   }
 
   async deleteRobotThumbnail(robotId: string) {
-    return this.req<RobotManaged>(`/robots/${robotId}/thumbnail`, {
+    return this.req<void>(`/robots/${robotId}/thumbnail`, {
       method: 'DELETE',
+      expectNoContent: true,
     });
   }
 
@@ -196,14 +199,24 @@ export class RobotsApi {
 
   async getRobotChatHistory(
     robotId: string,
-    params?: { before?: number; beforeId?: string; limit?: number; roomAccessToken?: string; guestSessionId?: string },
+    params?: {
+      before?: number;
+      beforeId?: string;
+      limit?: number;
+      roomAccessToken?: string;
+      guestSessionId?: string;
+    },
   ) {
-    return this.req<RobotChatHistoryPage>(`/robots/${robotId}/chat-messages${buildQueryString(params)}`);
+    return this.req<RobotChatHistoryPage>(
+      `/robots/${robotId}/chat-messages${buildQueryString(params)}`,
+    );
   }
 
   async getViewerToken(robotId: string, control = false) {
     const roomAccessToken =
-      typeof window !== 'undefined' ? window.sessionStorage.getItem(`botparty.room-access.${robotId}`) : null;
+      typeof window !== 'undefined'
+        ? window.sessionStorage.getItem(`botparty.room-access.${robotId}`)
+        : null;
     return this.req<{ token: string; livekitUrl: string }>(
       `/livekit/token/viewer/${robotId}${buildQueryString({ control, roomAccessToken })}`,
       { method: 'POST', body: '{}' },
@@ -212,29 +225,45 @@ export class RobotsApi {
 
   async getPublicViewerToken(robotId: string) {
     const roomAccessToken =
-      typeof window !== 'undefined' ? window.sessionStorage.getItem(`botparty.room-access.${robotId}`) : null;
+      typeof window !== 'undefined'
+        ? window.sessionStorage.getItem(`botparty.room-access.${robotId}`)
+        : null;
     const guestSessionId =
-      typeof window !== 'undefined' ? window.localStorage.getItem('botparty.guestSessionId.v1') : null;
+      typeof window !== 'undefined'
+        ? window.localStorage.getItem('botparty.guestSessionId.v1')
+        : null;
     return this.req<{ token: string; livekitUrl: string }>(
       `/livekit/token/viewer-public/${robotId}${buildQueryString({ roomAccessToken, guestSessionId })}`,
-      { method: 'POST', body: '{}' },
+      { method: 'POST', body: '{}', authentication: 'anonymous' },
     );
   }
 
   async getPendingRobotActions(robotId: string) {
-    return this.req<{ robotId: string; actions: Array<{ id: string; type: string; createdAt: number }> }>(
-      `/robots/${robotId}/actions/pending`,
-    );
+    return this.req<{
+      robotId: string;
+      actions: Array<{ id: string; type: string; createdAt: number }>;
+    }>(`/robots/${robotId}/actions/pending`);
   }
 
   async enqueueRobotAction(
     robotId: string,
-    data: { type: 'restart_video' | 'restart_control' | 'restart_chat' | 'update_client' | 'set_log_stream'; durationSec?: number },
+    data: {
+      type:
+        | 'restart_video'
+        | 'restart_control'
+        | 'restart_chat'
+        | 'update_client'
+        | 'set_log_stream';
+      durationSec?: number;
+    },
   ) {
-    return this.req<{ id: string; type: string; createdAt: number; alreadyQueued?: boolean }>(`/robots/${robotId}/actions`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
+    return this.req<{ id: string; type: string; createdAt: number; alreadyQueued?: boolean }>(
+      `/robots/${robotId}/actions`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
   }
 
   async getRobotLogs(robotId: string) {

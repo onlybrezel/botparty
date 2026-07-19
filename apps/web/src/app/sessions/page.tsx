@@ -108,23 +108,25 @@ export default function SessionsPage() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8">
-      <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6">
+      <header className="border-b border-[var(--border)] pb-5">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-sky-300">History</p>
-            <h1 className="mt-2 text-3xl font-black tracking-tight">Your sessions</h1>
-            <p className="mt-2 text-sm text-[var(--muted-foreground)]">
-              Review the robots you controlled recently, how long each turn lasted, and where to jump back in.
+            <h1 className="text-3xl font-bold tracking-tight">Sessions</h1>
+            <p className="mt-1 text-sm text-[var(--muted-foreground)]">
+              Recent control turns, command counts and session replays.
             </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr),12rem]">
+            <label htmlFor="session-filter" className="sr-only">Filter sessions</label>
             <input
+              id="session-filter"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Filter by robot name or slug"
               className="h-11 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 text-sm"
             />
-            <Select value={String(limit)} onChange={(event) => setLimit(Number(event.target.value))}>
+            <label htmlFor="session-limit" className="sr-only">Number of sessions</label>
+            <Select id="session-limit" value={String(limit)} onChange={(event) => setLimit(Number(event.target.value))}>
               {LIMIT_OPTIONS.map((option) => (
                 <option key={option} value={option}>
                   Last {option}
@@ -133,30 +135,30 @@ export default function SessionsPage() {
             </Select>
           </div>
         </div>
-      </div>
+      </header>
 
       <div className="mt-6">
         {!loading && !error && sessions.length > 0 ? (
-          <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-              <p className="text-[11px] uppercase tracking-wide text-[var(--muted-foreground)]">Sessions</p>
-              <p className="mt-2 text-2xl font-black">{analytics.totalSessions}</p>
+          <div className="mb-6 grid grid-cols-2 border-y border-[var(--border)] sm:grid-cols-3 xl:grid-cols-5">
+            <div className="border-b border-r border-[var(--border)] p-4 xl:border-b-0">
+              <p className="text-xs text-[var(--muted-foreground)]">Sessions</p>
+              <p className="mt-1 text-xl font-semibold">{analytics.totalSessions}</p>
             </div>
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-              <p className="text-[11px] uppercase tracking-wide text-[var(--muted-foreground)]">Drive time</p>
-              <p className="mt-2 text-2xl font-black">{analytics.totalDurationHours}h</p>
+            <div className="border-b border-[var(--border)] p-4 sm:border-r xl:border-b-0">
+              <p className="text-xs text-[var(--muted-foreground)]">Drive time</p>
+              <p className="mt-1 text-xl font-semibold">{analytics.totalDurationHours}h</p>
             </div>
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-              <p className="text-[11px] uppercase tracking-wide text-[var(--muted-foreground)]">Commands</p>
-              <p className="mt-2 text-2xl font-black">{analytics.totalCommands}</p>
+            <div className="border-b border-r border-[var(--border)] p-4 xl:border-b-0">
+              <p className="text-xs text-[var(--muted-foreground)]">Commands</p>
+              <p className="mt-1 text-xl font-semibold">{analytics.totalCommands}</p>
             </div>
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-              <p className="text-[11px] uppercase tracking-wide text-[var(--muted-foreground)]">Peak viewers</p>
-              <p className="mt-2 text-2xl font-black">{analytics.peakViewers}</p>
+            <div className="border-b border-[var(--border)] p-4 sm:border-r xl:border-b-0">
+              <p className="text-xs text-[var(--muted-foreground)]">Peak viewers</p>
+              <p className="mt-1 text-xl font-semibold">{analytics.peakViewers}</p>
             </div>
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-              <p className="text-[11px] uppercase tracking-wide text-[var(--muted-foreground)]">Peak hour</p>
-              <p className="mt-2 text-2xl font-black">{analytics.peakHour ?? '-'}</p>
+            <div className="p-4">
+              <p className="text-xs text-[var(--muted-foreground)]">Peak hour</p>
+              <p className="mt-1 text-xl font-semibold">{analytics.peakHour ?? '-'}</p>
               <p className="mt-1 text-xs text-[var(--muted-foreground)]">
                 Avg latency {analytics.averageLatency !== null ? `${analytics.averageLatency}ms` : '-'}
               </p>
@@ -174,16 +176,30 @@ export default function SessionsPage() {
           </div>
         ) : filteredSessions.length === 0 ? (
           <div className="rounded-xl border border-dashed border-[var(--border)] bg-[var(--card)] p-6 text-center">
-            <p className="text-base font-semibold">No sessions yet</p>
-            <p className="mt-2 text-sm text-[var(--muted-foreground)]">
-              Join a queue from Explore and your completed control turns will appear here.
+            <p className="text-base font-semibold">
+              {sessions.length > 0 ? 'No matching sessions' : 'No sessions yet'}
             </p>
-            <Link
-              href="/explore"
-              className="mt-4 inline-flex rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-white"
-            >
-              Explore robots
-            </Link>
+            <p className="mt-2 text-sm text-[var(--muted-foreground)]">
+              {sessions.length > 0
+                ? 'Try another robot name or clear the filter.'
+                : 'Join a queue from Explore and your completed control turns will appear here.'}
+            </p>
+            {sessions.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => setQuery('')}
+                className="mt-4 inline-flex rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-white"
+              >
+                Clear filter
+              </button>
+            ) : (
+              <Link
+                href="/explore"
+                className="mt-4 inline-flex rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-white"
+              >
+                Explore robots
+              </Link>
+            )}
           </div>
         ) : (
           <div className="grid gap-4">

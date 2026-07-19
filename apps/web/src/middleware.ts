@@ -46,6 +46,13 @@ function buildCsp(nonce: string, pathname: string): string {
 }
 
 export function middleware(request: NextRequest) {
+  if (request.nextUrl.pathname === '/dashboard/robots/new') {
+    const dashboard = request.nextUrl.clone();
+    dashboard.pathname = '/dashboard';
+    dashboard.hash = 'new-robot';
+    return NextResponse.redirect(dashboard, 308);
+  }
+
   if (request.nextUrl.pathname === '/de' || request.nextUrl.pathname.startsWith('/de/')) {
     const canonical = request.nextUrl.clone();
     canonical.pathname = request.nextUrl.pathname.slice(3) || '/';

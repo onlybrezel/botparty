@@ -266,8 +266,8 @@ export function useDashboardThumbnail({
 
     try {
       api.setToken(accessToken);
-      const updated = await api.robots.deleteRobotThumbnail(selectedRobot.id);
-      onRobotUpdated(updated);
+      await api.robots.deleteRobotThumbnail(selectedRobot.id);
+      onRobotUpdated({ ...selectedRobot, thumbnailUrl: null });
       setStatus('Thumbnail removed.');
       pushToast('Thumbnail removed.', 'success', 2400);
     } catch (error) {

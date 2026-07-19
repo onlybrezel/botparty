@@ -45,7 +45,7 @@ export default function ObsWhipDocsPage() {
           </Link>
         </div>
 
-        <div className="mt-6 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">
+          <div className="mt-6 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-900 dark:text-amber-100">
           If you are seeing 20-30 seconds of delay, the problem is usually OBS buffering or transcoding settings,
           not WHIP itself.
         </div>

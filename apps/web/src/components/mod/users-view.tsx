@@ -67,6 +67,7 @@ export function UsersView({
         <div className="relative ml-auto w-full max-w-xs">
           <Search className="pointer-events-none absolute left-2 top-2.5 h-4 w-4 text-[var(--muted-foreground)]" />
           <input
+            aria-label="Search users"
             value={query}
             onChange={(event) => onQueryChange(event.target.value)}
             className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] py-2 pl-8 pr-3 text-sm"
@@ -100,9 +101,7 @@ export function UsersView({
                       <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Edit user</p>
                       <p className="mt-1 text-sm font-semibold">{user.username}</p>
                       <p className="text-xs text-[var(--muted-foreground)]">
-                        {viewerIsAdmin
-                          ? 'All staff-editable account fields are available here.'
-                          : 'Mods can update the visible profile and economy fields. Credentials stay admin-only.'}
+                        Manage identity, access, and account balance.
                       </p>
                     </div>
                     <div className="rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
@@ -116,6 +115,7 @@ export function UsersView({
                     <div className="space-y-2 rounded-2xl border border-[var(--border)] bg-[var(--background)] p-3">
                       <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">Identity</p>
                       <input
+                        aria-label="Username"
                         value={userDraft.username}
                         onChange={(event) => onUserDraftChange((prev) => (prev ? { ...prev, username: event.target.value } : prev))}
                         placeholder="Username"
@@ -123,6 +123,7 @@ export function UsersView({
                         className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
                       />
                       <input
+                        aria-label="Email"
                         value={userDraft.email}
                         onChange={(event) => onUserDraftChange((prev) => (prev ? { ...prev, email: event.target.value } : prev))}
                         placeholder="Email"
@@ -131,6 +132,7 @@ export function UsersView({
                         className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
                       />
                       <input
+                        aria-label="Display name"
                         value={userDraft.displayName}
                         onChange={(event) => onUserDraftChange((prev) => (prev ? { ...prev, displayName: event.target.value } : prev))}
                         placeholder="Display name"
@@ -141,6 +143,7 @@ export function UsersView({
                     <div className="space-y-2 rounded-2xl border border-[var(--border)] bg-[var(--background)] p-3">
                       <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">Access & status</p>
                       <Select
+                        aria-label="Role"
                         value={userDraft.role}
                         onChange={(event) => onUserDraftChange((prev) => (prev ? { ...prev, role: event.target.value as UserRole } : prev))}
                         disabled={!viewerIsAdmin}
@@ -159,6 +162,7 @@ export function UsersView({
                         Account active
                       </label>
                       <input
+                        aria-label="New password"
                         value={userDraft.password}
                         onChange={(event) => onUserDraftChange((prev) => (prev ? { ...prev, password: event.target.value } : prev))}
                         placeholder={viewerIsAdmin ? 'New password (optional)' : 'Password changes are admin-only'}
@@ -175,19 +179,21 @@ export function UsersView({
                     <div className="space-y-2 rounded-2xl border border-[var(--border)] bg-[var(--background)] p-3">
                       <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">Economy</p>
                       <input
+                        aria-label="Credits"
                         value={userDraft.credits}
                         onChange={(event) => onUserDraftChange((prev) => (prev ? { ...prev, credits: event.target.value } : prev))}
                         placeholder="Credits"
                         className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
                       />
                       <input
+                        aria-label="Balance"
                         value={userDraft.balance}
                         onChange={(event) => onUserDraftChange((prev) => (prev ? { ...prev, balance: event.target.value } : prev))}
                         placeholder="Balance"
                         className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
                       />
                       <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
-                        Credits affect platform usage, while balance is the wallet-style numeric field used elsewhere in staff tooling.
+                        Credits cover platform actions. Balance tracks wallet funds.
                       </div>
                     </div>
                   </div>

@@ -65,7 +65,7 @@ function isProtectedSwaggerPath(url: string | undefined): boolean {
     return false;
   }
 
-  return url === '/docs' || url.startsWith('/docs/') || url === '/docs-json';
+  return url === '/api-docs' || url.startsWith('/api-docs/') || url === '/api-docs-json';
 }
 
 async function bootstrap() {
@@ -270,8 +270,8 @@ async function bootstrap() {
     }
 
     const document = SwaggerModule.createDocument(app, createSwaggerDocumentConfig());
-    SwaggerModule.setup('docs', app, document);
-    logger.log('📖 Swagger docs available at /docs');
+    SwaggerModule.setup('api-docs', app, document);
+    logger.log('📖 Swagger docs available at /api-docs');
   }
 
   const port = process.env.PORT ?? 4000;

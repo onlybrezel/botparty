@@ -35,6 +35,8 @@ import {
 } from '@botparty/shared';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 
+const CSRF_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
@@ -60,11 +62,18 @@ export class AuthController {
   @Get('csrf')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Issue CSRF token for double-submit protection' })
-  getCsrfToken(@Res({ passthrough: true }) reply: FastifyReply) {
-    const csrfToken = randomBytes(32).toString('base64url');
+  getCsrfToken(
+    @Headers('cookie') cookieHeader: string | undefined,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
     const secure = shouldUseSecureAuthCookies(this.configService);
     const sameSite = getAuthCookieSameSite(this.configService);
     const csrfCookieName = getCsrfCookieName(this.configService);
+    const currentToken = parseCookie(cookieHeader, csrfCookieName);
+    const csrfToken =
+      currentToken && CSRF_TOKEN_PATTERN.test(currentToken)
+        ? currentToken
+        : randomBytes(32).toString('base64url');
 
     reply.header(
       'set-cookie',

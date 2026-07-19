@@ -56,15 +56,15 @@ export default function ModBillingPage() {
 
   if (!accessToken || (role !== 'ADMIN' && role !== 'MOD')) {
     return (
-      <main className="mx-auto max-w-4xl px-4 py-12">
+      <div className="mx-auto max-w-4xl px-4 py-12">
         <h1 className="text-2xl font-semibold">Billing events</h1>
         <p className="mt-2 text-[var(--muted-foreground)]">Staff only.</p>
-      </main>
+      </div>
     );
   }
 
   return (
-    <main className="mx-auto max-w-6xl px-4 py-8">
+    <div className="mx-auto max-w-6xl px-4 py-8">
       <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">Billing events</h1>
@@ -152,6 +152,6 @@ export default function ModBillingPage() {
           ))}
         </div>
       )}
-    </main>
+    </div>
   );
 }

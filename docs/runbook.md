@@ -9,6 +9,7 @@ Quick reference for common production incident scenarios.
 **Symptoms:** readiness returns `503` and reports discovery, auth, or control as unavailable; data endpoints fail.
 
 **Steps:**
+
 1. Check container status: `docker compose ps postgres`
 2. Check logs: `docker compose logs --tail=50 postgres`
 3. Attempt restart: `docker compose restart postgres`
@@ -23,6 +24,7 @@ Quick reference for common production incident scenarios.
 **Symptoms:** Video streams are blank, robots fail to publish. Health endpoint shows `{ "livekit": "error" }`.
 
 **Steps:**
+
 1. Check container: `docker compose ps livekit && docker compose logs --tail=30 livekit`
 2. Restart: `docker compose restart livekit`
 3. If the livekit binary crashes: check `/data/livekit-recordings/` for disk space issues (`df -h`)
@@ -36,6 +38,7 @@ Quick reference for common production incident scenarios.
 **Symptoms:** Queue operations hang, presence doesn't update, health endpoint shows `{ "redis": "error" }`.
 
 **Steps:**
+
 1. Check memory: `docker compose exec redis redis-cli info memory | grep used_memory_human`
 2. Check max memory config in [docker/redis/redis.conf](docker/redis/redis.conf)
 3. Inspect keyspace and allocator pressure without reading values: `docker compose exec redis sh -lc 'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning info keyspace; redis-cli -a "$REDIS_PASSWORD" --no-auth-warning memory doctor'`.
@@ -49,6 +52,7 @@ Quick reference for common production incident scenarios.
 **Symptoms:** `docker compose ps api` shows restart loop, web returns 502.
 
 **Steps:**
+
 1. Check logs: `docker compose logs --tail=50 api`
 2. Look for startup errors (JWT secret, DB connection, Redis connection).
 3. Check required configuration presence without printing values: `docker compose exec -T api node -e "for (const key of ['JWT_SECRET','DATABASE_URL','REDIS_HOST']) console.log(key, process.env[key] ? 'set' : 'missing')"`
@@ -80,6 +84,7 @@ The observability profile additionally requires `alertmanager_webhook_url` in th
 **Symptoms:** Logs stop, uploads fail, DB writes fail.
 
 **Steps:**
+
 1. Check disk: `df -h /`
 2. Check recordings volume: `du -sh data/livekit-recordings/`
 3. Identify the largest paths with `du -xhd2 data /var/lib/docker | sort -h | tail -30` and verify whether growth comes from active volumes, logs, or completed archives.
@@ -195,6 +200,7 @@ Schema migrations are executed once by the dedicated `migrate` container before 
 BotParty can run multiple API instances behind a load balancer.
 
 **Guaranteed across instances today:**
+
 1. Robot claim exclusivity is coordinated through Redis lock keys.
 2. Room broadcasts, queue snapshots, presence fan-out, and shutdown notices replicate through Redis pub/sub.
 3. Active turns use Redis leases with monotonically increasing fencing tokens and reconstructible deadlines.
@@ -202,6 +208,7 @@ BotParty can run multiple API instances behind a load balancer.
 5. A reconnecting robot can land on a different instance without duplicating the control channel.
 
 **Operational guidance:**
+
 1. Drain websocket traffic before rotating replicas to avoid unnecessary reconnects.
 2. Monitor lease acquisition failures and Redis persistence health.
 3. Keep Redis on persistent storage with AOF and `noeviction`; it is part of the control-plane consistency model.
@@ -213,6 +220,7 @@ BotParty can run multiple API instances behind a load balancer.
 The production defaults include `connection_limit=10`, `pool_timeout=5`, and `connect_timeout=5` in generated `DATABASE_URL` values so connection exhaustion and database outages fail within a bounded interval.
 
 **Tuning rule of thumb:**
+
 1. Size `connection_limit` per API replica, not for the whole cluster.
 2. Keep `replica_count * connection_limit` below PostgreSQL `max_connections` with room left for admin tooling and migrations.
 3. If you inject `DATABASE_URL` through secrets, preserve the same query parameters explicitly.
@@ -235,6 +243,7 @@ APP_VERSION=20240101 docker compose up -d api web
 ```
 
 If a build is broken, the previous image is still on disk:
+
 ```bash
 docker images | grep botparty
 # Then update docker-compose.yml to pin the old tag temporarily
@@ -251,8 +260,8 @@ Use the moderation console to end affected sessions. If the console is unavailab
 ## Observability
 
 - Prometheus scrape endpoints:
-   - API: `/api/v1/health/metrics`
-   - Streamer: `/metrics`
+  - API: `/api/v1/health/metrics`
+  - Streamer: `/metrics`
 - Grafana dashboard template: `docs/grafana/botparty-observability-overview.json`
 - Setup notes and metric inventory: `docs/observability.md`
 
@@ -299,60 +308,67 @@ Until then, leave the default in place.
 
 A linear checklist for cutting a production deploy. Do not skip steps.
 
-1. **DNS**
+1. **Release approval and preflight**
+   - Record non-secret ticket or review references in `LEGAL_REVIEW_REFERENCE`, `PRIVACY_REVIEW_REFERENCE`, `BACKUP_RESTORE_REVIEW_REFERENCE` and `ALERTING_REVIEW_REFERENCE`.
+   - When enabling billing, payouts or paid controls, also record the provider, payout-operations or physical robot-safety acceptance required by `.env.example`.
+   - Run `./ops.sh preflight`. It validates the pinned version, public URLs, TLS mode, review references, host secret files and rendered Compose configuration without printing secret values.
+   - Keep subscriptions disabled. Production startup rejects `FEATURE_SUBSCRIPTIONS_ENABLED=true` until the complete recurring lifecycle is release-enabled.
+2. **DNS**
    - `A`/`AAAA` for app (`botparty.example.com`), API (`api.…`), LiveKit
      (`livekit.…`), Egress (`egress.…`), MinIO public (`media.…`).
    - TTL ≤ 300s during cut-over.
-2. **TLS**
+3. **TLS**
    - Run `./setup-env.sh` (or generate certs out-of-band) to populate
      `docker/nginx/nginx.ssl.conf` from the template.
    - Keep `fullchain.pem` and `privkey.pem` at mode `0640` with group
      `BOTPARTY_SECRET_GID`; the non-root nginx container receives that group.
    - Verify Let's Encrypt staging first, then production.
-3. **Secrets**
+4. **Secrets**
    - All values from `.env.example` set; no `devkey`, no `change_me_*`.
    - `WEBHOOK_SECRET_ENCRYPTION_KEY` set (≥ 32 chars).
    - For Docker/Kubernetes secret mounts, `WEBHOOK_SECRET_ENCRYPTION_KEY_FILE` can point to the mounted file path.
    - `STRIPE_*`/`PAYPAL_*` only set if billing is enabled — once set, the boot
      guard will require the respective webhook secret.
-4. **Migrations**
+5. **Migrations**
    - Create a versioned database-and-object archive (`./scripts/backup-release.sh`).
    - Run the one-shot `migrate` service; API replicas never migrate on startup.
    - Confirm `_prisma_migrations` table contains every committed migration.
    - In production the entrypoint refuses to fall back to `prisma db push`.
-5. **Smoke tests**
+6. **Smoke tests**
    - `curl -fsS https://<host>/api/v1/health/ready` returns `200`.
    - `curl -I https://<host>/` returns identical CSP across HTML and API
      responses (no `unsafe-eval`).
    - Headless smoke: `pnpm --filter @botparty/web exec playwright test`.
-6. **Monitoring**
+7. **Monitoring**
    - Prometheus is scraping `/api/v1/health/metrics` with the configured basic-auth credentials.
    - Loki / Promtail (if enabled) sees container logs.
    - The configured OpenTelemetry collector receives a trace carrying the release version.
-7. **Backups**
+8. **Backups**
    - The archive job runs at the operator-approved backup interval.
    - The latest scheduled `Backup Restore Drill` workflow completed successfully and, if an operator-approved RTO is configured, inside that objective.
-8. **Rollback plan**
-    - Keep the previous image tag pinned in `docker-compose.yml`.
-    - Restore script ready (see Backup/Restore below).
-    - Operator on call has access to MinIO bucket and Postgres dumps.
+9. **Rollback plan**
+   - Keep the previous image tag pinned in `docker-compose.yml`.
+   - Restore script ready (see Backup/Restore below).
+   - Operator on call has access to MinIO bucket and Postgres dumps.
 
 ### Release images and tags
 
-BotParty publishes release images from Git tags.
+BotParty publishes release images only from SemVer tags whose commit is reachable from `main`.
 
 1. Create and push a SemVer tag such as `v0.1.4`.
-2. GitHub Actions workflow `.github/workflows/release.yml` builds `ghcr.io/<owner>/botparty-api:<tag>` and `ghcr.io/<owner>/botparty-web:<tag>`.
-3. The same workflow also pushes the rolling tags `<major>.<minor>`, `<version>`, and `latest`.
-4. Images are signed with keyless Cosign using GitHub OIDC. Verify with:
+2. Configure the `production-release` GitHub Environment with required reviewers and restrict it to protected release tags.
+3. The release workflow repeats dependency, ENV, architecture, lint, type, API, Web and migration gates before it can enter that environment. Manual reruns must select the existing tag; branch refs are rejected.
+4. GitHub Actions builds `ghcr.io/<owner>/botparty-api:<version>` and `ghcr.io/<owner>/botparty-web:<version>`. For tag `v0.1.4`, the immutable image version is `0.1.4`.
+5. The same workflow also pushes the rolling tags `<major>.<minor>`, `<version>`, and `latest`.
+6. Images are signed with keyless Cosign using GitHub OIDC. Verify with:
 
    ```bash
-   cosign verify ghcr.io/<owner>/botparty-api:v0.1.4 \
+   cosign verify ghcr.io/<owner>/botparty-api:0.1.4 \
      --certificate-identity-regexp 'https://github.com/.+/.+/.github/workflows/release.yml@.+' \
      --certificate-oidc-issuer https://token.actions.githubusercontent.com
    ```
 
-5. Compose defaults to GHCR image references via `IMAGE_REGISTRY`, `IMAGE_NAMESPACE`, and `APP_VERSION`. Local `docker compose up --build` still works and simply retags the locally built image under the same name.
+7. Compose defaults to GHCR image references via `IMAGE_REGISTRY`, `IMAGE_NAMESPACE`, and `APP_VERSION`. Local `docker compose up --build` still works and simply retags the locally built image under the same name.
 
 ---
 

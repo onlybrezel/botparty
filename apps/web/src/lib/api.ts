@@ -42,6 +42,18 @@ class ApiError extends Error {
   }
 }
 
+type RefreshSessionResult = {
+  token: string | null;
+  retryable: boolean;
+};
+
+const RESTORE_RETRY_DELAYS_MS = [150, 400] as const;
+
+const wait = (delayMs: number) =>
+  new Promise<void>((resolve) => {
+    window.setTimeout(resolve, delayMs);
+  });
+
 function resolveApiUrl() {
   const configured = process.env.NEXT_PUBLIC_API_URL;
 
@@ -64,9 +76,9 @@ const API_URL = resolveApiUrl();
 class ApiClient {
   private readonly baseUrl: string;
   private accessToken: string | null = null;
-  private refreshPromise: Promise<string | null> | null = null;
+  private refreshPromise: Promise<RefreshSessionResult> | null = null;
   private csrfToken: string | null = null;
-  private csrfPromise: Promise<string | null> | null = null;
+  private csrfPromise: Promise<string> | null = null;
 
   readonly auth: AuthApi;
   readonly users: UsersApi;
@@ -111,8 +123,8 @@ class ApiClient {
     );
   }
 
-  private async refreshSession(): Promise<string | null> {
-    if (typeof window === 'undefined') return null;
+  private async refreshSession(): Promise<RefreshSessionResult> {
+    if (typeof window === 'undefined') return { token: null, retryable: false };
     if (this.refreshPromise) return this.refreshPromise;
 
     this.refreshPromise = (async () => {
@@ -132,15 +144,19 @@ class ApiClient {
           if (refreshRes.status === 401 || refreshRes.status === 403) {
             useAuth.getState().logout();
             this.setToken(null);
+            return { token: null, retryable: false };
           }
-          return null;
+          return {
+            token: null,
+            retryable: refreshRes.status === 429 || refreshRes.status >= 500,
+          };
         }
 
         const refreshed = (await refreshRes.json()) as AuthSessionResponse;
         if (!refreshed.accessToken) {
           useAuth.getState().logout();
           this.setToken(null);
-          return null;
+          return { token: null, retryable: false };
         }
         this.setToken(refreshed.accessToken);
         useAuth.getState().login({
@@ -151,11 +167,11 @@ class ApiClient {
           role: refreshed.user.role,
         });
 
-        return refreshed.accessToken;
+        return { token: refreshed.accessToken, retryable: false };
       } catch {
         // Temporary network / proxy / CSRF bootstrap issues should not look
         // like an explicit sign-out. A later retry can still recover cleanly.
-        return null;
+        return { token: null, retryable: true };
       }
     })().finally(() => {
       this.refreshPromise = null;
@@ -165,23 +181,44 @@ class ApiClient {
   }
 
   async restoreSession(): Promise<boolean> {
-    const restored = Boolean(await this.refreshSession());
+    let restored = false;
+
+    for (let attempt = 0; attempt <= RESTORE_RETRY_DELAYS_MS.length; attempt += 1) {
+      const result = await this.refreshSession();
+      if (result.token) {
+        restored = true;
+        break;
+      }
+      if (!result.retryable || attempt === RESTORE_RETRY_DELAYS_MS.length) {
+        break;
+      }
+      const retryDelayMs = RESTORE_RETRY_DELAYS_MS[attempt];
+      if (retryDelayMs === undefined) {
+        break;
+      }
+      await wait(retryDelayMs);
+    }
+
     useAuth.getState().setHasHydrated(true);
     return restored;
   }
 
-  async request(path: string, options: ApiRequestOptions & { expectNoContent: true }): Promise<void>;
+  async request(
+    path: string,
+    options: ApiRequestOptions & { expectNoContent: true },
+  ): Promise<void>;
   async request<T>(path: string, options?: ApiRequestOptions): Promise<T>;
   async request<T>(path: string, options: ApiRequestOptions = {}): Promise<T | void> {
+    const { authentication = 'default', expectNoContent = false, ...requestOptions } = options;
     const headers: Record<string, string> = {
-      ...((options.headers as Record<string, string>) ?? {}),
+      ...((requestOptions.headers as Record<string, string>) ?? {}),
     };
 
-    if (options.body !== undefined && !('Content-Type' in headers)) {
+    if (requestOptions.body !== undefined && !('Content-Type' in headers)) {
       headers['Content-Type'] = 'application/json';
     }
 
-    const method = (options.method ?? 'GET').toUpperCase();
+    const method = (requestOptions.method ?? 'GET').toUpperCase();
     if (path.startsWith('/auth/') && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
       const csrfToken = await this.ensureCsrfToken();
       if (csrfToken) {
@@ -189,38 +226,50 @@ class ApiClient {
       }
     }
 
-    if (this.accessToken) {
+    if (authentication === 'default' && this.accessToken) {
       headers['Authorization'] = `Bearer ${this.accessToken}`;
     }
 
     const makeRequest = () =>
-      fetch(`${this.baseUrl}${path}`, { ...options, headers, credentials: 'include' });
+      fetch(`${this.baseUrl}${path}`, { ...requestOptions, headers, credentials: 'include' });
 
-    let res = await makeRequest();
+    const performRequest = async () => {
+      try {
+        return await makeRequest();
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          throw error;
+        }
+        throw new ApiError('Cannot reach the service. Check your connection and try again.', 0);
+      }
+    };
+
+    let res = await performRequest();
 
     if (
       res.status === 401 &&
+      authentication === 'default' &&
       path !== '/auth/login' &&
       path !== '/auth/register' &&
       path !== '/auth/refresh' &&
       path !== '/auth/forgot-password' &&
       path !== '/auth/reset-password'
     ) {
-      const refreshedToken = await this.refreshSession();
-      if (refreshedToken) {
-        headers.Authorization = `Bearer ${refreshedToken}`;
-        res = await makeRequest();
+      const refreshed = await this.refreshSession();
+      if (refreshed.token) {
+        headers.Authorization = `Bearer ${refreshed.token}`;
+        res = await performRequest();
       }
     }
 
     if (!res.ok) throw await this.parseError(res);
-    if (res.status === 204 || options.expectNoContent) return;
+    if (res.status === 204 || expectNoContent) return;
     return res.json() as Promise<T>;
   }
 
-  private async ensureCsrfToken(): Promise<string | null> {
+  private async ensureCsrfToken(): Promise<string> {
     if (typeof window === 'undefined') {
-      return null;
+      throw new ApiError('A security token can only be requested in the browser.', 503);
     }
     if (this.csrfToken) {
       return this.csrfToken;
@@ -230,16 +279,24 @@ class ApiClient {
     }
 
     this.csrfPromise = (async () => {
-      const response = await fetch(`${this.baseUrl}/auth/csrf`, {
+      const csrfUrl = `${this.baseUrl}/auth/csrf`;
+      const requestMode = new URL(csrfUrl).origin === window.location.origin ? 'same-origin' : 'cors';
+      const response = await fetch(csrfUrl, {
         method: 'GET',
         credentials: 'include',
+        mode: requestMode,
       });
       if (!response.ok) {
-        return null;
+        throw new ApiError('Could not establish a secure session. Try again.', response.status);
       }
 
       const payload = (await response.json().catch(() => null)) as { csrfToken?: string } | null;
-      this.csrfToken = payload?.csrfToken?.trim() || null;
+      const csrfToken = payload?.csrfToken?.trim();
+      if (!csrfToken) {
+        throw new ApiError('Could not establish a secure session. Try again.', 503);
+      }
+
+      this.csrfToken = csrfToken;
       return this.csrfToken;
     })().finally(() => {
       this.csrfPromise = null;

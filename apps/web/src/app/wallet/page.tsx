@@ -194,15 +194,15 @@ export default function WalletPage() {
 
   if (!accessToken) {
     return (
-      <main className="mx-auto max-w-3xl px-4 py-12">
+      <div className="mx-auto max-w-3xl px-4 py-12">
         <h1 className="mb-4 text-2xl font-semibold">Wallet</h1>
         <p className="text-[var(--muted-foreground)]">Please sign in to view your wallet.</p>
-      </main>
+      </div>
     );
   }
 
   return (
-    <main className="mx-auto max-w-4xl px-4 py-8">
+    <div className="mx-auto max-w-4xl px-4 py-8">
       <header className="mb-8 flex items-center justify-between">
         <h1 className="flex items-center gap-2 text-2xl font-semibold">
           <Coins className="h-6 w-6 text-amber-500" />
@@ -492,6 +492,6 @@ export default function WalletPage() {
           ) : null}
         </>
       )}
-    </main>
+    </div>
   );
 }

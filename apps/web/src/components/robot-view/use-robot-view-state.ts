@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { WS_PROTOCOL_VERSION, type RobotPublic } from '@botparty/shared';
-import { api, createApiClient } from '@/lib/api';
+import { api } from '@/lib/api';
 import { useAuth } from '@/lib/store';
 import { pushToast } from '@/lib/toast';
 import { usePreferences } from '@/lib/preferences';
@@ -39,7 +39,11 @@ import {
 import { useRobotRecordingState } from './use-robot-recording-state';
 import { useVisibilityPolling } from '@/lib/use-visibility-polling';
 import { releaseFeatures } from '@/lib/release-features';
-import { useControlKeyboard, useGamepadControl, useHeldControlRepeater } from './use-control-inputs';
+import {
+  useControlKeyboard,
+  useGamepadControl,
+  useHeldControlRepeater,
+} from './use-control-inputs';
 
 function createInitialMessages(robotName: string): ChatMsg[] {
   return [
@@ -54,7 +58,6 @@ function createInitialMessages(robotName: string): ChatMsg[] {
 }
 
 export function useRobotViewState(robot: RobotPublic) {
-  const publicApiRef = useRef(createApiClient());
   const searchParams = useSearchParams();
   const { accessToken, userId, username, role, hasHydrated } = useAuth();
   const preferencesHydrated = usePreferences((state) => state.hydrated);
@@ -66,7 +69,8 @@ export function useRobotViewState(robot: RobotPublic) {
   useEffect(() => {
     if (!hasHydrated || !accessToken) return;
     api.setToken(accessToken);
-    void api.analytics.event('DISCOVERY_ROBOT_VIEW', robot.id)
+    void api.analytics
+      .event('DISCOVERY_ROBOT_VIEW', robot.id)
       .catch((error: unknown) => console.error('Failed to report robot view', error));
   }, [accessToken, hasHydrated, robot.id]);
 
@@ -109,7 +113,9 @@ export function useRobotViewState(robot: RobotPublic) {
   const [queueAction, setQueueAction] = useState<'join' | 'leave' | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
-  const wsEventHandlerRef = useRef<(event: string, data: Record<string, unknown>) => void>(() => undefined);
+  const wsEventHandlerRef = useRef<(event: string, data: Record<string, unknown>) => void>(
+    () => undefined,
+  );
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<HTMLInputElement>(null);
   const controlsPanelRef = useRef<HTMLDivElement>(null);
@@ -169,34 +175,37 @@ export function useRobotViewState(robot: RobotPublic) {
     accessToken,
   });
 
-  useVisibilityPolling(async () => {
-    const sameButton = (a: ControlButton, b: ControlButton) =>
-      a.id === b.id &&
-      a.label === b.label &&
-      a.command === b.command &&
-      a.hotKey === b.hotKey &&
-      a.icon === b.icon &&
-      a.cooldownMs === b.cooldownMs &&
-      a.costCredits === b.costCredits &&
-      a.access === b.access &&
-      a.position === b.position &&
-      a.color === b.color;
+  useVisibilityPolling(
+    async () => {
+      const sameButton = (a: ControlButton, b: ControlButton) =>
+        a.id === b.id &&
+        a.label === b.label &&
+        a.command === b.command &&
+        a.hotKey === b.hotKey &&
+        a.icon === b.icon &&
+        a.cooldownMs === b.cooldownMs &&
+        a.costCredits === b.costCredits &&
+        a.access === b.access &&
+        a.position === b.position &&
+        a.color === b.color;
 
-    try {
-      const next = await api.controls.getControls(robot.id);
-      setControlButtons((prev) => {
-        if (
-          prev.length === next.length &&
-          prev.every((entry, index) => sameButton(entry, next[index]!))
-        ) {
-          return prev;
-        }
-        return next;
-      });
-    } catch {
-      // Keep last known buttons when the low-frequency fallback refresh fails.
-    }
-  }, { intervalMs: 30_000, hiddenIntervalMs: null });
+      try {
+        const next = await api.controls.getControls(robot.id);
+        setControlButtons((prev) => {
+          if (
+            prev.length === next.length &&
+            prev.every((entry, index) => sameButton(entry, next[index]!))
+          ) {
+            return prev;
+          }
+          return next;
+        });
+      } catch {
+        // Keep last known buttons when the low-frequency fallback refresh fails.
+      }
+    },
+    { intervalMs: 30_000, hiddenIntervalMs: null },
+  );
 
   useEffect(() => {
     initialChatScrollDoneRef.current = false;
@@ -207,9 +216,7 @@ export function useRobotViewState(robot: RobotPublic) {
     setChatHistoryLoading(false);
 
     const storedMessages = loadStoredChatMessages(robot.id);
-    setMessages(
-      storedMessages.length > 0 ? storedMessages : createInitialMessages(robot.name),
-    );
+    setMessages(storedMessages.length > 0 ? storedMessages : createInitialMessages(robot.name));
   }, [robot.id, robot.name]);
 
   useEffect(() => {
@@ -313,6 +320,12 @@ export function useRobotViewState(robot: RobotPublic) {
         return;
       }
 
+      if (!isRobotOnline(robotStatus)) {
+        setLivekitCreds(null);
+        setVideoState('idle');
+        return;
+      }
+
       const roomAccessGate = getRoomAccessGateState({
         accessMode: robot.accessMode,
         accessToken,
@@ -350,9 +363,7 @@ export function useRobotViewState(robot: RobotPublic) {
           }
         }
 
-        const { token, livekitUrl } = await publicApiRef.current.robots.getPublicViewerToken(
-          robot.id,
-        );
+        const { token, livekitUrl } = await api.robots.getPublicViewerToken(robot.id);
         setLivekitCreds({ token, url: publicUrl ?? livekitUrl });
         setVideoState('ready');
         livekitRefreshAttemptRef.current = 0;
@@ -367,7 +378,15 @@ export function useRobotViewState(robot: RobotPublic) {
         livekitRefreshInFlightRef.current = false;
       }
     },
-    [accessToken, guestVideoAllowed, hasHydrated, robot.accessMode, robot.id, roomAccessToken],
+    [
+      accessToken,
+      guestVideoAllowed,
+      hasHydrated,
+      robot.accessMode,
+      robot.id,
+      robotStatus,
+      roomAccessToken,
+    ],
   );
 
   useEffect(() => {
@@ -412,8 +431,14 @@ export function useRobotViewState(robot: RobotPublic) {
     api.queue
       .getQueue(robot.id)
       .then((rows) => setQueue(normalizeQueueEntries(rows as QueueEntryWire[])))
-      .catch((error: unknown) => pushThrottledToast(lastErrorToastRef, 'queue-load',
-        getErrorMessage(error, 'Queue could not be loaded.'), { cooldownMs: 30_000, kind: 'error' }));
+      .catch((error: unknown) =>
+        pushThrottledToast(
+          lastErrorToastRef,
+          'queue-load',
+          getErrorMessage(error, 'Queue could not be loaded.'),
+          { cooldownMs: 30_000, kind: 'error' },
+        ),
+      );
   }, [accessToken, robot.id, roomAccessToken]);
 
   useEffect(() => {
@@ -430,8 +455,14 @@ export function useRobotViewState(robot: RobotPublic) {
           expiresAt: null,
         });
       })
-      .catch((error: unknown) => pushThrottledToast(lastErrorToastRef, 'active-session-load',
-        getErrorMessage(error, 'Active session could not be loaded.'), { cooldownMs: 30_000, kind: 'error' }));
+      .catch((error: unknown) =>
+        pushThrottledToast(
+          lastErrorToastRef,
+          'active-session-load',
+          getErrorMessage(error, 'Active session could not be loaded.'),
+          { cooldownMs: 30_000, kind: 'error' },
+        ),
+      );
 
     return () => {
       active = false;
@@ -622,7 +653,12 @@ export function useRobotViewState(robot: RobotPublic) {
   const sendCommand = useCallback(
     (
       command: string,
-      options?: { cooldownMs?: number; access?: ControlButton['access']; value?: unknown; buttonId?: string },
+      options?: {
+        cooldownMs?: number;
+        access?: ControlButton['access'];
+        value?: unknown;
+        buttonId?: string;
+      },
     ) => {
       const cooldownMs = options?.cooldownMs ?? 150;
       const buttonAccess = options?.access ?? 'QUEUE_TURN';
@@ -644,11 +680,16 @@ export function useRobotViewState(robot: RobotPublic) {
       }
 
       if (wsRef.current?.readyState !== WebSocket.OPEN) {
-        pushThrottledToast(lastErrorToastRef, 'disconnected', 'Waiting for connection to robot...', {
-          cooldownMs: 3000,
-          kind: 'error',
-          durationMs: 2000,
-        });
+        pushThrottledToast(
+          lastErrorToastRef,
+          'disconnected',
+          'Waiting for connection to robot...',
+          {
+            cooldownMs: 3000,
+            kind: 'error',
+            durationMs: 2000,
+          },
+        );
         return;
       }
       const lastAt = cooldownMap.current.get(command) ?? 0;
@@ -679,7 +720,12 @@ export function useRobotViewState(robot: RobotPublic) {
     wsRef.current.send(
       JSON.stringify({
         event: 'control:command',
-        data: { commandId: crypto.randomUUID(), robotId: robot.id, command: 'stop', timestamp: Date.now() },
+        data: {
+          commandId: crypto.randomUUID(),
+          robotId: robot.id,
+          command: 'stop',
+          timestamp: Date.now(),
+        },
       }),
     );
   }, [robot.id]);
@@ -1004,7 +1050,7 @@ export function useRobotViewState(robot: RobotPublic) {
         ? 'Your turn is live'
         : myQueuePosition === 1
           ? 'Next up'
-        : `Queue #${Math.max(myQueuePosition, 1)}`
+          : `Queue #${Math.max(myQueuePosition, 1)}`
       : 'Join queue'
     : 'Open controls';
   const showRoomOnboarding = preferencesHydrated && !robotRoomOnboardingSeen;

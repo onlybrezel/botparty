@@ -34,7 +34,7 @@ export default function RobotSetupDocsPage() {
           Bring a robot online with BotParty
         </h1>
         <p className="mt-3 max-w-2xl text-sm leading-6 text-[var(--muted-foreground)]">
-          This page keeps the essential setup path available inside the app. Use it as the stable fallback when external repository links are unavailable.
+          Connect a robot client, verify its safety checks, and bring the room online.
         </p>
 
         <div className="mt-8 space-y-4">
@@ -52,10 +52,10 @@ export default function RobotSetupDocsPage() {
           ))}
         </div>
 
-        <div className="mt-8 rounded-xl border border-sky-500/20 bg-sky-500/10 px-4 py-4 text-sm text-sky-100">
-          <p className="font-semibold text-sky-200">Need the deeper hardware and profile docs?</p>
-          <p className="mt-2 text-sky-100/85">
-            Keep the robot client repo nearby for full configuration reference, but this page covers the core operational setup path that operators need most often.
+        <div className="mt-8 rounded-xl border border-sky-500/20 bg-sky-500/10 px-4 py-4 text-sm text-sky-900 dark:text-sky-100">
+          <p className="font-semibold text-sky-900 dark:text-sky-200">Need the deeper hardware and profile docs?</p>
+          <p className="mt-2 text-sky-900 dark:text-sky-100">
+            Follow these steps for the standard setup. The client guide covers every configuration option.
           </p>
         </div>
 

@@ -94,7 +94,7 @@ export function DashboardSidebar({
             type="button"
             disabled={deleting}
             onClick={onDelete}
-            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-red-500/40 px-3 py-2 text-xs font-semibold text-red-300 disabled:opacity-60"
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-red-500/40 px-3 py-2 text-xs font-semibold text-red-700 disabled:opacity-60 dark:text-red-300"
           >
             <Trash2 className="h-3.5 w-3.5" />
             {deleting ? 'Deleting...' : 'Delete'}

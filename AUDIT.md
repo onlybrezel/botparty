@@ -8,16 +8,16 @@
 
 **Release-Entscheidung am Audit-Stichtag:** **Nein – in der ursprünglich geprüften Fassung nicht release-ready**
 
-## Sanierungsstand vom 18. Juli 2026
+## Sanierungsstand vom 19. Juli 2026
 
 Die Abschnitte 1 bis 14 dokumentieren den historischen Ausgangsbefund vom Audit-Stichtag. Der aktuelle Umsetzungsstand und die verbindlichen Nachweise stehen in Abschnitt 15 und in dieser Statusübersicht; frühere Fehlermeldungen sind nicht als aktueller Projektzustand zu lesen.
 
 Aktuell verifiziert:
 
 - Fresh- und Upgrade-Migrationen auf PostgreSQL 16 einschließlich Drift- und Wiederholungstest: **grün**.
-- API: **65/65 Suites / 608/608 Tests grün**, einschließlich aktiver Testcontainers-Integration.
-- Web: **33/33 Testdateien / 109/109 Tests grün**.
-- Playwright Chromium: **21/21 Tests grün**, einschließlich Auth, Host-Onboarding, CSP, Accessibility, Eigentümerisolation und Queue-/Control-Smokes.
+- API: **626/626 Tests grün**, einschließlich aktiver PostgreSQL-/Redis-Testcontainers-Integration und Produktionskonfigurationssuite.
+- Web: **121/121 Tests grün**.
+- Playwright: **216/216 Funktions-/Accessibility-Fälle** in Chromium, Firefox und WebKit, **15/15** Responsive-/Zoom-Fälle, **4/4** visuelle Workflows mit 14 Referenzbildern sowie der aktive Zwei-API-Failover-Flow sind grün.
 - API- und Web-Coverage einschließlich der separaten 90-%-Schwellen für kritische Auth-, Finanz-, Control- und LiveKit-Dateien: **grün**.
 - Produktions- und vollständiger Dependency-Audit: **keine bekannten Schwachstellen**.
 - OpenAPI-/Referenz-Drift, ENV-Parität, Architekturgrenzen, Backup-/Restore-Drill, Queue-Benchmark und File-Secret-Smoke: **grün**.
@@ -25,6 +25,8 @@ Aktuell verifiziert:
 - Zwei-API-Ausfall, DB-/Redis-/Storage-Ausfälle, fehlerhaftes Deployment, Rolling Update und echter Rollback wurden in der isolierten Compose-Umgebung praktisch bestanden. Das Rollout-/Rollback-/Rollforward-Triple lieferte auf allen beantworteten Requests HTTP 200; ungesunde Surge-Replikas blieben vollständig vom Traffic isoliert. Eine zusätzliche 150-Sekunden-Keep-alive-Probe des finalen Rollouts maß 146.191 HTTP-200-Antworten und sieben rohe Socket-Reconnects bei Nginx-Konfigurationswechseln (0,0048 %); die Single-Proxy-Grenze ist im Abschlussbericht ausgewiesen.
 - Das HTTPS-Profil startete als UID 101 mit read-only Root-Dateisystem, gruppenbeschränktem TLS-Schlüssel, Capability-Drop und erfolgreichen HTTP-/HTTPS-Probes.
 - Abschließende Shell-, Compose-, Diff-, Abschwächungs- und Hochkonfidenz-Secretsuche: **grün**; `git diff --check` Exit 0.
+- Der Produktions-Preflight erzwingt jetzt Reviewreferenzen, TLS, Secret-Dateien, gepinnte SemVer-Images und Feature-spezifische Freigaben. Der Release-Workflow akzeptiert nur Tags aus `main`, wiederholt die Qualitätsgates vor dem Publish und nutzt das Environment `production-release`.
+- Die abschließende Browserabnahme hat zusätzlich eine Firefox-Hydration-Race, einen CSRF-Bootstrap-Abbruch beim kanonischen Robot-Redirect, eine Mehrtab-Tokenrotation und WebKit-Offlinenavigation reproduziert. Theme-Bootstrap, fail-closed Same-Origin-CSRF-Versand, stabile Mehrtab-Tokens, Offline-Polling und Navigationssynchronisierung wurden korrigiert. Die finalen frischen Dockerläufe bestanden 216/216 Drei-Browser-Fälle, 15/15 Responsive-/Zoom-Fälle, 4/4 visuelle Workflows und den aktiven Zwei-API-Failover.
 
 ## Methodik, Evidenz und Grenzen
 
@@ -713,7 +715,7 @@ Die Reihenfolge innerhalb einer Priorität folgt Abhängigkeiten und Risikoreduk
   - Geschätzter Aufwand: groß
 
 - [ ] **PayPal erst nach bestätigtem Capture gutschreiben**
-  - Technisch umgesetzt und geprüft (18.07.2026): `ORDER.APPROVED` schreibt nicht gut, `PAYMENT.CAPTURE.COMPLETED` wird samt Order-/Capturebezug, Betrag und Währung genau einmal verarbeitet; Unit- und Providervertragstests sind grün. Externer Abnahmeblocker: Der geforderte echte PayPal-Sandbox-E2E benötigt Client-Credentials und Webhook-ID.
+  - Technisch umgesetzt und geprüft (19.07.2026): `ORDER.APPROVED` schreibt nicht gut, `PAYMENT.CAPTURE.COMPLETED` wird samt Order-/Capturebezug, Betrag und Währung genau einmal verarbeitet; Unit- und Providervertragstests sind grün. Billing bleibt standardmäßig aus; ein öffentlicher Start mit PayPal verlangt nun zusätzlich Sandbox- und Live-Abnahmereferenzen sowie `PAYPAL_ENV=live`. Externer Abnahmeblocker: Der echte PayPal-Sandbox-/Live-E2E benötigt Client-Credentials und Webhook-ID.
   - Priorität: P0
   - Kategorie: Security
   - Problem: **Gefunden.** CHECKOUT.ORDER.APPROVED wird als completed interpretiert; ein serverseitiger Capture-Schritt ist nicht vorhanden.
@@ -835,7 +837,7 @@ Die Reihenfolge innerhalb einer Priorität folgt Abhängigkeiten und Risikoreduk
 ### 15.2 P1 – Aufgaben vor einem öffentlichen Release
 
 - [ ] **GitHub-Workflows tatsächlich versionieren**
-  - Technisch umgesetzt und lokal geprüft (18.07.2026): `.github` ist nicht mehr ignoriert; CI, CodeQL, Release und Restore-Drill sind mit minimalen Permissions und SHA-gepinnten Actions vorhanden. Externer Abnahmeblocker: Commit/Push, verpflichtende Branch-Protection und ein GitHub-PR-Lauf benötigen Repository-Zugriff.
+  - Technisch umgesetzt und lokal geprüft (19.07.2026): `.github` ist nicht mehr ignoriert; CI, CodeQL, Release, Performance-Smoke und Restore-Drill sind auf dem Remote-Branch versioniert. Release-Publishing akzeptiert nur SemVer-Tags aus `main`, wiederholt die Qualitätsgates und wartet auf `production-release`; `actionlint` ist ohne Befund. Externer Abnahmeblocker: Merge, verpflichtende Branch-/Environment-Protection und ein GitHub-PR-Lauf müssen in den Repository-Einstellungen bestätigt werden.
   - Priorität: P1
   - Kategorie: DevOps
   - Problem: **Gefunden.** .gitignore schließt .github aus; git ls-files enthält die vorhandenen CI-, CodeQL- und Release-Dateien nicht.
@@ -847,7 +849,7 @@ Die Reihenfolge innerhalb einer Priorität folgt Abhängigkeiten und Risikoreduk
   - Geschätzter Aufwand: klein
 
 - [ ] **CI-Kommandos, Coverage-Pfade und E2E-Projekt reparieren**
-  - Technisch umgesetzt und lokal geprüft (18.07.2026): Chromium-Projekt, isolierte DB-/Redis-Fixtures, korrekte Coverageartefakte, Migrations-, OpenAPI-, Observability-, Queue-, Dev-Compose-, Build-, E2E- und Lighthouse-Gates sind integriert. Externer Abnahmeblocker: Der geforderte leere GitHub-Runner-Lauf benötigt einen gepushten Branch und Actions-Zugriff.
+  - Technisch umgesetzt und lokal geprüft (19.07.2026): Browserprojekte, isolierte DB-/Redis-Fixtures, korrekte Coverageartefakte, Migrations-, OpenAPI-, Observability-, Queue-, Dev-Compose-, Build-, E2E-, Lighthouse- und Produktions-Preflight-Gates sind integriert. Der ENV-Check besitzt keine versteckte `rg`-Hostabhängigkeit mehr; Restore-Readiness bricht nach dem Timeout korrekt ab. Externer Abnahmeblocker: Der geforderte leere GitHub-Runner-Lauf und verpflichtende Checkstatus benötigen GitHub-Actions-/Repositoryzugriff.
   - Priorität: P1
   - Kategorie: DevOps
   - Problem: **Gefunden.** --project=chromium referenziert kein Playwright-Projekt; API-Coverage-Pfad ist falsch; Filter sind uneinheitlich; E2E provisioniert keine API/Fixtures.
@@ -871,7 +873,7 @@ Die Reihenfolge innerhalb einer Priorität folgt Abhängigkeiten und Risikoreduk
   - Geschätzter Aufwand: klein
 
 - [x] **Aktuell rote API- und Web-Tests reparieren**
-  - Umgesetzt und geprüft (18.07.2026): Gateway- und Fokusfixtures, Jest-Lifecycle sowie die Browser-Smokes wurden repariert; API 65/65 Suites mit 608 Tests einschließlich aktiver Testcontainers-Integration, Web 33/33 Dateien mit 109 Tests und Chromium 21/21 laufen grün. Ein Test mit ausschließlich bedingungslos erfolgreichen Assertions wurde entfernt.
+  - Umgesetzt und geprüft (19.07.2026): Gateway- und Fokusfixtures, Jest-Lifecycle sowie die Browser-Smokes wurden repariert; API 626/626 Tests einschließlich aktiver Testcontainers-Integration, Web 121/121 Tests und 216/216 Cross-Browser-Funktions-/Accessibility-Fälle laufen grün. Browserfixtures bereinigen ihre sichtbaren Testdaten wieder vollständig; ein Test mit ausschließlich bedingungslos erfolgreichen Assertions wurde entfernt.
   - Priorität: P1
   - Kategorie: Codequalität
   - Problem: **Gefunden.** Gateway-Protokollsuite fehlt LivekitService und erzeugt vier Fehler; DashboardSidebar-Fokustest schlägt fehl.
@@ -967,7 +969,7 @@ Die Reihenfolge innerhalb einer Priorität folgt Abhängigkeiten und Risikoreduk
   - Geschätzter Aufwand: groß
 
 - [ ] **Finanzdaten bei Kontolöschung erhalten und Nutzer anonymisieren**
-  - Technisch umgesetzt und geprüft (18.07.2026): Accountlöschung deaktiviert Login und anonymisiert Profil/öffentliche Inhalte, während Ledger-, Billing- und Payoutrelationen mit pseudonymer Actor-ID und balanciertem Ledger erhalten bleiben. Staff-Änderungen und -Löschungen sperren Akteur und Ziel deterministisch, validieren die aktuelle aktive Adminrolle in der Transaktion und schreiben Profil-/Balance-/Ledgeränderungen atomar; anonymisierte Konten sind nicht reaktivierbar. Externer Abnahmeblocker: Die verbindliche gesetzliche Aufbewahrungsdauer und Rechtsgrundlage müssen vom Betreiber juristisch freigegeben werden.
+  - Technisch umgesetzt und geprüft (19.07.2026): Accountlöschung deaktiviert Login und anonymisiert Profil/öffentliche Inhalte, während Ledger-, Billing- und Payoutrelationen mit pseudonymer Actor-ID und balanciertem Ledger erhalten bleiben. Staff-Änderungen und -Löschungen sperren Akteur und Ziel deterministisch, validieren die aktuelle aktive Adminrolle in der Transaktion und schreiben Profil-/Balance-/Ledgeränderungen atomar; anonymisierte Konten sind nicht reaktivierbar. Der Produktions-Preflight verlangt eine Datenschutz-/Retention-Freigabereferenz. Externer Abnahmeblocker: Die verbindliche gesetzliche Aufbewahrungsdauer und Rechtsgrundlage müssen vom Betreiber juristisch freigegeben werden.
   - Priorität: P1
   - Kategorie: Compliance
   - Problem: **Gefunden.** User-Hard-Delete kaskadiert Ledger, BillingIntents, Payouts und Idempotency-Daten.
@@ -1015,7 +1017,7 @@ Die Reihenfolge innerhalb einer Priorität folgt Abhängigkeiten und Risikoreduk
   - Geschätzter Aufwand: klein
 
 - [ ] **Rechtstexte und Checkout-Einwilligungen finalisieren**
-  - Technisch umgesetzt und geprüft (18.07.2026): Sichtbare Template-/Konfigurationshinweise wurden entfernt, Policies versioniert, Links vereinheitlicht und die Sofortlieferungs-/Terms-Einwilligung wird mit der Billingabsicht nachweisbar gespeichert. Externer Abnahmeblocker: Die rechtliche Wirksamkeit und Betreiberfassung erfordern eine juristische Prüfung.
+  - Technisch umgesetzt und geprüft (19.07.2026): Sichtbare Template-/Konfigurationshinweise wurden entfernt, Policies versioniert, Links vereinheitlicht und die Sofortlieferungs-/Terms-Einwilligung wird mit der Billingabsicht nachweisbar gespeichert. Ein öffentlicher Start verlangt jetzt eine `LEGAL_REVIEW_REFERENCE`. Externer Abnahmeblocker: Die rechtliche Wirksamkeit und Betreiberfassung erfordern eine juristische Prüfung.
   - Priorität: P1
   - Kategorie: Compliance
   - Problem: **Gefunden.** Sichtbare Seiten bezeichnen sich als Template, enthalten vorgeschlagene Texte und stimmen nicht vollständig mit Export/Deletion/Refund überein.
@@ -1039,7 +1041,7 @@ Die Reihenfolge innerhalb einer Priorität folgt Abhängigkeiten und Risikoreduk
   - Geschätzter Aufwand: klein
 
 - [ ] **Cookie-/Storage-Inventar und echte Kategorieentscheidung herstellen**
-  - Technisch umgesetzt und geprüft (18.07.2026): Das wirkungslose Banner wurde entfernt, notwendige Cookie-/Storage-Keys, Zweck und Lebensdauer dokumentiert und Analytics-Consent technisch durchgesetzt. Externer Abnahmeblocker: Rechtsgrundlage und endgültige Kategorisierung müssen juristisch bestätigt werden.
+  - Technisch umgesetzt und geprüft (19.07.2026): Das wirkungslose Banner wurde entfernt, notwendige Cookie-/Storage-Keys, Zweck und Lebensdauer dokumentiert und Analytics-Consent technisch durchgesetzt. Ein öffentlicher Start verlangt jetzt eine `PRIVACY_REVIEW_REFERENCE`. Externer Abnahmeblocker: Rechtsgrundlage und endgültige Kategorisierung müssen juristisch bestätigt werden.
   - Priorität: P1
   - Kategorie: Compliance
   - Problem: **Gefunden.** Banner-Accept/Decline ändert nur einen Preferencewert; funktionale Speicherungen laufen weiter; Notice nennt keine exakten Keys/Laufzeiten.
@@ -1207,7 +1209,7 @@ Die Reihenfolge innerhalb einer Priorität folgt Abhängigkeiten und Risikoreduk
   - Geschätzter Aufwand: mittel
 
 - [ ] **Payout-Ziel und Vier-Augen-Prinzip professionalisieren**
-  - Technisch umgesetzt und geprüft (18.07.2026): Typisierte IBAN-/PayPal-Ziele sind AEAD-verschlüsselt und maskiert; Requester, Approver und Payer müssen drei verschiedene Accounts sein, jede Auszahlung verlangt eine externe Referenz und Auditspur. Externer Abnahmeblocker: Reale Provider-/Bankbestätigung sowie KYC-/Steuerprozess benötigen Betreiberkonten und verbindliche Compliancevorgaben.
+  - Technisch umgesetzt und geprüft (19.07.2026): Typisierte IBAN-/PayPal-Ziele sind AEAD-verschlüsselt und maskiert; Requester, Approver und Payer müssen drei verschiedene Accounts sein, jede Auszahlung verlangt eine externe Referenz und Auditspur. Payouts bleiben standardmäßig aus; ihre Aktivierung verlangt nun eine `PAYOUT_OPERATIONS_REVIEW_REFERENCE`. Externer Abnahmeblocker: Reale Provider-/Bankbestätigung sowie KYC-/Steuerprozess benötigen Betreiberkonten und verbindliche Compliancevorgaben.
   - Priorität: P1
   - Kategorie: Produkt
   - Problem: **Gefunden.** PayPal-E-Mail/IBAN als gemeinsames Freitextfeld; MOD darf approven und paid markieren; keine externe Zahlungsbestätigung.
@@ -1497,7 +1499,7 @@ Die Reihenfolge innerhalb einer Priorität folgt Abhängigkeiten und Risikoreduk
   - Geschätzter Aufwand: mittel
 
 - [ ] **LiveKit-Bandbreite für Multi-Camera adaptiv steuern**
-  - Technisch umgesetzt und im Browsermodell geprüft (18.07.2026): `adaptiveStream`, `dynacast`, sichtbarkeitsabhängige Subscriptionqualität, Netzfallback und exportierbare Diagnostik sind integriert. Externer Abnahmeblocker: Der geforderte 30-Minuten-Vier-Kamera-Test mit realer Publisherhardware, Mobilgerät, Bitrate, CPU und Temperatur benötigt das physische Robot-/Kamera-Setup.
+  - Technisch umgesetzt und im Browsermodell geprüft (19.07.2026): `adaptiveStream`, `dynacast`, sichtbarkeitsabhängige Subscriptionqualität, Netzfallback und exportierbare Diagnostik sind integriert. Paid Controls bleiben ohne `ROBOT_SAFETY_REVIEW_REFERENCE` gesperrt. Externer Abnahmeblocker: Der geforderte 30-Minuten-Vier-Kamera-Test mit realer Publisherhardware, Mobilgerät, Bitrate, CPU und Temperatur benötigt das physische Robot-/Kamera-Setup.
   - Priorität: P2
   - Kategorie: Performance
   - Problem: **Gefundenes Risiko.** adaptiveStream und dynacast sind deaktiviert; mehrere Streams können auch unsichtbar hohe Qualität beziehen.
@@ -1595,7 +1597,7 @@ Die Reihenfolge innerhalb einer Priorität folgt Abhängigkeiten und Risikoreduk
   - Geschätzter Aufwand: mittel
 
 - [ ] **Geführtes Host-Go-live-Onboarding einführen**
-  - Technisch umgesetzt und im Browser geprüft (18.07.2026): Persistente, serverseitig erzwungene Schritte für Claim, Connectivity, Kamera, Control-ACK, Hardware-E-Stop, Access, Moderation, Preview und Publish sind im Dashboard integriert; Anlage und nicht überspringbare Checks sind E2E-grün. Externer Abnahmeblocker: Eine echte Veröffentlichung nach Kamera-, Control- und Hardware-E-Stop-Nachweis benötigt den physischen Robot-Client.
+  - Technisch umgesetzt und im Browser geprüft (19.07.2026): Persistente, serverseitig erzwungene Schritte für Claim, Connectivity, Kamera, Control-ACK, Hardware-E-Stop, Access, Moderation, Preview und Publish sind im Dashboard integriert; Anlage und nicht überspringbare Checks sind E2E-grün. Der Produktions-Preflight verlangt zusätzlich den physischen Safety-Abnahmenachweis, bevor Paid Controls aktiviert werden. Externer Abnahmeblocker: Eine echte Veröffentlichung nach Kamera-, Control- und Hardware-E-Stop-Nachweis benötigt den physischen Robot-Client.
   - Priorität: P3
   - Kategorie: Feature
   - Problem: **Idee.** Einzelne Dashboardfunktionen sind vorhanden, aber kein verbindlicher Ende-zu-Ende-Go-live-Pfad.
@@ -1619,7 +1621,7 @@ Die Reihenfolge innerhalb einer Priorität folgt Abhängigkeiten und Risikoreduk
   - Geschätzter Aufwand: groß
 
 - [ ] **Produktanalytics mit Daten- und Consentplan aufbauen**
-  - Technisch umgesetzt und geprüft (18.07.2026): Versioniertes minimiertes Eventschema, Consent-Gate, Owner/Retention, Cleanup und Admin-Dashboard für Discovery, Hostaktivierung, Turns und Monetarisierung sind integriert und getestet. Externer Abnahmeblocker: Die geforderte Datenschutzprüfung der Metrikzwecke und Rechtsgrundlage muss der Betreiber abschließen.
+  - Technisch umgesetzt und geprüft (19.07.2026): Versioniertes minimiertes Eventschema, Consent-Gate, Owner/Retention, Cleanup und Admin-Dashboard für Discovery, Hostaktivierung, Turns und Monetarisierung sind integriert und getestet. Ein öffentlicher Start verlangt eine dokumentierte Datenschutz-/Retention-Freigabe. Externer Abnahmeblocker: Die Datenschutzprüfung der Metrikzwecke und Rechtsgrundlage muss der Betreiber abschließen.
   - Priorität: P3
   - Kategorie: Produkt
   - Problem: **Idee/Prüfpunkt.** AnalyticsEvents existieren für Sessions, aber kein konsistentes Aktivierungs-/Conversionmodell oder Betreiber-Dashboard.
@@ -1658,18 +1660,18 @@ Die Reihenfolge innerhalb einer Priorität folgt Abhängigkeiten und Risikoreduk
 
 ### Ist das Projekt aktuell release-ready?
 
-**Noch nicht für einen öffentlichen Produktionsstart.** 75 von 85 Audit-Punkten sind praktisch umgesetzt und mit lokalen Tests oder Betriebsnachweisen belegt. Die ursprünglichen technischen P0-/P1-Defekte bei Migration, Geldflüssen, Control-Safety, Zugriff, Secrets, Dependencies, Tests, Builds und Dev-Betrieb sind behoben. Alle lokal technisch ausführbaren Prüfungen sind abgeschlossen; die übrigen zehn offenen Punkte benötigen objektiv externe Konten, Repositoryfreigaben, juristische Entscheidungen oder physische Robot-/Kamerahardware.
+**Noch nicht zu 100 % für einen öffentlichen Produktionsstart freigegeben.** 75 von 85 Audit-Punkten sind praktisch umgesetzt und mit lokalen Tests oder Betriebsnachweisen belegt. Die ursprünglichen technischen P0-/P1-Defekte bei Migration, Geldflüssen, Control-Safety, Zugriff, Secrets, Dependencies, Tests, Builds und Dev-Betrieb sind behoben. Der neue Preflight verhindert einen öffentlichen Start ohne die erforderlichen externen Nachweise; die übrigen zehn offenen Punkte benötigen objektiv Provider-/Repositoryzugriff, juristische Entscheidungen oder physische Robot-/Kamerahardware.
 
 Monetarisierung, Payouts, Subscriptions und bezahlte Controls bleiben standardmäßig fail-closed. Ein Go-live ist erst verantwortbar, wenn die jeweils aktivierten Produktbereiche auch ihre unten dokumentierte externe Abnahme besitzen.
 
 ### Technischer Abschlussstand
 
-- Produktionsbuild, Lint, Typecheck, API-/Web-Coverage, Chromium-E2E, Bundlebudgets, File-Secrets, Compose-, ENV- und Architekturprüfungen sowie 18 mobile Lighthouse-Läufe auf sechs Kernrouten sind grün.
+- Produktionsbuild, Lint, Typecheck, API-/Web-Coverage, Cross-Browser-E2E, Bundlebudgets, File-Secrets, Compose-, ENV- und Architekturprüfungen sowie 18 mobile Lighthouse-Läufe auf sechs Kernrouten sind grün.
 
 ### Verbleibende externe Abnahmen
 
 - PayPal-Capture im echten Sandboxkonto mit Client-Credentials und Webhook-ID.
-- Commit/Push der GitHub-Workflows, Branch-Protection und ein Lauf auf einem leeren GitHub-Runner.
+- Merge des geprüften Branches, Branch-/Environment-Protection und ein Lauf auf einem leeren GitHub-Runner.
 - Juristische Freigabe für Finanzaufbewahrung, Rechtstexte, Checkout-Einwilligung sowie Cookie-/Storage-Kategorien.
 - Reale Provider-/Bankreferenz sowie Betreiberentscheidungen zu KYC und Steuerprozess für Payouts.
 - 30-Minuten-Vier-Kamera-Messung und vollständiger Go-live-Pfad mit physischem Robot-Client, Kamera, Control-ACK und Hardware-E-Stop.

@@ -138,7 +138,7 @@ export function ControlButtonEditor({
                 type="button"
                 onClick={() => void onSaveControlEdit()}
                 disabled={controlOp === editingControlId}
-                className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/40 px-3 py-2 text-sm font-medium text-emerald-300 disabled:opacity-60"
+                className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/40 px-3 py-2 text-sm font-medium text-emerald-700 disabled:opacity-60 dark:text-emerald-300"
               >
                 {controlOp === editingControlId ? 'Saving...' : 'Save control button'}
               </button>
@@ -160,6 +160,8 @@ export function ControlButtonEditor({
               .map((button, index) => (
                 <div
                   key={button.id}
+                  role="group"
+                  aria-label={`Control ${button.label}`}
                   className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
                 >
                   <div className="min-w-0 flex-1">
@@ -171,8 +173,8 @@ export function ControlButtonEditor({
                       <span
                         className={`rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide ${
                           button.isEnabled === false
-                            ? 'bg-zinc-700/60 text-zinc-300'
-                            : 'bg-emerald-500/15 text-emerald-300'
+                            ? 'bg-zinc-800 text-zinc-100'
+                            : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
                         }`}
                       >
                         {button.isEnabled === false ? 'Disabled' : 'Enabled'}
@@ -225,7 +227,7 @@ export function ControlButtonEditor({
                       type="button"
                       onClick={() => void onDeleteControl(button)}
                       disabled={controlOp === button.id}
-                      className="rounded border border-red-500/40 px-2 py-1 text-xs text-red-300 disabled:opacity-50"
+                      className="rounded border border-red-500/40 px-2 py-1 text-xs text-red-700 disabled:opacity-50 dark:text-red-300"
                     >
                       Delete
                     </button>

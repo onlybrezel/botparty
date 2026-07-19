@@ -9,6 +9,7 @@ export type AuthSessionResponse = {
 
 export type ApiRequestOptions = RequestInit & {
   expectNoContent?: boolean;
+  authentication?: 'default' | 'anonymous';
 };
 
 export type RequestFn = {

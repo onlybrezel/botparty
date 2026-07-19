@@ -7,15 +7,15 @@ import { subscribeToToasts, type ToastMessage } from '@/lib/toast';
 const styles: Record<ToastMessage['kind'], { icon: typeof Info; cls: string }> = {
   success: {
     icon: CheckCircle2,
-    cls: 'border-emerald-500/40 bg-emerald-500/15 text-emerald-100',
+    cls: 'border-emerald-500/40 bg-emerald-500/15 text-emerald-900 dark:text-emerald-100',
   },
   error: {
     icon: AlertCircle,
-    cls: 'border-red-500/40 bg-red-500/15 text-red-100',
+    cls: 'border-red-500/40 bg-red-500/15 text-red-900 dark:text-red-100',
   },
   info: {
     icon: Info,
-    cls: 'border-sky-500/40 bg-sky-500/15 text-sky-100',
+    cls: 'border-sky-500/40 bg-sky-500/15 text-sky-900 dark:text-sky-100',
   },
 };
 
@@ -24,7 +24,10 @@ export function ToastStack() {
 
   useEffect(() => {
     return subscribeToToasts((toast) => {
-      setToasts((prev) => [...prev, toast]);
+      setToasts((prev) => [
+        ...prev.filter((item) => item.kind !== toast.kind || item.message !== toast.message),
+        toast,
+      ]);
       window.setTimeout(() => {
         setToasts((prev) => prev.filter((item) => item.id !== toast.id));
       }, toast.durationMs);
@@ -39,6 +42,8 @@ export function ToastStack() {
         return (
           <div
             key={toast.id}
+            role={toast.kind === 'error' ? 'alert' : 'status'}
+            aria-atomic="true"
             className={`pointer-events-auto flex items-start gap-2 rounded-xl border px-3 py-2 text-sm shadow-lg shadow-black/30 backdrop-blur-sm ${config.cls}`}
           >
             <Icon className="mt-0.5 h-4 w-4 flex-shrink-0" />

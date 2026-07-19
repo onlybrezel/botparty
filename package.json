@@ -30,6 +30,8 @@
     "db:migrate": "turbo run db:migrate",
     "db:verify-migrations": "node scripts/verify-prisma-migrations.mjs",
     "env:check": "node scripts/check-env-parity.mjs",
+    "production:preflight": "./scripts/production-preflight.sh",
+    "production:preflight:test": "node --test scripts/verify-production-readiness.test.mjs",
     "architecture:check": "node scripts/check-web-module-size.mjs",
     "secrets:smoke": "./scripts/smoke-file-secrets.sh",
     "dev:smoke": "./scripts/smoke-dev-compose.sh",

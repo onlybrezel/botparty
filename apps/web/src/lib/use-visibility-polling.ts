@@ -25,6 +25,7 @@ export function useVisibilityPolling(
     if (!enabled) return;
 
     let disposed = false;
+    let pageLeaving = false;
     let running = false;
     let timer: number | null = null;
 
@@ -36,19 +37,21 @@ export function useVisibilityPolling(
     };
 
     const schedule = () => {
-      if (disposed) return;
+      if (disposed || !navigator.onLine) return;
       const delay = document.visibilityState === 'visible' ? intervalMs : hiddenIntervalMs;
       if (delay === null) return;
       timer = window.setTimeout(() => void run(), delay);
     };
 
     const run = async () => {
-      if (disposed || running) return;
+      if (disposed || running || !navigator.onLine) return;
       running = true;
       try {
         await taskRef.current();
       } catch (error) {
-        console.error('Background refresh failed', error);
+        if (!disposed && !pageLeaving && navigator.onLine) {
+          console.error('Background refresh failed', error);
+        }
       } finally {
         running = false;
         schedule();
@@ -64,7 +67,38 @@ export function useVisibilityPolling(
       }
     };
 
+    const handlePageHide = () => {
+      pageLeaving = true;
+      clearTimer();
+    };
+
+    const handlePageShow = () => {
+      pageLeaving = false;
+      if (document.visibilityState === 'visible') {
+        void run();
+      } else {
+        schedule();
+      }
+    };
+
+    const handleOffline = () => {
+      clearTimer();
+    };
+
+    const handleOnline = () => {
+      clearTimer();
+      if (document.visibilityState === 'visible') {
+        void run();
+      } else {
+        schedule();
+      }
+    };
+
     document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('pagehide', handlePageHide);
+    window.addEventListener('pageshow', handlePageShow);
+    window.addEventListener('offline', handleOffline);
+    window.addEventListener('online', handleOnline);
     if (runImmediately && document.visibilityState === 'visible') {
       void run();
     } else {
@@ -75,6 +109,10 @@ export function useVisibilityPolling(
       disposed = true;
       clearTimer();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pagehide', handlePageHide);
+      window.removeEventListener('pageshow', handlePageShow);
+      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('online', handleOnline);
     };
   }, [enabled, hiddenIntervalMs, intervalMs, runImmediately]);
 }

@@ -56,7 +56,7 @@ export function ModerationView({
               <h2 className="text-lg font-bold">Active Restrictions</h2>
               <p className="text-sm text-[var(--muted-foreground)]">Robot-specific bans and timeouts that may need follow-up.</p>
             </div>
-            <div className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs font-semibold text-red-200">
+            <div className="rounded-full border border-red-500/30 bg-red-100 px-3 py-1 text-xs font-semibold text-red-800 dark:bg-red-500/10 dark:text-red-200">
               {(overview?.activeRestrictions ?? []).length} open
             </div>
           </div>
@@ -93,6 +93,7 @@ export function ModerationView({
               <p className="text-sm text-[var(--muted-foreground)]">Recent blocked messages across the fleet.</p>
             </div>
             <Select
+              aria-label="Filter profanity log by robot"
               value={selectedRobotId}
               onChange={(event) => onSelectedRobotIdChange(event.target.value || 'ALL')}
               className="ml-auto bg-[var(--background)]"
@@ -127,14 +128,14 @@ export function ModerationView({
                   >
                     <p>
                       [{new Date(event.ts).toLocaleTimeString()}] <span className="text-[var(--foreground)]">{event.username}</span> in{' '}
-                      <span className="text-sky-300">{event.robotName}</span>: {event.content}
+                      <span className="text-sky-700 dark:text-sky-300">{event.robotName}</span>: {event.content}
                     </p>
                     <div className="mt-2 flex flex-wrap gap-2">
                       <button
                         type="button"
                         disabled={moderationActionUserId === event.userId}
                         onClick={() => void onTimeoutProfanityUser(event.robotId, event.userId)}
-                        className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2 py-1 font-semibold text-amber-200 disabled:opacity-60"
+                        className="rounded-lg border border-amber-500/30 bg-amber-100 px-2 py-1 font-semibold text-amber-900 disabled:opacity-60 dark:bg-amber-500/10 dark:text-amber-200"
                       >
                         {moderationActionUserId === event.userId ? 'Working...' : 'Timeout 10m'}
                       </button>
@@ -142,7 +143,7 @@ export function ModerationView({
                         type="button"
                         disabled={moderationActionUserId === event.userId}
                         onClick={() => void onBanProfanityUser(event.robotId, event.userId)}
-                        className="rounded-lg border border-red-500/30 bg-red-500/10 px-2 py-1 font-semibold text-red-200 disabled:opacity-60"
+                        className="rounded-lg border border-red-500/30 bg-red-100 px-2 py-1 font-semibold text-red-800 disabled:opacity-60 dark:bg-red-500/10 dark:text-red-200"
                       >
                         {moderationActionUserId === event.userId ? 'Working...' : 'Ban user'}
                       </button>

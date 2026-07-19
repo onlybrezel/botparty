@@ -15,9 +15,9 @@ export type {
 } from '@botparty/shared';
 
 export interface RobotManaged extends RobotPublic {
-  claimToken: string;
+  claimToken: string | null;
   inviteCode: string | null;
-  streamKey: string;
+  streamKey: string | null;
   metadata: {
     access?: {
       video?: 'ALL' | 'AUTHENTICATED' | 'DISABLED';

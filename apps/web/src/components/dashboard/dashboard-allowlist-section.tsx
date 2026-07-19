@@ -36,7 +36,9 @@ export function DashboardAllowlistSection({
         </p>
       </div>
       <div className="mb-3 flex gap-2">
+        <label htmlFor="allowlist-username" className="sr-only">Username to allow</label>
         <input
+          id="allowlist-username"
           className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
           placeholder="Username"
           value={allowlistUsername}
@@ -71,7 +73,7 @@ export function DashboardAllowlistSection({
                 type="button"
                 onClick={() => onRemove(user)}
                 disabled={allowlistOp === user.id}
-                className="rounded border border-red-500/40 px-2 py-1 text-xs text-red-300 disabled:opacity-50"
+                className="rounded border border-red-500/40 px-2 py-1 text-xs text-red-700 disabled:opacity-50 dark:text-red-300"
               >
                 Remove
               </button>

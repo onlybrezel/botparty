@@ -84,7 +84,7 @@ export const statusClassName = (status: 'ONLINE' | 'OFFLINE' | 'BUSY' | 'MAINTEN
 };
 
 const baseButtonClass =
-  'inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition duration-200 hover:-translate-y-0.5 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0 disabled:active:scale-100';
+  'inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60';
 
 export const secondaryButtonClass = `${baseButtonClass} border-[var(--border)] bg-[var(--background)] text-[var(--foreground)]`;
 export const primaryButtonClass = `${baseButtonClass} border-sky-400/40 bg-sky-500/10 text-sky-200`;

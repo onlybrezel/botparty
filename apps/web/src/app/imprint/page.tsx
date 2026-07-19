@@ -32,7 +32,7 @@ export default function ImprintPage() {
         <p className="text-xs uppercase tracking-[0.22em] text-amber-700 dark:text-amber-300">Legal</p>
         <h1 className="mt-2 text-3xl font-black tracking-tight">Imprint</h1>
         <p className="mt-3 max-w-2xl text-sm text-[var(--muted-foreground)]">
-          This page names the operator responsible for this BotParty deployment and the primary legal contact channel.
+          Operator details and the primary legal contact for this BotParty service.
         </p>
       </div>
 

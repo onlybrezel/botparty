@@ -1,4 +1,21 @@
 services:
+  mail-test:
+    image: axllent/mailpit:v1.27@sha256:e22dce5b36f93c77082e204a3942fb6b283b7896e057458400a4c88344c3df68
+    restart: on-failure:3
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    networks:
+      - internal
+    healthcheck:
+      test: ['CMD-SHELL', 'wget --spider -q http://127.0.0.1:8025/livez']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   postgres:
     ports: !reset []
   redis:
@@ -22,6 +39,14 @@ services:
       AUTH_COOKIE_SECURE: "false"
       LIVEKIT_PUBLIC_URL: ws://nginx/rtc
       THUMBNAIL_PUBLIC_BASE_URL: http://nginx/storage/botparty-thumbnails
+      SMTP_HOST: mail-test
+      SMTP_PORT: 1025
+      SMTP_SECURE: "false"
+      SMTP_FROM: BotParty E2E <no-reply@botparty.test>
+      THROTTLE_LIMIT: "10000"
+    depends_on:
+      mail-test:
+        condition: service_healthy
   web:
     ports: !reset []
   nginx:

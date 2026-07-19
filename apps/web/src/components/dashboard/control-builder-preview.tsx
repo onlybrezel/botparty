@@ -82,7 +82,7 @@ export function ControlBuilderPreview({ draft }: ControlBuilderPreviewProps) {
             }}
             className={`accent-[var(--primary)] ${
               draft.sliderDirection === 'vertical'
-                ? 'h-28 w-6 [writing-mode:vertical-lr] [-webkit-appearance:slider-vertical]'
+                ? 'h-28 w-6 [direction:rtl] [writing-mode:vertical-lr]'
                 : 'w-full'
             }`}
           />

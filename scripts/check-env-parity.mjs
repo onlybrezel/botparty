@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { relative, resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
 const inputs = [
@@ -14,6 +14,7 @@ const inputs = [
   'scripts/migrate-webhook-secrets.mjs',
   'scripts/prepare-prisma-baseline.mjs',
   'scripts/validate-public-env.mjs',
+  'scripts/verify-production-readiness.mjs',
   'scripts/verify-prisma-migrations.mjs',
 ];
 
@@ -26,22 +27,20 @@ const ignored = new Set([
 ]);
 
 function filesAt(path) {
-  const result = BunLikeGlob(path);
-  return result;
-}
+  const absolutePath = resolve(root, path);
+  if (statSync(absolutePath).isFile()) return [path];
 
-function BunLikeGlob(path) {
-  const { execFileSync } = awaitImportChildProcess();
-  const output = execFileSync('rg', ['--files', path], { cwd: root, encoding: 'utf8' });
-  return output.trim().split('\n').filter(Boolean);
+  const files = [];
+  const visit = (directory) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const absoluteEntry = resolve(directory, entry.name);
+      if (entry.isDirectory()) visit(absoluteEntry);
+      else if (entry.isFile()) files.push(relative(root, absoluteEntry));
+    }
+  };
+  visit(absolutePath);
+  return files;
 }
-
-function awaitImportChildProcess() {
-  // Kept synchronous so the check is deterministic and produces one concise error.
-  return childProcess;
-}
-
-import * as childProcess from 'node:child_process';
 
 const files = inputs.flatMap((entry) => {
   try {
@@ -53,7 +52,12 @@ const files = inputs.flatMap((entry) => {
 
 const used = new Set();
 for (const file of files) {
-  const source = readFileSync(resolve(root, file), 'utf8');
+  let source;
+  try {
+    source = readFileSync(resolve(root, file), 'utf8');
+  } catch (error) {
+    throw new Error(`Could not read environment scan input: ${file}`, { cause: error });
+  }
   const patterns = [
     /process\.env\.([A-Za-z_][A-Za-z0-9_]*)/g,
     /process\.env\[['"]([A-Za-z_][A-Za-z0-9_]*)['"]\]/g,
@@ -72,8 +76,12 @@ for (const match of example.matchAll(/^#?\s*([A-Z][A-Z0-9_]*)=/gm)) documented.a
 
 const missing = [...used].filter((name) => !documented.has(name) && !ignored.has(name)).sort();
 if (missing.length > 0) {
-  console.error(`Environment variables used but not documented in .env.example:\n${missing.join('\n')}`);
+  console.error(
+    `Environment variables used but not documented in .env.example:\n${missing.join('\n')}`,
+  );
   process.exit(1);
 }
 
-console.log(`Environment parity passed: ${used.size} used variables are documented or explicitly runtime-owned.`);
+console.log(
+  `Environment parity passed: ${used.size} used variables are documented or explicitly runtime-owned.`,
+);

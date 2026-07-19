@@ -25,7 +25,9 @@ export default function ResetPasswordPage() {
       : null;
   const confirmError =
     touched.confirmPassword && password !== confirmPassword ? 'Passwords do not match' : null;
-  const tokenError = touched.token && !token ? 'Missing password reset token' : null;
+  const tokenError = !token
+    ? 'This password reset link is incomplete. Request a new reset link.'
+    : null;
   const canSubmit = Boolean(token) && passwordResult.success && password === confirmPassword && !loading;
 
   useEffect(() => {
@@ -98,6 +100,7 @@ export default function ResetPasswordPage() {
               onChange={(event) => setPassword(event.target.value)}
               onBlur={() => setTouched((current) => ({ ...current, password: true }))}
               aria-invalid={Boolean(passwordError)}
+              aria-describedby={passwordError ? 'new-password-error' : undefined}
               className={`mt-1 w-full rounded-lg border bg-[var(--background)] px-3 py-2 text-sm outline-none transition ${
                 passwordError
                   ? 'border-[var(--destructive)] focus:border-[var(--destructive)]'
@@ -105,7 +108,7 @@ export default function ResetPasswordPage() {
               }`}
               placeholder="At least 8 characters"
             />
-            {passwordError ? <p className="mt-1 text-xs text-[var(--destructive)]">{passwordError}</p> : null}
+            {passwordError ? <p id="new-password-error" className="mt-1 text-xs text-[var(--destructive)]">{passwordError}</p> : null}
           </div>
 
           <div>
@@ -122,6 +125,7 @@ export default function ResetPasswordPage() {
               onChange={(event) => setConfirmPassword(event.target.value)}
               onBlur={() => setTouched((current) => ({ ...current, confirmPassword: true }))}
               aria-invalid={Boolean(confirmError)}
+              aria-describedby={confirmError ? 'confirm-password-error' : undefined}
               className={`mt-1 w-full rounded-lg border bg-[var(--background)] px-3 py-2 text-sm outline-none transition ${
                 confirmError
                   ? 'border-[var(--destructive)] focus:border-[var(--destructive)]'
@@ -129,19 +133,19 @@ export default function ResetPasswordPage() {
               }`}
               placeholder="Repeat password"
             />
-            {confirmError ? <p className="mt-1 text-xs text-[var(--destructive)]">{confirmError}</p> : null}
+            {confirmError ? <p id="confirm-password-error" className="mt-1 text-xs text-[var(--destructive)]">{confirmError}</p> : null}
           </div>
 
           {tokenError ? <p className="text-xs text-[var(--destructive)]">{tokenError}</p> : null}
 
           {error && (
-            <div className="rounded-lg border border-[var(--destructive)]/40 bg-[var(--destructive)]/10 px-3 py-2 text-sm text-[var(--destructive)]">
+            <div role="alert" className="rounded-lg border border-[var(--destructive)]/40 bg-[var(--destructive)]/10 px-3 py-2 text-sm text-[var(--destructive)]">
               {error}
             </div>
           )}
 
           {message && (
-            <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300">
+            <div role="status" className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-800 dark:text-emerald-200">
               {message}
             </div>
           )}

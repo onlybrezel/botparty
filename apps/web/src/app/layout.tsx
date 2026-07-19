@@ -67,17 +67,31 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               const theme = storedTheme === 'dark' || storedTheme === 'light'
                 ? storedTheme
                 : (prefersLight ? 'light' : 'dark');
-              document.documentElement.classList.remove('dark', 'light');
-              document.documentElement.classList.add(theme);
-              document.documentElement.dataset.theme = theme;
+              const root = document.documentElement;
+              const currentTheme = root.classList.contains('light')
+                ? 'light'
+                : (root.classList.contains('dark') ? 'dark' : null);
+              if (currentTheme && currentTheme !== theme) {
+                root.classList.replace(currentTheme, theme);
+              } else if (!currentTheme) {
+                root.classList.add(theme);
+              }
+              root.dataset.theme = theme;
             } catch {
-              document.documentElement.classList.add('dark');
-              document.documentElement.dataset.theme = 'dark';
+              const root = document.documentElement;
+              root.classList.add('dark');
+              root.dataset.theme = 'dark';
             }
           })();`}
         </Script>
       </head>
       <body className="flex min-h-screen flex-col bg-[var(--background)] text-[var(--foreground)] antialiased">
+        <a
+          href="#main-content"
+          className="fixed -top-20 left-4 z-[100] rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-white shadow-lg transition-[top] focus:top-4"
+        >
+          Skip to main content
+        </a>
         <noscript>
           <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
             BotParty needs JavaScript for live video, chat, and robot controls.
@@ -86,7 +100,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <ThemeController />
         <Nav />
         <ToastStack />
-        <main className="flex-1">{children}</main>
+        <main id="main-content" tabIndex={-1} className="flex-1">{children}</main>
         <footer className="border-t border-[var(--border)] bg-[var(--background)]/96">
           <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-6 text-sm text-[var(--muted-foreground)] sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
             <div>

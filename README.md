@@ -171,12 +171,13 @@ bash setup-env.sh
 Then:
 
 ```bash
+./ops.sh preflight
 docker compose up -d --build
 ```
 
 The one-shot `migrate` container applies committed migrations and the idempotent seed before API replicas start. API replicas never modify the schema during startup. Check the result with `docker compose ps` and `docker compose logs migrate api`.
 
-The production path requires a reachable SMTP server and complete operator details. For local hot reload use both Compose files shown under “Local development”; the generated local configuration intentionally does not claim production email delivery.
+The public production preflight requires TLS files, readable host secrets, a pinned SemVer image version, a reachable SMTP configuration and review references for legal text, privacy/retention, restore and alerting. Billing, payouts and paid robot controls require their own acceptance references before their feature flags may be enabled. For local hot reload use both Compose files shown under “Local development”; the generated local configuration intentionally does not claim production email delivery.
 
 For faster iteration, build or start only changed parts:
 
@@ -212,14 +213,14 @@ git push origin v0.1.4
 
 This triggers `.github/workflows/release.yml`, which publishes:
 
-- `ghcr.io/<owner>/botparty-api:v0.1.4`
-- `ghcr.io/<owner>/botparty-web:v0.1.4`
+- `ghcr.io/<owner>/botparty-api:0.1.4`
+- `ghcr.io/<owner>/botparty-web:0.1.4`
 
 `docker-compose.yml` already uses registry-based image names through `IMAGE_REGISTRY`, `IMAGE_NAMESPACE`, and `APP_VERSION`, so production hosts can deploy a pinned release with:
 
 ```bash
 export IMAGE_NAMESPACE=onlybrezel
-export APP_VERSION=v0.1.4
+export APP_VERSION=0.1.4
 docker compose pull api web
 docker compose up -d api web nginx
 ```

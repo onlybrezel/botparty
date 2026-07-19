@@ -80,10 +80,10 @@ export default function VerifyEmailPage() {
       <Card className="w-full rounded-2xl border-[var(--border)] bg-[var(--card)]/95 shadow-2xl shadow-black/30">
         <CardContent className="p-6 sm:p-8">
           <div className="mb-6">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.24em] text-sky-300">Account verification</p>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.24em] text-sky-700 dark:text-sky-300">Account verification</p>
             <h1 className="text-3xl font-black tracking-tight">{heading}</h1>
             <p className="mt-2 text-sm text-[var(--muted-foreground)]">
-              Confirm your email address so BotParty can enforce verified accounts when registration protection is enabled.
+              Confirm your email address to finish setting up your account.
             </p>
           </div>
 
@@ -95,9 +95,10 @@ export default function VerifyEmailPage() {
 
           {message ? (
             <div
+              role={state === 'error' ? 'alert' : 'status'}
               className={`mb-5 rounded-xl border px-4 py-3 text-sm ${
                 state === 'success'
-                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200'
                   : state === 'error'
                     ? 'border-[var(--destructive)]/40 bg-[var(--destructive)]/10 text-[var(--destructive)]'
                     : 'border-[var(--border)] bg-[var(--background)] text-[var(--muted-foreground)]'

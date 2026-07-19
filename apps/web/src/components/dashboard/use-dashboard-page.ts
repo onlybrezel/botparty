@@ -26,6 +26,14 @@ import { useDashboardControls } from './use-dashboard-controls';
 import { useDashboardRobotPolling } from './use-dashboard-robot-polling';
 import { useDashboardThumbnail } from './use-dashboard-thumbnail';
 
+function preserveRobotSecrets(previous: RobotManaged, updated: RobotManaged): RobotManaged {
+  return {
+    ...updated,
+    claimToken: updated.claimToken ?? previous.claimToken,
+    streamKey: updated.streamKey ?? previous.streamKey,
+  };
+}
+
 export function useDashboardPage() {
   const router = useRouter();
   const { accessToken, hasHydrated, username } = useAuth();
@@ -384,7 +392,11 @@ export function useDashboardPage() {
       api.setToken(accessToken);
       const previousBitrate = selectedRobot.metadata?.stream?.targetBitrateKbps ?? null;
       const updated = await api.robots.updateRobot(selectedRobot.id, toUpdatePayload(editForm));
-      setRobots((prev) => prev.map((robot) => (robot.id === updated.id ? updated : robot)));
+      setRobots((prev) =>
+        prev.map((robot) =>
+          robot.id === updated.id ? preserveRobotSecrets(robot, updated) : robot,
+        ),
+      );
       setStatus('Robot settings saved.');
 
       const nextBitrate = updated.metadata?.stream?.targetBitrateKbps ?? null;
@@ -458,7 +470,10 @@ export function useDashboardPage() {
   };
 
   const copyToken = async () => {
-    if (!selectedRobot) return;
+    if (!selectedRobot?.claimToken) {
+      setError('Generate a new claim token before copying it.');
+      return;
+    }
     try {
       await navigator.clipboard.writeText(selectedRobot.claimToken);
       setStatus('Claim token copied to clipboard.');
@@ -502,7 +517,11 @@ export function useDashboardPage() {
 
   const applyUpdatedRobot = useCallback(
     (updated: RobotManaged) => {
-      setRobots((prev) => prev.map((robot) => (robot.id === updated.id ? updated : robot)));
+      setRobots((prev) =>
+        prev.map((robot) =>
+          robot.id === updated.id ? preserveRobotSecrets(robot, updated) : robot,
+        ),
+      );
       setEditForm(formFromRobot(updated));
     },
     [setEditForm],

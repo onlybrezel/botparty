@@ -1,10 +1,11 @@
 'use client';
 
 import type { ChangeEvent, Dispatch, RefObject, SetStateAction } from 'react';
-import { CircleHelp, Copy, ExternalLink, Plus, RefreshCcw, X } from 'lucide-react';
+import { CircleHelp, Copy, ExternalLink, Plus, RefreshCcw } from 'lucide-react';
 import type { RobotCameraIngress, RobotManaged } from '@/lib/api';
 import { AclPicker } from '@/components/dashboard/acl-picker';
 import { Select } from '@/components/ui/select';
+import { Dialog } from '@/components/ui/dialog';
 import type { RobotFormState, RoomMode } from './types';
 import { queueModeDescription } from './types';
 
@@ -76,8 +77,9 @@ export function DashboardSettingsSection({
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="space-y-1">
-          <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Robot Name</label>
+          <label htmlFor="robot-name" className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Robot Name</label>
           <input
+            id="robot-name"
             className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
             value={editForm.name}
             onChange={(event) => setEditForm((prev) => ({ ...prev, name: event.target.value }))}
@@ -86,10 +88,11 @@ export function DashboardSettingsSection({
         </div>
 
         <div className="space-y-1">
-          <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">URL Slug</label>
+          <label htmlFor="robot-slug" className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">URL Slug</label>
           <div className="flex items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm">
             <span className="shrink-0 text-[var(--muted-foreground)]">/robot/{robot.owner.username}/</span>
             <input
+              id="robot-slug"
               className="min-w-0 flex-1 bg-transparent outline-none"
               autoComplete="off"
               inputMode="text"
@@ -102,7 +105,7 @@ export function DashboardSettingsSection({
                 }))
               }
               placeholder={robot.slug}
-              pattern="[a-z0-9][a-z0-9-]*[a-z0-9]"
+              pattern="[a-z0-9](?:[a-z0-9]|-)*[a-z0-9]"
               minLength={3}
               maxLength={50}
               title="3-50 lowercase letters, numbers, and hyphens. No leading or trailing hyphen."
@@ -116,6 +119,7 @@ export function DashboardSettingsSection({
         <div className="space-y-1">
           <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Room Access</label>
           <Select
+            aria-label="Room access"
             className="bg-[var(--background)]"
             value={editForm.roomMode}
             onChange={(event) => setEditForm((prev) => ({ ...prev, roomMode: event.target.value as RoomMode }))}
@@ -133,6 +137,7 @@ export function DashboardSettingsSection({
           <div className="space-y-1">
             <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Room Password</label>
             <input
+              aria-label="Room password"
               type="password"
               className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
               value={editForm.accessPassword}
@@ -175,7 +180,7 @@ export function DashboardSettingsSection({
                 onClick={() => void regenerateInviteCode()}
                 disabled={regeneratingInvite}
                 aria-label={`Regenerate invite link for ${robot.name}`}
-                className="inline-flex items-center gap-2 rounded-lg border border-amber-500/40 px-3 py-1.5 text-xs text-amber-300 disabled:opacity-60"
+                className="inline-flex items-center gap-2 rounded-lg border border-amber-500/40 px-3 py-1.5 text-xs text-amber-700 disabled:opacity-60 dark:text-amber-300"
               >
                 <RefreshCcw className="h-3.5 w-3.5" />
                 {regeneratingInvite ? 'Regenerating...' : 'Renew invite link'}
@@ -192,6 +197,7 @@ export function DashboardSettingsSection({
             </span>
           </label>
           <Select
+            aria-label="Queue mode"
             className="bg-[var(--background)]"
             value={editForm.queueMode}
             onChange={(event) =>
@@ -235,6 +241,7 @@ export function DashboardSettingsSection({
               <div className="space-y-1">
                 <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Start</label>
                 <input
+                  aria-label="Schedule start"
                   type="datetime-local"
                   className="w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
                   value={editForm.scheduleStart}
@@ -244,6 +251,7 @@ export function DashboardSettingsSection({
               <div className="space-y-1">
                 <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">End</label>
                 <input
+                  aria-label="Schedule end"
                   type="datetime-local"
                   className="w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
                   value={editForm.scheduleEnd}
@@ -253,6 +261,7 @@ export function DashboardSettingsSection({
               <div className="space-y-1 sm:col-span-2">
                 <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Timezone</label>
                 <input
+                  aria-label="Schedule timezone"
                   className="w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
                   value={editForm.timezone}
                   onChange={(event) => setEditForm((prev) => ({ ...prev, timezone: event.target.value }))}
@@ -296,6 +305,7 @@ export function DashboardSettingsSection({
             Target Bitrate (kbps)
           </label>
           <input
+            aria-label="Target bitrate in kilobits per second"
             type="number"
             min={150}
             max={3000}
@@ -331,15 +341,17 @@ export function DashboardSettingsSection({
             URL as WHIP server.
           </p>
 
-          <div className="mb-2 flex gap-1.5">
+          <div className="mb-2 grid gap-1.5 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
             <input
-              className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-xs"
+              aria-label="Camera ID"
+              className="min-w-0 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-xs"
               placeholder="Camera ID (e.g. front)"
               value={newIngressCameraId}
               onChange={(event) => setNewIngressCameraId(event.target.value)}
             />
             <input
-              className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-xs"
+              aria-label="Camera display label"
+              className="min-w-0 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-xs"
               placeholder="Display label (optional)"
               value={newIngressLabel}
               onChange={(event) => setNewIngressLabel(event.target.value)}
@@ -349,7 +361,7 @@ export function DashboardSettingsSection({
               onClick={() => void createIngressCamera()}
               disabled={Boolean(ingressOp)}
               aria-label="Add external camera ingress"
-              className="inline-flex items-center justify-center gap-1 rounded-lg border border-[var(--border)] px-2 py-1.5 text-xs font-semibold disabled:opacity-60"
+              className="inline-flex items-center justify-center gap-1 rounded-lg border border-[var(--border)] px-2 py-1.5 text-xs font-semibold disabled:opacity-60 sm:w-auto"
             >
               <Plus className="h-3 w-3" />
               Add
@@ -384,7 +396,7 @@ export function DashboardSettingsSection({
                       <span
                         className={`shrink-0 whitespace-nowrap rounded-full border px-1.5 py-0.5 text-[8px] font-semibold ${
                           entry.isLive
-                            ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+                            ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
                             : 'border-[var(--border)] text-[var(--muted-foreground)]'
                         }`}
                       >
@@ -406,7 +418,7 @@ export function DashboardSettingsSection({
                           onClick={() => void deleteIngressCamera(entry.ingressId)}
                           disabled={Boolean(ingressOp)}
                           aria-label={`Delete ingress for ${entry.cameraId ?? 'default'} camera`}
-                          className="rounded border border-red-500/40 px-1.5 py-0.5 text-[8px] text-red-300 disabled:opacity-60"
+                          className="rounded border border-red-500/40 px-1.5 py-0.5 text-[8px] text-red-700 disabled:opacity-60 dark:text-red-300"
                         >
                           {deleting ? '...' : 'Del'}
                         </button>
@@ -419,29 +431,13 @@ export function DashboardSettingsSection({
           )}
         </div>
 
-        {obsHelpOpen ? (
-          <div
-            className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4"
-            onClick={() => setObsHelpOpen(false)}
-          >
-            <div
-              className="w-full max-w-2xl rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4"
-              onClick={(event) => event.stopPropagation()}
-            >
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <h3 className="text-lg font-bold">OBS Low-Latency Setup</h3>
-                <button
-                  type="button"
-                  onClick={() => setObsHelpOpen(false)}
-                  className="rounded border border-[var(--border)] p-1.5"
-                  aria-label="Close OBS help"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-
+        <Dialog
+          open={obsHelpOpen}
+          title="OBS low-latency setup"
+          onClose={() => setObsHelpOpen(false)}
+        >
               <div className="space-y-3 text-sm">
-                <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-amber-200">
+                <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-amber-900 dark:text-amber-200">
                   30s delay is usually OBS buffering/transcoding settings, not WHIP itself.
                 </p>
 
@@ -466,14 +462,20 @@ export function DashboardSettingsSection({
                     <li>Viewer only shows the camera when OBS is actively publishing.</li>
                   </ul>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setObsHelpOpen(false)}
+                  className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-medium"
+                >
+                  Close guide
+                </button>
               </div>
-            </div>
-          </div>
-        ) : null}
+        </Dialog>
 
         <div className="space-y-1">
           <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Max Turn Time (ms)</label>
           <input
+            aria-label="Maximum turn time in milliseconds"
             type="number"
             className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
             value={editForm.maxTurnTime}
@@ -518,7 +520,7 @@ export function DashboardSettingsSection({
                 onClick={() => void removeThumbnail()}
                 disabled={thumbnailOp !== null}
                 aria-label={`Remove thumbnail for ${robot.name}`}
-                className="rounded-lg border border-red-500/40 px-3 py-2 text-sm text-red-300 disabled:opacity-60"
+                className="rounded-lg border border-red-500/40 px-3 py-2 text-sm text-red-700 disabled:opacity-60 dark:text-red-300"
               >
                 {thumbnailOp === 'remove' ? 'Removing...' : 'Remove thumbnail'}
               </button>
@@ -533,6 +535,7 @@ export function DashboardSettingsSection({
       <div className="space-y-1">
         <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Description</label>
         <textarea
+          aria-label="Robot description"
           className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
           rows={3}
           value={editForm.description}
@@ -544,6 +547,7 @@ export function DashboardSettingsSection({
       <div className="space-y-1">
         <label className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Tags</label>
         <input
+          aria-label="Robot tags"
           className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm"
           value={editForm.tags}
           onChange={(event) => setEditForm((prev) => ({ ...prev, tags: event.target.value }))}

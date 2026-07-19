@@ -141,7 +141,7 @@ export default function LoginPage() {
             displayName: result.user.displayName,
             role: result.user.role,
           });
-          router.push('/dashboard/robots/new');
+          router.push('/dashboard#new-robot');
           return;
         }
 
@@ -164,80 +164,63 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="relative min-h-[calc(100vh-8rem)] overflow-hidden px-4 py-12 sm:px-6 lg:px-8">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0"
-        style={{
-          background:
-            'radial-gradient(48rem 32rem at 12% 12%, rgba(124,58,237,0.18), transparent 60%), radial-gradient(32rem 24rem at 88% 78%, rgba(14,165,233,0.16), transparent 60%)',
-        }}
-      />
-
-      <div className="relative mx-auto grid w-full max-w-6xl gap-8 lg:grid-cols-2">
-        <section className="hidden rounded-2xl border border-[var(--border)] bg-[var(--card)]/70 p-8 backdrop-blur-sm lg:block">
-          <p className="mb-4 inline-flex items-center rounded-full border border-violet-500/30 bg-violet-500/10 px-3 py-1 text-xs font-semibold text-violet-300">
-            HOST CONTROL
-          </p>
-          <h1 className="text-4xl font-black leading-tight tracking-tight text-[var(--foreground)]">
-            Run a room people enjoy joining.
-            <br />
-            Keep access sane.
-            <br />
-            Keep the robot safe.
+    <div className="min-h-[calc(100vh-8rem)] border-b border-[var(--border)] px-4 py-10 sm:px-6 sm:py-16 lg:px-8">
+      <div className="mx-auto grid w-full max-w-5xl gap-12 lg:grid-cols-[minmax(0,0.85fr)_minmax(420px,1fr)] lg:items-start lg:gap-20">
+        <section className="hidden pt-8 lg:block">
+          <p className="text-sm font-semibold text-[var(--primary)]">For robot hosts</p>
+          <h1 className="mt-3 text-4xl font-bold leading-tight tracking-[-0.03em] text-[var(--foreground)]">
+            Manage your robots and rooms.
           </h1>
-          <p className="mt-4 max-w-md text-sm leading-relaxed text-[var(--muted-foreground)]">
-            Sign in to manage robots, claim clients, tune room access, and keep shared-control sessions under control.
+          <p className="mt-4 max-w-md text-base leading-7 text-[var(--muted-foreground)]">
+            Set up hardware, control room access and keep every live session under control.
           </p>
 
-          <div className="mt-8 grid gap-3">
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--background)]/70 p-4">
-              <p className="text-xs uppercase tracking-wider text-[var(--muted-foreground)]">Room flow</p>
-              <p className="mt-1 text-sm font-semibold">Video, queue state, chat, and turn-based control</p>
+          <div className="mt-8 divide-y divide-[var(--border)] border-y border-[var(--border)]">
+            <div className="py-4">
+              <p className="text-sm font-semibold">Room operations</p>
+              <p className="mt-1 text-sm text-[var(--muted-foreground)]">Video, queues, chat and turn-based control</p>
             </div>
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--background)]/70 p-4">
-              <p className="text-xs uppercase tracking-wider text-[var(--muted-foreground)]">Robot setup</p>
-              <p className="mt-1 text-sm font-semibold">Claim tokens, access rules, and remote ops in one place</p>
+            <div className="py-4">
+              <p className="text-sm font-semibold">Robot setup</p>
+              <p className="mt-1 text-sm text-[var(--muted-foreground)]">Claim tokens, access rules and remote actions</p>
             </div>
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--background)]/70 p-4">
-              <p className="text-xs uppercase tracking-wider text-[var(--muted-foreground)]">Safety defaults</p>
-              <p className="mt-1 text-sm font-semibold">Decide who can watch, chat, control, and hit E-STOP</p>
+            <div className="py-4">
+              <p className="text-sm font-semibold">Safety</p>
+              <p className="mt-1 text-sm text-[var(--muted-foreground)]">Permissions, moderation and emergency controls</p>
             </div>
           </div>
         </section>
 
-        <Card className="w-full rounded-2xl border-[var(--border)] bg-[var(--card)]/95 shadow-2xl shadow-black/30">
+        <Card className="w-full border-[var(--border)] bg-[var(--card)]">
           <CardContent className="p-6 sm:p-8">
-            <div className="mb-6 text-center">
-              <Link href="/" prefetch={false} className="inline-flex items-center gap-2 text-lg font-bold">
-                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--primary)] text-sm font-black text-white">
+            <div className="mb-7">
+              <Link href="/" prefetch={false} className="inline-flex items-center gap-2 text-sm font-semibold text-[var(--muted-foreground)] hover:text-[var(--foreground)]">
+                <span className="flex h-7 w-7 items-center justify-center rounded-md bg-[var(--primary)] text-xs font-bold text-white">
                   BP
                 </span>
-                <span className="bg-gradient-to-r from-violet-300 via-violet-400 to-cyan-300 bg-clip-text text-transparent">
-                  BotParty
-                </span>
+                BotParty
               </Link>
-              <h2 className="mt-4 text-2xl font-extrabold tracking-tight">
-                {mode === 'login' ? 'Jump back in' : 'Create your host account'}
+              <h2 className="mt-6 text-2xl font-bold tracking-tight">
+                {mode === 'login' ? 'Sign in' : 'Create your account'}
               </h2>
-              <p className="mt-1 text-sm text-[var(--muted-foreground)]">
+              <p className="mt-2 text-sm text-[var(--muted-foreground)]">
                 {mode === 'login'
-                  ? 'Sign in to open your rooms and settings.'
-                  : 'Create an account to host robots and manage live rooms.'}
+                  ? 'Open your rooms, wallet and account settings.'
+                  : 'Set up your first robot after registration.'}
               </p>
             </div>
 
-            <div className="mb-6 grid grid-cols-2 rounded-xl border border-[var(--border)] bg-[var(--background)] p-1">
+            <div className="mb-6 grid grid-cols-2 border-b border-[var(--border)]">
               <button
                 type="button"
                 onClick={() => {
                   setMode('login');
                   setError(null);
                 }}
-                className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
+                className={`border-b-2 px-3 py-3 text-sm font-semibold transition-colors ${
                   mode === 'login'
-                    ? 'bg-[var(--primary)] text-white'
-                    : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+                    ? 'border-[var(--primary)] text-[var(--foreground)]'
+                    : 'border-transparent text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
                 }`}
               >
                 Sign in
@@ -248,10 +231,10 @@ export default function LoginPage() {
                   setMode('register');
                   setError(null);
                 }}
-                className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
+                className={`border-b-2 px-3 py-3 text-sm font-semibold transition-colors ${
                   mode === 'register'
-                    ? 'bg-[var(--primary)] text-white'
-                    : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+                    ? 'border-[var(--primary)] text-[var(--foreground)]'
+                    : 'border-transparent text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
                 }`}
               >
                 Create account
@@ -274,7 +257,7 @@ export default function LoginPage() {
                     required
                     minLength={3}
                     maxLength={32}
-                    pattern="[a-zA-Z0-9_-]+"
+                    pattern="[a-zA-Z0-9_]+(?:-[a-zA-Z0-9_]+)*"
                     autoComplete="username"
                     placeholder="cool_maker_42"
                     value={draft.username}
@@ -351,7 +334,7 @@ export default function LoginPage() {
               </div>
 
               {error && (
-                <div className="rounded-lg border border-[var(--destructive)]/40 bg-[var(--destructive)]/10 px-3 py-2 text-sm text-[var(--destructive)]">
+                <div role="alert" className="rounded-lg border border-[var(--destructive)]/40 bg-[var(--destructive)]/10 px-3 py-2 text-sm text-[var(--destructive)]">
                   {error}
                 </div>
               )}
@@ -373,7 +356,7 @@ export default function LoginPage() {
               </Button>
             </form>
 
-            <p className="mt-6 text-center text-xs text-[var(--muted-foreground)]">
+            <p className="mt-6 text-xs text-[var(--muted-foreground)]">
               <Link className="underline" href="/terms">Terms</Link> · <Link className="underline" href="/privacy">Privacy</Link>
             </p>
           </CardContent>

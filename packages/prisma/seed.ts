@@ -149,6 +149,109 @@ async function ensureButtons(robotId: string) {
   }
 }
 
+async function ensureE2EUser(input: {
+  email: string;
+  username: string;
+  displayName: string;
+  passwordHash: string;
+  role: 'ADMIN' | 'MOD' | 'USER';
+  isActive?: boolean;
+}) {
+  return prisma.user.upsert({
+    where: { email: input.email },
+    update: {
+      username: input.username,
+      displayName: input.displayName,
+      passwordHash: input.passwordHash,
+      role: input.role,
+      isActive: input.isActive ?? true,
+      emailVerified: true,
+      deletedAt: null,
+    },
+    create: {
+      email: input.email,
+      username: input.username,
+      displayName: input.displayName,
+      passwordHash: input.passwordHash,
+      role: input.role,
+      isActive: input.isActive ?? true,
+      emailVerified: true,
+    },
+  });
+}
+
+async function ensureE2EFixtures(
+  admin: NonNullable<Awaited<ReturnType<typeof ensureInitialAdmin>>>,
+  passwordHash: string,
+) {
+  await ensureE2EUser({
+    email: 'moderator@botparty.test',
+    username: 'e2e_moderator',
+    displayName: 'Morgan Moderator',
+    passwordHash,
+    role: 'MOD',
+  });
+  await ensureE2EUser({
+    email: 'viewer@botparty.test',
+    username: 'e2e_viewer',
+    displayName: 'Vera Viewer',
+    passwordHash,
+    role: 'USER',
+  });
+  const owner = await ensureE2EUser({
+    email: 'owner@botparty.test',
+    username: 'e2e_owner',
+    displayName: 'Olivia Operator',
+    passwordHash,
+    role: 'USER',
+  });
+  await ensureE2EUser({
+    email: 'disabled@botparty.test',
+    username: 'e2e_disabled',
+    displayName: 'Dana Disabled',
+    passwordHash,
+    role: 'USER',
+    isActive: false,
+  });
+
+  const ownerRobot = await ensureSeedRobot({
+    ownerId: owner.id,
+    name: 'Owner Test Robot',
+    description: 'Robot used for owner dashboard and session history browser tests.',
+    tags: ['owner', 'e2e'],
+    fixedSlug: 'owner-test-robot',
+  });
+  await ensureButtons(ownerRobot.id);
+
+  for (let index = 1; index <= 24; index += 1) {
+    const suffix = String(index).padStart(2, '0');
+    const fleetRobot = await ensureSeedRobot({
+      ownerId: admin.id,
+      name: `E2E Fleet Robot ${suffix}`,
+      description: `Deterministic large-list fixture ${suffix}.`,
+      tags: ['fleet', index % 2 === 0 ? 'indoor' : 'outdoor'],
+      fixedSlug: `e2e-fleet-${suffix}`,
+    });
+    await ensureButtons(fleetRobot.id);
+  }
+
+  await prisma.session.createMany({
+    data: Array.from({ length: 55 }, (_, index) => ({
+      id: `10000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+      robotId: ownerRobot.id,
+      userId: owner.id,
+      status: 'ENDED' as const,
+      startedAt: new Date(Date.UTC(2026, 6, 1, 12, index)),
+      endedAt: new Date(Date.UTC(2026, 6, 1, 12, index, 30)),
+      durationMs: 30_000,
+      peakViewers: (index % 8) + 1,
+      totalCommands: index + 1,
+      avgLatencyMs: 40 + index,
+    })),
+    skipDuplicates: true,
+  });
+}
+
 async function ensureDemoData(admin: NonNullable<Awaited<ReturnType<typeof ensureInitialAdmin>>>) {
   if (process.env.NODE_ENV === 'production') {
     throw new Error('SEED_DEMO_DATA and SEED_E2E_FIXTURES are forbidden in production.');
@@ -158,13 +261,14 @@ async function ensureDemoData(admin: NonNullable<Awaited<ReturnType<typeof ensur
   if (!demoPassword || demoPassword.length < 12) {
     throw new Error('SEED_DEMO_USER_PASSWORD with at least 12 characters is required for demo data.');
   }
+  const demoPasswordHash = await hash(demoPassword);
   const user = await prisma.user.upsert({
     where: { email: 'user@botparty.local' },
     update: {},
     create: {
       username: 'demo_user',
       email: 'user@botparty.local',
-      passwordHash: await hash(demoPassword),
+      passwordHash: demoPasswordHash,
       displayName: 'Demo User',
       role: 'USER',
       emailVerified: true,
@@ -179,6 +283,7 @@ async function ensureDemoData(admin: NonNullable<Awaited<ReturnType<typeof ensur
   await ensureButtons(robot.id);
 
   if (enabled('SEED_E2E_FIXTURES')) {
+    await ensureE2EFixtures(admin, demoPasswordHash);
     const testRobot = await ensureSeedRobot({
       ownerId: admin.id,
       name: 'Test Robot',

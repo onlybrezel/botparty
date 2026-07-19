@@ -213,6 +213,7 @@ header "4 / 4  Writing .env"
 echo ""
 
 [[ "$IS_LOCAL" == "y" ]] && APP_ENVIRONMENT=development || APP_ENVIRONMENT=production
+APP_VERSION="$(node -p "require('./package.json').version")"
 
 SECRET_DIR="docker/secrets"
 mkdir -p "$SECRET_DIR"
@@ -248,6 +249,7 @@ cat > .env <<EOF
 # ─── General ──────────────────────────────────────────
 NODE_ENV=${APP_ENVIRONMENT}
 PUBLIC_DEPLOYMENT=$([[ "$IS_LOCAL" == "y" ]] && printf false || printf true)
+APP_VERSION=${APP_VERSION}
 PORT=4000
 BOTPARTY_SECRET_GID=$(id -g)
 
@@ -273,6 +275,7 @@ PASSWORD_RESET_TTL_SEC=3600
 
 # ─── Email / Password Reset ───────────────────────────
 APP_URL=${APP_URL}
+PUBLIC_WEB_URL=${APP_URL}
 SMTP_HOST=${SMTP_HOST}
 SMTP_PORT=${SMTP_PORT}
 SMTP_SECURE=${SMTP_SECURE}
@@ -284,6 +287,7 @@ SMTP_FROM=${SMTP_FROM}
 LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
 LIVEKIT_API_SECRET_FILE=/run/secrets/livekit_api_secret
 LIVEKIT_URL=${LIVEKIT_URL}
+LIVEKIT_PUBLIC_URL=${LIVEKIT_EXT_URL}
 LIVEKIT_WHIP_BASE_URL=${APP_URL}/whip
 
 # ─── Frontend ─────────────────────────────────────────
@@ -351,6 +355,17 @@ NEXT_PUBLIC_FEATURE_BILLING=false
 NEXT_PUBLIC_FEATURE_DONATIONS=false
 NEXT_PUBLIC_FEATURE_PAYOUTS=false
 NEXT_PUBLIC_FEATURE_PAID_CONTROLS=false
+
+# Complete these with internal ticket/review references before a public start.
+LEGAL_REVIEW_REFERENCE=
+PRIVACY_REVIEW_REFERENCE=
+BACKUP_RESTORE_REVIEW_REFERENCE=
+ALERTING_REVIEW_REFERENCE=
+BILLING_PROVIDER_REVIEW_REFERENCE=
+STRIPE_LIVE_REVIEW_REFERENCE=
+PAYPAL_LIVE_REVIEW_REFERENCE=
+PAYOUT_OPERATIONS_REVIEW_REFERENCE=
+ROBOT_SAFETY_REVIEW_REFERENCE=
 
 # ─── nginx ────────────────────────────────────────────
 # For HTTPS production: ./docker/nginx/nginx.ssl.conf (generated below, gitignored)
