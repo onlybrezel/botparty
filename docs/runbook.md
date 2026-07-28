@@ -73,7 +73,7 @@ Before exposing a BotParty instance publicly, confirm these envs are explicitly 
 6. `RECORDING_RETENTION_DAYS` set to a retention window that matches your privacy policy and moderation workflow.
 7. A reachable `SMTP_HOST` and valid sender configuration. Production startup performs an SMTP handshake and fails when delivery is unavailable.
 
-Production Compose reads credentials from `BOTPARTY_SECRET_DIR` (default `docker/secrets`) and mounts them read-only. Run `setup-env.sh` to create mode-0600 files, or provision files with the names used by `docker/api/entrypoint.sh`. `pnpm secrets:smoke` proves that PostgreSQL, Redis, MinIO, and the generated LiveKit configurations start without direct secret environment variables.
+Production Compose reads credentials from `BOTPARTY_SECRET_DIR` (default `docker/secrets`) and mounts them read-only. Run `setup-env.sh` to create mode-0600 files, or provision files with the names used by `docker/api/entrypoint.sh`. `pnpm secrets:smoke` proves that PostgreSQL, Redis, SeaweedFS, and the generated LiveKit configurations start without direct secret environment variables.
 
 The observability profile additionally requires `alertmanager_webhook_url` in the same secret directory. Alertmanager refuses to start with a missing or non-HTTP(S) endpoint so alerts cannot be silently discarded.
 
@@ -315,7 +315,7 @@ A linear checklist for cutting a production deploy. Do not skip steps.
    - Keep subscriptions disabled. Production startup rejects `FEATURE_SUBSCRIPTIONS_ENABLED=true` until the complete recurring lifecycle is release-enabled.
 2. **DNS**
    - `A`/`AAAA` for app (`botparty.example.com`), API (`api.…`), LiveKit
-     (`livekit.…`), Egress (`egress.…`), MinIO public (`media.…`).
+     (`livekit.…`), Egress (`egress.…`), SeaweedFS public (`media.…`).
    - TTL ≤ 300s during cut-over.
 3. **TLS**
    - Run `./setup-env.sh` (or generate certs out-of-band) to populate
@@ -349,7 +349,7 @@ A linear checklist for cutting a production deploy. Do not skip steps.
 9. **Rollback plan**
    - Keep the previous image tag pinned in `docker-compose.yml`.
    - Restore script ready (see Backup/Restore below).
-   - Operator on call has access to MinIO bucket and Postgres dumps.
+   - Operator on call has access to SeaweedFS bucket and Postgres dumps.
 
 ### Release images and tags
 

@@ -4,6 +4,11 @@ All notable operator-facing changes are recorded here. Releases use semantic ver
 
 ## Unreleased
 
+### Changed
+- Replaced MinIO with SeaweedFS mini (S3-compatible) for object storage. Thumbnails and LiveKit recordings use private buckets on `seaweedfs:8333`. Public `/storage/` remains blocked; media is served only through authorized API streams. Backup/restore and readiness checks use the S3 API instead of MinIO-specific health endpoints.
+
+## Unreleased
+
 ### Added
 
 - Durable notifications for queue turns, robot state, and financial events with in-app, browser, email, quiet-hour, retry, and preference handling.

@@ -1,7 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { PrismaClient } from '@botparty/prisma';
+import { HeadBucketCommand } from '@aws-sdk/client-s3';
 
+import {
+  createS3CompatibleStorageClient,
+  resolveS3CompatibleStorageConfig,
+} from '../common/s3-compatible-storage';
 import { FeatureFlagsService } from '../common/feature-flags.service';
 import { LivekitService } from '../livekit/livekit.service';
 import { MailService } from '../mail/mail.service';
@@ -297,15 +302,24 @@ export class HealthService {
   }
 
   private async checkObjectStorage() {
-    const endpoint = this.config.get<string>('THUMBNAIL_S3_ENDPOINT')?.replace(/\/$/, '');
-    if (!endpoint) return 0;
     try {
-      const response = await fetch(`${endpoint}/minio/health/live`, {
-        signal: AbortSignal.timeout(2_000),
-      });
-      return response.ok ? 1 : 0;
+      const storage = resolveS3CompatibleStorageConfig(this.config, 'THUMBNAIL_S3_');
+      if (!storage) return 0;
+      const client = createS3CompatibleStorageClient(storage);
+      await client.send(new HeadBucketCommand({ Bucket: storage.bucket }));
+      return 1;
     } catch {
-      return 0;
+      // SeaweedFS / generic S3: unauthenticated root often answers 403 when the gateway is up.
+      const endpoint = this.config.get<string>('THUMBNAIL_S3_ENDPOINT')?.replace(/\/$/, '');
+      if (!endpoint) return 0;
+      try {
+        const response = await fetch(`${endpoint}/`, {
+          signal: AbortSignal.timeout(2_000),
+        });
+        return response.ok || response.status === 403 ? 1 : 0;
+      } catch {
+        return 0;
+      }
     }
   }
 

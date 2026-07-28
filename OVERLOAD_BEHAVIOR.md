@@ -44,7 +44,7 @@ Queue-Jobs bleiben in Redis/BullMQ und werden nach Worker-/Redis-Recovery weiter
 | eine API von zwei | Nginx kann kurz `503` liefern; andere API hält Bearer-Session und Traffic    | Readiness nimmt die gestartete Instanz wieder auf        |
 | PostgreSQL        | abhängige Requests `503`; Liveness bleibt verfügbar, Readiness wird ungesund | Pools verbinden sich nach DB-Start neu                   |
 | Redis             | verteilte Schutz-/Queue-Pfade `503`; kein ungeschützter Mehrinstanzmodus     | Redis-Verbindung und Readiness erholen sich              |
-| MinIO             | Upload/Download schlägt explizit fehl; kein Erfolg ohne Objekt               | Storage-Readiness und neuer Versuch nach Dienst-Recovery |
+| SeaweedFS         | Upload/Download schlägt explizit fehl; kein Erfolg ohne Objekt               | Storage-Readiness und neuer Versuch nach Dienst-Recovery |
 | Mailpit/Fremdmail | E-Mail-Job bleibt retryfähig; API-Kerndaten bleiben erhalten                 | begrenzte Job-Retries/Backoff                            |
 
 ## Betreiber-Signale

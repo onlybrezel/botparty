@@ -190,7 +190,7 @@ export function evaluateProductionReadiness(env, options = {}) {
       ['WEBHOOK_SECRET_ENCRYPTION_KEY_FILE', 'webhook_secret_encryption_key'],
       ['LIVEKIT_API_SECRET_FILE', 'livekit_api_secret'],
       ['METRICS_PASSWORD_FILE', 'metrics_password'],
-      ['MINIO_ROOT_PASSWORD_FILE', 'minio_root_password'],
+      ['OBJECT_STORAGE_SECRET_ACCESS_KEY_FILE', 'object_storage_secret_access_key'],
       ['BACKUP_ENCRYPTION_KEY_FILE', 'backup_encryption_key'],
       ['ALERTMANAGER_WEBHOOK_URL_FILE', 'alertmanager_webhook_url'],
     ]) {

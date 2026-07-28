@@ -67,7 +67,7 @@ function buildImageRemotePatterns(): NonNullable<
   if (isDev) {
     patterns.push({ protocol: 'http', hostname: 'localhost' });
     patterns.push({ protocol: 'http', hostname: '127.0.0.1' });
-    patterns.push({ protocol: 'http', hostname: 'minio' });
+    patterns.push({ protocol: 'http', hostname: 'seaweedfs' });
   }
 
   // Ensure at least one host is set so next/image does not throw at runtime.

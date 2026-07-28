@@ -20,7 +20,7 @@ const manifest = {
     'payout_destination_encryption_key',
     'livekit_api_secret',
     'redis_password',
-    'minio_root_password',
+    'object_storage_secret_access_key',
     'metrics_password',
   ],
   restoreCommand:

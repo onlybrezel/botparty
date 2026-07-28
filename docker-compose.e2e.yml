@@ -20,7 +20,7 @@ services:
     ports: !reset []
   redis:
     ports: !reset []
-  minio:
+  seaweedfs:
     ports: !reset []
   livekit:
     ports: !reset []

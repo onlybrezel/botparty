@@ -22,7 +22,7 @@ const VALID_PNG_DATA_URL =
 const storage = {
   bucket: 'botparty-thumbnails',
   region: 'us-east-1',
-  endpoint: 'http://minio:9000',
+  endpoint: 'http://seaweedfs:8333',
   accessKeyId: 'test-access',
   secretAccessKey: 'test-secret',
   forcePathStyle: true,

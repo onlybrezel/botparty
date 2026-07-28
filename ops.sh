@@ -723,7 +723,7 @@ run_zero_downtime_update() {
   fi
 
   info "Reconciling object-storage buckets and access policies"
-  docker compose run --rm --no-deps minio-init
+  docker compose run --rm --no-deps object-storage-init
 
   info "Applying schema migrations once with the release image"
   docker compose run --rm --no-deps migrate

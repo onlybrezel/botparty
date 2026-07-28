@@ -11,10 +11,10 @@ Nginx protokolliert Status, Gesamtdauer, Upstreamadresse, Upstreamstatus und Ups
 ## Healthchecks
 
 - `/api/v1/health/live`: ausschließlich Prozesslebendigkeit; bleibt bei Datenbank-/Redis-/Storage-Ausfall 200.
-- `/api/v1/health/ready`: prüft PostgreSQL, Redis, Queuezustand, MinIO, LiveKit, Migrationszustand und notwendige Konfiguration mit begrenzten Timeouts.
+- `/api/v1/health/ready`: prüft PostgreSQL, Redis, Queuezustand, SeaweedFS, LiveKit, Migrationszustand und notwendige Konfiguration mit begrenzten Timeouts.
 - `/web-health/live`: Web-Prozessprobe mit Instanzmarker; Nginx enthält einen begrenzten Legacy-Rollbackpfad.
 
-Die Trennung wurde final erneut durch Stoppen von Redis, PostgreSQL und MinIO sowie zuvor mit LiveKit geprüft. Datenbank-, Redis- und Storage-Ausfälle lieferten jeweils Liveness 200 und Readiness 503 mit komponentengenauer Checkmatrix; nach Neustart kehrte Readiness auf 200 zurück. Externe Kurzstörungen lösen keinen Containerrestart über Liveness aus.
+Die Trennung wurde final erneut durch Stoppen von Redis, PostgreSQL und SeaweedFS sowie zuvor mit LiveKit geprüft. Datenbank-, Redis- und Storage-Ausfälle lieferten jeweils Liveness 200 und Readiness 503 mit komponentengenauer Checkmatrix; nach Neustart kehrte Readiness auf 200 zurück. Externe Kurzstörungen lösen keinen Containerrestart über Liveness aus.
 
 ## Metriken
 

@@ -23,7 +23,7 @@ RPO_SECONDS="${RESTORE_RPO_SECONDS:-}"
 SECRET_DIR="${RESTORE_SECRET_DIR:-${PROJECT_ROOT}/docker/secrets}"
 RUN_ID="restore-drill-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 PG_CONTAINER="botparty-${RUN_ID}-pg"
-MINIO_CONTAINER="botparty-${RUN_ID}-minio"
+SEAWEED_CONTAINER="botparty-${RUN_ID}-seaweedfs"
 REDIS_CONTAINER="botparty-${RUN_ID}-redis"
 LIVEKIT_CONTAINER="botparty-${RUN_ID}-livekit"
 MAIL_CONTAINER="botparty-${RUN_ID}-mail"
@@ -33,8 +33,8 @@ WORK="$(mktemp -d)"
 STARTED="$(date +%s)"
 REPORT_DIR="${PROJECT_ROOT}/data/restore-drills"
 POSTGRES_RESTORE_IMAGE="postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777"
-MINIO_RESTORE_IMAGE="minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e"
-MINIO_CLIENT_IMAGE="minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727"
+SEAWEEDFS_RESTORE_IMAGE="chrislusf/seaweedfs:4.40@sha256:52194fba4fecd0083c842158b3a902ba6e04a63619b2b0efcd08007bdb6a4602"
+AWS_CLI_IMAGE="${AWS_CLI_IMAGE:-amazon/aws-cli:2.27.50@sha256:48c3d4212e2f5b0e24bdc6af7708f9412ce65425a79575e0f78b8f8c0dcd70ab}"
 NODE_BACKUP_IMAGE="node@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2"
 REDIS_RESTORE_IMAGE="redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99"
 LIVEKIT_RESTORE_IMAGE="livekit/livekit-server:v1.8@sha256:621fd87bd64a0c83e1f2418ee0323eb920d00acdd73e5f79b303c64f6cc532af"
@@ -44,7 +44,7 @@ RESTORE_TEST_EMAIL="${RESTORE_TEST_EMAIL:-admin@botparty.test}"
 RESTORE_TEST_PASSWORD_FILE="${RESTORE_TEST_PASSWORD_FILE:-${SECRET_DIR}/seed_admin_password}"
 
 cleanup() {
-  for container in "${API_CONTAINER}" "${MAIL_CONTAINER}" "${LIVEKIT_CONTAINER}" "${REDIS_CONTAINER}" "${PG_CONTAINER}" "${MINIO_CONTAINER}"; do
+  for container in "${API_CONTAINER}" "${MAIL_CONTAINER}" "${LIVEKIT_CONTAINER}" "${REDIS_CONTAINER}" "${PG_CONTAINER}" "${SEAWEED_CONTAINER}"; do
     if docker inspect "${container}" >/dev/null 2>&1; then
       if ! docker rm -f "${container}" >/dev/null 2>&1; then
         echo "Warning: restore-drill container ${container} could not be removed automatically." >&2
@@ -104,8 +104,13 @@ fi
 docker network create "${NETWORK}" >/dev/null
 
 docker run -d --name "${PG_CONTAINER}" --network "${NETWORK}" --network-alias postgres -e POSTGRES_PASSWORD=drill_password -e POSTGRES_DB=botparty_restore "${POSTGRES_RESTORE_IMAGE}" >/dev/null
-docker run -d --name "${MINIO_CONTAINER}" --network "${NETWORK}" --network-alias minio -e MINIO_ROOT_USER=drill_access -e MINIO_ROOT_PASSWORD=drill_secret_123 -p 127.0.0.1::9000 "${MINIO_RESTORE_IMAGE}" server /data >/dev/null
-MINIO_PORT="$(docker port "${MINIO_CONTAINER}" 9000/tcp | sed 's/.*://')"
+docker run -d --name "${SEAWEED_CONTAINER}" --network "${NETWORK}" --network-alias seaweedfs \
+  -e AWS_ACCESS_KEY_ID=drill_access \
+  -e AWS_SECRET_ACCESS_KEY=drill_secret_123 \
+  -e S3_BUCKET=botparty-thumbnails \
+  -p 127.0.0.1::8333 \
+  "${SEAWEEDFS_RESTORE_IMAGE}" mini -dir=/data -ip=seaweedfs -master.telemetry=false -webdav=false -admin.ui=false >/dev/null
+SEAWEED_PORT="$(docker port "${SEAWEED_CONTAINER}" 8333/tcp | sed 's/.*://')"
 
 PG_READY_STREAK=0
 for _ in $(seq 1 60); do
@@ -134,17 +139,18 @@ docker run --rm --network "${NETWORK}" --user 1001:1001 \
 docker exec "${PG_CONTAINER}" psql -v ON_ERROR_STOP=1 -U postgres -d botparty_restore -c \
   'SELECT COUNT(*) AS migration_count FROM _prisma_migrations WHERE finished_at IS NOT NULL; SELECT COUNT(*) AS user_count FROM users;' >/dev/null
 
-MINIO_READY=false
+SEAWEED_READY=false
 for _ in $(seq 1 60); do
-  if curl -fsS "http://127.0.0.1:${MINIO_PORT}/minio/health/live" >/dev/null 2>&1; then
-    MINIO_READY=true
+  if curl -fsS "http://127.0.0.1:${SEAWEED_PORT}/status" >/dev/null 2>&1 \
+    || curl -fsS -o /dev/null -w '%{http_code}' "http://127.0.0.1:${SEAWEED_PORT}/" | grep -Eq '^(200|403)$'; then
+    SEAWEED_READY=true
     break
   fi
   sleep 1
 done
-if [[ "${MINIO_READY}" != true ]]; then
-  docker logs "${MINIO_CONTAINER}" >&2
-  echo "MinIO did not become ready for the restore drill" >&2
+if [[ "${SEAWEED_READY}" != true ]]; then
+  docker logs "${SEAWEED_CONTAINER}" >&2
+  echo "SeaweedFS did not become ready for the restore drill" >&2
   exit 1
 fi
 for bucket_dir in "${WORK}"/objects/*; do
@@ -153,16 +159,18 @@ for bucket_dir in "${WORK}"/objects/*; do
   mkdir -p "${WORK}/restored/${bucket}"
   docker run --rm --network host --entrypoint /bin/sh \
     --user "$(id -u):$(id -g)" --security-opt no-new-privileges:true --cap-drop ALL \
-    --env HOME=/tmp --tmpfs /tmp:rw,noexec,nosuid,size=32m \
-    -v "${WORK}:/backup" "${MINIO_CLIENT_IMAGE}" -c \
-    'mc alias set target "$1" drill_access drill_secret_123 >/dev/null && mc mb --ignore-existing "target/$2" >/dev/null && mc mirror --overwrite "/backup/objects/$2" "target/$2"' \
-    sh "http://127.0.0.1:${MINIO_PORT}" "${bucket}"
+    --env HOME=/tmp --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+    -e AWS_ACCESS_KEY_ID=drill_access -e AWS_SECRET_ACCESS_KEY=drill_secret_123 -e AWS_DEFAULT_REGION=us-east-1 \
+    -v "${WORK}:/backup" "${AWS_CLI_IMAGE}" -c \
+    'endpoint="$1"; bucket="$2"; aws --endpoint-url "$endpoint" s3 mb "s3://$bucket" 2>/dev/null || true; aws --endpoint-url "$endpoint" s3 sync "/backup/objects/$bucket" "s3://$bucket"' \
+    sh "http://127.0.0.1:${SEAWEED_PORT}" "${bucket}"
   docker run --rm --network host --entrypoint /bin/sh \
     --user "$(id -u):$(id -g)" --security-opt no-new-privileges:true --cap-drop ALL \
-    --env HOME=/tmp --tmpfs /tmp:rw,noexec,nosuid,size=32m \
-    -v "${WORK}:/backup" "${MINIO_CLIENT_IMAGE}" -c \
-    'mc alias set target "$1" drill_access drill_secret_123 >/dev/null && mc mirror --overwrite "target/$2" "/backup/restored/$2"' \
-    sh "http://127.0.0.1:${MINIO_PORT}" "${bucket}"
+    --env HOME=/tmp --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+    -e AWS_ACCESS_KEY_ID=drill_access -e AWS_SECRET_ACCESS_KEY=drill_secret_123 -e AWS_DEFAULT_REGION=us-east-1 \
+    -v "${WORK}:/backup" "${AWS_CLI_IMAGE}" -c \
+    'aws --endpoint-url "$1" s3 sync "s3://$2" "/backup/restored/$2"' \
+    sh "http://127.0.0.1:${SEAWEED_PORT}" "${bucket}"
   diff -qr "${WORK}/objects/${bucket}" "${WORK}/restored/${bucket}"
 done
 
@@ -178,7 +186,7 @@ done
 install -m 644 /dev/null "${API_SECRETS}/api_database_url"
 printf '%s\n' 'postgresql://postgres:drill_password@postgres:5432/botparty_restore?schema=public&connection_limit=10&pool_timeout=5&connect_timeout=5&sslmode=disable' >"${API_SECRETS}/api_database_url"
 printf '%s\n' 'restore-drill-redis-password' >"${API_SECRETS}/redis_password"
-printf '%s\n' 'drill_secret_123' >"${API_SECRETS}/minio_root_password"
+printf '%s\n' 'drill_secret_123' >"${API_SECRETS}/object_storage_secret_access_key"
 [[ -f "${API_SECRETS}/smtp_password" ]] || install -m 644 /dev/null "${API_SECRETS}/smtp_password"
 
 LIVEKIT_CONFIG="${WORK}/livekit.yaml"
@@ -232,14 +240,14 @@ docker run -d --name "${API_CONTAINER}" --network "${NETWORK}" --network-alias a
   -e PAYOUT_DESTINATION_ENCRYPTION_KEY_FILE=/run/secrets/payout_destination_encryption_key \
   -e LIVEKIT_API_KEY=restore-drill-key -e LIVEKIT_API_SECRET_FILE=/run/secrets/livekit_api_secret \
   -e LIVEKIT_URL=ws://livekit:7880 -e LIVEKIT_PUBLIC_URL=wss://restore.invalid/rtc \
-  -e LIVEKIT_RECORDINGS_S3_ENDPOINT=http://minio:9000 \
+  -e LIVEKIT_RECORDINGS_S3_ENDPOINT=http://seaweedfs:8333 \
   -e LIVEKIT_RECORDINGS_S3_ACCESS_KEY_ID=drill_access \
-  -e LIVEKIT_RECORDINGS_S3_SECRET_ACCESS_KEY_FILE=/run/secrets/minio_root_password \
+  -e LIVEKIT_RECORDINGS_S3_SECRET_ACCESS_KEY_FILE=/run/secrets/object_storage_secret_access_key \
   -e LIVEKIT_RECORDINGS_S3_BUCKET=botparty-recordings \
   -e LIVEKIT_RECORDINGS_S3_REGION=us-east-1 -e LIVEKIT_RECORDINGS_S3_FORCE_PATH_STYLE=true \
-  -e THUMBNAIL_S3_ENDPOINT=http://minio:9000 \
+  -e THUMBNAIL_S3_ENDPOINT=http://seaweedfs:8333 \
   -e THUMBNAIL_S3_ACCESS_KEY_ID=drill_access \
-  -e THUMBNAIL_S3_SECRET_ACCESS_KEY_FILE=/run/secrets/minio_root_password \
+  -e THUMBNAIL_S3_SECRET_ACCESS_KEY_FILE=/run/secrets/object_storage_secret_access_key \
   -e THUMBNAIL_S3_BUCKET=botparty-thumbnails \
   -e THUMBNAIL_S3_REGION=us-east-1 -e THUMBNAIL_S3_FORCE_PATH_STYLE=true \
   -e SMTP_HOST=mail -e SMTP_PORT=1025 -e SMTP_SECURE=false \

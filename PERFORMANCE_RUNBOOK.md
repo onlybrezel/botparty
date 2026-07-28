@@ -35,7 +35,7 @@ Eine `.env` und File-Secrets werden wie in `DEVELOPER_GUIDE.md` erzeugt. Danach:
 
 ```bash
 sg docker -c 'docker compose -f docker-compose.yml -f docker-compose.performance.yml --profile performance config --quiet'
-sg docker -c 'docker compose -f docker-compose.yml -f docker-compose.performance.yml up --build -d postgres redis minio minio-init livekit-config livekit livekit-ingress mail-test'
+sg docker -c 'docker compose -f docker-compose.yml -f docker-compose.performance.yml up --build -d postgres redis seaweedfs object-storage-init livekit-config livekit livekit-ingress mail-test'
 sg docker -c 'docker compose -f docker-compose.yml -f docker-compose.performance.yml run --rm migrate'
 sg docker -c 'docker compose -f docker-compose.yml -f docker-compose.performance.yml up -d --scale api=2 api web nginx'
 ```

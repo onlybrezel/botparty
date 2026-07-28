@@ -15,8 +15,8 @@ export BOTPARTY_SECRET_DIR="${SECRET_DIR}"
 export LIVEKIT_API_KEY="botparty-dev-smoke"
 export POSTGRES_HOST_PORT=0
 export REDIS_HOST_PORT=0
-export MINIO_API_HOST_PORT=0
-export MINIO_CONSOLE_HOST_PORT=0
+export SEAWEEDFS_S3_HOST_PORT=0
+export SEAWEEDFS_CONSOLE_HOST_PORT=0
 export API_HOST_PORT=0
 export WEB_HOST_PORT=0
 export API_SOURCE_DIR="${SOURCE_DIR}/api"
@@ -51,7 +51,9 @@ write_secret() {
 write_secret db_password 'dev-smoke-database-password'
 write_secret api_database_url 'postgresql://botparty:dev-smoke-database-password@postgres:5432/botparty?schema=public'
 write_secret redis_password 'dev-smoke-redis-password'
-write_secret minio_root_password 'dev-smoke-minio-password'
+write_secret object_storage_secret_access_key 'dev-smoke-object-storage-password'
+export OBJECT_STORAGE_SECRET_ACCESS_KEY="$(cat "${SECRET_DIR}/object_storage_secret_access_key")"
+export OBJECT_STORAGE_ACCESS_KEY_ID="${OBJECT_STORAGE_ACCESS_KEY_ID:-botparty}"
 write_secret livekit_api_secret 'dev-smoke-livekit-secret-at-least-32-characters'
 write_secret jwt_secret 'dev-smoke-jwt-secret-at-least-32-characters'
 write_secret jwt_refresh_secret 'dev-smoke-refresh-secret-at-least-32-characters'
@@ -143,9 +145,11 @@ if [[ "${DEV_COMPOSE_SKIP_BUILD:-false}" != true ]]; then
   "${COMPOSE[@]}" build api web
 fi
 
-"${COMPOSE[@]}" up -d postgres redis minio livekit-config livekit
+"${COMPOSE[@]}" up -d postgres redis object-storage-permissions seaweedfs livekit-config livekit
 wait_for_health postgres
 wait_for_health redis
+wait_for_health seaweedfs
+"${COMPOSE[@]}" run --rm object-storage-init
 wait_for_health livekit
 
 "${COMPOSE[@]}" run --rm migrate

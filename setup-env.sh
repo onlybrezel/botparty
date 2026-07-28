@@ -185,8 +185,8 @@ METRICS_PASSWORD=$(gen_secret)
 BACKUP_ENCRYPTION_KEY=$(gen_secret)
 DB_PASSWORD=$(gen_secret | head -c 24)
 REDIS_PASSWORD=$(gen_secret | head -c 24)
-MINIO_ROOT_USER=botpartyminio
-MINIO_ROOT_PASSWORD=$(gen_secret | head -c 24)
+OBJECT_STORAGE_ACCESS_KEY_ID=botparty
+OBJECT_STORAGE_SECRET_ACCESS_KEY=$(gen_secret | head -c 32)
 
 # LiveKit secrets — user can override with existing key/secret
 echo ""
@@ -225,7 +225,7 @@ write_secret() {
 write_secret db_password "$DB_PASSWORD"
 write_secret api_database_url "postgresql://botparty:${DB_PASSWORD}@postgres:5432/botparty?schema=public&connection_limit=10&pool_timeout=5&connect_timeout=5"
 write_secret redis_password "$REDIS_PASSWORD"
-write_secret minio_root_password "$MINIO_ROOT_PASSWORD"
+write_secret object_storage_secret_access_key "$OBJECT_STORAGE_SECRET_ACCESS_KEY"
 write_secret jwt_secret "$JWT_SECRET"
 write_secret jwt_refresh_secret "$JWT_REFRESH_SECRET"
 write_secret robot_jwt_secret "$ROBOT_JWT_SECRET"
@@ -312,22 +312,25 @@ THROTTLE_LIMIT=100
 THUMBNAIL_PUBLIC_BASE_URL=${APP_URL}/storage/botparty-thumbnails
 THUMBNAIL_S3_BUCKET=botparty-thumbnails
 THUMBNAIL_S3_REGION=us-east-1
-THUMBNAIL_S3_ENDPOINT=http://minio:9000
-THUMBNAIL_S3_ACCESS_KEY_ID=${MINIO_ROOT_USER}
-THUMBNAIL_S3_SECRET_ACCESS_KEY_FILE=/run/secrets/minio_root_password
+THUMBNAIL_S3_ENDPOINT=http://seaweedfs:8333
+THUMBNAIL_S3_ACCESS_KEY_ID=${OBJECT_STORAGE_ACCESS_KEY_ID}
+THUMBNAIL_S3_SECRET_ACCESS_KEY_FILE=/run/secrets/object_storage_secret_access_key
 THUMBNAIL_S3_FORCE_PATH_STYLE=true
 
 # ─── Recording Storage ────────────────────────────────
 LIVEKIT_RECORDING_OBJECT_KEY_TEMPLATE=sessions/{session_id}/{camera_id}-{time}.mp4
 LIVEKIT_RECORDINGS_S3_BUCKET=botparty-recordings
 LIVEKIT_RECORDINGS_S3_REGION=us-east-1
-LIVEKIT_RECORDINGS_S3_ENDPOINT=http://minio:9000
-LIVEKIT_RECORDINGS_S3_ACCESS_KEY_ID=${MINIO_ROOT_USER}
-LIVEKIT_RECORDINGS_S3_SECRET_ACCESS_KEY_FILE=/run/secrets/minio_root_password
+LIVEKIT_RECORDINGS_S3_ENDPOINT=http://seaweedfs:8333
+LIVEKIT_RECORDINGS_S3_ACCESS_KEY_ID=${OBJECT_STORAGE_ACCESS_KEY_ID}
+LIVEKIT_RECORDINGS_S3_SECRET_ACCESS_KEY_FILE=/run/secrets/object_storage_secret_access_key
 LIVEKIT_RECORDINGS_S3_FORCE_PATH_STYLE=true
 
-# ─── MinIO / Object Storage ──────────────────────────
-MINIO_ROOT_USER=${MINIO_ROOT_USER}
+# ─── SeaweedFS / Object Storage ────────────────────
+# Same secret value as docker/secrets/object_storage_secret_access_key (API file secret).
+# SeaweedFS mini reads AWS credentials from the environment (not the file mount).
+OBJECT_STORAGE_ACCESS_KEY_ID=${OBJECT_STORAGE_ACCESS_KEY_ID}
+OBJECT_STORAGE_SECRET_ACCESS_KEY=${OBJECT_STORAGE_SECRET_ACCESS_KEY}
 
 # ─── Metrics ─────────────────────────────────────────
 METRICS_AUTH_REQUIRED=true
@@ -336,9 +339,9 @@ METRICS_PASSWORD_FILE=/run/secrets/metrics_password
 
 # ─── Encrypted backup / restore ──────────────────────
 BACKUP_DATABASE_URL_FILE=./docker/secrets/api_database_url
-BACKUP_S3_ENDPOINT=http://minio:9000
-BACKUP_S3_ACCESS_KEY=${MINIO_ROOT_USER}
-BACKUP_S3_SECRET_KEY_FILE=./docker/secrets/minio_root_password
+BACKUP_S3_ENDPOINT=http://seaweedfs:8333
+BACKUP_S3_ACCESS_KEY=${OBJECT_STORAGE_ACCESS_KEY_ID}
+BACKUP_S3_SECRET_KEY_FILE=./docker/secrets/object_storage_secret_access_key
 BACKUP_ENCRYPTION_KEY_FILE=./docker/secrets/backup_encryption_key
 
 # ─── Seeding ──────────────────────────────────────────

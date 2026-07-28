@@ -15,7 +15,7 @@ describe('StorageDeletionService', () => {
   const storage = {
     bucket: 'botparty-recordings',
     region: 'us-east-1',
-    endpoint: 'http://minio:9000',
+    endpoint: 'http://seaweedfs:8333',
     accessKeyId: 'audit',
     secretAccessKey: 'audit-secret',
     forcePathStyle: true,

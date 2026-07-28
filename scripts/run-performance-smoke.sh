@@ -59,7 +59,9 @@ write_secret() {
 write_secret db_password 'performance-smoke-database-password'
 write_secret api_database_url 'postgresql://botparty:performance-smoke-database-password@postgres:5432/botparty_performance?schema=public&connection_limit=10&pool_timeout=3&connect_timeout=5&sslmode=disable'
 write_secret redis_password 'performance-smoke-redis-password'
-write_secret minio_root_password 'performance-smoke-minio-password'
+write_secret object_storage_secret_access_key 'performance-smoke-object-storage-password'
+export OBJECT_STORAGE_SECRET_ACCESS_KEY="$(cat "${SECRET_DIR}/object_storage_secret_access_key")"
+export OBJECT_STORAGE_ACCESS_KEY_ID="${OBJECT_STORAGE_ACCESS_KEY_ID:-botparty}"
 write_secret livekit_api_secret 'performance-smoke-livekit-secret-at-least-32-characters'
 write_secret jwt_secret 'performance-smoke-jwt-secret-at-least-32-characters'
 write_secret jwt_refresh_secret 'performance-smoke-refresh-secret-at-least-32-characters'
@@ -101,10 +103,11 @@ if [[ "${PERFORMANCE_SMOKE_SKIP_BUILD:-false}" != true ]]; then
   "${COMPOSE[@]}" build api
 fi
 
-"${COMPOSE[@]}" up -d postgres redis minio minio-init livekit-config livekit livekit-ingress mail-test
+"${COMPOSE[@]}" up -d postgres redis seaweedfs object-storage-init livekit-config livekit livekit-ingress mail-test
 wait_for_health postgres
 wait_for_health redis
-wait_for_health minio
+wait_for_health seaweedfs
+"${COMPOSE[@]}" run --rm --no-deps object-storage-init || true
 wait_for_health livekit
 wait_for_health mail-test
 "${COMPOSE[@]}" run --rm migrate

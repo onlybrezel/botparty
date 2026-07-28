@@ -134,9 +134,9 @@ describe('LivekitService', () => {
       LIVEKIT_RECORDING_OBJECT_KEY_TEMPLATE: 'sessions/{session_id}/{camera_id}-{time}.mp4',
       LIVEKIT_RECORDINGS_S3_BUCKET: 'botparty-recordings',
       LIVEKIT_RECORDINGS_S3_REGION: 'us-east-1',
-      LIVEKIT_RECORDINGS_S3_ENDPOINT: 'http://minio:9000',
-      LIVEKIT_RECORDINGS_S3_ACCESS_KEY_ID: 'botpartyminio',
-      LIVEKIT_RECORDINGS_S3_SECRET_ACCESS_KEY: 'minio-secret',
+      LIVEKIT_RECORDINGS_S3_ENDPOINT: 'http://seaweedfs:8333',
+      LIVEKIT_RECORDINGS_S3_ACCESS_KEY_ID: 'botparty',
+      LIVEKIT_RECORDINGS_S3_SECRET_ACCESS_KEY: 'object-storage-secret',
       LIVEKIT_RECORDINGS_S3_FORCE_PATH_STYLE: 'true',
     });
   }
@@ -401,7 +401,7 @@ describe('LivekitService', () => {
       expect(outputs[0].output.value).toEqual(
         expect.objectContaining({
           bucket: 'botparty-recordings',
-          endpoint: 'http://minio:9000',
+          endpoint: 'http://seaweedfs:8333',
           forcePathStyle: true,
           sessionToken: 'temporary-token',
         }),

@@ -48,7 +48,7 @@ fi
 BACKUP_DATABASE_DOCKER_NETWORK="${BACKUP_DATABASE_DOCKER_NETWORK:-${COMPOSE_PROJECT_NAME:-botparty}_internal}"
 BACKUP_OBJECT_DOCKER_NETWORK="${BACKUP_OBJECT_DOCKER_NETWORK:-${COMPOSE_PROJECT_NAME:-botparty}_frontend}"
 POSTGRES_BACKUP_IMAGE="postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777"
-MINIO_CLIENT_IMAGE="minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727"
+AWS_CLI_IMAGE="${AWS_CLI_IMAGE:-amazon/aws-cli:2.27.50@sha256:48c3d4212e2f5b0e24bdc6af7708f9412ce65425a79575e0f78b8f8c0dcd70ab}"
 TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 STAGING="$(mktemp -d)"
 ARCHIVE="${OUTPUT_DIR}/botparty-release-${TIMESTAMP}.tar.gz.enc"
@@ -126,12 +126,14 @@ for bucket in ${BACKUP_S3_BUCKETS}; do
   mkdir -p "${STAGING}/objects/${bucket}"
   docker run --rm --network "${BACKUP_OBJECT_DOCKER_NETWORK}" --entrypoint /bin/sh \
     --user "$(id -u):$(id -g)" --security-opt no-new-privileges:true --cap-drop ALL \
-    --env HOME=/tmp --tmpfs /tmp:rw,noexec,nosuid,size=32m \
+    --env HOME=/tmp --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+    -e AWS_ACCESS_KEY_ID="${BACKUP_S3_ACCESS_KEY}" \
+    -e AWS_DEFAULT_REGION=us-east-1 \
     -v "${STAGING}:/backup" \
     -v "${BACKUP_S3_SECRET_KEY_FILE}:/run/secrets/backup_s3_secret:ro" \
-    "${MINIO_CLIENT_IMAGE}" -c \
-    'secret="$(cat /run/secrets/backup_s3_secret)" && mc alias set source "$1" "$2" "$secret" >/dev/null && mc mirror --overwrite "source/$3" "/backup/objects/$3"' \
-    sh "${BACKUP_S3_ENDPOINT}" "${BACKUP_S3_ACCESS_KEY}" "${bucket}"
+    "${AWS_CLI_IMAGE}" -c \
+    'export AWS_SECRET_ACCESS_KEY="$(cat /run/secrets/backup_s3_secret)" && aws --endpoint-url "$1" s3 sync "s3://$2" "/backup/objects/$2"' \
+    sh "${BACKUP_S3_ENDPOINT}" "${bucket}"
 done
 
 (

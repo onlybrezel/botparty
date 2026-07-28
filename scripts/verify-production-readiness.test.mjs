@@ -118,7 +118,7 @@ describe('production readiness preflight', () => {
       'webhook_secret_encryption_key',
       'livekit_api_secret',
       'metrics_password',
-      'minio_root_password',
+      'object_storage_secret_access_key',
       'backup_encryption_key',
       'alertmanager_webhook_url',
     ]) {

@@ -81,70 +81,127 @@ services:
           cpus: '0.75'
           memory: 384M
 
-  minio:
+  # Object storage: SeaweedFS mini (S3-compatible). Private buckets only; no host ports.
+  # Application retention (RECORDING_RETENTION_DAYS / storage-deletion job) replaces MinIO ILM.
+  object-storage-permissions:
     logging: *default-logging
-    image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
-    restart: on-failure:10
+    image: chrislusf/seaweedfs:4.40@sha256:52194fba4fecd0083c842158b3a902ba6e04a63619b2b0efcd08007bdb6a4602
+    restart: "no"
     entrypoint: ["/bin/sh", "-ec"]
-    command: ['export MINIO_ROOT_PASSWORD="$$(cat /run/secrets/minio_root_password)"; exec minio server /data --console-address :9001']
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-botpartyminio}
-    ports:
-      - "127.0.0.1:${MINIO_API_HOST_PORT:-9000}:9000"
-      - "127.0.0.1:${MINIO_CONSOLE_HOST_PORT:-9001}:9001"
+    command: ["chown 1000:1000 /data"]
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [CHOWN]
+    security_opt:
+      - no-new-privileges:true
     volumes:
-      - minio_data:/data
-      - ${BOTPARTY_SECRET_DIR:-./docker/secrets}:/run/secrets:ro
-    networks:
-      - frontend
-    healthcheck:
-      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:9000/minio/health/live"]
-      interval: 3s
-      timeout: 2s
-      retries: 15
+      - seaweedfs_data:/data
     deploy:
       resources:
         limits:
-          cpus: '1.0'
-          memory: 1024M
+          cpus: "0.25"
+          memory: 128M
 
-  minio-init:
+  seaweedfs:
     logging: *default-logging
-    image: minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
-    restart: "no"
-    entrypoint: /bin/sh
+    image: chrislusf/seaweedfs:4.40@sha256:52194fba4fecd0083c842158b3a902ba6e04a63619b2b0efcd08007bdb6a4602
+    restart: on-failure:10
+    user: "1000:1000"
+    depends_on:
+      object-storage-permissions:
+        condition: service_completed_successfully
+    # Seaweed mini reads AWS_* / S3_BUCKET from the environment (same pattern as Inventonia).
+    # Application containers still load the matching secret from docker/secrets for the S3 SDK.
     command:
-      - -c
+      - mini
+      - -dir=/data
+      - -ip=seaweedfs
+      - -master.telemetry=false
+      - -webdav=false
+      - -admin.ui=false
+      - -filer.disableDirListing=true
+      - -filer.exposeDirectoryData=false
+      - -s3.allowDeleteBucketNotEmpty=false
+    environment:
+      AWS_ACCESS_KEY_ID: ${OBJECT_STORAGE_ACCESS_KEY_ID:-botparty}
+      AWS_SECRET_ACCESS_KEY: ${OBJECT_STORAGE_SECRET_ACCESS_KEY:?Set OBJECT_STORAGE_SECRET_ACCESS_KEY (same value as docker/secrets/object_storage_secret_access_key)}
+      S3_BUCKET: ${THUMBNAIL_S3_BUCKET:-botparty-thumbnails}
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    volumes:
+      - seaweedfs_data:/data
+    networks:
+      # APIs and LiveKit egress reach storage on both planes (no public publish).
+      - internal
+      - frontend
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -q -O /dev/null http://127.0.0.1:8333/status 2>/dev/null || wget -q -O /dev/null http://127.0.0.1:9333/cluster/status 2>/dev/null || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "${SEAWEEDFS_CPU_LIMIT:-1.0}"
+          memory: ${SEAWEEDFS_MEMORY_LIMIT:-1024M}
+
+  object-storage-init:
+    logging: *default-logging
+    image: amazon/aws-cli:2.27.50@sha256:48c3d4212e2f5b0e24bdc6af7708f9412ce65425a79575e0f78b8f8c0dcd70ab
+    restart: "no"
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
       - |
-        minio_password="$$(cat /run/secrets/minio_root_password)"
+        export AWS_ACCESS_KEY_ID="$${AWS_ACCESS_KEY_ID:-botparty}"
+        export AWS_SECRET_ACCESS_KEY="$${AWS_SECRET_ACCESS_KEY:?missing}"
+        export AWS_DEFAULT_REGION="$${AWS_DEFAULT_REGION:-us-east-1}"
+        endpoint="$${THUMBNAIL_S3_ENDPOINT:-http://seaweedfs:8333}"
         attempts=0
-        until mc alias set local http://minio:9000 "${MINIO_ROOT_USER:-botpartyminio}" "$${minio_password}"; do
+        until aws --endpoint-url "$$endpoint" s3 ls >/dev/null 2>&1; do
           attempts=$$((attempts + 1))
-          if [ "$${attempts}" -ge 30 ]; then
-            echo "minio remained unavailable while applying bucket policies" >&2
+          if [ "$$attempts" -ge 40 ]; then
+            echo "SeaweedFS S3 remained unavailable while ensuring buckets" >&2
             exit 1
           fi
-          echo "waiting for minio..."
+          echo "waiting for seaweedfs s3..."
           sleep 2
         done
-        mc mb --ignore-existing local/${THUMBNAIL_S3_BUCKET:-botparty-thumbnails}
-        mc anonymous set none local/${THUMBNAIL_S3_BUCKET:-botparty-thumbnails}
-        mc mb --ignore-existing local/${LIVEKIT_RECORDINGS_S3_BUCKET:-botparty-recordings}
-        mc anonymous set none local/${LIVEKIT_RECORDINGS_S3_BUCKET:-botparty-recordings}
-        if [ "${RECORDING_RETENTION_DAYS:-30}" -gt 0 ] 2>/dev/null; then
-          lifecycle="$$(mc ilm rule ls --json local/${LIVEKIT_RECORDINGS_S3_BUCKET:-botparty-recordings})"
-          case "$${lifecycle}" in
-            *'"Days":${RECORDING_RETENTION_DAYS:-30}'*) echo "recording retention rule already present" ;;
-            *) mc ilm rule add --expire-days "${RECORDING_RETENTION_DAYS:-30}" local/${LIVEKIT_RECORDINGS_S3_BUCKET:-botparty-recordings} ;;
-          esac
-        fi
+        for bucket in "$${THUMBNAIL_S3_BUCKET:-botparty-thumbnails}" "$${LIVEKIT_RECORDINGS_S3_BUCKET:-botparty-recordings}"; do
+          if aws --endpoint-url "$$endpoint" s3api head-bucket --bucket "$$bucket" >/dev/null 2>&1; then
+            echo "bucket $$bucket already present"
+          else
+            aws --endpoint-url "$$endpoint" s3 mb "s3://$$bucket"
+            echo "created bucket $$bucket"
+          fi
+        done
+    environment:
+      AWS_ACCESS_KEY_ID: ${OBJECT_STORAGE_ACCESS_KEY_ID:-botparty}
+      AWS_SECRET_ACCESS_KEY: ${OBJECT_STORAGE_SECRET_ACCESS_KEY:?Set OBJECT_STORAGE_SECRET_ACCESS_KEY}
+      AWS_DEFAULT_REGION: ${THUMBNAIL_S3_REGION:-us-east-1}
+      THUMBNAIL_S3_ENDPOINT: ${THUMBNAIL_S3_ENDPOINT:-http://seaweedfs:8333}
+      THUMBNAIL_S3_BUCKET: ${THUMBNAIL_S3_BUCKET:-botparty-thumbnails}
+      LIVEKIT_RECORDINGS_S3_BUCKET: ${LIVEKIT_RECORDINGS_S3_BUCKET:-botparty-recordings}
     depends_on:
-      minio:
+      seaweedfs:
         condition: service_healthy
     networks:
       - frontend
-    volumes:
-      - ${BOTPARTY_SECRET_DIR:-./docker/secrets}:/run/secrets:ro
+      - internal
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
 
   livekit-config:
     logging: *default-logging
@@ -242,9 +299,9 @@ services:
         condition: service_healthy
       livekit:
         condition: service_healthy
-      minio:
+      seaweedfs:
         condition: service_healthy
-      minio-init:
+      object-storage-init:
         condition: service_completed_successfully
     networks:
       internal:
@@ -383,9 +440,9 @@ services:
       LIVEKIT_RECORDING_OBJECT_KEY_TEMPLATE: ${LIVEKIT_RECORDING_OBJECT_KEY_TEMPLATE:-sessions/{session_id}/{camera_id}-{time}.mp4}
       LIVEKIT_RECORDINGS_S3_BUCKET: ${LIVEKIT_RECORDINGS_S3_BUCKET:-botparty-recordings}
       LIVEKIT_RECORDINGS_S3_REGION: ${LIVEKIT_RECORDINGS_S3_REGION:-us-east-1}
-      LIVEKIT_RECORDINGS_S3_ENDPOINT: ${LIVEKIT_RECORDINGS_S3_ENDPOINT:-http://minio:9000}
-      LIVEKIT_RECORDINGS_S3_ACCESS_KEY_ID: ${LIVEKIT_RECORDINGS_S3_ACCESS_KEY_ID:-botpartyminio}
-      LIVEKIT_RECORDINGS_S3_SECRET_ACCESS_KEY_FILE: ${LIVEKIT_RECORDINGS_S3_SECRET_ACCESS_KEY_FILE:-/run/secrets/minio_root_password}
+      LIVEKIT_RECORDINGS_S3_ENDPOINT: ${LIVEKIT_RECORDINGS_S3_ENDPOINT:-http://seaweedfs:8333}
+      LIVEKIT_RECORDINGS_S3_ACCESS_KEY_ID: ${LIVEKIT_RECORDINGS_S3_ACCESS_KEY_ID:-botparty}
+      LIVEKIT_RECORDINGS_S3_SECRET_ACCESS_KEY_FILE: ${LIVEKIT_RECORDINGS_S3_SECRET_ACCESS_KEY_FILE:-/run/secrets/object_storage_secret_access_key}
       LIVEKIT_RECORDINGS_S3_FORCE_PATH_STYLE: ${LIVEKIT_RECORDINGS_S3_FORCE_PATH_STYLE:-true}
       RECORDING_RETENTION_DAYS: ${RECORDING_RETENTION_DAYS:-30}
       CADVISOR_URL: ${CADVISOR_URL:-http://cadvisor:8080}
@@ -398,9 +455,9 @@ services:
       THUMBNAIL_PUBLIC_BASE_URL: ${THUMBNAIL_PUBLIC_BASE_URL:-https://botparty.live/storage/botparty-thumbnails}
       THUMBNAIL_S3_BUCKET: ${THUMBNAIL_S3_BUCKET:-botparty-thumbnails}
       THUMBNAIL_S3_REGION: ${THUMBNAIL_S3_REGION:-us-east-1}
-      THUMBNAIL_S3_ENDPOINT: ${THUMBNAIL_S3_ENDPOINT:-http://minio:9000}
-      THUMBNAIL_S3_ACCESS_KEY_ID: ${THUMBNAIL_S3_ACCESS_KEY_ID:-botpartyminio}
-      THUMBNAIL_S3_SECRET_ACCESS_KEY_FILE: ${THUMBNAIL_S3_SECRET_ACCESS_KEY_FILE:-/run/secrets/minio_root_password}
+      THUMBNAIL_S3_ENDPOINT: ${THUMBNAIL_S3_ENDPOINT:-http://seaweedfs:8333}
+      THUMBNAIL_S3_ACCESS_KEY_ID: ${THUMBNAIL_S3_ACCESS_KEY_ID:-botparty}
+      THUMBNAIL_S3_SECRET_ACCESS_KEY_FILE: ${THUMBNAIL_S3_SECRET_ACCESS_KEY_FILE:-/run/secrets/object_storage_secret_access_key}
       THUMBNAIL_S3_FORCE_PATH_STYLE: ${THUMBNAIL_S3_FORCE_PATH_STYLE:-true}
       SEED_ADMIN_PASSWORD_FILE: ${SEED_ADMIN_PASSWORD_FILE:-/run/secrets/seed_admin_password}
       SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-}
@@ -429,9 +486,9 @@ services:
         condition: service_healthy
       livekit-ingress:
         condition: service_healthy
-      minio:
+      seaweedfs:
         condition: service_healthy
-      minio-init:
+      object-storage-init:
         condition: service_completed_successfully
     networks:
       internal:
@@ -536,7 +593,7 @@ services:
     depends_on:
       api:
         condition: service_healthy
-      minio:
+      seaweedfs:
         condition: service_healthy
     networks:
       - frontend
@@ -722,7 +779,7 @@ services:
 volumes:
   postgres_data:
   redis_data:
-  minio_data:
+  seaweedfs_data:
   prometheus_data:
   alertmanager_data:
   loki_data:

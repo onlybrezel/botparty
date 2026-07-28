@@ -88,7 +88,9 @@ write_secret() {
 write_secret db_password 'e2e-database-password'
 write_secret api_database_url 'postgresql://botparty:e2e-database-password@postgres:5432/botparty?schema=public&connection_limit=10&pool_timeout=5&connect_timeout=5&sslmode=disable'
 write_secret redis_password 'e2e-redis-password'
-write_secret minio_root_password 'e2e-minio-password'
+write_secret object_storage_secret_access_key 'e2e-object-storage-password'
+export OBJECT_STORAGE_SECRET_ACCESS_KEY="$(cat "${SECRET_DIR}/object_storage_secret_access_key")"
+export OBJECT_STORAGE_ACCESS_KEY_ID="${OBJECT_STORAGE_ACCESS_KEY_ID:-botparty}"
 write_secret livekit_api_secret 'e2e-livekit-secret-at-least-32-characters'
 write_secret jwt_secret 'e2e-jwt-secret-at-least-32-characters'
 write_secret jwt_refresh_secret 'e2e-refresh-secret-at-least-32-characters'

@@ -4,7 +4,7 @@ Stand: 18. Juli 2026
 
 ## Ziel und Sicherheitsrahmen
 
-Dieser Plan misst die Kapazität des realen Docker-Pfads und prüft kontrollierte Überlast. Alle Daten sind synthetisch, alle Ziele liegen in privaten Docker-Netzen. Mail geht ausschließlich an Mailpit, Dateien ausschließlich an den lokalen MinIO-Testdienst. Das Lastwerkzeug lehnt öffentliche Ziele ab.
+Dieser Plan misst die Kapazität des realen Docker-Pfads und prüft kontrollierte Überlast. Alle Daten sind synthetisch, alle Ziele liegen in privaten Docker-Netzen. Mail geht ausschließlich an Mailpit, Dateien ausschließlich an den lokalen SeaweedFS-Testdienst. Das Lastwerkzeug lehnt öffentliche Ziele ab.
 
 Abbruchkriterien sind Datenfehler, unkontrollierte `500`, ein OOM-Kill, wiederholte Containerneustarts, anhaltende Timeouts oder fehlende Erholung nach Lastende. Erfolgsantworten sind ausschließlich Status `2xx`/`3xx`; `429` und `503` werden getrennt als kontrollierte Überlast gezählt.
 
@@ -34,7 +34,7 @@ PostgreSQL verwendet `shared_buffers=128MB`, `work_mem=4MB`, `effective_cache_si
 
 `Lastgenerator → Nginx → Fastify Admission-Control → CSRF/Auth → Rollenprüfung → Service → Prisma-Pool → PostgreSQL`
 
-Daneben verwenden Auth-Limits und Queues Redis. Uploads laufen über die API zum gemeinsamen MinIO-Speicher. Health-Liveness bleibt unabhängig von Datenbank und Redis erreichbar; Readiness prüft erforderliche Abhängigkeiten.
+Daneben verwenden Auth-Limits und Queues Redis. Uploads laufen über die API zum gemeinsamen SeaweedFS-Speicher. Health-Liveness bleibt unabhängig von Datenbank und Redis erreichbar; Readiness prüft erforderliche Abhängigkeiten.
 
 ## Reproduzierbare Datenprofile
 

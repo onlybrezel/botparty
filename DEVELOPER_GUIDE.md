@@ -12,7 +12,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 docker compose -f docker-compose.yml -f docker-compose.dev.yml ps
 ```
 
-The development stack starts PostgreSQL, Redis, MinIO, LiveKit, API, Web, and Nginx. `migrate` is a
+The development stack starts PostgreSQL, Redis, SeaweedFS, LiveKit, API, Web, and Nginx. `migrate` is a
 one-shot dependency: it applies committed migrations and converges the idempotent seed before API
 startup. Development mail is disabled unless `SMTP_HOST` is set; use a disposable local SMTP
 capture service when testing mail. Production requires a reachable SMTP server.

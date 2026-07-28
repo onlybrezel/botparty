@@ -54,9 +54,9 @@ describe('RecordingAdminService', () => {
   function configureStorage() {
     configValues.LIVEKIT_RECORDINGS_S3_BUCKET = 'botparty-recordings';
     configValues.LIVEKIT_RECORDINGS_S3_REGION = 'us-east-1';
-    configValues.LIVEKIT_RECORDINGS_S3_ENDPOINT = 'http://minio:9000';
-    configValues.LIVEKIT_RECORDINGS_S3_ACCESS_KEY_ID = 'botpartyminio';
-    configValues.LIVEKIT_RECORDINGS_S3_SECRET_ACCESS_KEY = 'minio-secret';
+    configValues.LIVEKIT_RECORDINGS_S3_ENDPOINT = 'http://seaweedfs:8333';
+    configValues.LIVEKIT_RECORDINGS_S3_ACCESS_KEY_ID = 'botparty';
+    configValues.LIVEKIT_RECORDINGS_S3_SECRET_ACCESS_KEY = 'object-storage-secret';
   }
 
   it('lists only indexed recording metadata without scanning object storage', async () => {

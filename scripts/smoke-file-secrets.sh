@@ -24,7 +24,9 @@ write_secret() {
 write_secret db_password 'secret-smoke-database-password'
 write_secret api_database_url 'postgresql://botparty:secret-smoke-database-password@postgres:5432/botparty?schema=public'
 write_secret redis_password 'secret-smoke-redis-password'
-write_secret minio_root_password 'secret-smoke-minio-password'
+write_secret object_storage_secret_access_key 'secret-smoke-object-storage-password'
+export OBJECT_STORAGE_SECRET_ACCESS_KEY="$(cat "${SECRET_DIR}/object_storage_secret_access_key")"
+export OBJECT_STORAGE_ACCESS_KEY_ID="${OBJECT_STORAGE_ACCESS_KEY_ID:-botparty}"
 write_secret livekit_api_secret 'secret-smoke-livekit-secret-at-least-32-characters'
 write_secret jwt_secret 'secret-smoke-jwt-secret-at-least-32-characters'
 write_secret jwt_refresh_secret 'secret-smoke-refresh-secret-at-least-32-characters'
@@ -38,20 +40,20 @@ write_secret seed_admin_password ''
 write_secret seed_demo_user_password ''
 
 rendered="$(docker compose -p "${PROJECT}" config)"
-for forbidden in POSTGRES_PASSWORD: REDIS_PASSWORD: MINIO_ROOT_PASSWORD: LIVEKIT_API_SECRET: JWT_SECRET: JWT_REFRESH_SECRET: ROBOT_JWT_SECRET:; do
+for forbidden in POSTGRES_PASSWORD: REDIS_PASSWORD: OBJECT_STORAGE_SECRET_ACCESS_KEY: LIVEKIT_API_SECRET: JWT_SECRET: JWT_REFRESH_SECRET: ROBOT_JWT_SECRET:; do
   if grep -Eq "^[[:space:]]+${forbidden}" <<<"${rendered}"; then
     echo "Direct secret environment found in rendered Compose: ${forbidden}" >&2
     exit 1
   fi
 done
 
-docker compose -p "${PROJECT}" up -d postgres redis minio livekit-config
+docker compose -p "${PROJECT}" up -d postgres redis seaweedfs livekit-config
 for _ in $(seq 1 60); do
   postgres_state="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${PROJECT}-postgres-1" 2>/dev/null || printf missing)"
   redis_state="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${PROJECT}-redis-1" 2>/dev/null || printf missing)"
-  minio_state="$(docker inspect -f '{{.State.Status}}' "${PROJECT}-minio-1" 2>/dev/null || printf missing)"
+  object_storage_state="$(docker inspect -f '{{.State.Status}}' "${PROJECT}-seaweedfs-1" 2>/dev/null || printf missing)"
   config_exit="$(docker inspect -f '{{.State.ExitCode}}' "${PROJECT}-livekit-config-1" 2>/dev/null || printf missing)"
-  if [[ "${postgres_state}" == healthy && "${redis_state}" == healthy && "${minio_state}" == running && "${config_exit}" == 0 ]]; then
+  if [[ "${postgres_state}" == healthy && "${redis_state}" == healthy && "${object_storage_state}" == running && "${config_exit}" == 0 ]]; then
     echo 'File-backed Compose secret smoke passed.'
     exit 0
   fi
@@ -59,5 +61,5 @@ for _ in $(seq 1 60); do
 done
 
 docker compose -p "${PROJECT}" ps
-docker compose -p "${PROJECT}" logs --no-color postgres redis minio livekit-config
+docker compose -p "${PROJECT}" logs --no-color postgres redis seaweedfs livekit-config
 exit 1

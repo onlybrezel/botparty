@@ -10,7 +10,7 @@ Geprüft wurden Architekturkomplexität, tote/temporäre Pfade, Abhängigkeiten,
 
 - Die neuen Sicherheitsentscheidungen liegen in gemeinsamen Services/Helfern statt in UI-Ausblendungen. Eigentümerprüfungen laufen vor Status-/Featureauswertung.
 - Redis-, Storage-, Billing- und Rolloutadapter besitzen begrenzte Timeouts/Retrypfade; Fehler werden nicht leer verschluckt.
-- Migrations-, MinIO-Init- und Rolloutlogik sind einmalige Betriebsprozesse und nicht in jede API-Replika dupliziert.
+- Migrations-, Object-Storage-Init- und Rolloutlogik sind einmalige Betriebsprozesse und nicht in jede API-Replika dupliziert.
 - Der Nginx-Drain wurde anhand realer 502-Nachweise zweimal korrigiert: zunächst das Entfernen alter DNS-Peers, danach die vorzeitige Veröffentlichung ungesunder Surge-Replikas. Pre-Surge-Pinning, Instanz-Admission und Worker-Handoff bestanden Rollout, Rollback und Rollforward mit zusammen 71.803 HTTP-200-Antworten ohne Fehler; der finale Ablehnungstest ergänzte 9.958 fehlerfreie Antworten über die alte Version.
 - Der zunächst fehlgeschlagene private Upload führte zu einer echten Compose-Startreihenfolgenreparatur und einem vollständigen 21/21-Retest; der Test wurde nicht abgeschwächt.
 - Der Review fand außerdem direkte Avatar-Storage-URLs, verwaisbare Avatar-/Thumbnailobjekte, einen für Non-Root unlesbaren TLS-Schlüsselpfad und einen veralteten Restore-Smoke nach der Eigentümerhärtung. API-Proxies, eindeutige Objektkeys, transaktionale Prefix-/Key-Outbox, TLS-Zusatzgruppe und rollenrichtiger Restore-Smoke wurden implementiert und praktisch nachgetestet.
