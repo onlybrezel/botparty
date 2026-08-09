@@ -58,8 +58,9 @@
     "@aws-sdk/client-s3": "^3.1104.0",
     "@botparty/prisma": "workspace:*",
     "@botparty/shared": "workspace:*",
-    "@livekit/protocol": "^1.50.4",
     "@fastify/helmet": "^13.1.0",
+    "@fastify/static": "10.1.2",
+    "@livekit/protocol": "^1.50.4",
     "@nestjs/bullmq": "^11.0.0",
     "@nestjs/common": "^11.1.28",
     "@nestjs/config": "^4.0.4",
@@ -97,8 +98,8 @@
     "zod": "^3.24.2"
   },
   "devDependencies": {
-    "@botparty/tsconfig": "workspace:*",
     "@botparty/eslint-config": "workspace:*",
+    "@botparty/tsconfig": "workspace:*",
     "@nestjs/cli": "^11.0.24",
     "@nestjs/schematics": "^11.1.0",
     "@nestjs/testing": "^11.1.28",

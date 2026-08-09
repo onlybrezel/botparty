@@ -27,19 +27,20 @@ services:
     image: botparty-api:dev
     environment:
       NODE_ENV: development
+      NODE_OPTIONS: --max-old-space-size=${DEV_API_MAX_OLD_SPACE_MB:-1152}
       APP_URL: ${APP_URL:-http://localhost:3000}
       PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-http://localhost:3000}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000,http://127.0.0.1:3000}
-      AUTH_COOKIE_SECURE: "false"
+      AUTH_COOKIE_SECURE: 'false'
       LIVEKIT_PUBLIC_URL: ${NEXT_PUBLIC_LIVEKIT_URL:-ws://localhost:7880}
       THUMBNAIL_PUBLIC_BASE_URL: ${THUMBNAIL_PUBLIC_BASE_URL:-http://localhost:9000/botparty-thumbnails}
     read_only: false
     volumes:
       - ${API_SOURCE_DIR:-./apps/api/src}:/app/apps/api/src:delegated
     ports:
-      - "127.0.0.1:${API_HOST_PORT:-4000}:4000"
+      - '127.0.0.1:${API_HOST_PORT:-4000}:4000'
     # Override the prod command with dev server (ts-node / nest start --watch)
-    command: ["pnpm", "--filter", "@botparty/api", "dev"]
+    command: ['pnpm', '--filter', '@botparty/api', 'dev']
 
   web:
     build:
@@ -60,5 +61,5 @@ services:
     volumes:
       - ${WEB_SOURCE_DIR:-./apps/web/src}:/app/apps/web/src:delegated
     ports:
-      - "127.0.0.1:${WEB_HOST_PORT:-3000}:3000"
-    command: ["pnpm", "--filter", "@botparty/web", "dev"]
+      - '127.0.0.1:${WEB_HOST_PORT:-3000}:3000'
+    command: ['pnpm', '--filter', '@botparty/web', 'dev']
