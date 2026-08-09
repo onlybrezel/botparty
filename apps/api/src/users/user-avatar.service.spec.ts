@@ -18,7 +18,7 @@ jest.mock('../common/s3-compatible-storage', () => ({
 
 const USER_ID = '10000000-0000-4000-8000-000000000001';
 const VALID_PNG_DATA_URL =
-  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO8B9pUAAAAASUVORK5CYII=';
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==';
 const storage = {
   bucket: 'botparty-thumbnails',
   region: 'us-east-1',
