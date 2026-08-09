@@ -281,6 +281,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
       - name: Build shared package
         run: pnpm --filter @botparty/shared build
 
