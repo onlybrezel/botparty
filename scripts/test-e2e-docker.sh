@@ -6,7 +6,7 @@ PROJECT="botparty-e2e-${$}"
 SECRET_DIR="$(mktemp -d)"
 RESULT_DIR="${E2E_RESULT_DIR:-$(mktemp -d)}"
 FAILOVER_SIGNAL_DIR="${RESULT_DIR}/failover-signals"
-RUNNER_IMAGE="mcr.microsoft.com/playwright:v1.59.1-noble@sha256:b0ab6f3cb99aa7803adbc14d9027ec1785fc6e433b97e134e0f8fe61683b6b53"
+RUNNER_IMAGE="mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e"
 RESULT_DIR_IS_TEMP=true
 if [[ -n "${E2E_RESULT_DIR:-}" ]]; then
   RESULT_DIR_IS_TEMP=false
@@ -212,7 +212,7 @@ docker run --rm --init --ipc=host \
   -e E2E_FAILOVER_SIGNAL_DIR=/results/failover-signals \
   -e E2E_UPDATE_VISUAL_SNAPSHOTS="${E2E_UPDATE_VISUAL_SNAPSHOTS:-false}" \
   "${RUNNER_IMAGE}" \
-  bash -lc 'cd /work/apps/web; code=0; functional_args=(); if [[ -n "$E2E_TEST_FILE" ]]; then functional_args+=("$E2E_TEST_FILE"); fi; if [[ -n "$E2E_PLAYWRIGHT_PROJECT" ]]; then functional_args+=("--project=$E2E_PLAYWRIGHT_PROJECT"); fi; LOAD_TEST_ALLOW_REMOTE=true LOAD_TEST_MIN_INSTANCES=2 LOAD_TEST_MAX_REQUESTS=20 LOAD_TEST_DURATION_SECONDS=3 LOAD_TEST_CONCURRENCY=1 node /work/scripts/load-smoke.mjs http://nginx/api/v1/health/stats || code=$?; if (( code == 0 )) && [[ "$E2E_SKIP_FUNCTIONAL" != true ]]; then PLAYWRIGHT_OUTPUT_DIR=/results/functional /work/node_modules/.bin/playwright test "${functional_args[@]}" || code=$?; fi; if (( code == 0 )) && [[ "$E2E_SKIP_AUXILIARY" != true ]]; then PLAYWRIGHT_OUTPUT_DIR=/results/responsive /work/node_modules/.bin/playwright test --config playwright.responsive.config.ts || code=$?; fi; if (( code == 0 )) && [[ "$E2E_SKIP_AUXILIARY" != true ]]; then visual_args=(); if [[ "$E2E_UPDATE_VISUAL_SNAPSHOTS" == true ]]; then visual_args+=(--update-snapshots=all); fi; PLAYWRIGHT_OUTPUT_DIR=/results/visual /work/node_modules/.bin/playwright test --config playwright.visual.config.ts "${visual_args[@]}" || code=$?; fi; if (( code == 0 )) && [[ "$E2E_RUN_FAILOVER" == true ]]; then PLAYWRIGHT_OUTPUT_DIR=/results/failover /work/node_modules/.bin/playwright test --config playwright.failover.config.ts || code=$?; fi; chmod -R a+rwX /results; exit $code'
+  bash -lc 'cd /work/apps/web; code=0; playwright=/work/apps/web/node_modules/.bin/playwright; functional_args=(); if [[ -n "$E2E_TEST_FILE" ]]; then functional_args+=("$E2E_TEST_FILE"); fi; if [[ -n "$E2E_PLAYWRIGHT_PROJECT" ]]; then functional_args+=("--project=$E2E_PLAYWRIGHT_PROJECT"); fi; LOAD_TEST_ALLOW_REMOTE=true LOAD_TEST_MIN_INSTANCES=2 LOAD_TEST_MAX_REQUESTS=20 LOAD_TEST_DURATION_SECONDS=3 LOAD_TEST_CONCURRENCY=1 node /work/scripts/load-smoke.mjs http://nginx/api/v1/health/stats || code=$?; if (( code == 0 )) && [[ "$E2E_SKIP_FUNCTIONAL" != true ]]; then PLAYWRIGHT_OUTPUT_DIR=/results/functional "$playwright" test "${functional_args[@]}" || code=$?; fi; if (( code == 0 )) && [[ "$E2E_SKIP_AUXILIARY" != true ]]; then PLAYWRIGHT_OUTPUT_DIR=/results/responsive "$playwright" test --config playwright.responsive.config.ts || code=$?; fi; if (( code == 0 )) && [[ "$E2E_SKIP_AUXILIARY" != true ]]; then visual_args=(); if [[ "$E2E_UPDATE_VISUAL_SNAPSHOTS" == true ]]; then visual_args+=(--update-snapshots=all); fi; PLAYWRIGHT_OUTPUT_DIR=/results/visual "$playwright" test --config playwright.visual.config.ts "${visual_args[@]}" || code=$?; fi; if (( code == 0 )) && [[ "$E2E_RUN_FAILOVER" == true ]]; then PLAYWRIGHT_OUTPUT_DIR=/results/failover "$playwright" test --config playwright.failover.config.ts || code=$?; fi; chmod -R a+rwX /results; exit $code'
 RUNNER_STATUS=$?
 set -e
 
