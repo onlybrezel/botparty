@@ -1,21 +1,24 @@
 # BotParty
 
-BotParty is a self-hosted platform for controlling camera-equipped robots from a browser. A robot connects through the separate Python client, publishes video through LiveKit, and receives low-latency control commands from the BotParty gateway.
+BotParty lets people control camera-equipped robots from a web browser. The server handles accounts, rooms, queues, chat, moderation, and control sessions. A separate Python client runs on each robot and connects its cameras and controls to the server.
 
-The project is under active development. Test emergency-stop behavior on the physical robot before allowing public access.
+BotParty is still under active development.
 
-## Features
+> [!WARNING]
+> Test the emergency stop on the physical robot before opening a room to other users. Start the robot client with `hardware.type: none` until video, authentication, and disconnect handling work as expected.
 
-- WebRTC video through LiveKit, including multiple cameras
-- Browser controls with acknowledgements, cooldowns, and configurable hotkeys
+## What it supports
+
+- WebRTC video through LiveKit, with support for multiple cameras
+- Browser controls with acknowledgements, cooldowns, and custom hotkeys
 - First-come and voting queues with timed control sessions
 - Room chat and live control feedback
-- Robot ownership, access rules, moderation, and role-based administration
-- Short-lived robot credentials and stale-command rejection
-- PostgreSQL-backed state, Redis coordination, and S3-compatible file storage
-- Docker Compose deployment with health checks, migrations, backups, and monitoring
+- Robot ownership, access rules, moderation, and administrator roles
+- Short-lived robot credentials and rejection of stale commands
+- PostgreSQL for persistent data, Redis for coordination, and S3-compatible file storage
+- Docker Compose deployment, health checks, database migrations, backups, and monitoring
 
-## Architecture
+## How it fits together
 
 ```mermaid
 flowchart LR
@@ -28,26 +31,28 @@ flowchart LR
     API --> Storage[(S3-compatible storage)]
 ```
 
-The monorepo contains:
+This repository contains:
 
-- `apps/api`: NestJS and Fastify API
-- `apps/web`: Next.js web application
-- `packages/prisma`: schema, migrations, seed, and generated client
-- `packages/shared`: shared schemas, protocol types, and constants
-- `docker`: service configuration and container images
-- `scripts`: migration, backup, smoke-test, and load-test tooling
-- `docs`: development, operations, protocol, and architecture documentation
+- `apps/api` — NestJS API using Fastify
+- `apps/web` — Next.js web application
+- `packages/prisma` — Prisma schema, migrations, seed data, and generated client
+- `packages/shared` — shared validation schemas, protocol types, and constants
+- `docker` — container images and service configuration
+- `scripts` — migration, backup, smoke-test, and load-test tools
+- `docs` — development, operations, protocol, and architecture guides
+
+The robot client is maintained separately at [onlybrezel/botparty-client](https://github.com/onlybrezel/botparty-client).
 
 ## Requirements
 
 - Node.js 24
-- pnpm 11.20 or newer
+- pnpm 11.20 or later
 - Docker Engine with Docker Compose
-- Python 3.10 or newer for the separate robot client
+- Python 3.10 or later on machines running the robot client
 
-See the [system requirements](docs/system-requirements.md) for deployment sizing.
+Deployment sizes and resource limits are listed in the [system requirements](docs/system-requirements.md).
 
-## Local development
+## Run it locally
 
 ```bash
 git clone https://github.com/onlybrezel/botparty.git
@@ -58,29 +63,33 @@ bash setup-env.sh
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 ```
 
-Choose the local development option in `setup-env.sh`. The migration service applies committed migrations and seeds the database before the API starts.
+Select **Local development** when `setup-env.sh` asks for a deployment type. The migration container prepares and seeds the database before the API starts.
 
-Local endpoints:
+Open:
 
-- Web: <http://localhost:3000>
+- Web app: <http://localhost:3000>
 - API: <http://localhost:4000>
-- Swagger: <http://localhost:4000/docs>
-- LiveKit: `ws://localhost:7880`
+- API documentation: <http://localhost:4000/docs>
+- LiveKit WebSocket: `ws://localhost:7880`
 
-Check the stack with:
+Check the containers and run the development smoke test:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.dev.yml ps
 pnpm dev:smoke
 ```
 
-## Robot client
+See the [development guide](docs/development.md) for the repository layout, database changes, generated API files, and test commands.
 
-The Python client lives in [onlybrezel/botparty-client](https://github.com/onlybrezel/botparty-client). Start with `hardware.type: none` while testing video and connectivity without motors attached. The client repository documents Raspberry Pi setup, camera backends, serial hardware, and systemd installation.
+## Connect a robot
 
-## Production deployment
+Install the [BotParty robot client](https://github.com/onlybrezel/botparty-client) on the computer attached to the robot. Its documentation covers Raspberry Pi setup, cameras, serial hardware, and systemd installation.
 
-Generate the environment and file-based secrets first:
+Use `hardware.type: none` for the first connection. This keeps motor output disabled while you check the camera stream and connection lifecycle.
+
+## Production
+
+Create the environment file and secrets, run the preflight checks, then start the stack:
 
 ```bash
 bash setup-env.sh
@@ -88,30 +97,23 @@ bash setup-env.sh
 docker compose up -d --build
 ```
 
-The production preflight checks secrets, TLS files, image versions, SMTP, backups, alerting, and deployment-specific policy references. The [production runbook](docs/runbook.md) covers backups, restores, incidents, and upgrades.
+Select **Server / VPS** in `setup-env.sh`. The preflight checks TLS files, secrets, image versions, SMTP, backups, alerting, and deployment policy settings.
 
-### PostgreSQL 16 upgrades
+Read the [production runbook](docs/runbook.md) before putting an instance online. It covers deployment, backups, restores, incidents, and upgrades.
 
-Existing PostgreSQL 16 installations must migrate their data before starting the PostgreSQL 18 stack:
+### Upgrade from PostgreSQL 16
+
+PostgreSQL 16 installations need an offline data migration before they can start the PostgreSQL 18 stack:
 
 ```bash
 pnpm db:upgrade:postgres18
 ```
 
-The script performs an offline dump and restore into a new volume, checks row counts, enables data checksums, and keeps the PostgreSQL 16 source volume for rollback. Read the [major-upgrade procedure](docs/runbook.md#postgresql-16--18-major-upgrade) before running it on a production host.
+The upgrade script dumps the old database, restores it into a new volume, compares row counts, enables data checksums, and leaves the PostgreSQL 16 volume in place for rollback. Follow the [PostgreSQL 16 to 18 procedure](docs/runbook.md#postgresql-16--18-major-upgrade) before running it on a production host.
 
-### Release images
+## Checks
 
-SemVer tags publish API and web images to GitHub Container Registry:
-
-```bash
-git tag v0.1.4
-git push origin v0.1.4
-```
-
-Production deployments should set `APP_VERSION` to a release tag instead of using a moving tag.
-
-## Development commands
+Run the main checks from the repository root:
 
 ```bash
 pnpm lint
@@ -121,7 +123,7 @@ pnpm build
 pnpm test:e2e:docker
 ```
 
-Useful focused commands:
+Focused checks:
 
 ```bash
 pnpm --filter @botparty/api test
@@ -132,12 +134,12 @@ pnpm secrets:smoke
 pnpm load:smoke
 ```
 
-The [developer guide](docs/development.md) explains module ownership, database changes, API artifacts, and release checks. The [documentation index](docs/README.md) lists the remaining guides.
+The [documentation index](docs/README.md) links to the remaining setup, protocol, performance, and operations guides.
 
 ## Contributing
 
-Bug reports and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md), follow the [Code of Conduct](CODE_OF_CONDUCT.md), and use [SECURITY.md](SECURITY.md) for private vulnerability reports.
+Issues and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before making a change and follow the [Code of Conduct](CODE_OF_CONDUCT.md). Report security problems privately as described in [SECURITY.md](SECURITY.md).
 
 ## License
 
-BotParty is available under the [MIT License](LICENSE). Third-party dependencies remain subject to their own licenses.
+BotParty is licensed under the [MIT License](LICENSE). Third-party packages and services keep their own licenses.
