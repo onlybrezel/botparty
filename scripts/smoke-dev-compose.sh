@@ -122,11 +122,11 @@ wait_for_web_reload() {
   local probe_url="$2"
   local marker='botparty-dev-reload-marker'
 
-  if ! grep -q 'Real robots\.' "${source_file}"; then
-    echo 'Web reload fixture text was not found.' >&2
+  if ! grep -q '<section' "${source_file}"; then
+    echo 'Web reload fixture section was not found.' >&2
     return 1
   fi
-  sed -i "0,/Real robots\\./s//Real robots. ${marker}/" "${source_file}"
+  sed -i "0,/<section/s//<span hidden>${marker}<\\/span>\n      <section/" "${source_file}"
 
   for _ in $(seq 1 60); do
     if curl --fail --silent "${probe_url}" | grep -q "${marker}"; then
