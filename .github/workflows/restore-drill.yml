@@ -27,7 +27,7 @@ jobs:
       - run: pnpm db:generate
       - name: Start isolated backup sources
         run: |
-          docker run -d --name drill-source-pg -e POSTGRES_PASSWORD=source_password -e POSTGRES_DB=botparty -p 127.0.0.1:35432:5432 postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+          docker run -d --name drill-source-pg -e POSTGRES_PASSWORD=source_password -e POSTGRES_DB=botparty -p 127.0.0.1:35432:5432 postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
           docker run -d --name drill-source-minio -e MINIO_ROOT_USER=source_access -e MINIO_ROOT_PASSWORD=source_secret_123 -p 127.0.0.1:39000:9000 minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e server /data
           wait_for_postgres() {
             for ((attempt = 1; attempt <= 60; attempt++)); do

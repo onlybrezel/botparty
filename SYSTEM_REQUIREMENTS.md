@@ -22,6 +22,10 @@ Docker-Netze und Volumes. Ein Host-Gate akzeptierte Messungen nur bei mindestens
 Throttle-, Restart-, OOM-, Event-Loop- und GC-Werte wurden im Sekundentakt aus
 cgroup v2 und den Prometheus-Runtime-Metriken erfasst.
 
+Die Messwerte bleiben als historische PostgreSQL-16-Baseline erhalten. Der aktuelle
+Betriebsstack verwendet PostgreSQL 18; Kapazitätsentscheidungen für PostgreSQL 18
+benötigen einen neuen isolierten Matrixlauf.
+
 ## Lastmodell
 
 Der gemischte API-Test bildet folgende Verteilung ab:

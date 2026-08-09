@@ -29,6 +29,8 @@
     "db:generate": "turbo run db:generate",
     "db:push": "turbo run db:push",
     "db:migrate": "turbo run db:migrate",
+    "db:upgrade:postgres18": "./scripts/upgrade-postgres-16-to-18.sh",
+    "db:upgrade:postgres18:test": "./scripts/test-postgres-18-upgrade.sh",
     "db:verify-migrations": "node scripts/verify-prisma-migrations.mjs",
     "env:check": "node scripts/check-env-parity.mjs",
     "production:preflight": "./scripts/production-preflight.sh",

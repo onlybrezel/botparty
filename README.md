@@ -177,6 +177,15 @@ docker compose up -d --build
 
 The one-shot `migrate` container applies committed migrations and the idempotent seed before API replicas start. API replicas never modify the schema during startup. Check the result with `docker compose ps` and `docker compose logs migrate api`.
 
+Existing installations created with PostgreSQL 16 must migrate their data volume before the first start of this release:
+
+```bash
+pnpm db:upgrade:postgres18
+docker compose up -d --build
+```
+
+The upgrade performs an offline dump/restore into the new PostgreSQL 18 volume, compares row counts, enables data checksums, and retains the PostgreSQL 16 source volume for rollback. See [docs/runbook.md](docs/runbook.md#postgresql-16--18-major-upgrade) before running it in production.
+
 The public production preflight requires TLS files, readable host secrets, a pinned SemVer image version, a reachable SMTP configuration and review references for legal text, privacy/retention, restore and alerting. Billing, payouts and paid robot controls require their own acceptance references before their feature flags may be enabled. For local hot reload use both Compose files shown under “Local development”; the generated local configuration intentionally does not claim production email delivery.
 
 For faster iteration, build or start only changed parts:

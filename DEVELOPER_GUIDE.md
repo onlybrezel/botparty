@@ -89,6 +89,11 @@ docker compose run --rm migrate
 Migrations must remain compatible with the preceding application version during the rollback
 window. API, Web, workers and schedulers must never run schema migrations independently.
 
+The reference stack runs PostgreSQL 18. PostgreSQL 16 installations require the offline,
+volume-preserving `pnpm db:upgrade:postgres18` procedure before starting the current Compose file.
+This major-version data migration is separate from Prisma schema migrations; see the production
+runbook for preconditions, verification, and rollback.
+
 ## Tests
 
 Fast local feedback uses the repository's pinned Node runtime:

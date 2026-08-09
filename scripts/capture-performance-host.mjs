@@ -57,7 +57,7 @@ console.log(JSON.stringify({
     dockerEngine: command('docker', ['version', '--format', '{{.Server.Version}}']),
     dockerCompose: command('docker', ['compose', 'version', '--short']),
     dockerCgroupVersion: command('docker', ['info', '--format', '{{.CgroupVersion}}']),
-    postgresImage: 'postgres:16-alpine',
+    postgresImage: 'postgres:18-alpine',
     redisImage: 'redis:7-alpine',
   },
   source: {

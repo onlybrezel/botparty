@@ -24,18 +24,22 @@ services:
   # ═══════════════════════════════════════════════════
   postgres:
     logging: *default-logging
-    image: postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+    image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
     restart: on-failure:10
     environment:
       POSTGRES_DB: botparty
       POSTGRES_USER: botparty
       POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+      PGDATA: /var/lib/postgresql/18/docker
+      POSTGRES_INITDB_ARGS: --data-checksums
     ports:
       # Exposed on 5433 (not 5432) to avoid clashing with a local Postgres install.
       # The API container connects on the default 5432 via the internal Docker network.
       - '127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432'
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      # PostgreSQL 18 stores clusters below a major-version-specific PGDATA.
+      # A separate volume prevents an unsafe in-place start of PostgreSQL 16 data.
+      - postgres18_data:/var/lib/postgresql
       - ${BOTPARTY_SECRET_DIR:-./docker/secrets}:/run/secrets:ro
     networks:
       - internal
@@ -46,7 +50,7 @@ services:
       test:
         [
           'CMD-SHELL',
-          'test "$$(head -n 1 /var/lib/postgresql/data/postmaster.pid 2>/dev/null)" = ''1'' && pg_isready -U botparty -d botparty',
+          'test "$$(head -n 1 "$$PGDATA/postmaster.pid" 2>/dev/null)" = ''1'' && pg_isready -U botparty -d botparty',
         ]
       interval: 2s
       timeout: 2s
@@ -822,7 +826,7 @@ services:
           memory: 256M
 
 volumes:
-  postgres_data:
+  postgres18_data:
   redis_data:
   seaweedfs_data:
   prometheus_data:

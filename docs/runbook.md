@@ -79,6 +79,69 @@ The observability profile additionally requires `alertmanager_webhook_url` in th
 
 ---
 
+## PostgreSQL 16 → 18 Major Upgrade
+
+[PostgreSQL major upgrades](https://www.postgresql.org/docs/18/upgrading.html) require dump/restore,
+`pg_upgrade`, or logical replication; major versions cannot reuse each other's data directory. The
+[PostgreSQL 18 Docker image](https://github.com/docker-library/docs/blob/master/postgres/README.md#pgdata)
+also changed its persistent mount to `/var/lib/postgresql` and uses
+`/var/lib/postgresql/18/docker` as `PGDATA`. The Compose stack therefore uses a new
+`<project>_postgres18_data` volume instead of the old `<project>_postgres_data` volume.
+
+### Preconditions
+
+1. Confirm the current database is PostgreSQL 16 and healthy:
+   `docker compose exec postgres psql -U botparty -d botparty -Atc 'SHOW server_version'`.
+2. Create and externally copy a current encrypted release backup with
+   `pnpm backup:release`. Complete a restore drill against that archive.
+3. Reserve free disk space for the PostgreSQL 16 volume, the custom-format dump, and the new
+   PostgreSQL 18 volume at the same time.
+4. Announce downtime. The supplied procedure is an offline dump/restore and stops the Compose
+   stack to prevent writes during the cutover.
+5. Pull the release and make sure `docker/secrets/db_password` (or
+   `${BOTPARTY_SECRET_DIR}/db_password`) is readable and non-empty.
+
+### Upgrade
+
+```bash
+git pull --ff-only
+pnpm db:upgrade:postgres18
+docker compose up -d --build
+docker compose exec postgres psql -U botparty -d botparty -Atc \
+  "SELECT current_setting('server_version'), current_setting('data_checksums')"
+docker compose ps
+docker compose logs --tail=100 postgres migrate api
+```
+
+The upgrade command:
+
+- refuses to run unless the source volume contains PostgreSQL 16;
+- refuses to overwrite an existing PostgreSQL 18 target volume;
+- creates a consistent custom-format dump with PostgreSQL 16 tooling;
+- initializes PostgreSQL 18 with data checksums and restores with PostgreSQL 18 tooling;
+- compares exact row counts for every user table before accepting the target;
+- runs staged `ANALYZE`; and
+- never deletes the PostgreSQL 16 source volume.
+
+For a non-default Compose project name, export the same `COMPOSE_PROJECT_NAME` used by the
+deployment. Explicit volume overrides are available as `POSTGRES_16_VOLUME` and
+`POSTGRES_18_VOLUME`.
+
+### Rollback
+
+Do not delete the PostgreSQL 16 source volume during the rollback window. If validation fails,
+stop the new stack, check out the preceding PostgreSQL-16 release, and start it with the retained
+`<project>_postgres_data` volume. Writes made after the PostgreSQL 18 cutover are not present in
+that source volume; restore the pre-upgrade backup if the rollback policy requires a different
+recovery point. Never point a PostgreSQL 16 image at `postgres18_data` or a PostgreSQL 18 image at
+the old `postgres_data` directory.
+
+After application smoke tests, migration drift checks, backup creation, and a PostgreSQL 18
+restore drill have all passed, remove the old volume only through the operator's approved retention
+procedure.
+
+---
+
 ## Disk Full
 
 **Symptoms:** Logs stop, uploads fail, DB writes fail.
