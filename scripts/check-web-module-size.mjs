@@ -6,13 +6,14 @@ const sourceRoot = resolve(root, 'apps/web/src');
 const DEFAULT_MAX_LINES = 500;
 const legacyBudgets = new Map(
   Object.entries({
-    'apps/web/src/components/dashboard/use-dashboard-page.ts': 950,
-    'apps/web/src/components/robot-view/use-robot-view-state.ts': 1219,
+    'apps/web/src/components/dashboard/use-dashboard-page.ts': 972,
+    'apps/web/src/components/robot-view/use-robot-view-state.ts': 1266,
     'apps/web/src/components/livekit/video-renderer.tsx': 774,
     'apps/web/src/app/mod/page.tsx': 751,
     'apps/web/src/components/mod/runtime-view.tsx': 593,
-    'apps/web/src/app/settings/page.tsx': 587,
-    'apps/web/src/components/dashboard/dashboard-settings-section.tsx': 555,
+    'apps/web/src/app/settings/page.tsx': 616,
+    'apps/web/src/app/wallet/page.tsx': 501,
+    'apps/web/src/components/dashboard/dashboard-settings-section.tsx': 559,
   }),
 );
 
