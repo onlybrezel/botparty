@@ -57,7 +57,7 @@
     "restore:drill": "./scripts/restore-drill.sh",
     "load:smoke": "node scripts/load-smoke.mjs",
     "performance:load": "node scripts/performance-load.mjs",
-    "benchmark:queue": "pnpm --filter @botparty/prisma exec tsx --tsconfig ../../apps/api/tsconfig.json ../../scripts/benchmark-queue.ts",
+    "benchmark:queue": "pnpm --filter @botparty/shared build && pnpm --filter @botparty/prisma exec tsx --tsconfig ../../apps/api/tsconfig.json ../../scripts/benchmark-queue.ts",
     "web:budget": "pnpm --filter @botparty/web performance:budget",
     "db:studio": "pnpm --filter @botparty/prisma db:studio",
     "clean": "turbo run clean && rm -rf node_modules",
