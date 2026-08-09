@@ -127,10 +127,12 @@ jobs:
         run: docker compose -f docker-compose.yml -f docker-compose.dev.yml config --quiet
         env:
           LIVEKIT_API_KEY: botparty-ci-livekit-key
+          OBJECT_STORAGE_SECRET_ACCESS_KEY: botparty-ci-object-storage-secret
       - name: Build hot-reload API and Web images
         run: docker compose -f docker-compose.yml -f docker-compose.dev.yml build api web
         env:
           LIVEKIT_API_KEY: botparty-ci-livekit-key
+          OBJECT_STORAGE_SECRET_ACCESS_KEY: botparty-ci-object-storage-secret
       - name: Start hot-reload stack and verify runtime health
         run: DEV_COMPOSE_SKIP_BUILD=true ./scripts/smoke-dev-compose.sh
 

@@ -10,6 +10,7 @@ on:
 
 jobs:
   analyze:
+    if: github.event.repository.visibility == 'public'
     name: Analyze JavaScript/TypeScript
     runs-on: ubuntu-latest
     permissions:
@@ -49,6 +50,14 @@ jobs:
         run: pnpm build
         env:
           NEXT_PUBLIC_API_URL: http://localhost:4000
+          NEXT_PUBLIC_APP_URL: http://localhost:3000
+          NEXT_PUBLIC_WS_URL: ws://localhost:4000
+          NEXT_PUBLIC_LIVEKIT_URL: ws://localhost:7880
+          NEXT_PUBLIC_LEGAL_OPERATOR_NAME: BotParty CI
+          NEXT_PUBLIC_LEGAL_OPERATOR_EMAIL: ci@example.invalid
+          NEXT_PUBLIC_LEGAL_OPERATOR_ADDRESS: CI environment
+          NEXT_PUBLIC_LEGAL_OPERATOR_COUNTRY: Germany
+          NEXT_PUBLIC_LEGAL_GOVERNING_LAW: Germany
           API_URL: http://localhost:4000
 
       - name: Perform CodeQL analysis
