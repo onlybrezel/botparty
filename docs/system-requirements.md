@@ -64,6 +64,8 @@ A Docker CPU value of 100% represents one fully occupied logical processor. In a
 
 ## Sizing guide
 
+The API figures below do not include media transcoding. A LiveKit egress worker needs another 4 vCPUs and 4 GiB of RAM for composite recording. Keep `LIVEKIT_EGRESS_CPU_LIMIT` and `LIVEKIT_EGRESS_MEMORY_LIMIT` at their defaults unless the instance only exports tracks without transcoding.
+
 ### Ultra-Low / Edge
 
 - API: 0.5 vCPU, 384 MiB RAM, 1 worker, 192 MiB V8 old space

@@ -334,8 +334,9 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2.0'
-          memory: 2048M
+          # LiveKit will not accept composite egress jobs below four CPUs.
+          cpus: '${LIVEKIT_EGRESS_CPU_LIMIT:-4.0}'
+          memory: ${LIVEKIT_EGRESS_MEMORY_LIMIT:-4096M}
 
   cadvisor:
     logging: *default-logging
