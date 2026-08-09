@@ -195,6 +195,9 @@ jobs:
       - name: Generate Prisma client
         run: pnpm db:generate
 
+      - name: Build shared package
+        run: pnpm --filter @botparty/shared build
+
       - name: Run API tests
         run: pnpm --filter @botparty/api test
 
@@ -222,6 +225,9 @@ jobs:
 
       - name: Generate Prisma client
         run: pnpm db:generate
+
+      - name: Build shared package
+        run: pnpm --filter @botparty/shared build
 
       - name: Run API coverage
         run: pnpm --filter @botparty/api test:coverage
@@ -274,6 +280,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Build shared package
+        run: pnpm --filter @botparty/shared build
 
       - name: Install Playwright browser
         run: pnpm --filter @botparty/web exec playwright install --with-deps chromium
