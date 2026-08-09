@@ -310,7 +310,7 @@ export default function ModDashboardPage() {
     try {
       api.setToken(accessToken);
       const [staffUsers, modOverview, runtime, globalProfanity] = await Promise.all([
-        api.users.getAdminUsers({ q: query || undefined, limit: 120 }),
+        api.users.getAdminUsers({ ...(query ? { q: query } : {}), limit: 120 }),
         api.moderation.getModerationOverview(),
         api.moderation.getModRuntimeOverview(),
         api.moderation.getGlobalProfanityOverview(),
@@ -533,7 +533,7 @@ export default function ModDashboardPage() {
         username: userDraft.username.trim(),
         email: userDraft.email.trim(),
         displayName: userDraft.displayName.trim() || null,
-        password: userDraft.password.trim() || undefined,
+        ...(userDraft.password.trim() ? { password: userDraft.password.trim() } : {}),
         role: userDraft.role,
         isActive: userDraft.isActive,
         credits: Number(userDraft.credits),
@@ -604,8 +604,8 @@ export default function ModDashboardPage() {
       const scheduleEnd = robotDraft.scheduleEnabled ? toIsoDateTime(robotDraft.scheduleEnd) : null;
       await api.robots.updateRobotAsStaff(editingRobotId, {
         name: robotDraft.name.trim(),
-        slug: robotDraft.slug.trim() || undefined,
-        description: robotDraft.description.trim() || undefined,
+        ...(robotDraft.slug.trim() ? { slug: robotDraft.slug.trim() } : {}),
+        ...(robotDraft.description.trim() ? { description: robotDraft.description.trim() } : {}),
         visibility,
         accessMode,
         queueMode: robotDraft.queueMode,
@@ -621,17 +621,17 @@ export default function ModDashboardPage() {
           chat: robotDraft.aclChat,
           estop: robotDraft.aclEStop,
         },
-        stream: {
-          targetBitrateKbps:
-            Number.isFinite(bitrate) && bitrate >= 150 && bitrate <= 3000 ? Math.round(bitrate) : undefined,
-        },
+        stream: Number.isFinite(bitrate) && bitrate >= 150 && bitrate <= 3000
+          ? { targetBitrateKbps: Math.round(bitrate) }
+          : {},
         tags: robotDraft.tags
           .split(',')
           .map((tag) => tag.trim())
           .filter(Boolean)
           .slice(0, 12),
-        accessPassword:
-          robotDraft.roomMode === 'PASSWORD' ? robotDraft.accessPassword.trim() || undefined : undefined,
+        ...(robotDraft.roomMode === 'PASSWORD' && robotDraft.accessPassword.trim()
+          ? { accessPassword: robotDraft.accessPassword.trim() }
+          : {}),
       });
       setEditingRobotId(null);
       setRobotDraft(null);
@@ -657,9 +657,11 @@ export default function ModDashboardPage() {
         onRefresh={() => void refresh()}
         overviewCards={overviewCards}
         actionItems={actionItems}
-        generatedAt={runtimeOverview?.generatedAt}
-        ingressKbps={runtimeOverview?.summary.totalIngressKbps}
-        egressKbps={runtimeOverview?.summary.totalEgressKbps}
+        {...(runtimeOverview ? {
+          generatedAt: runtimeOverview.generatedAt,
+          ingressKbps: runtimeOverview.summary.totalIngressKbps,
+          egressKbps: runtimeOverview.summary.totalEgressKbps,
+        } : {})}
         activeView={activeView}
         onActiveViewChange={setActiveView}
         viewButtons={viewButtons}

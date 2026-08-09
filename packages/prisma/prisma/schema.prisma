@@ -140,52 +140,52 @@ enum ModerationActionType {
 // ═════════════════════════════════════════════════════
 
 model User {
-  id                      String    @id @default(uuid()) @db.Uuid
-  username                String    @unique @db.VarChar(32)
-  email                   String    @unique @db.VarChar(255)
-  passwordHash            String    @db.VarChar(255)
-  displayName             String?   @db.VarChar(64)
-  avatarUrl               String?   @db.VarChar(512)
-  role                    Role      @default(USER)
-  balance                 Int       @default(0) // Reserved for the durable credits ledger. See docs/adr/0005-schema-cleanup-decisions.md.
-  credits                 Int       @default(0) // Exposed in staff and leaderboard flows; intentionally kept. See ADR-0005.
-  creditDebt              Int       @default(0)
-  financialHold           Boolean   @default(false)
-  tokenVersion            Int       @default(0) // For refresh token invalidation
-  isActive                Boolean   @default(true)
-  emailVerified           Boolean   @default(false) // existing users are backfilled true in migration; new users default to unverified
-  emailVerificationToken  String?   @unique @db.VarChar(64)
-  emailVerificationExpiry DateTime?
-  lastLoginAt             DateTime?
-  deletedAt               DateTime?
-  legalAcceptedAt         DateTime?
-  acceptedTermsVersion    String?   @db.VarChar(32)
-  acceptedPrivacyVersion  String?   @db.VarChar(32)
-  productAnalyticsEnabled Boolean   @default(false)
+  id                        String    @id @default(uuid()) @db.Uuid
+  username                  String    @unique @db.VarChar(32)
+  email                     String    @unique @db.VarChar(255)
+  passwordHash              String    @db.VarChar(255)
+  displayName               String?   @db.VarChar(64)
+  avatarUrl                 String?   @db.VarChar(512)
+  role                      Role      @default(USER)
+  balance                   Int       @default(0) // Reserved for the durable credits ledger. See docs/adr/0005-schema-cleanup-decisions.md.
+  credits                   Int       @default(0) // Exposed in staff and leaderboard flows; intentionally kept. See ADR-0005.
+  creditDebt                Int       @default(0)
+  financialHold             Boolean   @default(false)
+  tokenVersion              Int       @default(0) // For refresh token invalidation
+  isActive                  Boolean   @default(true)
+  emailVerified             Boolean   @default(false) // existing users are backfilled true in migration; new users default to unverified
+  emailVerificationToken    String?   @unique @db.VarChar(64)
+  emailVerificationExpiry   DateTime?
+  lastLoginAt               DateTime?
+  deletedAt                 DateTime?
+  legalAcceptedAt           DateTime?
+  acceptedTermsVersion      String?   @db.VarChar(32)
+  acceptedPrivacyVersion    String?   @db.VarChar(32)
+  productAnalyticsEnabled   Boolean   @default(false)
   productAnalyticsConsentAt DateTime?
-  createdAt               DateTime  @default(now())
-  updatedAt               DateTime  @updatedAt
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
 
   // Relations
-  robots            Robot[]
-  transactions      Transaction[]
-  sessions          Session[]              @relation("SessionUser")
-  queueEntries      QueueEntry[]
-  chatMessages      ChatMessage[]
-  deletedMessages   ChatMessage[]          @relation("DeletedMessages")
-  allowedRobots     RobotAllowedUser[]
-  analyticsEvents   AnalyticsEvent[]
-  moderationEntries RobotModerationEntry[]
-  givenModerations  RobotModerationEntry[] @relation("ModeratorActions")
-  adminAuditLogs    AdminAuditLog[]
-  billingIntents    BillingIntent[]
-  walletIdempotency WalletIdempotencyKey[]
-  payoutRequests    PayoutRequest[]
-  reviewedPayouts   PayoutRequest[]        @relation("PayoutReviewer")
-  paidPayouts       PayoutRequest[]        @relation("PayoutPayer")
-  controlCommands   ControlCommand[]
+  robots                 Robot[]
+  transactions           Transaction[]
+  sessions               Session[]               @relation("SessionUser")
+  queueEntries           QueueEntry[]
+  chatMessages           ChatMessage[]
+  deletedMessages        ChatMessage[]           @relation("DeletedMessages")
+  allowedRobots          RobotAllowedUser[]
+  analyticsEvents        AnalyticsEvent[]
+  moderationEntries      RobotModerationEntry[]
+  givenModerations       RobotModerationEntry[]  @relation("ModeratorActions")
+  adminAuditLogs         AdminAuditLog[]
+  billingIntents         BillingIntent[]
+  walletIdempotency      WalletIdempotencyKey[]
+  payoutRequests         PayoutRequest[]
+  reviewedPayouts        PayoutRequest[]         @relation("PayoutReviewer")
+  paidPayouts            PayoutRequest[]         @relation("PayoutPayer")
+  controlCommands        ControlCommand[]
   notificationPreference NotificationPreference?
-  notifications     Notification[]
+  notifications          Notification[]
 
   @@index([email])
   @@index([username])
@@ -269,6 +269,9 @@ model Robot {
   @@index([ownerId])
   @@index([status])
   @@index([visibility, status])
+  @@index([visibility, createdAt(sort: Desc)])
+  @@index([visibility, totalSessions(sort: Desc), viewerCount(sort: Desc), createdAt(sort: Desc)])
+  @@index([visibility, isFeatured(sort: Desc), viewerCount(sort: Desc), createdAt(sort: Desc)])
   @@index([slug])
   @@map("robots")
 }
@@ -323,28 +326,28 @@ model Transaction {
 // ═════════════════════════════════════════════════════
 
 model BillingIntent {
-  id                      String              @id @default(uuid()) @db.Uuid
-  userId                  String              @db.Uuid
-  user                    User                @relation(fields: [userId], references: [id], onDelete: Restrict)
-  provider                String              @db.VarChar(16) // 'stripe' | 'paypal'
-  providerRef             String?             @db.VarChar(128) // checkout/session/order/intent id once known
-  providerCustomerRef     String?             @db.VarChar(128)
-  providerPaymentRef      String?             @db.VarChar(128)
-  providerSubscriptionRef String?             @db.VarChar(128)
-  purchaseType            BillingPurchaseType @default(ONE_TIME)
-  packageId               String              @db.VarChar(64)
-  amountCents             Int
-  currency                String              @db.VarChar(8)
-  creditsAmount           Int
-  reversedCredits         Int                 @default(0)
-  status                  BillingIntentStatus @default(PENDING)
-  metadata                Json?
-  paidAt                  DateTime?
-  refundedAt              DateTime?
-  termsVersion            String?             @db.VarChar(32)
+  id                         String              @id @default(uuid()) @db.Uuid
+  userId                     String              @db.Uuid
+  user                       User                @relation(fields: [userId], references: [id], onDelete: Restrict)
+  provider                   String              @db.VarChar(16) // 'stripe' | 'paypal'
+  providerRef                String?             @db.VarChar(128) // checkout/session/order/intent id once known
+  providerCustomerRef        String?             @db.VarChar(128)
+  providerPaymentRef         String?             @db.VarChar(128)
+  providerSubscriptionRef    String?             @db.VarChar(128)
+  purchaseType               BillingPurchaseType @default(ONE_TIME)
+  packageId                  String              @db.VarChar(64)
+  amountCents                Int
+  currency                   String              @db.VarChar(8)
+  creditsAmount              Int
+  reversedCredits            Int                 @default(0)
+  status                     BillingIntentStatus @default(PENDING)
+  metadata                   Json?
+  paidAt                     DateTime?
+  refundedAt                 DateTime?
+  termsVersion               String?             @db.VarChar(32)
   immediateDeliveryConsentAt DateTime?
-  createdAt               DateTime            @default(now())
-  updatedAt               DateTime            @updatedAt
+  createdAt                  DateTime            @default(now())
+  updatedAt                  DateTime            @updatedAt
 
   @@unique([provider, providerRef])
   @@unique([provider, providerPaymentRef])
@@ -574,15 +577,15 @@ model SwarmGroup {
 // ═════════════════════════════════════════════════════
 
 model AnalyticsEvent {
-  id        String   @id @default(uuid()) @db.Uuid
-  robotId   String?  @db.Uuid
-  robot     Robot?   @relation(fields: [robotId], references: [id], onDelete: SetNull)
-  userId    String?  @db.Uuid
-  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
-  event     String   @db.VarChar(64) // e.g. "view", "control", "session_start"
-  schemaVersion Int  @default(1)
-  payload   Json?
-  createdAt DateTime @default(now())
+  id            String   @id @default(uuid()) @db.Uuid
+  robotId       String?  @db.Uuid
+  robot         Robot?   @relation(fields: [robotId], references: [id], onDelete: SetNull)
+  userId        String?  @db.Uuid
+  user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  event         String   @db.VarChar(64) // e.g. "view", "control", "session_start"
+  schemaVersion Int      @default(1)
+  payload       Json?
+  createdAt     DateTime @default(now())
 
   @@index([robotId, event, createdAt])
   @@index([userId, event, createdAt])
@@ -632,7 +635,7 @@ model Notification {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
-  @@index([userId, createdAt])
+  @@index([userId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([emailStatus, nextEmailAttemptAt])
   @@index([expiresAt])
   @@map("notifications")

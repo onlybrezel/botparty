@@ -4,10 +4,11 @@ import {
   NotFoundException,
   BadRequestException,
   InternalServerErrorException,
+  Inject,
 } from '@nestjs/common';
 import { StreamableFile } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { GetObjectCommand } from '@aws-sdk/client-s3';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { basename } from 'node:path';
 import { Readable } from 'node:stream';
@@ -17,6 +18,7 @@ import {
   createS3CompatibleStorageClient,
   resolveS3CompatibleStorageConfig,
   type S3CompatibleStorageConfig,
+  type S3CompatibleStorageClient,
 } from '../common/s3-compatible-storage';
 
 @Injectable()
@@ -25,14 +27,24 @@ export class RecordingAdminService {
   private readonly playbackTtlSec: number;
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly livekit: LivekitService,
-    private readonly config: ConfigService,
+    @Inject(PrismaService)
+    private readonly prisma: {
+      recording: Pick<PrismaService['recording'], 'findMany' | 'findUnique'>;
+      session: Pick<PrismaService['session'], 'findFirst'>;
+      user: Pick<PrismaService['user'], 'findUnique'>;
+    },
+    @Inject(LivekitService)
+    private readonly livekit: Pick<LivekitService, 'getRoomRecordingStatus' | 'startRoomRecording' | 'stopRoomRecording'>,
+    @Inject(ConfigService)
+    private readonly config: { get(key: string): unknown; getOrThrow(key: string): unknown },
   ) {
+    const signingSecret = this.config.get('RECORDING_SIGNING_SECRET');
+    const jwtSecret = this.config.getOrThrow('JWT_SECRET');
+    if (typeof jwtSecret !== 'string') throw new Error('JWT_SECRET must be a string');
     this.playbackSigningKey =
-      this.config.get<string>('RECORDING_SIGNING_SECRET')?.trim()
-      || this.config.getOrThrow<string>('JWT_SECRET').trim();
-    this.playbackTtlSec = Number(this.config.get<string>('RECORDING_SIGNED_URL_TTL_SEC') ?? '300');
+      (typeof signingSecret === 'string' ? signingSecret.trim() : '') || jwtSecret.trim();
+    const ttl = this.config.get('RECORDING_SIGNED_URL_TTL_SEC');
+    this.playbackTtlSec = Number(typeof ttl === 'string' ? ttl : '300');
   }
 
   async getAdminRobotRecordingStatus(robotId: string, requesterId: string) {
@@ -165,20 +177,20 @@ export class RecordingAdminService {
     return config;
   }
 
-  private _createObjectStorageClient(config: S3CompatibleStorageConfig): S3Client {
+  createObjectStorageClient(config: S3CompatibleStorageConfig): S3CompatibleStorageClient {
     return createS3CompatibleStorageClient(config);
   }
 
   private async _readObjectRecording(recordingId: string): Promise<StreamableFile | null> {
     const config = this._requireObjectStorageConfig();
-    const client = this._createObjectStorageClient(config);
+    const client = this.createObjectStorageClient(config);
     const recording = await this.prisma.recording.findUnique({ where: { id: recordingId } });
     if (!recording) return null;
     return this._readObjectRecordingByKey(client, config, recording.objectKey);
   }
 
   private async _readObjectRecordingByKey(
-    client: S3Client,
+    client: S3CompatibleStorageClient,
     config: S3CompatibleStorageConfig,
     key: string,
   ): Promise<StreamableFile | null> {

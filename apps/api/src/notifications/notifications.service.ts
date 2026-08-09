@@ -1,7 +1,22 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import type { NotificationCategory, NotificationKind, UpdateNotificationPreferencesInput } from '@botparty/shared';
+import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import type {
+  NotificationCategory,
+  NotificationKind,
+  UpdateNotificationPreferencesInput,
+} from '@botparty/shared';
 import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
+type NotificationsDatabase = {
+  notification: Pick<
+    PrismaService['notification'],
+    'count' | 'create' | 'findMany' | 'findUnique' | 'update' | 'updateMany'
+  >;
+  notificationPreference: Pick<
+    PrismaService['notificationPreference'],
+    'findUniqueOrThrow' | 'update' | 'upsert'
+  >;
+  user: Pick<PrismaService['user'], 'findUnique'>;
+};
 
 export interface PublishNotificationInput {
   userId: string;
@@ -36,8 +51,8 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
   private lastDeliveryCycleErrorLogAt = 0;
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly mail: MailService,
+    @Inject(PrismaService) private readonly prisma: NotificationsDatabase,
+    @Inject(MailService) private readonly mail: Pick<MailService, 'isEnabled' | 'sendRaw'>,
   ) {}
 
   onModuleInit() {
@@ -63,7 +78,9 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
         const now = Date.now();
         if (now - this.lastDeliveryCycleErrorLogAt >= 60_000) {
           this.lastDeliveryCycleErrorLogAt = now;
-          this.logger.error(`Notification email delivery cycle failed: ${(error as Error).message}`);
+          this.logger.error(
+            `Notification email delivery cycle failed: ${(error as Error).message}`,
+          );
         }
       });
   }
@@ -82,11 +99,14 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
     if (!user?.isActive) return null;
 
     const preferences = user.notificationPreference ?? DEFAULT_PREFERENCES;
-    const emailEnabled = this.emailEnabled(preferences, input.category)
-      && user.emailVerified
-      && this.mail.isEnabled();
+    const emailEnabled =
+      this.emailEnabled(preferences, input.category) && user.emailVerified && this.mail.isEnabled();
     const nextEmailAttemptAt = emailEnabled
-      ? this.nextAllowedDelivery(preferences.quietStartMin, preferences.quietEndMin, preferences.timezone)
+      ? this.nextAllowedDelivery(
+          preferences.quietStartMin,
+          preferences.quietEndMin,
+          preferences.timezone,
+        )
       : null;
 
     try {
@@ -117,7 +137,9 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
     try {
       return await this.publish(input);
     } catch (error) {
-      this.logger.warn(`Notification ${input.kind} could not be stored: ${(error as Error).message}`);
+      this.logger.warn(
+        `Notification ${input.kind} could not be stored: ${(error as Error).message}`,
+      );
       return null;
     }
   }
@@ -126,29 +148,32 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
     const preferences = await this.getPreferences(userId);
     if (!preferences.inAppEnabled) return { items: [], nextCursor: null, unreadCount: 0 };
     const take = Math.min(Math.max(limit, 1), 100);
-    const items = await this.prisma.notification.findMany({
-      where: { userId, expiresAt: { gt: new Date() } },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      take: take + 1,
-      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-      select: {
-        id: true,
-        kind: true,
-        category: true,
-        title: true,
-        body: true,
-        actionUrl: true,
-        browserRequested: true,
-        readAt: true,
-        createdAt: true,
-      },
-    });
+    const now = new Date();
+    const [items, unreadCount] = await Promise.all([
+      this.prisma.notification.findMany({
+        where: { userId, expiresAt: { gt: now } },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: take + 1,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        select: {
+          id: true,
+          kind: true,
+          category: true,
+          title: true,
+          body: true,
+          actionUrl: true,
+          browserRequested: true,
+          readAt: true,
+          createdAt: true,
+        },
+      }),
+      this.prisma.notification.count({
+        where: { userId, readAt: null, expiresAt: { gt: now } },
+      }),
+    ]);
     const hasMore = items.length > take;
     const page = hasMore ? items.slice(0, take) : items;
-    const unreadCount = await this.prisma.notification.count({
-      where: { userId, readAt: null, expiresAt: { gt: new Date() } },
-    });
-    return { items: page, nextCursor: hasMore ? page.at(-1)?.id ?? null : null, unreadCount };
+    return { items: page, nextCursor: hasMore ? (page.at(-1)?.id ?? null) : null, unreadCount };
   }
 
   async markRead(userId: string, id: string) {
@@ -181,15 +206,25 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
   }
 
   async updatePreferences(userId: string, input: UpdateNotificationPreferencesInput) {
+    const updates = {
+      ...(input.inAppEnabled === undefined ? {} : { inAppEnabled: input.inAppEnabled }),
+      ...(input.browserEnabled === undefined ? {} : { browserEnabled: input.browserEnabled }),
+      ...(input.emailTurn === undefined ? {} : { emailTurn: input.emailTurn }),
+      ...(input.emailRobot === undefined ? {} : { emailRobot: input.emailRobot }),
+      ...(input.emailFinance === undefined ? {} : { emailFinance: input.emailFinance }),
+      ...(input.quietStartMin === undefined ? {} : { quietStartMin: input.quietStartMin }),
+      ...(input.quietEndMin === undefined ? {} : { quietEndMin: input.quietEndMin }),
+      ...(input.timezone === undefined ? {} : { timezone: input.timezone }),
+    };
     try {
       return await this.prisma.notificationPreference.upsert({
         where: { userId },
-        create: { userId, ...input },
-        update: input,
+        create: { userId, ...updates },
+        update: updates,
       });
     } catch (error) {
       if (!isUniqueConstraintError(error)) throw error;
-      return this.prisma.notificationPreference.update({ where: { userId }, data: input });
+      return this.prisma.notificationPreference.update({ where: { userId }, data: updates });
     }
   }
 
@@ -214,7 +249,11 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
         data: { emailStatus: 'SENDING', emailAttempts: { increment: 1 } },
       });
       if (claimed.count !== 1) continue;
-      if (!notification.user.isActive || !notification.user.emailVerified || !this.mail.isEnabled()) {
+      if (
+        !notification.user.isActive ||
+        !notification.user.emailVerified ||
+        !this.mail.isEnabled()
+      ) {
         await this.prisma.notification.update({
           where: { id: notification.id },
           data: { emailStatus: 'SKIPPED', nextEmailAttemptAt: null },
@@ -237,7 +276,11 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
         );
         await this.prisma.notification.update({
           where: { id: notification.id },
-          data: { emailStatus: 'DELIVERED', emailDeliveredAt: new Date(), nextEmailAttemptAt: null },
+          data: {
+            emailStatus: 'DELIVERED',
+            emailDeliveredAt: new Date(),
+            nextEmailAttemptAt: null,
+          },
         });
       } catch (error) {
         const attempts = notification.emailAttempts + 1;
@@ -245,12 +288,15 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
           where: { id: notification.id },
           data: {
             emailStatus: attempts >= 5 ? 'FAILED' : 'RETRY',
-            nextEmailAttemptAt: attempts >= 5
-              ? null
-              : new Date(Date.now() + Math.min(60 * 60_000, 30_000 * 2 ** attempts)),
+            nextEmailAttemptAt:
+              attempts >= 5
+                ? null
+                : new Date(Date.now() + Math.min(60 * 60_000, 30_000 * 2 ** attempts)),
           },
         });
-        this.logger.warn(`Notification email ${notification.id} failed: ${(error as Error).message}`);
+        this.logger.warn(
+          `Notification email ${notification.id} failed: ${(error as Error).message}`,
+        );
       }
     }
   }
@@ -272,9 +318,10 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
     const hour = Number(parts.find((part) => part.type === 'hour')?.value ?? 0);
     const minute = Number(parts.find((part) => part.type === 'minute')?.value ?? 0);
     const localMinute = hour * 60 + minute;
-    const quiet = start < end
-      ? localMinute >= start && localMinute < end
-      : localMinute >= start || localMinute < end;
+    const quiet =
+      start < end
+        ? localMinute >= start && localMinute < end
+        : localMinute >= start || localMinute < end;
     if (!quiet) return new Date();
     const minutesUntilEnd = (end - localMinute + 1440) % 1440 || 1440;
     return new Date(Date.now() + minutesUntilEnd * 60_000);

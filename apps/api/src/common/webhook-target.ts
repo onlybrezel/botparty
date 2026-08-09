@@ -109,7 +109,7 @@ export async function postWebhookSafely(
   for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount += 1) {
     const target = await resolveSafeWebhookTarget(nextUrl);
     const response = await requestPinnedTarget(target, body, headers, timeoutMs);
-    const location = response.headers.location;
+    const location = response.headers['location'];
 
     if (!REDIRECT_STATUSES.has(response.status) || !location) {
       return { ok: response.status >= 200 && response.status < 300, status: response.status };

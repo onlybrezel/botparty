@@ -1,21 +1,23 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DashboardSidebar } from './dashboard-sidebar';
+import { createRobotManaged } from '@/test/robot-fixtures';
+import { RobotStatus } from '@botparty/shared';
 
 const robots = [
-  {
+  createRobotManaged({
     id: 'robot-1',
     name: 'Mars Rover',
     slug: 'mars-rover',
-    status: 'ONLINE',
-  },
-  {
+    status: RobotStatus.ONLINE,
+  }),
+  createRobotManaged({
     id: 'robot-2',
     name: 'Claw Bot',
     slug: 'claw-bot',
-    status: 'OFFLINE',
-  },
-] as const;
+    status: RobotStatus.OFFLINE,
+  }),
+];
 
 describe('DashboardSidebar', () => {
   it('supports keyboard navigation across robots, sections, and actions', async () => {
@@ -26,12 +28,12 @@ describe('DashboardSidebar', () => {
 
     render(
       <DashboardSidebar
-        robots={robots as never}
+        robots={robots}
         selectedId="robot-1"
         activeSectionId="section-settings"
         saving={false}
         deleting={false}
-        editFormRef={{ current: { requestSubmit: vi.fn() } } as never}
+        editFormRef={{ current: null }}
         onSelect={onSelect}
         onSectionSelect={onSectionSelect}
         onDelete={onDelete}

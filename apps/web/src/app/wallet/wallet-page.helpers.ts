@@ -62,14 +62,12 @@ export function buildWalletHistoryFilters(input: {
 }) {
   const robotId = input.robotId.trim();
   return {
-    type: input.type || undefined,
-    from: input.from ? new Date(`${input.from}T00:00:00.000Z`).toISOString() : undefined,
-    to: input.to ? new Date(`${input.to}T23:59:59.999Z`).toISOString() : undefined,
-    robotId: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-      robotId,
-    )
-      ? robotId
-      : undefined,
+    ...(input.type ? { type: input.type } : {}),
+    ...(input.from ? { from: new Date(`${input.from}T00:00:00.000Z`).toISOString() } : {}),
+    ...(input.to ? { to: new Date(`${input.to}T23:59:59.999Z`).toISOString() } : {}),
+    ...(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(robotId)
+      ? { robotId }
+      : {}),
   };
 }
 

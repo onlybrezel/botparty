@@ -1,8 +1,7 @@
-import { Injectable, Logger, InternalServerErrorException } from '@nestjs/common';
+import { Inject, Injectable, Logger, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AccessToken, EgressClient, IngressClient, IngressInput, RoomServiceClient } from 'livekit-server-sdk';
 import { EncodedFileOutput, EncodedFileType, S3Upload, TrackType } from '@livekit/protocol';
-import type { EgressInfo, IngressInfo } from '@livekit/protocol';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   resolveS3CompatibleStorageConfig,
@@ -30,6 +29,15 @@ type RecordingTrackTarget = {
   videoTrackId: string;
   audioTrackId: string | null;
 };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function readTrimmedString(record: Record<string, unknown>, key: string): string | undefined {
+  const value = record[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
 
 type ActiveRecordingSession = {
   egressId: string;
@@ -62,12 +70,19 @@ export class LivekitService {
   private readonly egressService: EgressClient;
 
   constructor(
-    private readonly config: ConfigService,
-    private readonly prisma: PrismaService,
+    @Inject(ConfigService)
+    private readonly config: { get(key: string): unknown; getOrThrow(key: string): unknown },
+    @Inject(PrismaService)
+    private readonly prisma: { recording: Pick<PrismaService['recording'], 'create' | 'updateMany'> },
   ) {
-    this.apiKey = config.getOrThrow<string>('LIVEKIT_API_KEY');
-    this.apiSecret = config.getOrThrow<string>('LIVEKIT_API_SECRET');
-    this.livekitUrl = config.getOrThrow<string>('LIVEKIT_URL');
+    const readRequired = (key: string): string => {
+      const value = config.getOrThrow(key);
+      if (typeof value !== 'string' || !value.trim()) throw new Error(`${key} must be a non-empty string`);
+      return value;
+    };
+    this.apiKey = readRequired('LIVEKIT_API_KEY');
+    this.apiSecret = readRequired('LIVEKIT_API_SECRET');
+    this.livekitUrl = readRequired('LIVEKIT_URL');
     this.livekitServiceUrl = this.toLivekitServiceUrl(this.livekitUrl);
     this.roomService = new RoomServiceClient(
       this.livekitServiceUrl,
@@ -177,7 +192,8 @@ export class LivekitService {
   getLivekitUrl(): string {
     // LIVEKIT_PUBLIC_URL is the URL returned to browser clients.
     // Falls back to LIVEKIT_URL if not set.
-    return this.config.get<string>('LIVEKIT_PUBLIC_URL') ?? this.livekitUrl;
+    const publicUrl = this.config.get('LIVEKIT_PUBLIC_URL');
+    return typeof publicUrl === 'string' ? publicUrl : this.livekitUrl;
   }
 
   async listRooms(names?: string[]) {
@@ -252,7 +268,7 @@ export class LivekitService {
 
       const session = await this.withTimeout(
         this.egressService.startTrackCompositeEgress(roomName, output, {
-          audioTrackId: target.audioTrackId ?? undefined,
+          ...(target.audioTrackId === null ? {} : { audioTrackId: target.audioTrackId }),
           videoTrackId: target.videoTrackId,
         }),
         `start room recording${target.cameraId ? ` (${target.cameraId})` : ''}`,
@@ -500,13 +516,16 @@ export class LivekitService {
     }
   }
 
-  private mapRobotWhipIngress(info: IngressInfo): RobotWhipIngress | null {
-    const ingressId = info.ingressId?.trim();
-    const url = info.url?.trim();
-    const streamKey = info.streamKey?.trim();
+  mapRobotWhipIngress(info: unknown): RobotWhipIngress | null {
+    if (!isRecord(info)) return null;
+    const ingressId = readTrimmedString(info, 'ingressId');
+    const url = readTrimmedString(info, 'url');
+    const streamKey = readTrimmedString(info, 'streamKey');
     if (!ingressId || !url || !streamKey) {
       return null;
     }
+    const participantIdentity = readTrimmedString(info, 'participantIdentity');
+    const participantName = readTrimmedString(info, 'participantName');
 
     return {
       type: 'WHIP',
@@ -514,13 +533,13 @@ export class LivekitService {
       url,
       streamKey,
       endpointUrl: this.buildIngressEndpointUrl(url, streamKey),
-      participantIdentity: info.participantIdentity?.trim() || undefined,
-      participantName: info.participantName?.trim() || undefined,
-      enableTranscoding: Boolean(info.enableTranscoding),
+      ...(participantIdentity === undefined ? {} : { participantIdentity }),
+      ...(participantName === undefined ? {} : { participantName }),
+      enableTranscoding: Boolean(info['enableTranscoding']),
     };
   }
 
-  private sanitizeCameraId(value: string): string {
+  sanitizeCameraId(value: string): string {
     const normalized = value.trim().toLowerCase();
     if (!normalized) {
       return '';
@@ -528,7 +547,7 @@ export class LivekitService {
     return normalized.replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64);
   }
 
-  private cameraIdFromParticipantIdentityForRobot(robotId: string, identity?: string): string | null {
+  cameraIdFromParticipantIdentityForRobot(robotId: string, identity?: string): string | null {
     const normalized = identity?.trim();
     if (!normalized) {
       return null;
@@ -559,7 +578,7 @@ export class LivekitService {
     return participants.some((participant) => participant.identity === participantIdentity);
   }
 
-  private buildIngressEndpointUrl(baseUrl: string, streamKey: string): string {
+  buildIngressEndpointUrl(baseUrl: string, streamKey: string): string {
     const normalizedBase = baseUrl.trim().replace(/\/+$/, '');
     const normalizedKey = streamKey.trim().replace(/^\/+/, '');
     if (!normalizedKey || normalizedBase.endsWith(`/${normalizedKey}`)) {
@@ -568,7 +587,7 @@ export class LivekitService {
     return `${normalizedBase}/${normalizedKey}`;
   }
 
-  private buildRecordingFileOutput(
+  buildRecordingFileOutput(
     objectKey: string,
     objectStorage: S3CompatibleStorageConfig,
   ): EncodedFileOutput {
@@ -592,10 +611,11 @@ export class LivekitService {
     });
   }
 
-  private resolveRecordingObjectKey(roomName: string, cameraId: string | null, sessionId: string): string {
-    const template = this.config
-      .get<string>('LIVEKIT_RECORDING_OBJECT_KEY_TEMPLATE')
-      ?.trim() || 'sessions/{session_id}/{camera_id}-{time}.mp4';
+  resolveRecordingObjectKey(roomName: string, cameraId: string | null, sessionId: string): string {
+    const templateValue = this.config.get('LIVEKIT_RECORDING_OBJECT_KEY_TEMPLATE');
+    const template = typeof templateValue === 'string' && templateValue.trim()
+      ? templateValue.trim()
+      : 'sessions/{session_id}/{camera_id}-{time}.mp4';
     return this.resolveRecordingTemplate(template, roomName, cameraId)
       .replaceAll('{session_id}', this.sanitizePathSegment(sessionId))
       .split(/[\\/]+/)
@@ -603,7 +623,7 @@ export class LivekitService {
       .join('/');
   }
 
-  private resolveRecordingTemplate(template: string, roomName: string, cameraId: string | null): string {
+  resolveRecordingTemplate(template: string, roomName: string, cameraId: string | null): string {
     let resolvedTemplate = template;
     const roomSegment = roomName.replace(/[^a-zA-Z0-9._-]/g, '_');
     const cameraSegment = cameraId ? this.sanitizePathSegment(cameraId) : '';
@@ -680,27 +700,36 @@ export class LivekitService {
     return targets;
   }
 
-  private toRecordingStatus(
+  toRecordingStatus(
     roomName: string,
-    egressItems: EgressInfo[],
+    egressItems: unknown[],
     roomActiveRecording: boolean,
     trackCameraLookup: Map<string, string | null>,
   ): RecordingStatus {
     const sessions = egressItems
       .map((entry) => {
-        const egressId = entry.egressId?.trim();
+        if (!isRecord(entry)) return null;
+        const egressId = readTrimmedString(entry, 'egressId');
         if (!egressId) {
           return null;
         }
 
-        const videoTrackId = entry.request?.case === 'trackComposite' ? entry.request.value?.videoTrackId?.trim() || null : null;
-        const audioTrackId = entry.request?.case === 'trackComposite' ? entry.request.value?.audioTrackId?.trim() || null : null;
+        const request = isRecord(entry['request']) ? entry['request'] : null;
+        const requestValue = request && isRecord(request['value']) ? request['value'] : null;
+        const videoTrackId = request?.['case'] === 'trackComposite' && requestValue
+          ? readTrimmedString(requestValue, 'videoTrackId') ?? null
+          : null;
+        const audioTrackId = request?.['case'] === 'trackComposite' && requestValue
+          ? readTrimmedString(requestValue, 'audioTrackId') ?? null
+          : null;
         return {
           egressId,
           cameraId: videoTrackId ? (trackCameraLookup.get(videoTrackId) ?? null) : null,
           videoTrackId,
           audioTrackId,
-          startedAt: this.toIsoTimestamp(entry.startedAt),
+          startedAt: this.toIsoTimestamp(
+            typeof entry['startedAt'] === 'bigint' || typeof entry['startedAt'] === 'number' ? entry['startedAt'] : undefined,
+          ),
         } satisfies ActiveRecordingSession;
       })
       .filter((entry): entry is ActiveRecordingSession => Boolean(entry))
@@ -717,16 +746,16 @@ export class LivekitService {
     };
   }
 
-  private getTrackCompositeVideoTrackId(entry: EgressInfo): string | null {
-    if (entry.request?.case !== 'trackComposite') {
+  getTrackCompositeVideoTrackId(entry: unknown): string | null {
+    if (!isRecord(entry) || !isRecord(entry['request']) || entry['request']['case'] !== 'trackComposite') {
       return null;
     }
-
-    const trackId = entry.request.value?.videoTrackId?.trim();
-    return trackId || null;
+    return isRecord(entry['request']['value'])
+      ? readTrimmedString(entry['request']['value'], 'videoTrackId') ?? null
+      : null;
   }
 
-  private cameraIdFromParticipantIdentity(identity?: string | null): string | null {
+  cameraIdFromParticipantIdentity(identity?: string | null): string | null {
     const normalized = identity?.trim();
     if (!normalized) {
       return null;
@@ -740,13 +769,13 @@ export class LivekitService {
     return normalized === 'robot-media' || normalized.startsWith('robot-') ? null : normalized;
   }
 
-  private sanitizePathSegment(value: string): string {
+  sanitizePathSegment(value: string): string {
     return value.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/^[-_.]+|[-_.]+$/g, '') || 'camera';
   }
 
-  private async waitForActiveEgressCount(roomName: string, expectedCount: number): Promise<void> {
+  async waitForActiveEgressCount(roomName: string, expectedCount: number, timeoutMs = this.egressStopWaitMs): Promise<void> {
     const startedAt = Date.now();
-    while (Date.now() - startedAt < this.egressStopWaitMs) {
+    while (Date.now() - startedAt < timeoutMs) {
       const activeEgress = await this.withTimeout(
         this.egressService.listEgress({ roomName, active: true }),
         'wait for egress shutdown',
@@ -760,7 +789,7 @@ export class LivekitService {
     throw new Error(`Timed out waiting for ${expectedCount} active recording egresses in ${roomName}`);
   }
 
-  private toIsoTimestamp(raw?: bigint | number | null): string | null {
+  toIsoTimestamp(raw?: bigint | number | null): string | null {
     if (raw === null || raw === undefined) {
       return null;
     }
@@ -793,7 +822,7 @@ export class LivekitService {
     return new Date(asNumber).toISOString();
   }
 
-  private async withTimeout<T>(promise: Promise<T>, action: string): Promise<T> {
+  async withTimeout<T>(promise: Promise<T>, action: string): Promise<T> {
     let timer: ReturnType<typeof setTimeout> | null = null;
     try {
       return await Promise.race([

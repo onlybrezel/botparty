@@ -47,7 +47,8 @@ test('a private room created in the UI stays hidden from another signed-in owner
   await signOut(page);
   await registerThroughTheForm(page, secondOwner, `${secondOwner}@example.test`);
   browserIssues.allowHttpError(404, /\/api\/v1\/robots\/private\//);
-  await page.goto(privateRoomHref!);
+  if (!privateRoomHref) throw new Error('Private room link was not found');
+  await page.goto(privateRoomHref);
 
   await expect(page.getByRole('heading', { name: 'Private robot' })).toBeVisible();
   await expect(page.getByText('Robot not found', { exact: true })).toBeVisible();

@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { performance } from 'node:perf_hooks';
+import { assertPerformanceTargetAllowed } from './performance-target.mjs';
 
 const baseUrl = new URL(process.env.PERFORMANCE_BASE_URL ?? 'http://127.0.0.1:8080');
 const scenario = process.env.PERFORMANCE_SCENARIO ?? 'public-read';
@@ -52,18 +53,7 @@ for (const [name, value] of [
     throw new Error(`${name} must be a non-negative number.`);
   }
 }
-const localTarget = ['127.0.0.1', 'localhost', '::1', 'nginx', 'api'].includes(baseUrl.hostname);
-const privateDockerTarget =
-  /^10\./.test(baseUrl.hostname) ||
-  /^192\.168\./.test(baseUrl.hostname) ||
-  /^172\.(1[6-9]|2\d|3[01])\./.test(baseUrl.hostname);
-if (
-  (!localTarget && !privateDockerTarget) ||
-  ((['nginx', 'api'].includes(baseUrl.hostname) || privateDockerTarget) &&
-    process.env.PERFORMANCE_ALLOW_DOCKER !== 'true')
-) {
-  throw new Error('Performance load is restricted to the local Docker environment.');
-}
+assertPerformanceTargetAllowed(baseUrl, process.env.PERFORMANCE_ALLOW_DOCKER === 'true');
 
 const samples = [];
 const successfulSamples = [];

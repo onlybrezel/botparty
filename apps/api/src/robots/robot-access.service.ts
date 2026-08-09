@@ -4,11 +4,18 @@ import {
   ForbiddenException,
   OnModuleDestroy,
   Logger,
+  Inject,
 } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { hash, verify } from 'argon2';
 import { PrismaService } from '../prisma/prisma.service';
+type RobotAccessDatabase = {
+  robot: Pick<PrismaService['robot'], 'findUnique' | 'update'>;
+  robotAllowedUser: Pick<PrismaService['robotAllowedUser'], 'deleteMany' | 'findMany' | 'upsert'>;
+  user: Pick<PrismaService['user'], 'findUnique'>;
+};
 import { RedisService } from '../redis/redis.service';
+import { isRecord } from '../common/json-value';
 import { isStaffRole } from '../common/robot-access';
 import type {
   RobotAccessPolicy,
@@ -44,8 +51,8 @@ export class RobotAccessService implements OnModuleDestroy {
   private readonly _policyCacheSweeper: ReturnType<typeof setInterval>;
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly redis: RedisService,
+    @Inject(PrismaService) private readonly prisma: RobotAccessDatabase,
+    @Inject(RedisService) private readonly redis: Pick<RedisService, 'get' | 'set'>,
   ) {
     this._policyCacheSweeper = setInterval(() => {
       const now = Date.now();
@@ -63,14 +70,14 @@ export class RobotAccessService implements OnModuleDestroy {
     const entry = this._getCacheEntry(robotId);
     if (entry) return entry.access;
     await this._loadPolicyFromDb(robotId);
-    return this.policyCache.get(robotId)!.access;
+    return this.policyCache.get(robotId)?.access ?? DEFAULT_ACCESS_POLICY;
   }
 
   async getStreamPolicy(robotId: string): Promise<RobotStreamPolicy> {
     const entry = this._getCacheEntry(robotId);
     if (entry) return entry.stream;
     await this._loadPolicyFromDb(robotId);
-    return this.policyCache.get(robotId)!.stream;
+    return this.policyCache.get(robotId)?.stream ?? DEFAULT_STREAM_POLICY;
   }
 
   async getAllowedUsers(robotId: string, ownerId: string): Promise<AllowedUserSummary[]> {
@@ -197,7 +204,7 @@ export class RobotAccessService implements OnModuleDestroy {
   async validateRoomAccess(input: {
     robotId: string;
     actorId: string;
-    roomAccessToken?: string;
+    roomAccessToken?: string | undefined;
   }): Promise<boolean> {
     const requesterUserId = input.actorId.startsWith('guest:') ? null : input.actorId;
     const robot = await this._getRoomAccessContext(input.robotId, requesterUserId);
@@ -245,11 +252,14 @@ export class RobotAccessService implements OnModuleDestroy {
     }
 
     try {
-      const parsed = JSON.parse(raw) as { robotId?: string; actorId?: string };
-      if (parsed.robotId !== robotId || typeof parsed.actorId !== 'string' || !parsed.actorId.trim()) {
+      const parsed: unknown = JSON.parse(raw);
+      if (
+        !isRecord(parsed) ||
+        parsed['robotId'] !== robotId || typeof parsed['actorId'] !== 'string' || !parsed['actorId'].trim()
+      ) {
         return null;
       }
-      return parsed.actorId;
+      return parsed['actorId'];
     } catch {
       return null;
     }

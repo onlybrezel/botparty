@@ -1,0 +1,151 @@
+{
+  "schemaVersion": 1,
+  "profiles": [
+    {
+      "id": "ultra-low",
+      "label": "Ultra-Low / Edge",
+      "api": {
+        "replicas": 1,
+        "cpusPerReplica": 0.5,
+        "memoryMbPerReplica": 384,
+        "maxOldSpaceMb": 192
+      },
+      "postgres": { "cpus": 0.5, "memoryMb": 512, "maxConnections": 30 },
+      "redis": { "cpus": 0.25, "memoryMb": 128 },
+      "nginx": { "cpus": 0.25, "memoryMb": 128 },
+      "runtime": {
+        "connectionLimitPerApi": 3,
+        "maxConcurrentRequestsPerApi": 8,
+        "maxConcurrentLoginRequestsPerApi": 1,
+        "uvThreadpoolSize": 2
+      },
+      "load": { "dataset": "small", "scenario": "mixed", "durationSeconds": 15, "concurrency": 4 },
+      "recommendedUse": "Private Edge installation with a small robot fleet and low concurrent traffic"
+    },
+    {
+      "id": "minimal",
+      "label": "Minimal / Small VPS",
+      "api": {
+        "replicas": 1,
+        "cpusPerReplica": 1,
+        "memoryMbPerReplica": 1024,
+        "maxOldSpaceMb": 512
+      },
+      "postgres": { "cpus": 1, "memoryMb": 1024, "maxConnections": 50 },
+      "redis": { "cpus": 0.25, "memoryMb": 192 },
+      "nginx": { "cpus": 0.25, "memoryMb": 128 },
+      "runtime": {
+        "connectionLimitPerApi": 6,
+        "maxConcurrentRequestsPerApi": 24,
+        "maxConcurrentLoginRequestsPerApi": 1,
+        "uvThreadpoolSize": 4
+      },
+      "load": { "dataset": "small", "scenario": "mixed", "durationSeconds": 15, "concurrency": 10 },
+      "recommendedUse": "Small VPS, hobby community, or a lightly used public deployment"
+    },
+    {
+      "id": "standard",
+      "label": "Standard / Recommended",
+      "api": {
+        "replicas": 2,
+        "cpusPerReplica": 2,
+        "memoryMbPerReplica": 2048,
+        "maxOldSpaceMb": 1024
+      },
+      "postgres": { "cpus": 2, "memoryMb": 4096, "maxConnections": 100 },
+      "redis": { "cpus": 0.5, "memoryMb": 256 },
+      "nginx": { "cpus": 0.5, "memoryMb": 256 },
+      "runtime": {
+        "connectionLimitPerApi": 8,
+        "maxConcurrentRequestsPerApi": 48,
+        "maxConcurrentLoginRequestsPerApi": 2,
+        "uvThreadpoolSize": 8
+      },
+      "load": {
+        "dataset": "medium",
+        "scenario": "mixed",
+        "durationSeconds": 20,
+        "concurrency": 30
+      },
+      "recommendedUse": "Normal production with redundancy and moderate sustained concurrency"
+    },
+    {
+      "id": "high-performance",
+      "label": "High-Performance / Production",
+      "api": {
+        "replicas": 4,
+        "cpusPerReplica": 2,
+        "memoryMbPerReplica": 4096,
+        "maxOldSpaceMb": 2048
+      },
+      "postgres": { "cpus": 4, "memoryMb": 8192, "maxConnections": 160 },
+      "redis": { "cpus": 1, "memoryMb": 512 },
+      "nginx": { "cpus": 1, "memoryMb": 512 },
+      "runtime": {
+        "connectionLimitPerApi": 10,
+        "maxConcurrentRequestsPerApi": 64,
+        "maxConcurrentLoginRequestsPerApi": 2,
+        "uvThreadpoolSize": 8
+      },
+      "load": {
+        "dataset": "medium",
+        "scenario": "mixed",
+        "durationSeconds": 20,
+        "concurrency": 80
+      },
+      "recommendedUse": "High-traffic production on an 8-vCPU application tier"
+    },
+    {
+      "id": "enterprise",
+      "label": "Enterprise / Extreme Scale",
+      "api": {
+        "replicas": 8,
+        "cpusPerReplica": 2,
+        "memoryMbPerReplica": 4096,
+        "maxOldSpaceMb": 2048
+      },
+      "postgres": { "cpus": 8, "memoryMb": 16384, "maxConnections": 260 },
+      "redis": { "cpus": 2, "memoryMb": 1024 },
+      "nginx": { "cpus": 2, "memoryMb": 1024 },
+      "runtime": {
+        "connectionLimitPerApi": 12,
+        "maxConcurrentRequestsPerApi": 80,
+        "maxConcurrentLoginRequestsPerApi": 2,
+        "uvThreadpoolSize": 8
+      },
+      "load": {
+        "dataset": "large",
+        "scenario": "mixed",
+        "durationSeconds": 25,
+        "concurrency": 160
+      },
+      "recommendedUse": "Large single-host or orchestrated deployment with a 16-vCPU application tier"
+    },
+    {
+      "id": "hyperscale",
+      "label": "Hyperscale / Bare-Metal EPYC",
+      "api": {
+        "replicas": 16,
+        "cpusPerReplica": 2,
+        "memoryMbPerReplica": 4096,
+        "maxOldSpaceMb": 2048
+      },
+      "postgres": { "cpus": 16, "memoryMb": 32768, "maxConnections": 420 },
+      "redis": { "cpus": 4, "memoryMb": 2048 },
+      "nginx": { "cpus": 4, "memoryMb": 2048 },
+      "runtime": {
+        "connectionLimitPerApi": 12,
+        "maxConcurrentRequestsPerApi": 96,
+        "maxConcurrentLoginRequestsPerApi": 2,
+        "uvThreadpoolSize": 8
+      },
+      "load": {
+        "dataset": "large",
+        "scenario": "mixed",
+        "durationSeconds": 30,
+        "concurrency": 320
+      },
+      "recommendedUse": "Bare-metal or orchestrated deployment using a 32-vCPU application tier on a 64-thread host"
+    }
+  ]
+}

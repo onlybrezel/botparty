@@ -57,7 +57,9 @@ describe('robot-view state helpers', () => {
       content: `message-${index}`,
       timestamp: 505 - index,
     }));
-    const duplicate = { ...messages[0]!, username: 'updated' };
+    const firstMessage = messages[0];
+    if (!firstMessage) throw new Error('Expected generated chat messages');
+    const duplicate = { ...firstMessage, username: 'updated' };
     const merged = mergeChatMessages(messages, [duplicate]);
     expect(merged).toHaveLength(500);
     expect(merged.map((entry) => entry.timestamp)).toEqual(

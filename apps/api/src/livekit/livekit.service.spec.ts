@@ -1,45 +1,5 @@
-import type { EncodedFileOutput } from '@livekit/protocol';
-import { TrackType } from '@livekit/protocol';
-import type { ConfigService } from '@nestjs/config';
+import { EncodedFileOutput, TrackType } from '@livekit/protocol';
 import { LivekitService } from './livekit.service';
-
-type RecordingStatus = {
-  active: boolean;
-  activeCount: number;
-  sessions: Array<{ videoTrackId: string | null }>;
-};
-
-type LivekitServiceTestAccess = {
-  egressStopWaitMs: number;
-  waitForActiveEgressCount(roomName: string, expectedCount: number): Promise<void>;
-  buildIngressEndpointUrl(baseUrl: string, streamKey: string): string;
-  sanitizeCameraId(value: string): string;
-  sanitizePathSegment(value: string): string;
-  cameraIdFromParticipantIdentity(identity?: string): string | null;
-  cameraIdFromParticipantIdentityForRobot(robotId: string, identity?: string): string | null;
-  mapRobotWhipIngress(info: unknown): unknown;
-  resolveRecordingTemplate(template: string, roomName: string, cameraId: string | null): string;
-  resolveRecordingObjectKey(roomName: string, cameraId: string | null, sessionId: string): string;
-  buildRecordingFileOutput(
-    filePath: string,
-    storage: {
-      bucket: string;
-      region: string;
-      accessKeyId: string;
-      secretAccessKey: string;
-      forcePathStyle: boolean;
-    },
-  ): EncodedFileOutput;
-  getTrackCompositeVideoTrackId(entry: unknown): string | null;
-  toRecordingStatus(
-    roomName: string,
-    entries: unknown[],
-    active: boolean,
-    cameraNames: Map<string, string>,
-  ): RecordingStatus;
-  toIsoTimestamp(raw?: bigint | number | null): string | null;
-  withTimeout<T>(promise: Promise<T>, action: string): Promise<T>;
-};
 
 const mockRoomService = {
   listRooms: jest.fn(),
@@ -59,6 +19,10 @@ const mockEgressService = {
   startTrackCompositeEgress: jest.fn(),
   stopEgress: jest.fn(),
 };
+
+function isEncodedFileOutput(value: unknown): value is EncodedFileOutput {
+  return value instanceof EncodedFileOutput;
+}
 
 const mockTokens: Array<{
   key: string;
@@ -81,7 +45,7 @@ jest.mock('livekit-server-sdk', () => {
     }
 
     async toJwt() {
-      return `jwt-${String(this.entry.options.identity)}`;
+      return `jwt-${String(this.entry.options['identity'])}`;
     }
   }
 
@@ -120,12 +84,12 @@ describe('LivekitService', () => {
   };
 
   let values: Record<string, string | undefined>;
-  let config: jest.Mocked<ConfigService>;
+  let config: { get: jest.Mock; getOrThrow: jest.Mock };
   let service: LivekitService;
 
   function instantiate(overrides: Record<string, string | undefined> = {}) {
     Object.assign(values, overrides);
-    service = new LivekitService(config, prisma as never);
+    service = new LivekitService(config, prisma);
     return service;
   }
 
@@ -169,7 +133,7 @@ describe('LivekitService', () => {
         if (!value) throw new Error(`Missing config: ${key}`);
         return value;
       }),
-    } as never;
+    };
 
     mockRoomService.listRooms.mockResolvedValue([{ name: roomName }]);
     mockRoomService.listParticipants.mockResolvedValue([defaultParticipant]);
@@ -197,9 +161,9 @@ describe('LivekitService', () => {
 
   describe('clients and grants', () => {
     it('converts ws/wss service URLs and preserves invalid custom URLs', () => {
-      const sdk = jest.requireMock('livekit-server-sdk') as {
+      const sdk = jest.requireMock<{
         RoomServiceClient: jest.Mock;
-      };
+      }>('livekit-server-sdk');
       expect(sdk.RoomServiceClient).toHaveBeenLastCalledWith(
         'http://livekit:7880',
         'livekit-key',
@@ -278,7 +242,7 @@ describe('LivekitService', () => {
 
     it('returns public URL overrides and delegates room/participant queries', async () => {
       expect(service.getLivekitUrl()).toBe('ws://livekit:7880');
-      values.LIVEKIT_PUBLIC_URL = 'wss://media.example';
+      values['LIVEKIT_PUBLIC_URL'] = 'wss://media.example';
       expect(service.getLivekitUrl()).toBe('wss://media.example');
       await service.listRooms(['one']);
       await service.listParticipants('one');
@@ -363,7 +327,7 @@ describe('LivekitService', () => {
 
     it('starts one S3 egress per camera and persists only sessions with IDs', async () => {
       configureStorage();
-      values.LIVEKIT_RECORDINGS_S3_SESSION_TOKEN = 'temporary-token';
+      values['LIVEKIT_RECORDINGS_S3_SESSION_TOKEN'] = 'temporary-token';
       mockRoomService.listParticipants.mockResolvedValueOnce([
         defaultParticipant,
         {
@@ -389,9 +353,13 @@ describe('LivekitService', () => {
       const status = await service.startRoomRecording(robotId, ' session/unsafe ');
 
       expect(mockEgressService.startTrackCompositeEgress).toHaveBeenCalledTimes(2);
-      const outputs = mockEgressService.startTrackCompositeEgress.mock.calls.map(
-        (call) => call[1] as EncodedFileOutput,
-      );
+      const outputs = mockEgressService.startTrackCompositeEgress.mock.calls.map((call) => {
+        const output: unknown = call[1];
+        if (!isEncodedFileOutput(output)) {
+          throw new Error('Expected an encoded file output');
+        }
+        return output;
+      });
       expect(outputs.map((output) => output.filepath)).toEqual([
         'sessions/session_unsafe/back-{time}.mp4',
         'sessions/session_unsafe/front-{time}.mp4',
@@ -449,9 +417,8 @@ describe('LivekitService', () => {
       await service.stopRoomRecording(robotId);
       expect(prisma.recording.updateMany).not.toHaveBeenCalled();
 
-      const internal = service as unknown as LivekitServiceTestAccess;
-      internal.egressStopWaitMs = 0;
-      await expect(internal.waitForActiveEgressCount(roomName, 0)).rejects.toThrow(
+      const internal = service;
+      await expect(internal.waitForActiveEgressCount(roomName, 0, 0)).rejects.toThrow(
         'Timed out waiting',
       );
     });
@@ -588,7 +555,7 @@ describe('LivekitService', () => {
 
   describe('pure mapping and timeout behavior', () => {
     it('maps endpoint, identity, and sanitized camera/path variants', () => {
-      const internal = service as unknown as LivekitServiceTestAccess;
+      const internal = service;
       expect(internal.buildIngressEndpointUrl('https://host/path/', '/key')).toBe(
         'https://host/path/key',
       );
@@ -611,17 +578,15 @@ describe('LivekitService', () => {
       ).toBe('front');
       expect(internal.cameraIdFromParticipantIdentityForRobot(robotId, undefined)).toBeNull();
       expect(internal.cameraIdFromParticipantIdentityForRobot(robotId, 'other')).toBeNull();
-      expect(
-        internal.mapRobotWhipIngress(
-          ingress({ participantIdentity: undefined, participantName: undefined }),
-        ),
-      ).toEqual(
-        expect.objectContaining({ participantIdentity: undefined, participantName: undefined }),
+      const mappedIngress = internal.mapRobotWhipIngress(
+        ingress({ participantIdentity: undefined, participantName: undefined }),
       );
+      expect(mappedIngress).not.toHaveProperty('participantIdentity');
+      expect(mappedIngress).not.toHaveProperty('participantName');
     });
 
     it('resolves camera-safe recording templates with and without camera placeholders', () => {
-      const internal = service as unknown as LivekitServiceTestAccess;
+      const internal = service;
       expect(
         internal.resolveRecordingTemplate('records/{room_name}/{time}.mp4', roomName, 'front'),
       ).toBe(`records/${roomName}/front-{time}.mp4`);
@@ -635,11 +600,11 @@ describe('LivekitService', () => {
           null,
         ),
       ).toBe('records/default-2026-07-17T160000.mp4');
-      values.LIVEKIT_RECORDING_OBJECT_KEY_TEMPLATE = ' /{room_name}//{camera_id}/{session_id}.mp4 ';
+      values['LIVEKIT_RECORDING_OBJECT_KEY_TEMPLATE'] = ' /{room_name}//{camera_id}/{session_id}.mp4 ';
       expect(internal.resolveRecordingObjectKey(roomName, null, ' .unsafe/id. ')).toBe(
         `${roomName}/default/unsafe_id.mp4`,
       );
-      delete values.LIVEKIT_RECORDING_OBJECT_KEY_TEMPLATE;
+      delete values['LIVEKIT_RECORDING_OBJECT_KEY_TEMPLATE'];
       expect(internal.resolveRecordingObjectKey(roomName, 'front', 'session')).toBe(
         'sessions/session/front-{time}.mp4',
       );
@@ -649,14 +614,14 @@ describe('LivekitService', () => {
         accessKeyId: 'key',
         secretAccessKey: 'secret',
         forcePathStyle: false,
-      }) as EncodedFileOutput;
+      });
       if (output.output.case !== 's3') throw new Error('Expected S3 output');
       expect(output.output.value.sessionToken).toBe('');
       expect(output.output.value.endpoint).toBe('');
     });
 
     it('handles non-composite and incomplete recording status entries', () => {
-      const internal = service as unknown as LivekitServiceTestAccess;
+      const internal = service;
       expect(internal.getTrackCompositeVideoTrackId({ request: { case: 'roomComposite' } })).toBeNull();
       expect(
         internal.getTrackCompositeVideoTrackId({
@@ -678,7 +643,7 @@ describe('LivekitService', () => {
     });
 
     it('maps timestamps from seconds, milliseconds, microseconds, and nanoseconds', () => {
-      const internal = service as unknown as LivekitServiceTestAccess;
+      const internal = service;
       expect(internal.toIsoTimestamp(null)).toBeNull();
       expect(internal.toIsoTimestamp(0)).toBeNull();
       expect(internal.toIsoTimestamp(1_700_000_000)).toBe('2023-11-14T22:13:20.000Z');
@@ -695,7 +660,7 @@ describe('LivekitService', () => {
     it('rejects LiveKit calls that exceed the bounded egress timeout', async () => {
       jest.useFakeTimers();
       const never = new Promise<never>(() => undefined);
-      const timed = (service as unknown as LivekitServiceTestAccess).withTimeout(never, 'test action');
+      const timed = service.withTimeout(never, 'test action');
       const assertion = expect(timed).rejects.toThrow(
         'LiveKit egress timeout (test action) after 12000ms',
       );

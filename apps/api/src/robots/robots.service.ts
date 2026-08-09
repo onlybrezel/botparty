@@ -1,6 +1,7 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
+import { isRecord } from '../common/json-value';
 import { RedisService } from '../redis/redis.service';
 import { createRobotSchema, updateRobotSchema } from '@botparty/shared';
 import type { z } from 'zod';
@@ -20,8 +21,12 @@ import {
   RobotPublicOverviewService,
   type PublicRobotOverview,
 } from './robot-public-overview.service';
-import { RobotRoomStateHelper } from './robot-room-state.helper';
-import { RobotWriteHelper } from './robot-write.helper';
+import { RobotRoomStateHelper, type RobotRoomStateDatabase } from './robot-room-state.helper';
+import {
+  RobotWriteHelper,
+  type RobotWriteDatabase,
+  type RobotWriteTransaction,
+} from './robot-write.helper';
 import { PlatformUserService } from '../wallet/platform-user.service';
 import { sanitizeManagedRobot, toPublicRobot } from './robots.service.helpers';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -63,6 +68,21 @@ const PUBLIC_ROBOT_SELECT = {
   },
 } satisfies Prisma.RobotSelect;
 
+type PublicRobot = ReturnType<typeof toPublicRobot>;
+
+const PUBLIC_DISCOVERY_CACHE_TTL_MS = 5_000;
+const PUBLIC_DISCOVERY_CACHE_MAX_ENTRIES = 64;
+
+type RobotsDatabase = RobotWriteDatabase &
+  RobotRoomStateDatabase & {
+    $transaction<T>(
+      callback: (transaction: RobotWriteTransaction) => Promise<T>,
+      options?: { isolationLevel?: Prisma.TransactionIsolationLevel },
+    ): Promise<T>;
+    controlButton: Pick<PrismaService['controlButton'], 'count'>;
+    robot: Pick<PrismaService['robot'], 'findMany' | 'findUnique' | 'update' | 'updateMany'>;
+  };
+
 @Injectable()
 export class RobotsService {
   private readonly logger = new Logger(RobotsService.name);
@@ -70,25 +90,81 @@ export class RobotsService {
   private readonly writeHelper: RobotWriteHelper;
   private readonly roomStateHelper: RobotRoomStateHelper;
   private readonly platformUserId: string;
+  private readonly publicDiscoveryCache = new Map<
+    string,
+    { expiresAt: number; robots: PublicRobot[] }
+  >();
+  private readonly publicDiscoveryRefreshes = new Map<string, Promise<PublicRobot[]>>();
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly redis: RedisService,
-    private readonly telemetry: RobotTelemetryService,
-    private readonly thumbnail: RobotThumbnailService,
-    private readonly access: RobotAccessService,
-    private readonly webhooks: RobotWebhookService,
-    private readonly chatPersistence: ChatPersistenceService,
-    private readonly configService: ConfigService,
-    private readonly deviceService: RobotDeviceService,
-    private readonly slugService: RobotSlugService,
-    private readonly inviteService: RobotInviteService,
-    private readonly cameraService: RobotCameraService,
-    private readonly actionQueueService: RobotActionQueueService,
-    private readonly publicOverviewService: RobotPublicOverviewService,
-    private readonly platformUser: PlatformUserService,
-    private readonly notifications: NotificationsService,
-    private readonly storageDeletion: StorageDeletionService,
+    @Inject(PrismaService) private readonly prisma: RobotsDatabase,
+    @Inject(RedisService) private readonly redis: Pick<RedisService, 'del' | 'get' | 'set'>,
+    @Inject(RobotTelemetryService)
+    private readonly telemetry: Pick<
+      RobotTelemetryService,
+      'getLogs' | 'getTelemetry' | 'ingestLogsByRobotId' | 'ingestTelemetryByRobotId'
+    >,
+    @Inject(RobotThumbnailService)
+    private readonly thumbnail: Pick<RobotThumbnailService, 'clear' | 'read' | 'save'>,
+    @Inject(RobotAccessService)
+    private readonly access: Pick<
+      RobotAccessService,
+      | 'addAllowedUser'
+      | 'getAccessPolicy'
+      | 'getAllowedUsers'
+      | 'getStreamPolicy'
+      | 'invalidateCache'
+      | 'issueRoomAccessGrant'
+      | 'removeAllowedUser'
+      | 'resolveGuestActorId'
+      | 'resolveRoomAccessActorId'
+      | 'validateRoomAccess'
+    >,
+    @Inject(RobotWebhookService)
+    private readonly webhooks: Pick<RobotWebhookService, 'emitRobotStatus'>,
+    @Inject(ChatPersistenceService)
+    private readonly chatPersistence: Pick<ChatPersistenceService, 'enqueue'>,
+    @Inject(ConfigService) private readonly configService: { get(key: string): unknown },
+    @Inject(RobotDeviceService)
+    private readonly deviceService: Pick<
+      RobotDeviceService,
+      | 'clearBoundDeviceMetadata'
+      | 'findByClaimToken'
+      | 'validateOrBindRobotDevice'
+      | 'validateRobotAuth'
+      | 'withClaimTokenIssuedAt'
+    >,
+    @Inject(RobotSlugService)
+    private readonly slugService: Pick<
+      RobotSlugService,
+      'buildSlugUpdate' | 'findRobotBySlugAny' | 'generateSlug' | 'validateAndNormalizeSlugInput'
+    >,
+    @Inject(RobotInviteService)
+    private readonly inviteService: Pick<
+      RobotInviteService,
+      'ensureInviteCodeForManagedRobot' | 'generateUniqueInviteCode' | 'resolveInviteCode'
+    >,
+    @Inject(RobotCameraService)
+    private readonly cameraService: Pick<
+      RobotCameraService,
+      'removeExternalStreamCamera' | 'upsertExternalStreamCamera'
+    >,
+    @Inject(RobotActionQueueService)
+    private readonly actionQueueService: Pick<
+      RobotActionQueueService,
+      'consumeActionsByRobotId' | 'enqueueAction' | 'enqueueActionForRobot' | 'getPendingActions'
+    >,
+    @Inject(RobotPublicOverviewService)
+    private readonly publicOverviewService: Pick<RobotPublicOverviewService, 'getPublicOverview'>,
+    @Inject(PlatformUserService)
+    private readonly platformUser: Pick<PlatformUserService, 'getPlatformUserId'>,
+    @Inject(NotificationsService)
+    private readonly notifications: Pick<NotificationsService, 'publishSafely'>,
+    @Inject(StorageDeletionService)
+    private readonly storageDeletion: Pick<
+      StorageDeletionService,
+      'enqueue' | 'recordingBucket' | 'thumbnailBucket'
+    >,
   ) {
     this.maxRobotsPerOwner = readNonNegativeIntegerEnv(
       this.configService,
@@ -113,6 +189,7 @@ export class RobotsService {
 
   async create(ownerId: string, input: z.infer<typeof createRobotSchema>) {
     const robot = await this.writeHelper.create(ownerId, input, this.maxRobotsPerOwner);
+    this.publicDiscoveryCache.clear();
     this.logger.log(`Robot created: ${robot.name} (${robot.slug}) by ${ownerId}`);
     return robot;
   }
@@ -148,35 +225,78 @@ export class RobotsService {
             ? [{ name: 'asc' }, { createdAt: 'desc' }]
             : [{ isFeatured: 'desc' }, { viewerCount: 'desc' }, { createdAt: 'desc' }];
 
-    const robots = await this.prisma.robot.findMany({
-      where: {
-        visibility: 'PUBLIC',
-        ownerId: { not: this.platformUserId },
-        ...(statusFilter && { status: statusFilter }),
-        ...(filters?.tag && { tags: { has: filters.tag } }),
-        ...(query && {
-          OR: [
-            { name: { contains: query, mode: 'insensitive' } },
-            { description: { contains: query, mode: 'insensitive' } },
-            { tags: { has: query } },
-            {
-              owner: {
-                OR: [
-                  { username: { contains: query, mode: 'insensitive' } },
-                  { displayName: { contains: query, mode: 'insensitive' } },
-                ],
-              },
-            },
-          ],
-        }),
-      },
-      orderBy,
+    const cacheKey = JSON.stringify({
+      operation: 'findAll',
+      query: query ?? null,
+      sort: sort ?? null,
+      status: statusFilter ?? null,
+      tag: filters?.tag ?? null,
       take,
       skip,
-      select: PUBLIC_ROBOT_SELECT,
     });
 
-    return robots.map((robot) => toPublicRobot(robot));
+    return this.cachedPublicDiscovery(cacheKey, async () => {
+      const robots = await this.prisma.robot.findMany({
+        where: {
+          visibility: 'PUBLIC',
+          ownerId: { not: this.platformUserId },
+          ...(statusFilter && { status: statusFilter }),
+          ...(filters?.tag && { tags: { has: filters.tag } }),
+          ...(query && {
+            OR: [
+              { name: { contains: query, mode: 'insensitive' } },
+              { description: { contains: query, mode: 'insensitive' } },
+              { tags: { has: query } },
+              {
+                owner: {
+                  OR: [
+                    { username: { contains: query, mode: 'insensitive' } },
+                    { displayName: { contains: query, mode: 'insensitive' } },
+                  ],
+                },
+              },
+            ],
+          }),
+        },
+        orderBy,
+        take,
+        skip,
+        select: PUBLIC_ROBOT_SELECT,
+      });
+
+      return robots.map((robot) => toPublicRobot(robot));
+    });
+  }
+
+  private async cachedPublicDiscovery(
+    key: string,
+    load: () => Promise<PublicRobot[]>,
+  ): Promise<PublicRobot[]> {
+    const now = Date.now();
+    const cached = this.publicDiscoveryCache.get(key);
+    if (cached && cached.expiresAt > now) return cached.robots;
+    if (cached) this.publicDiscoveryCache.delete(key);
+
+    const activeRefresh = this.publicDiscoveryRefreshes.get(key);
+    if (activeRefresh) return activeRefresh;
+
+    const refresh = load().then((robots) => {
+      if (this.publicDiscoveryCache.size >= PUBLIC_DISCOVERY_CACHE_MAX_ENTRIES) {
+        const oldestKey = this.publicDiscoveryCache.keys().next().value as string | undefined;
+        if (oldestKey) this.publicDiscoveryCache.delete(oldestKey);
+      }
+      this.publicDiscoveryCache.set(key, {
+        expiresAt: Date.now() + PUBLIC_DISCOVERY_CACHE_TTL_MS,
+        robots,
+      });
+      return robots;
+    });
+    this.publicDiscoveryRefreshes.set(key, refresh);
+    try {
+      return await refresh;
+    } finally {
+      this.publicDiscoveryRefreshes.delete(key);
+    }
   }
 
   async findBySlug(slug: string) {
@@ -233,13 +353,19 @@ export class RobotsService {
 
     await this.assertPublicationReady(robot, input, ownerId);
 
-    return this.writeHelper.applyRobotUpdate(robot, input);
+    const updated = await this.writeHelper.applyRobotUpdate(robot, input);
+    this.publicDiscoveryCache.clear();
+    await this.roomStateHelper.invalidateRealtimeRobot(id);
+    return updated;
   }
 
   async updateByStaff(id: string, input: z.infer<typeof updateRobotSchema>) {
     const existing = await this.findById(id);
     await this.assertPublicationReady(existing, input, existing.ownerId);
-    return this.writeHelper.applyRobotUpdate(existing, input);
+    const updated = await this.writeHelper.applyRobotUpdate(existing, input);
+    this.publicDiscoveryCache.clear();
+    await this.roomStateHelper.invalidateRealtimeRobot(id);
+    return updated;
   }
 
   private async assertPublicationReady(
@@ -261,11 +387,15 @@ export class RobotsService {
 
   async delete(id: string, ownerId: string) {
     const name = await this.deleteWithObjects(id, ownerId);
+    this.publicDiscoveryCache.clear();
+    await this.roomStateHelper.invalidateRealtimeRobot(id);
     this.logger.log(`Robot deleted: ${name}`);
   }
 
   async deleteByStaff(id: string) {
     const name = await this.deleteWithObjects(id, null);
+    this.publicDiscoveryCache.clear();
+    await this.roomStateHelper.invalidateRealtimeRobot(id);
     this.logger.log(`Robot deleted by staff: ${name}`);
   }
 
@@ -408,7 +538,7 @@ export class RobotsService {
       where: { id },
       data: {
         status,
-        lastOnlineAt: status === 'ONLINE' ? new Date() : undefined,
+        ...(status === 'ONLINE' ? { lastOnlineAt: new Date() } : {}),
       },
       select: { id: true, name: true, slug: true, status: true, ownerId: true },
     });
@@ -480,22 +610,22 @@ export class RobotsService {
   async ingestRobotTelemetryByRobotId(
     robotId: string,
     payload: {
-      clientVersion?: string;
-      gitBranch?: string;
-      gitCommit?: string;
-      gitDirty?: boolean;
-      botpartyStreamerVersion?: string;
-      streamerVersion?: string;
-      pythonVersion?: string;
-      cpuPercent?: number;
-      memoryPercent?: number;
-      temperatureC?: number;
-      uptimeSec?: number;
-      controlConnected?: boolean;
-      livekitConnected?: boolean;
-      commandsReceived?: number;
-      cameraFrames?: number;
-      emergencyStopVerified?: boolean;
+      clientVersion?: string | undefined;
+      gitBranch?: string | undefined;
+      gitCommit?: string | undefined;
+      gitDirty?: boolean | undefined;
+      botpartyStreamerVersion?: string | undefined;
+      streamerVersion?: string | undefined;
+      pythonVersion?: string | undefined;
+      cpuPercent?: number | undefined;
+      memoryPercent?: number | undefined;
+      temperatureC?: number | undefined;
+      uptimeSec?: number | undefined;
+      controlConnected?: boolean | undefined;
+      livekitConnected?: boolean | undefined;
+      commandsReceived?: number | undefined;
+      cameraFrames?: number | undefined;
+      emergencyStopVerified?: boolean | undefined;
     },
   ) {
     await this.findById(robotId);
@@ -516,11 +646,12 @@ export class RobotsService {
     ]);
     let telemetry: Record<string, unknown> = {};
     try {
-      telemetry = rawTelemetry ? (JSON.parse(rawTelemetry) as Record<string, unknown>) : {};
+      const parsed: unknown = rawTelemetry ? JSON.parse(rawTelemetry) : {};
+      telemetry = isRecord(parsed) ? parsed : {};
     } catch {
       telemetry = {};
     }
-    const fresh = typeof telemetry.ts === 'number' && Date.now() - telemetry.ts < 180_000;
+    const fresh = typeof telemetry['ts'] === 'number' && Date.now() - telemetry['ts'] < 180_000;
     const access = await this.getAccessPolicy(robotId);
     const videoRequired = access.video !== 'DISABLED';
     const controlRequired = access.control !== 'DISABLED';
@@ -531,7 +662,7 @@ export class RobotsService {
         id: 'connectivity' as const,
         label: 'Connection healthy',
         required: true,
-        complete: connected && telemetry.controlConnected === true,
+        complete: connected && telemetry['controlConnected'] === true,
       },
       {
         id: 'camera' as const,
@@ -539,7 +670,9 @@ export class RobotsService {
         required: videoRequired,
         complete:
           !videoRequired ||
-          (fresh && telemetry.livekitConnected === true && Number(telemetry.cameraFrames ?? 0) > 0),
+          (fresh &&
+            telemetry['livekitConnected'] === true &&
+            Number(telemetry['cameraFrames'] ?? 0) > 0),
       },
       {
         id: 'control' as const,
@@ -548,14 +681,14 @@ export class RobotsService {
         complete:
           !controlRequired ||
           (fresh &&
-            telemetry.controlConnected === true &&
-            Number(telemetry.commandsReceived ?? 0) > 0),
+            telemetry['controlConnected'] === true &&
+            Number(telemetry['commandsReceived'] ?? 0) > 0),
       },
       {
         id: 'emergency_stop' as const,
         label: 'Hardware E-Stop verified',
         required: controlRequired,
-        complete: !controlRequired || (fresh && telemetry.emergencyStopVerified === true),
+        complete: !controlRequired || (fresh && telemetry['emergencyStopVerified'] === true),
       },
       {
         id: 'access' as const,
@@ -575,7 +708,9 @@ export class RobotsService {
         required: videoRequired,
         complete:
           !videoRequired ||
-          (fresh && telemetry.livekitConnected === true && Number(telemetry.cameraFrames ?? 0) > 0),
+          (fresh &&
+            telemetry['livekitConnected'] === true &&
+            Number(telemetry['cameraFrames'] ?? 0) > 0),
       },
     ];
     return {
@@ -601,8 +736,15 @@ export class RobotsService {
     return this.access.getStreamPolicy(robotId);
   }
 
-  async findByIdCached(id: string): Promise<Awaited<ReturnType<RobotsService['findById']>>> {
-    return this.roomStateHelper.findByIdCached(id, () => this.findById(id));
+  async findByIdCached(id: string) {
+    return this.roomStateHelper.findByIdCached(id, async () => {
+      const robot = await this.prisma.robot.findUnique({
+        where: { id },
+        select: { id: true, name: true, ownerId: true, queueMode: true },
+      });
+      if (!robot) throw new NotFoundException('Robot not found');
+      return robot;
+    });
   }
 
   async appendChatMessage(
@@ -629,7 +771,7 @@ export class RobotsService {
     robotId: string;
     requesterUserId: string | null;
     guestSessionId?: string;
-    roomAccessToken?: string;
+    roomAccessToken?: string | undefined;
     before?: number;
     beforeId?: string;
     limit?: number;
@@ -638,12 +780,14 @@ export class RobotsService {
   }
 
   async getFeatured() {
-    const robots = await this.prisma.robot.findMany({
-      where: { isFeatured: true, visibility: 'PUBLIC', ownerId: { not: this.platformUserId } },
-      select: PUBLIC_ROBOT_SELECT,
-    });
+    return this.cachedPublicDiscovery('featured', async () => {
+      const robots = await this.prisma.robot.findMany({
+        where: { isFeatured: true, visibility: 'PUBLIC', ownerId: { not: this.platformUserId } },
+        select: PUBLIC_ROBOT_SELECT,
+      });
 
-    return robots.map((robot) => toPublicRobot(robot));
+      return robots.map((robot) => toPublicRobot(robot));
+    });
   }
 
   async getPublicOverview(): Promise<PublicRobotOverview> {
@@ -663,7 +807,7 @@ export class RobotsService {
   async validateRoomAccess(input: {
     robotId: string;
     actorId: string;
-    roomAccessToken?: string;
+    roomAccessToken?: string | undefined;
   }): Promise<boolean> {
     return this.access.validateRoomAccess(input);
   }

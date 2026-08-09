@@ -383,8 +383,8 @@ export class GatewayRuntimeSupport {
       if (typeof payload.deviceHash !== 'string' || !/^[a-f0-9]{64}$/i.test(payload.deviceHash)) {
         return null;
       }
-      if (!Number.isInteger(payload.tokenVersion)) return null;
-      return { robotId: payload.sub, deviceHash: payload.deviceHash, tokenVersion: payload.tokenVersion! };
+      if (typeof payload.tokenVersion !== 'number' || !Number.isInteger(payload.tokenVersion)) return null;
+      return { robotId: payload.sub, deviceHash: payload.deviceHash, tokenVersion: payload.tokenVersion };
     } catch {
       return null;
     }

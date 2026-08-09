@@ -4,10 +4,10 @@ import { ModerationActionType } from '@botparty/shared';
 export class ModerateUserDto {
   @IsString()
   @MaxLength(128)
-  targetUserId!: string;
+  declare targetUserId: string;
 
   @IsEnum(ModerationActionType)
-  action!: ModerationActionType;
+  declare action: ModerationActionType;
 
   @IsOptional()
   @IsString()

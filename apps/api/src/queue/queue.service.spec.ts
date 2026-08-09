@@ -57,7 +57,7 @@ describe('QueueService', () => {
   beforeEach(async () => {
     jest.resetAllMocks();
     mockPrisma.$transaction.mockImplementation(async (callback: (tx: typeof mockPrisma) => Promise<unknown>) =>
-      callback(mockPrisma as never),
+      callback(mockPrisma),
     );
     mockPrisma.$executeRaw.mockResolvedValue(1);
     mockPrisma.robot.findUnique.mockResolvedValue({ queueMode: 'STANDARD' });
@@ -83,10 +83,10 @@ describe('QueueService', () => {
 
     // Directly instantiate with mocked deps to avoid NestJS DI token issues
     service = new QueueService(
-      mockPrisma as never,
-      mockRedis as never,
-      mockRobotsService as never,
-      mockConfig as never,
+      mockPrisma,
+      mockRedis,
+      mockRobotsService,
+      mockConfig,
     );
   });
 
@@ -126,10 +126,10 @@ describe('QueueService', () => {
         key === 'MAX_ACTIVE_QUEUE_ENTRIES_PER_USER' ? '1' : undefined,
       );
       service = new QueueService(
-        mockPrisma as never,
-        mockRedis as never,
-        mockRobotsService as never,
-        mockConfig as never,
+        mockPrisma,
+        mockRedis,
+        mockRobotsService,
+        mockConfig,
       );
       mockRobotsService.getAccessPolicy.mockResolvedValueOnce({ control: 'ENABLED' });
       mockRobotsService.findById.mockResolvedValueOnce({ status: 'ONLINE' });
@@ -189,7 +189,7 @@ describe('QueueService', () => {
       mockPrisma.robot.findUnique.mockResolvedValueOnce({ queueMode: 'STANDARD' });
       mockPrisma.queueEntry.findUnique.mockResolvedValueOnce(null);
 
-      const result = await service.leave('robot-1', 'user-1') as { removed: boolean };
+      const result = await service.leave('robot-1', 'user-1');
       expect(result.removed).toBe(false);
     });
 
@@ -251,7 +251,7 @@ describe('QueueService', () => {
     });
 
     it('allows verified guest viewers to read the queue in restricted rooms', async () => {
-      const queue = [{ id: 'entry-1', userId: 'user-1' }];
+      const queue = [{ id: 'entry-1', robotId: 'robot-1', userId: 'user-1', position: 1, votes: 0, isPriority: false, joinedAt: new Date(0), expiresAt: null, user: { id: 'user-1', username: 'pilot', displayName: null, avatarUrl: null } }];
       mockRobotsService.findById.mockResolvedValueOnce({
         id: 'robot-1',
         visibility: 'PRIVATE',
@@ -259,7 +259,7 @@ describe('QueueService', () => {
       });
       mockRobotsService.resolveGuestActorId.mockReturnValueOnce('guest:viewer-1');
       mockRobotsService.validateRoomAccess.mockResolvedValueOnce(true);
-      jest.spyOn(service, 'getQueue').mockResolvedValueOnce(queue as never);
+      jest.spyOn(service, 'getQueue').mockResolvedValueOnce(queue);
 
       await expect(service.getQueueForRequester('robot-1', null, 'room-token', 'viewer-1')).resolves.toEqual(queue);
 

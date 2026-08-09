@@ -35,7 +35,7 @@ describe('RobotActionQueueService', () => {
     access = {
       getStreamPolicy: jest.fn().mockResolvedValue({ targetBitrateKbps: 1200 }),
     };
-    service = new RobotActionQueueService(prisma as never, redis as never, access as never);
+    service = new RobotActionQueueService(prisma, redis, access);
   });
 
   it('deduplicates queued actions by type', async () => {

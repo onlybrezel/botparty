@@ -3,12 +3,12 @@ import { WS_EVENTS } from '@botparty/shared';
 import type { SessionsService } from '../sessions/sessions.service';
 import type { RobotsService } from '../robots/robots.service';
 import type { QueueService } from '../queue/queue.service';
-import type { ActiveTurnState, WsClient } from './gateway-types';
+import type { ActiveTurnState } from './gateway-types';
 import { randomUUID } from 'crypto';
 import type { NotificationsService } from '../notifications/notifications.service';
 
 export interface TurnHandlerContext {
-  readonly robotClients: Map<string, WsClient>;
+  readonly robotClients: Pick<ReadonlySet<string>, 'has'>;
   getActiveTurn(robotId: string): Promise<ActiveTurnState | null>;
   hasLocalActiveTurn(robotId: string): boolean;
   isTurnOwner(state: ActiveTurnState): boolean;
@@ -22,15 +22,20 @@ export interface TurnHandlerContext {
   revokeController(robotId: string, userId: string): Promise<void>;
 }
 
+type TurnRobots = Pick<RobotsService, 'findById' | 'updateStatus'>;
+type TurnSessions = Pick<SessionsService, 'create' | 'end' | 'findActiveForTurnRecovery'>;
+type TurnQueue = Pick<QueueService, 'leave'>;
+type TurnNotifications = Pick<NotificationsService, 'publishSafely'>;
+
 export class TurnHandler {
   private readonly logger = new Logger(TurnHandler.name);
 
   constructor(
     private readonly ctx: TurnHandlerContext,
-    private readonly robotsService: RobotsService,
-    private readonly sessionsService: SessionsService,
-    private readonly queueService: QueueService,
-    private readonly notifications: NotificationsService,
+    private readonly robotsService: TurnRobots,
+    private readonly sessionsService: TurnSessions,
+    private readonly queueService: TurnQueue,
+    private readonly notifications: TurnNotifications,
   ) {}
 
   async syncTurnLifecycle(

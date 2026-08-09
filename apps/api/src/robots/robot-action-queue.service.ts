@@ -1,16 +1,17 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { RobotAccessService } from './robot-access.service';
 import type { RobotActionPayload } from './robots.types';
+import { parseJsonRecord } from '../common/json-value';
 
 @Injectable()
 export class RobotActionQueueService {
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly redis: RedisService,
-    private readonly access: RobotAccessService,
+    @Inject(PrismaService) private readonly prisma: { robot: Pick<PrismaService['robot'], 'findUnique'> },
+    @Inject(RedisService) private readonly redis: Pick<RedisService, 'del' | 'expire' | 'lrange' | 'ltrim' | 'rpush'>,
+    @Inject(RobotAccessService) private readonly access: Pick<RobotAccessService, 'getStreamPolicy'>,
   ) {}
 
   async enqueueAction(robotId: string, ownerId: string, payload: RobotActionPayload) {
@@ -64,13 +65,13 @@ export class RobotActionQueueService {
   private async enqueueActionForExistingRobot(robotId: string, payload: RobotActionPayload) {
     const key = this.actionKey(robotId);
     const queued = await this.redis.lrange(key, 0, -1);
-    const existing = this.parseActions(queued).find((entry) => entry.type === payload.type);
+    const existing = this.parseActions(queued).find((entry) => entry['type'] === payload['type']);
 
     if (existing) {
       return {
-        id: typeof existing.id === 'string' ? existing.id : randomBytes(8).toString('hex'),
-        type: String(existing.type),
-        createdAt: typeof existing.createdAt === 'number' ? existing.createdAt : Date.now(),
+        id: typeof existing['id'] === 'string' ? existing['id'] : randomBytes(8).toString('hex'),
+        type: String(existing['type']),
+        createdAt: typeof existing['createdAt'] === 'number' ? existing['createdAt'] : Date.now(),
         alreadyQueued: true,
       };
     }
@@ -112,13 +113,7 @@ export class RobotActionQueueService {
 
   private parseActions(raw: string[]): Array<Record<string, unknown>> {
     return raw
-      .map((entry) => {
-        try {
-          return JSON.parse(entry) as Record<string, unknown>;
-        } catch {
-          return null;
-        }
-      })
+      .map(parseJsonRecord)
       .filter((entry): entry is Record<string, unknown> => entry !== null);
   }
 

@@ -9,11 +9,27 @@ import {
 } from './gateway-payloads';
 import type { GatewayRuntimeSupport } from './gateway-runtime.support';
 
+type RoomRuntimePort = Pick<
+  GatewayRuntimeSupport,
+  | 'broadcastToRoom'
+  | 'parseWsPayload'
+  | 'resolveSocketUser'
+  | 'rooms'
+> & {
+  guestSockets: Pick<GatewayRuntimeSupport['guestSockets'], 'canJoin' | 'register' | 'unregister'>;
+  logger: Pick<GatewayRuntimeSupport['logger'], 'warn'>;
+  presence: Pick<GatewayRuntimeSupport['presence'], 'refresh' | 'remove' | 'touch'>;
+};
+type RoomRobotsPort = Pick<
+  RobotsService,
+  'getRecentChatMessages' | 'resolveRoomAccessActorId' | 'validateRoomAccess'
+>;
+
 export class RoomHandler {
   constructor(
-    private readonly runtime: GatewayRuntimeSupport,
-    private readonly robotsService: RobotsService,
-    private readonly moderationService: ModerationService,
+    private readonly runtime: RoomRuntimePort,
+    private readonly robotsService: RoomRobotsPort,
+    private readonly moderationService: Pick<ModerationService, 'getActiveRestriction'>,
   ) {}
 
   async handleJoin(client: WsClient, data: unknown) {
@@ -104,10 +120,9 @@ export class RoomHandler {
       }
     }
 
-    if (!this.runtime.rooms.has(parsed.robotId)) {
-      this.runtime.rooms.set(parsed.robotId, new Set());
-    }
-    this.runtime.rooms.get(parsed.robotId)!.add(client.id);
+    const roomClients = this.runtime.rooms.get(parsed.robotId) ?? new Set<string>();
+    roomClients.add(client.id);
+    this.runtime.rooms.set(parsed.robotId, roomClients);
 
     client.presenceJoinedAt = Date.now();
     const presenceSnapshot = await this.runtime.presence.refresh(client, parsed.robotId);

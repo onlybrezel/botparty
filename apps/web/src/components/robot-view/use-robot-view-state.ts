@@ -194,7 +194,10 @@ export function useRobotViewState(robot: RobotPublic) {
         setControlButtons((prev) => {
           if (
             prev.length === next.length &&
-            prev.every((entry, index) => sameButton(entry, next[index]!))
+            prev.every((entry, index) => {
+              const nextEntry = next[index];
+              return nextEntry !== undefined && sameButton(entry, nextEntry);
+            })
           ) {
             return prev;
           }
@@ -346,7 +349,7 @@ export function useRobotViewState(robot: RobotPublic) {
       livekitRefreshInFlightRef.current = true;
       setVideoState('loading');
       try {
-        const publicUrl = process.env.NEXT_PUBLIC_LIVEKIT_URL;
+        const publicUrl = process.env['NEXT_PUBLIC_LIVEKIT_URL'];
         api.setToken(accessToken);
         if (accessToken) {
           try {
@@ -470,13 +473,14 @@ export function useRobotViewState(robot: RobotPublic) {
   }, [robot.id]);
 
   useEffect(() => {
-    if (!activeSession?.expiresAt) {
+    const expiresAt = activeSession?.expiresAt;
+    if (!expiresAt) {
       setTurnCountdownMs(null);
       return;
     }
 
     const tick = () => {
-      setTurnCountdownMs(Math.max(0, activeSession.expiresAt! - Date.now()));
+      setTurnCountdownMs(Math.max(0, expiresAt - Date.now()));
     };
 
     tick();
@@ -573,11 +577,19 @@ export function useRobotViewState(robot: RobotPublic) {
 
       ws.onmessage = (e) => {
         try {
-          const { event, data } = JSON.parse(e.data as string) as {
-            event: string;
-            data: Record<string, unknown>;
-          };
-          wsEventHandlerRef.current(event, data);
+          if (typeof e.data !== 'string') return;
+          const payload: unknown = JSON.parse(e.data);
+          if (
+            typeof payload !== 'object'
+            || payload === null
+            || !('event' in payload)
+            || typeof payload.event !== 'string'
+            || !('data' in payload)
+            || typeof payload.data !== 'object'
+            || payload.data === null
+            || Array.isArray(payload.data)
+          ) return;
+          wsEventHandlerRef.current(payload.event, { ...payload.data });
         } catch {
           //
         }
@@ -891,9 +903,9 @@ export function useRobotViewState(robot: RobotPublic) {
       api.setToken(accessToken);
       const page = await api.robots.getRobotChatHistory(robot.id, {
         before,
-        beforeId: chatHistoryCursorId ?? undefined,
+        ...(chatHistoryCursorId ? { beforeId: chatHistoryCursorId } : {}),
         limit: 50,
-        roomAccessToken: roomAccessToken ?? undefined,
+        ...(roomAccessToken ? { roomAccessToken } : {}),
         guestSessionId,
       });
 
@@ -931,8 +943,8 @@ export function useRobotViewState(robot: RobotPublic) {
     try {
       api.setToken(accessToken);
       const grant = await api.robots.verifyRobotAccess(robot.id, {
-        password: accessPasswordInput.trim() || undefined,
-        inviteCode: inviteCodeFromUrl || undefined,
+        ...(accessPasswordInput.trim() ? { password: accessPasswordInput.trim() } : {}),
+        ...(inviteCodeFromUrl ? { inviteCode: inviteCodeFromUrl } : {}),
       });
       setRoomAccessToken(grant.token);
       saveStoredRoomAccessToken(robot.id, grant.token);
@@ -959,7 +971,7 @@ export function useRobotViewState(robot: RobotPublic) {
           targetUserId,
           action,
           reason: 'Chat moderation',
-          durationSec: action === 'TIMEOUT' ? 300 : undefined,
+          ...(action === 'TIMEOUT' ? { durationSec: 300 } : {}),
         });
         pushToast(
           action === 'TIMEOUT'

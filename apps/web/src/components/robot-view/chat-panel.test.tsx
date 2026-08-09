@@ -138,7 +138,7 @@ describe('RobotChatPanel', () => {
 
     expect(container.querySelector('img')).toBeNull();
     expect(container.querySelector('script')).toBeNull();
-    expect((window as unknown as { __pwned?: unknown }).__pwned).toBeUndefined();
+    expect('__pwned' in window).toBe(false);
     expect(screen.getByText(/<img src=x onerror/)).toBeInTheDocument();
   });
 });

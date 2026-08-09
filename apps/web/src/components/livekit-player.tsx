@@ -28,9 +28,9 @@ export function LiveKitPlayer({ token, livekitUrl, onStreamStalled, streamConfig
       {/* Render remote participant audio tracks into hidden audio elements. */}
       <RoomAudioRenderer volume={isMuted ? 0 : volume / 100} muted={isMuted} />
       <VideoRenderer
-        onStreamStalled={onStreamStalled}
-        streamConfig={streamConfig}
-        volumeStorageKey={volumeStorageKey}
+        {...(onStreamStalled ? { onStreamStalled } : {})}
+        {...(streamConfig ? { streamConfig } : {})}
+        {...(volumeStorageKey ? { volumeStorageKey } : {})}
         volume={volume}
         isMuted={isMuted}
         onVolumeChange={setVolume}

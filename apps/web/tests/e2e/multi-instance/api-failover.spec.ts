@@ -2,7 +2,7 @@ import { existsSync, writeFileSync } from 'node:fs';
 import { signIn } from '../support/auth';
 import { expect, test } from '../support/fixtures';
 
-const signalDirectory = process.env.E2E_FAILOVER_SIGNAL_DIR ?? '/results/failover-signals';
+const signalDirectory = process.env['E2E_FAILOVER_SIGNAL_DIR'] ?? '/results/failover-signals';
 const signalPath = (name: string) => `${signalDirectory}/${name}`;
 
 async function waitForOrchestratorSignal(name: string) {

@@ -1,6 +1,7 @@
-import type { ReactElement } from 'react';
+import { isValidElement } from 'react';
 import type { RobotPublic } from '@botparty/shared';
-import { Role } from '@botparty/shared';
+import { RobotStatus, Role } from '@botparty/shared';
+import { createRobotPublic } from '@/test/robot-fixtures';
 
 const notFound = vi.fn(() => {
   throw new Error('notFound');
@@ -33,12 +34,11 @@ vi.mock('@/components/robot-view/offline-robot-view', () => ({
   OfflineRobotView: ({ robot }: { robot: RobotPublic }) => <div data-offline-robot={robot.slug} />,
 }));
 
-function createResponse(robot: Partial<RobotPublic>, status = 200) {
-  return {
+function createResponse(robot: RobotPublic | Record<string, never>, status = 200): Response {
+  return new Response(JSON.stringify(robot), {
     status,
-    ok: status >= 200 && status < 300,
-    json: () => Promise.resolve(robot),
-  } as Response;
+    headers: { 'content-type': 'application/json' },
+  });
 }
 
 describe('robot catch-all route', () => {
@@ -52,7 +52,7 @@ describe('robot catch-all route', () => {
       'fetch',
       vi.fn(() =>
         Promise.resolve(
-          createResponse({
+          createResponse(createRobotPublic({
             name: 'Mars Rover',
             slug: 'mars-rover',
             owner: {
@@ -63,7 +63,7 @@ describe('robot catch-all route', () => {
               role: Role.USER,
               createdAt: '2026-01-01T00:00:00.000Z',
             },
-          }),
+          })),
         ),
       ),
     );
@@ -83,9 +83,12 @@ describe('robot catch-all route', () => {
     );
 
     const { default: RobotPage } = await import('./page');
-    const result = (await RobotPage({
+    const result = await RobotPage({
       params: Promise.resolve({ parts: ['secret-bot'] }),
-    })) as ReactElement<{ slug: string; username?: string | null }>;
+    });
+    if (!isValidElement<{ slug: string; username?: string | null }>(result)) {
+      throw new Error('Expected the private robot loader element');
+    }
 
     expect(result.props.slug).toBe('secret-bot');
     expect(result.props.username).toBeNull();
@@ -94,26 +97,29 @@ describe('robot catch-all route', () => {
   it('uses the lightweight room view while a public robot is offline', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(() => Promise.resolve(createResponse({
-        name: 'Mars Rover',
-        slug: 'mars-rover',
-        status: 'OFFLINE' as RobotPublic['status'],
-        owner: {
-          id: 'owner-1',
-          username: 'julien',
-          displayName: 'Julien',
-          avatarUrl: null,
-          role: Role.USER,
-          createdAt: '2026-01-01T00:00:00.000Z',
-        },
-      }))),
+      vi.fn(async () => createResponse(createRobotPublic({
+          name: 'Mars Rover',
+          slug: 'mars-rover',
+          status: RobotStatus.OFFLINE,
+          owner: {
+            id: 'owner-1',
+            username: 'julien',
+            displayName: 'Julien',
+            avatarUrl: null,
+            role: Role.USER,
+            createdAt: '2026-01-01T00:00:00.000Z',
+          },
+        }))),
     );
 
     const { default: RobotPage } = await import('./page');
     const { OfflineRobotView } = await import('@/components/robot-view/offline-robot-view');
-    const result = (await RobotPage({
+    const result = await RobotPage({
       params: Promise.resolve({ parts: ['julien', 'mars-rover'] }),
-    })) as ReactElement<{ robot: RobotPublic }>;
+    });
+    if (!isValidElement<{ robot: RobotPublic }>(result)) {
+      throw new Error('Expected the offline robot element');
+    }
 
     expect(result.props.robot.status).toBe('OFFLINE');
     expect(result.type).toBe(OfflineRobotView);
@@ -122,28 +128,31 @@ describe('robot catch-all route', () => {
   it('loads the interactive room view for an online robot', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(() => Promise.resolve(createResponse({
-        name: 'Mars Rover',
-        slug: 'mars-rover',
-        status: 'ONLINE' as RobotPublic['status'],
-        owner: {
-          id: 'owner-1',
-          username: 'julien',
-          displayName: 'Julien',
-          avatarUrl: null,
-          role: Role.USER,
-          createdAt: '2026-01-01T00:00:00.000Z',
-        },
-      }))),
+      vi.fn(async () => createResponse(createRobotPublic({
+          name: 'Mars Rover',
+          slug: 'mars-rover',
+          status: RobotStatus.ONLINE,
+          owner: {
+            id: 'owner-1',
+            username: 'julien',
+            displayName: 'Julien',
+            avatarUrl: null,
+            role: Role.USER,
+            createdAt: '2026-01-01T00:00:00.000Z',
+          },
+        }))),
     );
 
     const { default: RobotPage } = await import('./page');
     const { OnlineRobotViewLoader } = await import(
       '@/components/robot-view/online-robot-view-loader'
     );
-    const result = (await RobotPage({
+    const result = await RobotPage({
       params: Promise.resolve({ parts: ['julien', 'mars-rover'] }),
-    })) as ReactElement<{ robot: RobotPublic }>;
+    });
+    if (!isValidElement<{ robot: RobotPublic }>(result)) {
+      throw new Error('Expected the online robot element');
+    }
 
     expect(result.props.robot.status).toBe('ONLINE');
     expect(result.type).toBe(OnlineRobotViewLoader);

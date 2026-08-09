@@ -50,7 +50,7 @@ export class RobotCamerasController {
 
     await this.robotsService.upsertExternalStreamCamera(robot.id, user.sub, {
       id: ingress.cameraId ?? cameraId,
-      label: body.label,
+      ...(body.label === undefined ? {} : { label: body.label }),
       enabled: true,
       publishMode: 'always_on',
     });

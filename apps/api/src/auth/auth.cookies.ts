@@ -28,7 +28,7 @@ export function getCsrfCookieName(config: Pick<ConfigService, 'get'>): string {
 export function shouldUseSecureAuthCookies(config: Pick<ConfigService, 'get'>): boolean {
   const configured = readEnvLike(config, 'AUTH_COOKIE_SECURE');
   if (!configured) {
-    return (readEnvLike(config, 'NODE_ENV') ?? process.env.NODE_ENV ?? '').toLowerCase() === 'production';
+    return (readEnvLike(config, 'NODE_ENV') ?? process.env['NODE_ENV'] ?? '').toLowerCase() === 'production';
   }
 
   return configured.toLowerCase() === 'true';

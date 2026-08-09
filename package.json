@@ -13,6 +13,7 @@
     "build": "turbo run build",
     "dev": "turbo run dev",
     "lint": "turbo run lint",
+    "test": "turbo run test && node --test scripts/*.test.mjs",
     "docs:api-client": "node scripts/generate-api-client-docs.mjs",
     "openapi:export": "pnpm --filter @botparty/api build && node apps/api/dist/openapi/export-openapi.js docs/openapi.json",
     "test:coverage": "turbo run test:coverage",
@@ -43,7 +44,7 @@
     "web:budget": "pnpm --filter @botparty/web performance:budget",
     "db:studio": "pnpm --filter @botparty/prisma db:studio",
     "clean": "turbo run clean && rm -rf node_modules",
-    "typecheck": "turbo run typecheck"
+    "typecheck": "turbo run typecheck && pnpm exec tsc --noEmit -p scripts/tsconfig.json"
   },
   "devDependencies": {
     "prettier": "^3.5.3",

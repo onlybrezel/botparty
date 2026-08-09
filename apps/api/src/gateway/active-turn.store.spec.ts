@@ -1,4 +1,3 @@
-import type { RedisService } from '../redis/redis.service';
 import type { ActiveTurnState } from './gateway-types';
 import { ActiveTurnStore } from './active-turn.store';
 
@@ -19,7 +18,7 @@ describe('ActiveTurnStore', () => {
   beforeEach(() => {
     jest.spyOn(Date, 'now').mockReturnValue(now);
     redis = { get: jest.fn().mockResolvedValue(null), eval: jest.fn() };
-    store = new ActiveTurnStore(redis as unknown as RedisService, 'instance-a');
+    store = new ActiveTurnStore(redis, 'instance-a');
   });
 
   afterEach(() => jest.restoreAllMocks());

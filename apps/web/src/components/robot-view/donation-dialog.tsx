@@ -32,7 +32,7 @@ export function DonationDialog({ robotId, robotName, ownerName, onClose, onDonat
     setError(null);
     try {
       await api.wallet.donate(
-        { robotId, amount, message: message.trim() || undefined },
+        { robotId, amount, ...(message.trim() ? { message: message.trim() } : {}) },
         idempotencyKey.current,
       );
       setSuccess(true);

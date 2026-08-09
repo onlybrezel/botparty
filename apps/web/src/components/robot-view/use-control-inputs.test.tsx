@@ -29,6 +29,32 @@ const customButton: ControlButton = {
   position: 1,
 };
 
+const releasedGamepadButton = (): GamepadButton => ({ pressed: false, touched: false, value: 0 });
+
+function createGamepad({
+  axes = [],
+  buttons = [],
+  connected = true,
+}: {
+  axes?: number[];
+  buttons?: GamepadButton[];
+  connected?: boolean;
+} = {}): Gamepad {
+  return {
+    axes,
+    buttons,
+    connected,
+    id: 'test-gamepad',
+    index: 0,
+    mapping: 'standard',
+    timestamp: 0,
+    vibrationActuator: {
+      playEffect: vi.fn().mockResolvedValue('complete'),
+      reset: vi.fn().mockResolvedValue('complete'),
+    },
+  };
+}
+
 describe('robot control input hooks', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -157,14 +183,13 @@ describe('robot control input hooks', () => {
   });
 
   it('polls a connected gamepad, sends edges, and stops when input returns neutral', () => {
-    let pads: Array<Partial<Gamepad> | null> = [
-      {
-        connected: true,
+    let pads: Array<Gamepad | null> = [
+      createGamepad({
         axes: [0.8, -0.8],
-        buttons: Array.from({ length: 16 }, () => ({ pressed: false })) as GamepadButton[],
-      },
+        buttons: Array.from({ length: 16 }, releasedGamepadButton),
+      }),
     ];
-    vi.mocked(navigator.getGamepads).mockImplementation(() => pads as Gamepad[]);
+    vi.mocked(navigator.getGamepads).mockImplementation(() => pads);
     const sendCommand = vi.fn();
     const { unmount } = renderHook(() =>
       useGamepadControl({
@@ -187,7 +212,7 @@ describe('robot control input hooks', () => {
       buttonId: undefined,
     });
 
-    pads = [{ connected: true, axes: [0, 0], buttons: [] as GamepadButton[] }];
+    pads = [createGamepad({ axes: [0, 0] })];
     act(() => vi.advanceTimersByTime(120));
     expect(sendCommand).toHaveBeenLastCalledWith('stop', {
       cooldownMs: 0,
@@ -197,12 +222,10 @@ describe('robot control input hooks', () => {
   });
 
   it('supports d-pad controls, turn gating, disabled mode, and cleanup stop', () => {
-    const buttons = Array.from({ length: 16 }, () => ({ pressed: false })) as GamepadButton[];
-    buttons[12] = { pressed: true } as GamepadButton;
-    buttons[14] = { pressed: true } as GamepadButton;
-    vi.mocked(navigator.getGamepads).mockReturnValue([
-      { connected: true, axes: [], buttons } as unknown as Gamepad,
-    ] as unknown as Gamepad[]);
+    const buttons = Array.from({ length: 16 }, releasedGamepadButton);
+    buttons[12] = { pressed: true, touched: true, value: 1 };
+    buttons[14] = { pressed: true, touched: true, value: 1 };
+    vi.mocked(navigator.getGamepads).mockReturnValue([createGamepad({ buttons })]);
     const sendCommand = vi.fn();
     const enabled = renderHook(() =>
       useGamepadControl({ enabled: true, isMyTurn: true, controlButtons: [], sendCommand }),

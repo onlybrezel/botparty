@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Inject,
 } from '@nestjs/common';
 import { Prisma, TransactionType } from '@botparty/prisma';
 import { randomUUID } from 'crypto';
@@ -27,16 +28,43 @@ interface TransferResult {
 interface CreditDebitOptions {
   description?: string | null;
   metadata?: Prisma.InputJsonValue | null;
-  ledgerGroupId?: string;
-  billingIntentId?: string;
-  billingReversalKey?: string;
-  payoutRequestId?: string;
-  controlCommandId?: string;
+  ledgerGroupId?: string | undefined;
+  billingIntentId?: string | undefined;
+  billingReversalKey?: string | undefined;
+  payoutRequestId?: string | undefined;
+  controlCommandId?: string | undefined;
 }
 
 interface TransferOptions extends CreditDebitOptions {
   payerType: TransactionType;
   payeeType: TransactionType;
+}
+
+export type WalletTransaction = {
+  $executeRaw: Prisma.TransactionClient['$executeRaw'];
+  $queryRaw: Prisma.TransactionClient['$queryRaw'];
+  adminAuditLog: Pick<Prisma.TransactionClient['adminAuditLog'], 'create'>;
+  billingIntent: Pick<Prisma.TransactionClient['billingIntent'], 'findFirst' | 'findUniqueOrThrow' | 'update'>;
+  billingWebhookEvent: Pick<Prisma.TransactionClient['billingWebhookEvent'], 'create'>;
+  controlCommand: Pick<Prisma.TransactionClient['controlCommand'], 'create' | 'findMany' | 'findUnique' | 'update'>;
+  payoutRequest: Pick<
+    Prisma.TransactionClient['payoutRequest'],
+    'create' | 'findFirst' | 'findUnique' | 'findUniqueOrThrow' | 'update' | 'updateMany'
+  >;
+  robot: Pick<Prisma.TransactionClient['robot'], 'findUnique'>;
+  transaction: Pick<Prisma.TransactionClient['transaction'], 'create' | 'findUnique'>;
+  user: Pick<Prisma.TransactionClient['user'], 'findUnique' | 'update'>;
+  walletIdempotencyKey: Pick<Prisma.TransactionClient['walletIdempotencyKey'], 'create' | 'update'>;
+};
+
+interface WalletDatabase {
+  $transaction<T>(
+    callback: (transaction: WalletTransaction) => Promise<T>,
+    options?: { isolationLevel?: Prisma.TransactionIsolationLevel },
+  ): Promise<T>;
+  controlCommand: Pick<PrismaService['controlCommand'], 'findMany'>;
+  transaction: Pick<PrismaService['transaction'], 'findMany'>;
+  user: Pick<PrismaService['user'], 'findUnique'>;
 }
 
 const SERIALIZATION_ERROR_CODES = new Set(['40001', '40P01']);
@@ -47,8 +75,9 @@ export class WalletService {
   private readonly logger = new Logger(WalletService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly platform: PlatformUserService,
+    @Inject(PrismaService) private readonly prisma: WalletDatabase,
+    @Inject(PlatformUserService)
+    private readonly platform: Pick<PlatformUserService, 'computeFee' | 'getPlatformUserId' | 'isPlatformUser'>,
   ) {}
 
   // ─── Reads ───────────────────────────────────────────────────────────────────
@@ -104,7 +133,7 @@ export class WalletService {
         createdAt: tx.createdAt.toISOString(),
         metadata: (tx.metadata as Record<string, unknown> | null) ?? null,
       })),
-      nextCursor: hasMore && sliced.length > 0 ? sliced[sliced.length - 1]!.id : null,
+      nextCursor: hasMore ? sliced.at(-1)?.id ?? null : null,
     };
   }
 
@@ -115,7 +144,11 @@ export class WalletService {
     const all = [];
     let cursor: string | undefined;
     do {
-      const page = await this.listTransactions(userId, { ...opts, cursor, limit: 200 });
+      const page = await this.listTransactions(userId, {
+        ...opts,
+        ...(cursor === undefined ? {} : { cursor }),
+        limit: 200,
+      });
       all.push(...page.items);
       cursor = page.nextCursor ?? undefined;
     } while (cursor);
@@ -188,7 +221,7 @@ export class WalletService {
   }
 
   async creditInTransaction(
-    tx: Prisma.TransactionClient,
+    tx: WalletTransaction,
     userId: string,
     amount: number,
     type: TransactionType,
@@ -207,7 +240,7 @@ export class WalletService {
   }
 
   async debitInTransaction(
-    tx: Prisma.TransactionClient,
+    tx: WalletTransaction,
     userId: string,
     amount: number,
     type: TransactionType,
@@ -226,7 +259,7 @@ export class WalletService {
   }
 
   async reverseBillingCreditInTransaction(
-    tx: Prisma.TransactionClient,
+    tx: WalletTransaction,
     input: {
       userId: string;
       amount: number;
@@ -269,7 +302,7 @@ export class WalletService {
   }
 
   async transferInTransaction(
-    tx: Prisma.TransactionClient,
+    tx: WalletTransaction,
     payerId: string,
     payeeId: string,
     gross: number,
@@ -325,7 +358,7 @@ export class WalletService {
   }
 
   async completeReservedControlInTransaction(
-    tx: Prisma.TransactionClient,
+    tx: WalletTransaction,
     input: {
       payeeId: string;
       gross: number;
@@ -365,7 +398,7 @@ export class WalletService {
   }
 
   async compensateReservedControlInTransaction(
-    tx: Prisma.TransactionClient,
+    tx: WalletTransaction,
     input: { userId: string; amount: number; controlCommandId: string; sourceLedgerGroupId: string },
   ) {
     return this.creditInTransaction(tx, input.userId, input.amount, TransactionType.REFUND, {
@@ -411,7 +444,7 @@ export class WalletService {
   }
 
   async adminAdjustInTransaction(
-    tx: Prisma.TransactionClient,
+    tx: WalletTransaction,
     input: {
       userId: string;
       delta: number;
@@ -447,8 +480,8 @@ export class WalletService {
    * conditional UPDATE that fails the transaction with InsufficientFundsError
    * when the balance would go negative.
    */
-  private async applyDelta(
-    tx: Prisma.TransactionClient,
+  async applyDelta(
+    tx: WalletTransaction,
     userId: string,
     delta: number,
   ): Promise<number> {
@@ -464,8 +497,9 @@ export class WalletService {
                    WHERE id = ${userId}::uuid
                    RETURNING balance`,
       );
-      if (rows.length === 0) throw new NotFoundException('User not found');
-      return rows[0]!.balance;
+      const updated = rows[0];
+      if (!updated) throw new NotFoundException('User not found');
+      return updated.balance;
     }
 
     // Debit path: guarded conditional update.
@@ -480,11 +514,13 @@ export class WalletService {
       if (!existing) throw new NotFoundException('User not found');
       throw new InsufficientFundsError(need, existing.balance);
     }
-    return rows[0]!.balance;
+    const updated = rows[0];
+    if (!updated) throw new NotFoundException('User not found');
+    return updated.balance;
   }
 
   private async recordTransaction(
-    tx: Prisma.TransactionClient,
+    tx: WalletTransaction,
     input: {
       userId: string;
       type: TransactionType;
@@ -492,11 +528,11 @@ export class WalletService {
       balanceAfter: number;
       description: string | null;
       metadata: Prisma.InputJsonValue | null;
-      ledgerGroupId?: string;
-      billingIntentId?: string;
-      billingReversalKey?: string;
-      payoutRequestId?: string;
-      controlCommandId?: string;
+      ledgerGroupId?: string | undefined;
+      billingIntentId?: string | undefined;
+      billingReversalKey?: string | undefined;
+      payoutRequestId?: string | undefined;
+      controlCommandId?: string | undefined;
     },
   ) {
     return tx.transaction.create({
@@ -524,7 +560,7 @@ export class WalletService {
     });
   }
 
-  async runSerializable<T>(fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+  async runSerializable<T>(fn: (tx: WalletTransaction) => Promise<T>): Promise<T> {
     let attempt = 0;
     while (true) {
       try {

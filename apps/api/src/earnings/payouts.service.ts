@@ -4,15 +4,33 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Inject,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { PayoutDestinationType, PayoutRequestStatus, TransactionType } from '@botparty/prisma';
+import { PayoutDestinationType, PayoutRequestStatus, TransactionType, type Prisma } from '@botparty/prisma';
 import { LIMITS } from '@botparty/shared';
 import { randomUUID } from 'crypto';
 import { AeadCipher } from '../common/aead-cipher';
 import { FeatureFlagsService } from '../common/feature-flags.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { WalletService } from '../wallet/wallet.service';
+type PayoutDatabase = { payoutRequest: Pick<PrismaService['payoutRequest'], 'findMany' | 'findUnique' | 'update'> };
+type PayoutTransaction = {
+  $executeRaw: Prisma.TransactionClient['$executeRaw'];
+  adminAuditLog: Pick<Prisma.TransactionClient['adminAuditLog'], 'create'>;
+  payoutRequest: Pick<Prisma.TransactionClient['payoutRequest'], 'create' | 'findFirst' | 'findUnique' | 'findUniqueOrThrow' | 'update' | 'updateMany'>;
+  user: Pick<Prisma.TransactionClient['user'], 'findUnique'>;
+};
+interface PayoutWallet {
+  runSerializable<T>(fn: (tx: PayoutTransaction) => Promise<T>): Promise<T>;
+  debitInTransaction(
+    tx: PayoutTransaction,
+    userId: string,
+    amount: number,
+    type: TransactionType,
+    metadata: Parameters<WalletService['debitInTransaction']>[4],
+  ): Promise<unknown>;
+}
 import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
@@ -20,19 +38,23 @@ export class PayoutsService {
   private readonly destinationCipher: AeadCipher;
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly wallet: WalletService,
-    private readonly features: FeatureFlagsService,
-    private readonly notifications: NotificationsService,
-    config: ConfigService,
+    @Inject(PrismaService) private readonly prisma: PayoutDatabase,
+    @Inject(WalletService) private readonly wallet: PayoutWallet,
+    @Inject(FeatureFlagsService) private readonly features: Pick<FeatureFlagsService, 'assertEnabled'>,
+    @Inject(NotificationsService) private readonly notifications: Pick<NotificationsService, 'publishSafely'>,
+    @Inject(ConfigService) config: { get(key: string): unknown },
   ) {
-    const key = config.get<string>('PAYOUT_DESTINATION_ENCRYPTION_KEY')?.trim()
-      || config.get<string>('WEBHOOK_SECRET_ENCRYPTION_KEY')?.trim()
-      || config.get<string>('JWT_SECRET')?.trim()
+    const readConfig = (name: string): string => {
+      const value = config.get(name);
+      return typeof value === 'string' ? value.trim() : '';
+    };
+    const key = readConfig('PAYOUT_DESTINATION_ENCRYPTION_KEY')
+      || readConfig('WEBHOOK_SECRET_ENCRYPTION_KEY')
+      || readConfig('JWT_SECRET')
       || 'botparty-payout-dev-key-at-least-32-characters';
     this.destinationCipher = new AeadCipher(
       key,
-      (config.get<string>('PAYOUT_DESTINATION_ENCRYPTION_KEY_PREVIOUS') ?? '')
+      readConfig('PAYOUT_DESTINATION_ENCRYPTION_KEY_PREVIOUS')
         .split(',')
         .map((entry) => entry.trim()),
     );

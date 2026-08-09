@@ -1,6 +1,9 @@
 import { Logger } from '@nestjs/common';
 import type { RedisService } from '../redis/redis.service';
 import type { ActiveTurnState } from './gateway-types';
+import { isRecord } from '../common/json-value';
+
+type ActiveTurnRedis = Pick<RedisService, 'eval' | 'get'>;
 
 const TURN_LEASE_MS = 15_000;
 
@@ -41,7 +44,7 @@ export class ActiveTurnStore {
   private redisFallbackActive = false;
 
   constructor(
-    private readonly redis: RedisService,
+    private readonly redis: ActiveTurnRedis,
     readonly instanceId: string,
   ) {}
 
@@ -166,14 +169,23 @@ export class ActiveTurnStore {
   private parse(raw: string | null, robotId: string): ActiveTurnState | null {
     if (!raw) return null;
     try {
-      const parsed = JSON.parse(raw) as Partial<ActiveTurnState>;
+      const parsed: unknown = JSON.parse(raw);
       if (
-        typeof parsed.sessionId !== 'string' || typeof parsed.userId !== 'string' ||
-        typeof parsed.startedAt !== 'number' || typeof parsed.expiresAt !== 'number' ||
-        typeof parsed.ownerId !== 'string' || typeof parsed.fencingToken !== 'number' ||
-        typeof parsed.leaseExpiresAt !== 'number' || parsed.expiresAt <= Date.now()
+        !isRecord(parsed) ||
+        typeof parsed['sessionId'] !== 'string' || typeof parsed['userId'] !== 'string' ||
+        typeof parsed['startedAt'] !== 'number' || typeof parsed['expiresAt'] !== 'number' ||
+        typeof parsed['ownerId'] !== 'string' || typeof parsed['fencingToken'] !== 'number' ||
+        typeof parsed['leaseExpiresAt'] !== 'number' || parsed['expiresAt'] <= Date.now()
       ) return null;
-      return parsed as ActiveTurnState;
+      return {
+        sessionId: parsed['sessionId'],
+        userId: parsed['userId'],
+        startedAt: parsed['startedAt'],
+        expiresAt: parsed['expiresAt'],
+        ownerId: parsed['ownerId'],
+        fencingToken: parsed['fencingToken'],
+        leaseExpiresAt: parsed['leaseExpiresAt'],
+      };
     } catch {
       this.logger.warn(`Invalid active turn state for ${robotId}; ignoring cached payload`);
       return null;

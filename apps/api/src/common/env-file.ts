@@ -1,7 +1,10 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { Logger } from '@nestjs/common';
 
-export function loadFileBackedEnv(env: NodeJS.ProcessEnv = process.env, logger = new Logger('EnvFile')) {
+export function loadFileBackedEnv(
+  env: NodeJS.ProcessEnv = process.env,
+  logger: Pick<Logger, 'warn'> = new Logger('EnvFile'),
+) {
   for (const [key, value] of Object.entries(env)) {
     if (!key.endsWith('_FILE')) {
       continue;

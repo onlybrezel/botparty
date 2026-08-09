@@ -11,7 +11,7 @@ const EMAIL_BY_ROLE: Record<E2ERole, string> = {
 };
 
 export function e2ePassword() {
-  return process.env.E2E_USER_PASSWORD ?? 'E2eDemoPassword!2026';
+  return process.env['E2E_USER_PASSWORD'] ?? 'E2eDemoPassword!2026';
 }
 
 export async function waitForLoginForm(page: Page) {
@@ -30,7 +30,7 @@ export async function signIn(page: Page, role: E2ERole) {
     .getByLabel('Password')
     .fill(
       role === 'admin'
-        ? (process.env.E2E_ADMIN_PASSWORD ?? 'E2eAdminPassword!2026')
+        ? (process.env['E2E_ADMIN_PASSWORD'] ?? 'E2eAdminPassword!2026')
         : e2ePassword(),
     );
   await expect(page.getByRole('button', { name: 'Continue' })).toBeEnabled();

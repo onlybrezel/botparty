@@ -1,18 +1,15 @@
 import { WS_EVENTS } from '@botparty/shared';
-import type { QueueService } from '../queue/queue.service';
-import type { RobotsService } from '../robots/robots.service';
-import type { GatewayRuntimeSupport } from './gateway-runtime.support';
 import type { WsClient } from './gateway-types';
+import { createWsClient } from '../test/ws-client.fixture';
 import { RobotRuntimeHandler } from './robot-runtime.handler';
 
 describe('RobotRuntimeHandler', () => {
   function createClient(): WsClient {
-    return {
+    return createWsClient({
       id: 'socket-1',
       send: jest.fn(),
       close: jest.fn(),
-      readyState: WebSocket.OPEN,
-    } as unknown as WsClient;
+    });
   }
 
   function createDeps() {
@@ -32,6 +29,7 @@ describe('RobotRuntimeHandler', () => {
         warn: jest.fn(),
         log: jest.fn(),
         error: jest.fn(),
+        debug: jest.fn(),
       },
     };
     const robotsService = {
@@ -49,11 +47,11 @@ describe('RobotRuntimeHandler', () => {
     const syncTurnLifecycle = jest.fn().mockResolvedValue(undefined);
 
     return {
-      runtime: runtime as unknown as GatewayRuntimeSupport,
+      runtime,
       runtimeMock: runtime,
-      robotsService: robotsService as unknown as RobotsService,
+      robotsService,
       robotsMock: robotsService,
-      queueService: queueService as unknown as QueueService,
+      queueService,
       queueMock: queueService,
       syncTurnLifecycle,
     };

@@ -7,10 +7,6 @@ import {
 import { NotFoundException } from '@nestjs/common';
 import { RobotThumbnailService } from './robot-thumbnail.service';
 
-type RobotThumbnailServiceTestAccess = {
-  _createObjectStorageClient(): { send: jest.Mock };
-};
-
 const VALID_PNG_DATA_URL =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO8B9pUAAAAASUVORK5CYII=';
 
@@ -26,9 +22,13 @@ describe('RobotThumbnailService', () => {
       findUnique: jest.Mock;
       update: jest.Mock;
     };
+    storageDeletionTask: {
+      createMany: jest.Mock;
+    };
   };
   let storageDeletion: { enqueue: jest.Mock };
   let originalEnv: NodeJS.ProcessEnv;
+  let objectStorageClientFactory: jest.Mock;
 
   beforeEach(() => {
     originalEnv = { ...process.env };
@@ -41,13 +41,17 @@ describe('RobotThumbnailService', () => {
         findUnique: jest.fn(),
         update: jest.fn(),
       },
+      storageDeletionTask: {
+        createMany: jest.fn(),
+      },
     };
     prisma = {
       ...transactionClient,
       $transaction: jest.fn(async (callback: (tx: typeof transactionClient) => Promise<unknown>) => callback(transactionClient)),
     };
     storageDeletion = { enqueue: jest.fn().mockResolvedValue(undefined) };
-    service = new RobotThumbnailService(prisma as never, storageDeletion as never);
+    objectStorageClientFactory = jest.fn();
+    service = new RobotThumbnailService(prisma, storageDeletion, objectStorageClientFactory);
   });
 
   afterEach(async () => {
@@ -72,12 +76,12 @@ describe('RobotThumbnailService', () => {
   });
 
   it('uploads thumbnails to private S3-compatible storage and returns the API proxy url', async () => {
-    process.env.THUMBNAIL_S3_BUCKET = 'botparty-thumbnails';
-    process.env.THUMBNAIL_S3_REGION = 'auto';
-    process.env.THUMBNAIL_S3_ENDPOINT = 'https://storage.example.com';
-    process.env.THUMBNAIL_S3_ACCESS_KEY_ID = 'access-key';
-    process.env.THUMBNAIL_S3_SECRET_ACCESS_KEY = 'secret-key';
-    process.env.THUMBNAIL_PUBLIC_BASE_URL = 'https://cdn.example.com';
+    process.env['THUMBNAIL_S3_BUCKET'] = 'botparty-thumbnails';
+    process.env['THUMBNAIL_S3_REGION'] = 'auto';
+    process.env['THUMBNAIL_S3_ENDPOINT'] = 'https://storage.example.com';
+    process.env['THUMBNAIL_S3_ACCESS_KEY_ID'] = 'access-key';
+    process.env['THUMBNAIL_S3_SECRET_ACCESS_KEY'] = 'secret-key';
+    process.env['THUMBNAIL_PUBLIC_BASE_URL'] = 'https://cdn.example.com';
 
     prisma.robot.findUnique.mockResolvedValue({
       id: 'robot-1',
@@ -94,18 +98,19 @@ describe('RobotThumbnailService', () => {
     const send = jest.fn()
       .mockResolvedValueOnce({ Contents: [] })
       .mockResolvedValueOnce({});
-    jest
-      .spyOn(service as unknown as RobotThumbnailServiceTestAccess, '_createObjectStorageClient')
-      .mockReturnValue({ send });
+    objectStorageClientFactory.mockReturnValue({ send });
     const saved = await service.save('robot-1', 'owner-1', VALID_PNG_DATA_URL);
 
     expect(send).toHaveBeenNthCalledWith(1, expect.any(ListObjectsV2Command));
     expect(send).toHaveBeenNthCalledWith(2, expect.any(PutObjectCommand));
     expect(saved.thumbnailUrl).toBe('/api/v1/robots/robot-1/thumbnail-image');
 
-    const putInput = send.mock.calls[1]?.[0].input as { CacheControl?: string; ContentType?: string };
-    expect(putInput.ContentType).toBe('image/webp');
-    expect(putInput.CacheControl).toBe('private, no-store');
+    const putCommand: unknown = send.mock.calls[1]?.[0];
+    if (!(putCommand instanceof PutObjectCommand)) {
+      throw new Error('Expected the second storage request to upload an object');
+    }
+    expect(putCommand.input.ContentType).toBe('image/webp');
+    expect(putCommand.input.CacheControl).toBe('private, no-store');
     expect(storageDeletion.enqueue).toHaveBeenCalledWith(
       expect.any(Object),
       'botparty-thumbnails',
@@ -114,20 +119,18 @@ describe('RobotThumbnailService', () => {
   });
 
   it('removes a newly uploaded object when the database transaction fails', async () => {
-    process.env.THUMBNAIL_S3_BUCKET = 'botparty-thumbnails';
-    process.env.THUMBNAIL_S3_REGION = 'auto';
-    process.env.THUMBNAIL_S3_ACCESS_KEY_ID = 'access-key';
-    process.env.THUMBNAIL_S3_SECRET_ACCESS_KEY = 'secret-key';
-    process.env.THUMBNAIL_PUBLIC_BASE_URL = 'https://cdn.example.com';
+    process.env['THUMBNAIL_S3_BUCKET'] = 'botparty-thumbnails';
+    process.env['THUMBNAIL_S3_REGION'] = 'auto';
+    process.env['THUMBNAIL_S3_ACCESS_KEY_ID'] = 'access-key';
+    process.env['THUMBNAIL_S3_SECRET_ACCESS_KEY'] = 'secret-key';
+    process.env['THUMBNAIL_PUBLIC_BASE_URL'] = 'https://cdn.example.com';
     prisma.robot.findUnique.mockResolvedValue({ id: 'robot-1', ownerId: 'owner-1' });
     prisma.robot.update.mockRejectedValue(new Error('database unavailable'));
     const send = jest.fn()
       .mockResolvedValueOnce({ Contents: [] })
       .mockResolvedValueOnce({})
       .mockResolvedValueOnce({ Errors: [] });
-    jest
-      .spyOn(service as unknown as RobotThumbnailServiceTestAccess, '_createObjectStorageClient')
-      .mockReturnValue({ send });
+    objectStorageClientFactory.mockReturnValue({ send });
 
     await expect(service.save('robot-1', 'owner-1', VALID_PNG_DATA_URL)).rejects.toThrow(
       'database unavailable',
@@ -139,11 +142,11 @@ describe('RobotThumbnailService', () => {
   });
 
   it('hides a cleared thumbnail and queues its exact object key transactionally', async () => {
-    process.env.THUMBNAIL_S3_BUCKET = 'botparty-thumbnails';
-    process.env.THUMBNAIL_S3_REGION = 'auto';
-    process.env.THUMBNAIL_S3_ACCESS_KEY_ID = 'access-key';
-    process.env.THUMBNAIL_S3_SECRET_ACCESS_KEY = 'secret-key';
-    process.env.THUMBNAIL_PUBLIC_BASE_URL = 'https://cdn.example.com';
+    process.env['THUMBNAIL_S3_BUCKET'] = 'botparty-thumbnails';
+    process.env['THUMBNAIL_S3_REGION'] = 'auto';
+    process.env['THUMBNAIL_S3_ACCESS_KEY_ID'] = 'access-key';
+    process.env['THUMBNAIL_S3_SECRET_ACCESS_KEY'] = 'secret-key';
+    process.env['THUMBNAIL_PUBLIC_BASE_URL'] = 'https://cdn.example.com';
 
     prisma.robot.findUnique.mockResolvedValue({
       id: 'robot-1',
@@ -158,9 +161,7 @@ describe('RobotThumbnailService', () => {
 
     const send = jest.fn()
       .mockResolvedValueOnce({ Contents: [{ Key: 'robot-thumbnails/robot-1/1700000000000.webp' }] });
-    jest
-      .spyOn(service as unknown as RobotThumbnailServiceTestAccess, '_createObjectStorageClient')
-      .mockReturnValue({ send });
+    objectStorageClientFactory.mockReturnValue({ send });
 
     const cleared = await service.clear('robot-1', 'owner-1');
 
@@ -175,11 +176,11 @@ describe('RobotThumbnailService', () => {
   });
 
   it('reads thumbnails from object storage when the stored url points at the CDN', async () => {
-    process.env.THUMBNAIL_S3_BUCKET = 'botparty-thumbnails';
-    process.env.THUMBNAIL_S3_REGION = 'auto';
-    process.env.THUMBNAIL_S3_ACCESS_KEY_ID = 'access-key';
-    process.env.THUMBNAIL_S3_SECRET_ACCESS_KEY = 'secret-key';
-    process.env.THUMBNAIL_PUBLIC_BASE_URL = 'https://cdn.example.com';
+    process.env['THUMBNAIL_S3_BUCKET'] = 'botparty-thumbnails';
+    process.env['THUMBNAIL_S3_REGION'] = 'auto';
+    process.env['THUMBNAIL_S3_ACCESS_KEY_ID'] = 'access-key';
+    process.env['THUMBNAIL_S3_SECRET_ACCESS_KEY'] = 'secret-key';
+    process.env['THUMBNAIL_PUBLIC_BASE_URL'] = 'https://cdn.example.com';
 
     prisma.robot.findUnique.mockResolvedValue({
       id: 'robot-1',
@@ -193,9 +194,7 @@ describe('RobotThumbnailService', () => {
       Body: { transformToByteArray },
       ContentType: 'image/webp',
     });
-    jest
-      .spyOn(service as unknown as RobotThumbnailServiceTestAccess, '_createObjectStorageClient')
-      .mockReturnValue({ send });
+    objectStorageClientFactory.mockReturnValue({ send });
 
     const file = await service.read('robot-1', null);
 
@@ -208,11 +207,11 @@ describe('RobotThumbnailService', () => {
   });
 
   it('does not disclose private thumbnails to anonymous or foreign users', async () => {
-    process.env.THUMBNAIL_S3_BUCKET = 'botparty-thumbnails';
-    process.env.THUMBNAIL_S3_REGION = 'auto';
-    process.env.THUMBNAIL_S3_ACCESS_KEY_ID = 'access-key';
-    process.env.THUMBNAIL_S3_SECRET_ACCESS_KEY = 'secret-key';
-    process.env.THUMBNAIL_PUBLIC_BASE_URL = 'https://cdn.example.com';
+    process.env['THUMBNAIL_S3_BUCKET'] = 'botparty-thumbnails';
+    process.env['THUMBNAIL_S3_REGION'] = 'auto';
+    process.env['THUMBNAIL_S3_ACCESS_KEY_ID'] = 'access-key';
+    process.env['THUMBNAIL_S3_SECRET_ACCESS_KEY'] = 'secret-key';
+    process.env['THUMBNAIL_PUBLIC_BASE_URL'] = 'https://cdn.example.com';
     prisma.robot.findUnique.mockResolvedValue({
       id: 'private-robot',
       ownerId: 'owner-1',
@@ -221,9 +220,7 @@ describe('RobotThumbnailService', () => {
     });
     prisma.user.findUnique.mockResolvedValue({ role: 'USER' });
     const send = jest.fn();
-    jest
-      .spyOn(service as unknown as RobotThumbnailServiceTestAccess, '_createObjectStorageClient')
-      .mockReturnValue({ send });
+    objectStorageClientFactory.mockReturnValue({ send });
 
     await expect(service.read('private-robot', null)).rejects.toBeInstanceOf(NotFoundException);
     await expect(service.read('private-robot', 'foreign-user')).rejects.toBeInstanceOf(
@@ -236,11 +233,11 @@ describe('RobotThumbnailService', () => {
     ['owner', 'owner-1', null],
     ['staff', 'staff-1', { role: 'MOD' }],
   ])('serves a private thumbnail to its %s', async (_label, requesterId, requester) => {
-    process.env.THUMBNAIL_S3_BUCKET = 'botparty-thumbnails';
-    process.env.THUMBNAIL_S3_REGION = 'auto';
-    process.env.THUMBNAIL_S3_ACCESS_KEY_ID = 'access-key';
-    process.env.THUMBNAIL_S3_SECRET_ACCESS_KEY = 'secret-key';
-    process.env.THUMBNAIL_PUBLIC_BASE_URL = 'https://cdn.example.com';
+    process.env['THUMBNAIL_S3_BUCKET'] = 'botparty-thumbnails';
+    process.env['THUMBNAIL_S3_REGION'] = 'auto';
+    process.env['THUMBNAIL_S3_ACCESS_KEY_ID'] = 'access-key';
+    process.env['THUMBNAIL_S3_SECRET_ACCESS_KEY'] = 'secret-key';
+    process.env['THUMBNAIL_PUBLIC_BASE_URL'] = 'https://cdn.example.com';
     prisma.robot.findUnique.mockResolvedValue({
       id: 'private-robot',
       ownerId: 'owner-1',
@@ -252,9 +249,7 @@ describe('RobotThumbnailService', () => {
       Body: { transformToByteArray: jest.fn().mockResolvedValue(Uint8Array.from([7, 8])) },
       ContentType: 'image/webp',
     });
-    jest
-      .spyOn(service as unknown as RobotThumbnailServiceTestAccess, '_createObjectStorageClient')
-      .mockReturnValue({ send });
+    objectStorageClientFactory.mockReturnValue({ send });
 
     await expect(service.read('private-robot', requesterId)).resolves.toEqual({
       buffer: Buffer.from([7, 8]),
@@ -264,11 +259,11 @@ describe('RobotThumbnailService', () => {
   });
 
   it('reads the latest object for a robot when the stored thumbnail url is legacy', async () => {
-    process.env.THUMBNAIL_S3_BUCKET = 'botparty-thumbnails';
-    process.env.THUMBNAIL_S3_REGION = 'auto';
-    process.env.THUMBNAIL_S3_ACCESS_KEY_ID = 'access-key';
-    process.env.THUMBNAIL_S3_SECRET_ACCESS_KEY = 'secret-key';
-    process.env.THUMBNAIL_PUBLIC_BASE_URL = 'https://cdn.example.com';
+    process.env['THUMBNAIL_S3_BUCKET'] = 'botparty-thumbnails';
+    process.env['THUMBNAIL_S3_REGION'] = 'auto';
+    process.env['THUMBNAIL_S3_ACCESS_KEY_ID'] = 'access-key';
+    process.env['THUMBNAIL_S3_SECRET_ACCESS_KEY'] = 'secret-key';
+    process.env['THUMBNAIL_PUBLIC_BASE_URL'] = 'https://cdn.example.com';
 
     prisma.robot.findUnique.mockResolvedValue({
       id: 'robot-1',
@@ -285,9 +280,7 @@ describe('RobotThumbnailService', () => {
         Body: { transformToByteArray: jest.fn().mockResolvedValue(Uint8Array.from([4, 5, 6])) },
         ContentType: 'image/webp',
       });
-    jest
-      .spyOn(service as unknown as RobotThumbnailServiceTestAccess, '_createObjectStorageClient')
-      .mockReturnValue({ send });
+    objectStorageClientFactory.mockReturnValue({ send });
 
     const file = await service.read('robot-1', null);
 

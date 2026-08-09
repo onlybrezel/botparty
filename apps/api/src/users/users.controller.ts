@@ -114,8 +114,8 @@ export class UsersController {
     @Query('limit') limit?: string,
   ) {
     return this.usersService.listUsersForStaff({
-      q,
-      limit: limit ? Number(limit) : undefined,
+      ...(q === undefined ? {} : { q }),
+      ...(limit ? { limit: Number(limit) } : {}),
       requesterRole: requester.role,
     });
   }
@@ -154,7 +154,7 @@ export class UsersController {
   ) {
     return this.usersService.getLeaderboard({
       limit: limit ? Number(limit) : 20,
-      period,
+      ...(period === undefined ? {} : { period }),
       metric: metric === 'creator_revenue' ? 'creator_revenue' : 'engagement',
     });
   }

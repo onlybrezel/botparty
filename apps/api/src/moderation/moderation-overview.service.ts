@@ -29,7 +29,7 @@ export class ModerationOverviewService {
 
     const [recentActions, activeRestrictions, robots] = await Promise.all([
       this.prisma.robotModerationEntry.findMany({
-        where: robotId ? { robotId } : undefined,
+        ...(robotId ? { where: { robotId } } : {}),
         orderBy: { createdAt: 'desc' },
         take: 150,
         include: {
@@ -49,7 +49,7 @@ export class ModerationOverviewService {
         },
       }),
       this.prisma.robot.findMany({
-        where: robotId ? { id: robotId } : undefined,
+        ...(robotId ? { where: { id: robotId } } : {}),
         orderBy: { createdAt: 'desc' },
         take: 100,
         select: {

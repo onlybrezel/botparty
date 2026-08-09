@@ -15,7 +15,7 @@ export class ModerationEnforcerHandler {
 
   constructor(
     private readonly ctx: ModerationEnforcerContext,
-    private readonly queueService: QueueService,
+    private readonly queueService: Pick<QueueService, 'leave'>,
   ) {}
 
   async enforce(robotId: string, payload: { event?: string; data?: unknown }) {
@@ -32,7 +32,7 @@ export class ModerationEnforcerHandler {
       payload.data && typeof payload.data === 'object'
         ? (payload.data as Record<string, unknown>)
         : null;
-    const targetUserId = typeof data?.userId === 'string' ? data.userId : null;
+    const targetUserId = typeof data?.['userId'] === 'string' ? data['userId'] : null;
     if (!targetUserId) {
       return;
     }
@@ -94,8 +94,8 @@ export class ModerationEnforcerHandler {
     }
     if (event === WS_EVENTS.MOD_TIMEOUT) {
       const expiresAt =
-        typeof details.expiresAt === 'string' && details.expiresAt.trim().length > 0
-          ? Date.parse(details.expiresAt)
+        typeof details['expiresAt'] === 'string' && details['expiresAt'].trim().length > 0
+          ? Date.parse(details['expiresAt'])
           : Number.NaN;
       if (Number.isFinite(expiresAt) && expiresAt > Date.now()) {
         const totalMinutes = Math.max(1, Math.round((expiresAt - Date.now()) / 60000));
@@ -108,17 +108,17 @@ export class ModerationEnforcerHandler {
   }
 
   private readTargetLabel(details: Record<string, unknown>): string | null {
-    const displayName = typeof details.displayName === 'string' ? details.displayName.trim() : '';
+    const displayName = typeof details['displayName'] === 'string' ? details['displayName'].trim() : '';
     if (displayName) {
       return displayName;
     }
 
-    const username = typeof details.username === 'string' ? details.username.trim() : '';
+    const username = typeof details['username'] === 'string' ? details['username'].trim() : '';
     if (username) {
       return username;
     }
 
-    const userId = typeof details.userId === 'string' ? details.userId.trim() : '';
+    const userId = typeof details['userId'] === 'string' ? details['userId'].trim() : '';
     return userId ? userId.slice(0, 8) : null;
   }
 }

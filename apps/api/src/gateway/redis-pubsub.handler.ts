@@ -1,16 +1,26 @@
 import { Logger } from '@nestjs/common';
 import { WS_EVENTS } from '@botparty/shared';
-import type Redis from 'ioredis';
 import type { QueueService } from '../queue/queue.service';
-import type { RedisService } from '../redis/redis.service';
+import { parseJsonRecord } from '../common/json-value';
 
 type QueueSnapshot = Awaited<ReturnType<QueueService['getQueue']>>;
 
-type RedisModerationPayload = { event?: string; data?: unknown };
-type RedisRoomPayload = { originId?: string; event?: string; data?: unknown };
-type RedisSystemPayload = { event?: string; data?: unknown };
+type RedisModerationPayload = { event: string; data?: unknown };
+type RedisRoomPayload = { originId?: string; event: string; data?: unknown };
+type RedisSystemPayload = { event: string; data?: unknown };
 
 const CHANNEL_PATTERNS = ['queue:*', 'ws:moderation:*', 'ws:room:*', 'ws:system:*'] as const;
+
+interface PubSubSubscriber {
+  connect(): Promise<void>;
+  on(event: 'pmessage', listener: (pattern: string, channel: string, message: string) => void): unknown;
+  psubscribe(...patterns: string[]): Promise<unknown>;
+  quit(): Promise<unknown>;
+}
+
+interface PubSubRedis {
+  duplicate(options: { lazyConnect: true }): PubSubSubscriber;
+}
 
 export interface RedisPubSubContext {
   readonly instanceId: string;
@@ -26,11 +36,11 @@ export interface RedisPubSubContext {
 
 export class RedisPubSubHandler {
   private readonly logger = new Logger(RedisPubSubHandler.name);
-  private subscriber: Redis | null = null;
+  private subscriber: PubSubSubscriber | null = null;
 
   constructor(
-    private readonly redis: RedisService,
-    private readonly queueService: QueueService,
+    private readonly redis: PubSubRedis,
+    private readonly queueService: Pick<QueueService, 'getQueue'>,
     private readonly ctx: RedisPubSubContext,
   ) {}
 
@@ -43,7 +53,7 @@ export class RedisPubSubHandler {
     this.subscriber = subscriber;
 
     subscriber.on('pmessage', (_pattern, channel, message) => {
-      void this.handleMessage(channel, message).catch((error) => {
+      void this.handlePublishedMessage(channel, message).catch((error) => {
         this.logger.warn(`Redis pub/sub message failed on ${channel}: ${(error as Error).message}`);
       });
     });
@@ -62,7 +72,7 @@ export class RedisPubSubHandler {
     await subscriber.quit();
   }
 
-  private async handleMessage(channel: string, message: string): Promise<void> {
+  async handlePublishedMessage(channel: string, message: string): Promise<void> {
     if (channel.startsWith('queue:')) {
       await this.handleQueueMessage(channel.slice('queue:'.length));
       return;
@@ -107,10 +117,11 @@ export class RedisPubSubHandler {
     }
 
     try {
-      const payload = JSON.parse(message) as RedisModerationPayload;
-      if (!payload.event) {
+      const parsed = parseJsonRecord(message);
+      if (!parsed || typeof parsed['event'] !== 'string') {
         return;
       }
+      const payload: RedisModerationPayload = { event: parsed['event'], data: parsed['data'] };
 
       await this.ctx.enforceModerationEvent(robotId, payload);
       this.ctx.broadcastToRoomLocally(robotId, payload.event, payload.data ?? {});
@@ -133,10 +144,15 @@ export class RedisPubSubHandler {
     }
 
     try {
-      const payload = JSON.parse(message) as RedisRoomPayload;
-      if (!payload.event || payload.originId === this.ctx.instanceId) {
+      const parsed = parseJsonRecord(message);
+      if (!parsed || typeof parsed['event'] !== 'string' || parsed['originId'] === this.ctx.instanceId) {
         return;
       }
+      const payload: RedisRoomPayload = {
+        event: parsed['event'],
+        data: parsed['data'],
+        ...(typeof parsed['originId'] === 'string' ? { originId: parsed['originId'] } : {}),
+      };
 
       this.ctx.broadcastToRoomLocally(robotId, payload.event, payload.data ?? {});
     } catch (err) {
@@ -146,10 +162,11 @@ export class RedisPubSubHandler {
 
   private handleSystemMessage(message: string): void {
     try {
-      const payload = JSON.parse(message) as RedisSystemPayload;
-      if (!payload.event) {
+      const parsed = parseJsonRecord(message);
+      if (!parsed || typeof parsed['event'] !== 'string') {
         return;
       }
+      const payload: RedisSystemPayload = { event: parsed['event'], data: parsed['data'] };
 
       const data =
         payload.data && typeof payload.data === 'object' && !Array.isArray(payload.data)

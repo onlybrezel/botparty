@@ -10,11 +10,11 @@ let tracingSdk: NodeSDK | null = null;
 let tracingStarted = false;
 
 function isTracingEnabled(): boolean {
-  return (process.env.OTEL_ENABLED ?? '').trim().toLowerCase() === 'true';
+  return (process.env['OTEL_ENABLED'] ?? '').trim().toLowerCase() === 'true';
 }
 
 function buildTraceExporter(): OTLPTraceExporter | undefined {
-  const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT?.trim();
+  const endpoint = process.env['OTEL_EXPORTER_OTLP_ENDPOINT']?.trim();
   if (!endpoint) {
     return undefined;
   }
@@ -29,12 +29,13 @@ export async function initTracing(logger: Logger): Promise<void> {
     return;
   }
 
+  const traceExporter = buildTraceExporter();
   tracingSdk = new NodeSDK({
     resource: resourceFromAttributes({
-      [SemanticResourceAttributes.SERVICE_NAME]: process.env.OTEL_SERVICE_NAME?.trim() || 'botparty-api',
-      [SemanticResourceAttributes.SERVICE_VERSION]: process.env.npm_package_version?.trim() || '0.1.0',
+      [SemanticResourceAttributes.SERVICE_NAME]: process.env['OTEL_SERVICE_NAME']?.trim() || 'botparty-api',
+      [SemanticResourceAttributes.SERVICE_VERSION]: process.env['npm_package_version']?.trim() || '0.1.0',
     }),
-    traceExporter: buildTraceExporter(),
+    ...(traceExporter === undefined ? {} : { traceExporter }),
     instrumentations: [new PrismaInstrumentation(), getNodeAutoInstrumentations()],
   });
 

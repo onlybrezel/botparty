@@ -1,8 +1,11 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import StripeSDK from 'stripe';
-import type { BillingIntent } from '@botparty/prisma';
-import type { CheckoutSession, PaymentProvider, VerifiedWebhookEvent } from './payment-provider.interface';
+import type { CheckoutBillingIntent, CheckoutSession, PaymentProvider, VerifiedWebhookEvent } from './payment-provider.interface';
+
+interface StripeConfig {
+  get(key: string): string | undefined;
+}
 
 type StripeClient = InstanceType<typeof StripeSDK>;
 
@@ -67,19 +70,19 @@ export class StripeProvider implements PaymentProvider {
   private readonly client: StripeClient | null;
   private readonly webhookSecret: string | null;
 
-  constructor(private readonly config: ConfigService) {
-    const key = this.config.get<string>('STRIPE_SECRET_KEY');
+  constructor(@Inject(ConfigService) private readonly config: StripeConfig) {
+    const key = this.config.get('STRIPE_SECRET_KEY');
     this.client = key
-      ? new StripeSDK(key, { apiVersion: '2024-11-20.acacia' as never })
+      ? new StripeSDK(key, { apiVersion: '2026-04-22.dahlia' })
       : null;
-    this.webhookSecret = this.config.get<string>('STRIPE_WEBHOOK_SECRET') ?? null;
+    this.webhookSecret = this.config.get('STRIPE_WEBHOOK_SECRET') ?? null;
     if (!this.client) {
       this.logger.warn('Stripe disabled: STRIPE_SECRET_KEY not set');
     }
   }
 
   async createCheckout(input: {
-    intent: BillingIntent;
+    intent: CheckoutBillingIntent;
     successUrl: string;
     cancelUrl: string;
   }): Promise<CheckoutSession> {
@@ -119,7 +122,7 @@ export class StripeProvider implements PaymentProvider {
   }
 
   async createSubscriptionCheckout(input: {
-    intent: BillingIntent;
+    intent: CheckoutBillingIntent;
     successUrl: string;
     cancelUrl: string;
   }): Promise<CheckoutSession> {
@@ -218,7 +221,7 @@ export class StripeProvider implements PaymentProvider {
         const obj = event.data.object as StripeCheckoutSession;
         const isSubscription = obj.mode === 'subscription' || Boolean(obj.subscription);
         type = obj.payment_status === 'paid' || isSubscription ? 'completed' : 'failed';
-        intentId = obj.client_reference_id ?? obj.metadata?.intentId ?? null;
+        intentId = obj.client_reference_id ?? obj.metadata?.['intentId'] ?? null;
         providerRef = obj.subscription ?? obj.id;
         subscriptionRef = obj.subscription ?? null;
         paymentRef =
@@ -264,7 +267,7 @@ export class StripeProvider implements PaymentProvider {
       case 'checkout.session.expired': {
         const obj = event.data.object as StripeCheckoutSession;
         type = 'failed';
-        intentId = obj.client_reference_id ?? obj.metadata?.intentId ?? null;
+        intentId = obj.client_reference_id ?? obj.metadata?.['intentId'] ?? null;
         providerRef = obj.id;
         break;
       }

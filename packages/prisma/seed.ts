@@ -50,7 +50,7 @@ async function ensurePlatformUser() {
 }
 
 async function ensureInitialAdmin() {
-  const password = process.env.SEED_ADMIN_PASSWORD?.trim();
+  const password = process.env['SEED_ADMIN_PASSWORD']?.trim();
   if (!password) {
     console.log('ℹ️  Initial admin skipped (SEED_ADMIN_PASSWORD is not set).');
     return null;
@@ -59,8 +59,8 @@ async function ensureInitialAdmin() {
     throw new Error('SEED_ADMIN_PASSWORD must contain at least 16 characters.');
   }
 
-  const email = process.env.SEED_ADMIN_EMAIL?.trim().toLowerCase() || 'admin@localhost.invalid';
-  const username = process.env.SEED_ADMIN_USERNAME?.trim() || 'admin';
+  const email = process.env['SEED_ADMIN_EMAIL']?.trim().toLowerCase() || 'admin@localhost.invalid';
+  const username = process.env['SEED_ADMIN_USERNAME']?.trim() || 'admin';
   const passwordHash = await hash(password);
   const admin = await prisma.user.upsert({
     where: { email },
@@ -253,11 +253,11 @@ async function ensureE2EFixtures(
 }
 
 async function ensureDemoData(admin: NonNullable<Awaited<ReturnType<typeof ensureInitialAdmin>>>) {
-  if (process.env.NODE_ENV === 'production') {
+  if (process.env['NODE_ENV'] === 'production') {
     throw new Error('SEED_DEMO_DATA and SEED_E2E_FIXTURES are forbidden in production.');
   }
 
-  const demoPassword = process.env.SEED_DEMO_USER_PASSWORD?.trim();
+  const demoPassword = process.env['SEED_DEMO_USER_PASSWORD']?.trim();
   if (!demoPassword || demoPassword.length < 12) {
     throw new Error('SEED_DEMO_USER_PASSWORD with at least 12 characters is required for demo data.');
   }

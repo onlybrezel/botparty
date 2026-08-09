@@ -77,7 +77,6 @@ describe('wallet page helpers', () => {
       ...baseTransaction,
       id: 'chargeback-1',
       type: TransactionType.CHARGEBACK,
-      reconciliationId: undefined,
       description: '@formula',
     };
     const csv = buildWalletExportContent([baseTransaction, refund, chargeback], 'csv', 'now');

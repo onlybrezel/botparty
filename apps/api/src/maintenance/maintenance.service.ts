@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@botparty/prisma';
@@ -7,35 +7,63 @@ import { Counter, Gauge, register } from 'prom-client';
 import { StorageDeletionService } from '../storage/storage-deletion.service';
 
 // AnalyticsEvent rows older than this are deleted during maintenance sweeps.
-const ANALYTICS_RETENTION_DAYS = Number(process.env.ANALYTICS_RETENTION_DAYS ?? 90);
+const ANALYTICS_RETENTION_DAYS = Number(process.env['ANALYTICS_RETENTION_DAYS'] ?? 90);
 // How often the cleanup job runs (default: every 6 hours).
-const CLEANUP_INTERVAL_MS = Number(process.env.CLEANUP_INTERVAL_MS ?? 6 * 60 * 60 * 1000);
-const ROBOT_STREAM_KEY_MAX_AGE_DAYS = Number(process.env.ROBOT_STREAM_KEY_MAX_AGE_DAYS ?? 90);
-const ADMIN_AUDIT_LOG_RETENTION_DAYS = Number(process.env.ADMIN_AUDIT_LOG_RETENTION_DAYS ?? 180);
-const LEDGER_RECONCILIATION_LOOKBACK_DAYS = Number(process.env.LEDGER_RECONCILIATION_LOOKBACK_DAYS ?? 30);
-const CHAT_RETENTION_DAYS = Number(process.env.CHAT_RETENTION_DAYS ?? 30);
-const BILLING_WEBHOOK_PAYLOAD_RETENTION_DAYS = Number(process.env.BILLING_WEBHOOK_PAYLOAD_RETENTION_DAYS ?? 30);
-const MODERATION_RETENTION_DAYS = Number(process.env.MODERATION_RETENTION_DAYS ?? 180);
-const RECORDING_RETENTION_DAYS = Number(process.env.RECORDING_RETENTION_DAYS ?? 30);
+const CLEANUP_INTERVAL_MS = Number(process.env['CLEANUP_INTERVAL_MS'] ?? 6 * 60 * 60 * 1000);
+const ROBOT_STREAM_KEY_MAX_AGE_DAYS = Number(process.env['ROBOT_STREAM_KEY_MAX_AGE_DAYS'] ?? 90);
+const ADMIN_AUDIT_LOG_RETENTION_DAYS = Number(process.env['ADMIN_AUDIT_LOG_RETENTION_DAYS'] ?? 180);
+const LEDGER_RECONCILIATION_LOOKBACK_DAYS = Number(
+  process.env['LEDGER_RECONCILIATION_LOOKBACK_DAYS'] ?? 30,
+);
+const CHAT_RETENTION_DAYS = Number(process.env['CHAT_RETENTION_DAYS'] ?? 30);
+const BILLING_WEBHOOK_PAYLOAD_RETENTION_DAYS = Number(
+  process.env['BILLING_WEBHOOK_PAYLOAD_RETENTION_DAYS'] ?? 30,
+);
+const MODERATION_RETENTION_DAYS = Number(process.env['MODERATION_RETENTION_DAYS'] ?? 180);
+const RECORDING_RETENTION_DAYS = Number(process.env['RECORDING_RETENTION_DAYS'] ?? 30);
+const ROBOT_MAINTENANCE_BATCH_SIZE = 100;
 
-const cleanupRuns = (register.getSingleMetric('botparty_retention_cleanup_runs_total') as Counter<'dataset' | 'outcome'> | undefined)
-  ?? new Counter({
+const cleanupRuns =
+  (register.getSingleMetric('botparty_retention_cleanup_runs_total') as
+    | Counter<'dataset' | 'outcome'>
+    | undefined) ??
+  new Counter({
     name: 'botparty_retention_cleanup_runs_total',
     help: 'Retention cleanup runs by dataset and outcome',
     labelNames: ['dataset', 'outcome'] as const,
   });
-const cleanupRows = (register.getSingleMetric('botparty_retention_cleanup_rows_total') as Counter<'dataset'> | undefined)
-  ?? new Counter({
+const cleanupRows =
+  (register.getSingleMetric('botparty_retention_cleanup_rows_total') as
+    | Counter<'dataset'>
+    | undefined) ??
+  new Counter({
     name: 'botparty_retention_cleanup_rows_total',
     help: 'Rows deleted or minimized by retention cleanup',
     labelNames: ['dataset'] as const,
   });
-const cleanupLastSuccess = (register.getSingleMetric('botparty_retention_cleanup_last_success_timestamp_seconds') as Gauge<'dataset'> | undefined)
-  ?? new Gauge({
+const cleanupLastSuccess =
+  (register.getSingleMetric('botparty_retention_cleanup_last_success_timestamp_seconds') as
+    | Gauge<'dataset'>
+    | undefined) ??
+  new Gauge({
     name: 'botparty_retention_cleanup_last_success_timestamp_seconds',
     help: 'Unix timestamp of the last successful retention cleanup',
     labelNames: ['dataset'] as const,
   });
+
+interface MaintenanceDatabase {
+  $executeRaw: PrismaService['$executeRaw'];
+  $queryRaw: PrismaService['$queryRaw'];
+  $transaction: PrismaService['$transaction'];
+  adminAuditLog: Pick<PrismaService['adminAuditLog'], 'deleteMany'>;
+  analyticsEvent: Pick<PrismaService['analyticsEvent'], 'deleteMany'>;
+  chatMessage: Pick<PrismaService['chatMessage'], 'deleteMany'>;
+  notification: Pick<PrismaService['notification'], 'deleteMany'>;
+  queueEntry: Pick<PrismaService['queueEntry'], 'deleteMany'>;
+  robot: Pick<PrismaService['robot'], 'findMany' | 'update'>;
+  robotModerationEntry: Pick<PrismaService['robotModerationEntry'], 'deleteMany' | 'updateMany'>;
+  user: Pick<PrismaService['user'], 'updateMany'>;
+}
 
 @Injectable()
 export class MaintenanceService implements OnModuleInit, OnModuleDestroy {
@@ -46,9 +74,14 @@ export class MaintenanceService implements OnModuleInit, OnModuleDestroy {
   private _lastViewerCountErrorLogAt = 0;
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly redis: RedisService,
-    private readonly storageDeletion: StorageDeletionService,
+    @Inject(PrismaService)
+    private readonly prisma: MaintenanceDatabase,
+    @Inject(RedisService) private readonly redis: Pick<RedisService, 'eval' | 'mget' | 'set'>,
+    @Inject(StorageDeletionService)
+    private readonly storageDeletion: Pick<
+      StorageDeletionService,
+      'enqueue' | 'processDue' | 'recordingBucket'
+    >,
   ) {}
 
   onModuleInit() {
@@ -101,7 +134,7 @@ export class MaintenanceService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async _runCleanup() {
-    await this._withDistributedLock('maintenance:retention', 30 * 60_000, async () => {
+    await this.withDistributedLock('maintenance:retention', 30 * 60_000, async () => {
       await this._runCleanupJobs();
     });
   }
@@ -113,13 +146,16 @@ export class MaintenanceService implements OnModuleInit, OnModuleDestroy {
       ['robot_stream_keys', () => this._rotateExpiredRobotStreamKeys()],
       ['admin_audit', () => this._purgeOldAdminAuditLogs()],
       ['ledger_reconciliation', () => this._reconcileLedgerGroups()],
-      ['content', () => this._enforceContentRetention()],
-      ['storage_deletions', async () => {
-        const processed = await this.storageDeletion.processDue();
-        if (processed > 0) {
-          cleanupRows.inc({ dataset: 'storage_deletions' }, processed);
-        }
-      }],
+      ['content', () => this.enforceContentRetention()],
+      [
+        'storage_deletions',
+        async () => {
+          const processed = await this.storageDeletion.processDue();
+          if (processed > 0) {
+            cleanupRows.inc({ dataset: 'storage_deletions' }, processed);
+          }
+        },
+      ],
     ];
     for (const [dataset, job] of jobs) {
       try {
@@ -160,40 +196,56 @@ export class MaintenanceService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async _rotateExpiredRobotStreamKeys() {
+  protected async _rotateExpiredRobotStreamKeys() {
     if (!Number.isFinite(ROBOT_STREAM_KEY_MAX_AGE_DAYS) || ROBOT_STREAM_KEY_MAX_AGE_DAYS <= 0) {
       return;
     }
 
     const maxAgeMs = ROBOT_STREAM_KEY_MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
-    const robots = await this.prisma.robot.findMany({
-      select: {
-        id: true,
-        createdAt: true,
-        metadata: true,
-      },
-    });
-
+    const now = Date.now();
     let rotated = 0;
-    for (const robot of robots) {
-      const issuedAt = this._readIssuedAt(robot.metadata, 'streamKeyIssuedAt') ?? robot.createdAt;
-      if (Date.now() - issuedAt.getTime() <= maxAgeMs) {
-        continue;
+    let cursor: string | undefined;
+    while (true) {
+      const robots = await this.prisma.robot.findMany({
+        select: {
+          id: true,
+          createdAt: true,
+          metadata: true,
+        },
+        orderBy: { id: 'asc' },
+        take: ROBOT_MAINTENANCE_BATCH_SIZE,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      });
+      if (robots.length === 0) break;
+
+      for (const robot of robots) {
+        const issuedAt = this._readIssuedAt(robot.metadata, 'streamKeyIssuedAt') ?? robot.createdAt;
+        if (now - issuedAt.getTime() <= maxAgeMs) {
+          continue;
+        }
+
+        const nextMetadata = this._withIssuedAt(robot.metadata, 'streamKeyIssuedAt');
+        await this.prisma.robot.update({
+          where: { id: robot.id },
+          data: {
+            streamKeyHash: createHash('sha256')
+              .update(randomBytes(32).toString('hex'))
+              .digest('hex'),
+            metadata: nextMetadata as Prisma.InputJsonValue,
+          },
+        });
+        rotated += 1;
       }
 
-      const nextMetadata = this._withIssuedAt(robot.metadata, 'streamKeyIssuedAt');
-      await this.prisma.robot.update({
-        where: { id: robot.id },
-        data: {
-          streamKeyHash: createHash('sha256').update(randomBytes(32).toString('hex')).digest('hex'),
-          metadata: nextMetadata as Prisma.InputJsonValue,
-        },
-      });
-      rotated += 1;
+      if (robots.length < ROBOT_MAINTENANCE_BATCH_SIZE) break;
+      cursor = robots[robots.length - 1]?.id;
+      if (!cursor) break;
     }
 
     if (rotated > 0) {
-      this.logger.log(`Rotated ${rotated} robot stream key(s) older than ${ROBOT_STREAM_KEY_MAX_AGE_DAYS} days`);
+      this.logger.log(
+        `Rotated ${rotated} robot stream key(s) older than ${ROBOT_STREAM_KEY_MAX_AGE_DAYS} days`,
+      );
     }
   }
 
@@ -216,12 +268,17 @@ export class MaintenanceService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async _reconcileLedgerGroups() {
-    if (!Number.isFinite(LEDGER_RECONCILIATION_LOOKBACK_DAYS) || LEDGER_RECONCILIATION_LOOKBACK_DAYS <= 0) {
+    if (
+      !Number.isFinite(LEDGER_RECONCILIATION_LOOKBACK_DAYS) ||
+      LEDGER_RECONCILIATION_LOOKBACK_DAYS <= 0
+    ) {
       return;
     }
 
     const cutoff = new Date(Date.now() - LEDGER_RECONCILIATION_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
-    const mismatches = await this.prisma.$queryRaw<Array<{ ledgerGroupId: string; netAmount: number; entryCount: number }>>(
+    const mismatches = await this.prisma.$queryRaw<
+      Array<{ ledgerGroupId: string; netAmount: number; entryCount: number }>
+    >(
       Prisma.sql`
         SELECT
           "ledgerGroupId"::text AS "ledgerGroupId",
@@ -247,29 +304,41 @@ export class MaintenanceService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async _flushViewerCounts() {
-    await this._withDistributedLock('maintenance:viewer-counts', 25_000, async () => {
+    await this.withDistributedLock('maintenance:viewer-counts', 25_000, async () => {
       await this._flushViewerCountsUnlocked();
     });
   }
 
-  private async _flushViewerCountsUnlocked() {
-    const robots = await this.prisma.robot.findMany({
-      where: { status: { in: ['ONLINE', 'BUSY'] } },
-      select: { id: true, viewerCount: true },
-    });
-    if (robots.length === 0) return;
-    const counts = await this.redis.mget(...robots.map((robot) => `robot:viewer-count:${robot.id}`));
-    await this.prisma.$transaction(
-      robots.flatMap((robot, index) => {
+  protected async _flushViewerCountsUnlocked() {
+    let cursor: string | undefined;
+    while (true) {
+      const robots = await this.prisma.robot.findMany({
+        where: { status: { in: ['ONLINE', 'BUSY'] } },
+        select: { id: true, viewerCount: true },
+        orderBy: { id: 'asc' },
+        take: ROBOT_MAINTENANCE_BATCH_SIZE,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      });
+      if (robots.length === 0) break;
+
+      const counts = await this.redis.mget(
+        ...robots.map((robot) => `robot:viewer-count:${robot.id}`),
+      );
+      const updates = robots.flatMap((robot, index) => {
         const count = Math.max(0, Number(counts[index] ?? 0) || 0);
         return count === robot.viewerCount
           ? []
           : [this.prisma.robot.update({ where: { id: robot.id }, data: { viewerCount: count } })];
-      }),
-    );
+      });
+      if (updates.length > 0) await this.prisma.$transaction(updates);
+
+      if (robots.length < ROBOT_MAINTENANCE_BATCH_SIZE) break;
+      cursor = robots[robots.length - 1]?.id;
+      if (!cursor) break;
+    }
   }
 
-  private async _enforceContentRetention() {
+  async enforceContentRetention() {
     const now = Date.now();
     if (CHAT_RETENTION_DAYS > 0) {
       const deleted = await this.prisma.chatMessage.deleteMany({
@@ -293,7 +362,10 @@ export class MaintenanceService implements OnModuleInit, OnModuleDestroy {
         data: { isActive: false },
       });
       const deleted = await this.prisma.robotModerationEntry.deleteMany({
-        where: { createdAt: { lt: new Date(now - MODERATION_RETENTION_DAYS * 86_400_000) }, isActive: false },
+        where: {
+          createdAt: { lt: new Date(now - MODERATION_RETENTION_DAYS * 86_400_000) },
+          isActive: false,
+        },
       });
       cleanupRows.inc({ dataset: 'moderation_entries' }, deleted.count);
     }
@@ -332,9 +404,10 @@ export class MaintenanceService implements OnModuleInit, OnModuleDestroy {
   }
 
   private _withIssuedAt(metadata: unknown, field: 'streamKeyIssuedAt'): Record<string, unknown> {
-    const base = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
-      ? { ...(metadata as Record<string, unknown>) }
-      : {};
+    const base =
+      metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+        ? { ...(metadata as Record<string, unknown>) }
+        : {};
     base[field] = new Date().toISOString();
     return base;
   }
@@ -357,7 +430,7 @@ export class MaintenanceService implements OnModuleInit, OnModuleDestroy {
     return parsed;
   }
 
-  private async _withDistributedLock(
+  async withDistributedLock(
     key: string,
     ttlMs: number,
     work: () => Promise<void>,

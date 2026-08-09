@@ -11,7 +11,7 @@ const intent = {
 };
 
 function provider(values: Record<string, string | undefined> = {}) {
-  return new PaypalProvider({ get: jest.fn((key: string) => values[key]) } as never);
+  return new PaypalProvider({ get: jest.fn((key: string) => values[key]) });
 }
 
 function jsonResponse(value: unknown, ok = true, status = ok ? 200 : 400) {
@@ -21,7 +21,7 @@ function jsonResponse(value: unknown, ok = true, status = ok ? 200 : 400) {
     headers: { get: jest.fn().mockReturnValue(null) },
     json: jest.fn().mockResolvedValue(value),
     text: jest.fn().mockResolvedValue(JSON.stringify(value)),
-  } as never;
+  };
 }
 
 describe('PaypalProvider', () => {
@@ -43,7 +43,7 @@ describe('PaypalProvider', () => {
 
     await expect(
       paypal.createCheckout({
-        intent: intent as never,
+        intent: intent,
         successUrl: 'https://example.test/success',
         cancelUrl: 'https://example.test/cancel',
       }),
@@ -79,7 +79,7 @@ describe('PaypalProvider', () => {
 
     await expect(
       paypal.createCheckout({
-        intent: intent as never,
+        intent: intent,
         successUrl: 'https://example.test/success',
         cancelUrl: 'https://example.test/cancel',
       }),
@@ -89,7 +89,7 @@ describe('PaypalProvider', () => {
       redirectUrl: 'https://paypal.test/approve/order-1',
     });
     await paypal.createCheckout({
-      intent: { ...intent, id: 'intent-2' } as never,
+      intent: { ...intent, id: 'intent-2' },
       successUrl: 'https://example.test/success',
       cancelUrl: 'https://example.test/cancel',
     });
@@ -106,7 +106,7 @@ describe('PaypalProvider', () => {
     global.fetch = jest.fn().mockResolvedValueOnce(jsonResponse({}, false));
     await expect(
       provider(configured).createCheckout({
-        intent: intent as never,
+        intent: intent,
         successUrl: 'https://example.test/success',
         cancelUrl: 'https://example.test/cancel',
       }),
@@ -118,7 +118,7 @@ describe('PaypalProvider', () => {
       .mockResolvedValueOnce(jsonResponse({ error: 'invalid order' }, false));
     await expect(
       provider(configured).createCheckout({
-        intent: intent as never,
+        intent: intent,
         successUrl: 'https://example.test/success',
         cancelUrl: 'https://example.test/cancel',
       }),
@@ -276,7 +276,7 @@ describe('PaypalProvider', () => {
 
     await expect(
       provider({ ...configured, PAYPAL_MAX_RETRIES: '1', PAYPAL_RETRY_BASE_MS: '10' }).createCheckout({
-        intent: intent as never,
+        intent: intent,
         successUrl: 'https://example.test/success',
         cancelUrl: 'https://example.test/cancel',
       }),

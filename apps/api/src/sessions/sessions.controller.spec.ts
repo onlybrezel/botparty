@@ -8,7 +8,7 @@ describe('SessionsController', () => {
     getActiveSessionForRequester: jest.Mock;
   };
   let authService: { resolveValidAccessTokenPayload: jest.Mock };
-  let configService: { getOrThrow: jest.Mock };
+  let configService: { get: jest.Mock };
   let controller: SessionsController;
 
   beforeEach(() => {
@@ -19,14 +19,14 @@ describe('SessionsController', () => {
       getActiveSessionForRequester: jest.fn(),
     };
     authService = { resolveValidAccessTokenPayload: jest.fn() };
-    configService = { getOrThrow: jest.fn().mockReturnValue('secret') };
-    controller = new SessionsController(sessionsService as never, authService as never, configService as never);
+    configService = { get: jest.fn().mockReturnValue('secret') };
+    controller = new SessionsController(sessionsService, authService, configService);
   });
 
   it('returns the authenticated user session history with numeric limits', async () => {
     sessionsService.findByUser.mockResolvedValue([{ id: 'session-1' }]);
 
-    const sessions = await controller.getMySessions({ sub: 'user-1' } as never, '25');
+    const sessions = await controller.getMySessions({ sub: 'user-1' }, '25');
 
     expect(sessionsService.findByUser).toHaveBeenCalledWith('user-1', 25);
     expect(sessions).toEqual([{ id: 'session-1' }]);
@@ -35,7 +35,7 @@ describe('SessionsController', () => {
   it('returns a requester-scoped session detail entry', async () => {
     sessionsService.findDetailForRequester.mockResolvedValue({ id: 'session-1', replayCandidates: [] });
 
-    const session = await controller.getMySession({ sub: 'user-1' } as never, 'session-1');
+    const session = await controller.getMySession({ sub: 'user-1' }, 'session-1');
 
     expect(sessionsService.findDetailForRequester).toHaveBeenCalledWith('session-1', 'user-1');
     expect(session).toEqual({ id: 'session-1', replayCandidates: [] });
@@ -64,7 +64,7 @@ describe('SessionsController', () => {
   it.each(['0', '-1', '201', '2.5', 'not-a-number'])(
     'rejects invalid session history limit %s',
     async (limit) => {
-      await expect(controller.getMySessions({ sub: 'user-1' } as never, limit)).rejects.toMatchObject({
+      await expect(controller.getMySessions({ sub: 'user-1' }, limit)).rejects.toMatchObject({
         status: 400,
       });
       expect(sessionsService.findByUser).not.toHaveBeenCalled();

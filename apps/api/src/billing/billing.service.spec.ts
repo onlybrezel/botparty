@@ -4,22 +4,26 @@ import { BillingService } from './billing.service';
 import type { VerifiedWebhookEvent } from './providers/payment-provider.interface';
 
 describe('BillingService', () => {
-  const intent = {
-    id: '00000000-0000-0000-0000-000000000011',
-    userId: 'user-1',
-    provider: 'stripe',
-    providerRef: 'provider-ref-1',
-    providerPaymentRef: null,
-    providerSubscriptionRef: null,
-    providerCustomerRef: null,
-    packageId: 'starter',
-    amountCents: 499,
-    currency: 'EUR',
-    creditsAmount: 500,
-    reversedCredits: 0,
-    paidAt: null,
-    status: BillingIntentStatus.PENDING as BillingIntentStatus,
-  };
+  function createIntent(status: BillingIntentStatus = BillingIntentStatus.PENDING) {
+    return {
+      id: '00000000-0000-0000-0000-000000000011',
+      userId: 'user-1',
+      provider: 'stripe',
+      providerRef: 'provider-ref-1',
+      providerPaymentRef: null,
+      providerSubscriptionRef: null,
+      providerCustomerRef: null,
+      packageId: 'starter',
+      amountCents: 499,
+      currency: 'EUR',
+      creditsAmount: 500,
+      reversedCredits: 0,
+      paidAt: null,
+      status,
+    };
+  }
+
+  const intent = createIntent();
 
   function event(overrides: Partial<VerifiedWebhookEvent> = {}): VerifiedWebhookEvent {
     return {
@@ -41,13 +45,20 @@ describe('BillingService', () => {
   function build(lockedIntent = intent) {
     const tx = {
       $executeRaw: jest.fn().mockResolvedValue(1),
+      $queryRaw: jest.fn(),
+      adminAuditLog: { create: jest.fn() },
+      controlCommand: { create: jest.fn(), findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
+      payoutRequest: { create: jest.fn(), findFirst: jest.fn(), findUnique: jest.fn(), findUniqueOrThrow: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
+      robot: { findUnique: jest.fn() },
+      user: { findUnique: jest.fn(), update: jest.fn() },
+      walletIdempotencyKey: { create: jest.fn(), update: jest.fn() },
       billingIntent: {
         findFirst: jest.fn().mockResolvedValue(lockedIntent),
         findUniqueOrThrow: jest.fn().mockResolvedValue(lockedIntent),
         update: jest.fn().mockResolvedValue(lockedIntent),
       },
       billingWebhookEvent: { create: jest.fn().mockResolvedValue({ id: 'webhook-row' }) },
-      transaction: { findUnique: jest.fn().mockResolvedValue(null) },
+      transaction: { create: jest.fn(), findUnique: jest.fn().mockResolvedValue(null) },
     };
     const prisma = {
       billingWebhookEvent: {
@@ -61,10 +72,11 @@ describe('BillingService', () => {
       },
     };
     const wallet = {
-      runSerializable: jest.fn(async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx)),
+      runSerializable: jest.fn(),
       creditInTransaction: jest.fn().mockResolvedValue({ id: 'credit-row' }),
       reverseBillingCreditInTransaction: jest.fn().mockResolvedValue({ id: 'reversal-row' }),
     };
+    wallet.runSerializable.mockImplementation(<T>(callback: (client: typeof tx) => Promise<T>) => callback(tx));
     const stripe = {
       name: 'stripe' as const,
       createCheckout: jest.fn().mockResolvedValue({ providerRef: 'stripe-session', redirectUrl: 'https://stripe.test' }),
@@ -85,13 +97,13 @@ describe('BillingService', () => {
     };
     const notifications = { publishSafely: jest.fn().mockResolvedValue(null) };
     const service = new BillingService(
-      prisma as never,
-      wallet as never,
-      stripe as never,
-      paypal as never,
-      config as never,
-      features as never,
-      notifications as never,
+      prisma,
+      wallet,
+      stripe,
+      paypal,
+      config,
+      features,
+      notifications,
     );
     return { service, tx, prisma, wallet, stripe, paypal, config, features, notifications };
   }
@@ -109,9 +121,9 @@ describe('BillingService', () => {
     prisma.billingWebhookEvent.findMany.mockResolvedValue([{
       id: 'row-1', provider: 'stripe', eventId: 'evt-1', eventType: 'completed', payload: { ok: true }, processedAt: new Date('2026-07-17T00:00:00Z'),
     }]);
-    stripe.parseStoredWebhookEvent.mockReturnValue(event({ currency: undefined, intentId: undefined, providerRef: undefined }));
+    stripe.parseStoredWebhookEvent.mockReturnValue(event());
     await expect(service.listWebhookEvents(999)).resolves.toEqual({ items: [expect.objectContaining({
-      id: 'row-1', amountCents: 499, currency: null, processedAt: '2026-07-17T00:00:00.000Z',
+      id: 'row-1', amountCents: 499, currency: 'EUR', processedAt: '2026-07-17T00:00:00.000Z',
     })] });
     expect(prisma.billingWebhookEvent.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 200 }));
   });
@@ -319,17 +331,17 @@ describe('BillingService', () => {
     const { service, prisma, notifications } = build();
     prisma.billingWebhookEvent.findUnique.mockResolvedValue({ intentId: intent.id });
     prisma.billingIntent.findUnique.mockResolvedValue({ id: intent.id, userId: intent.userId, creditsAmount: intent.creditsAmount });
-    await (service as never as { notifyPaymentFinal(provider: 'stripe', id: string, type: VerifiedWebhookEvent['type']): Promise<void> }).notifyPaymentFinal('stripe', 'event', type);
+    await service.notifyPaymentFinal('stripe', 'event', type);
     expect(notifications.publishSafely).toHaveBeenCalledWith(expect.objectContaining({ title, dedupeKey: 'payment:stripe:event' }));
   });
 
   it('skips payment notification when the event or intent cannot be resolved', async () => {
     const first = build();
-    await (first.service as never as { notifyPaymentFinal(provider: 'stripe', id: string, type: 'completed'): Promise<void> }).notifyPaymentFinal('stripe', 'event', 'completed');
+    await first.service.notifyPaymentFinal('stripe', 'event', 'completed');
     expect(first.notifications.publishSafely).not.toHaveBeenCalled();
     const second = build();
     second.prisma.billingWebhookEvent.findUnique.mockResolvedValue({ intentId: intent.id });
-    await (second.service as never as { notifyPaymentFinal(provider: 'stripe', id: string, type: 'completed'): Promise<void> }).notifyPaymentFinal('stripe', 'event', 'completed');
+    await second.service.notifyPaymentFinal('stripe', 'event', 'completed');
     expect(second.notifications.publishSafely).not.toHaveBeenCalled();
   });
 });

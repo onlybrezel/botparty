@@ -12,31 +12,31 @@ describe('loadFileBackedEnv', () => {
   });
 
   it('loads secret values from *_FILE paths when the direct env var is absent', () => {
-    const env = {
+    const env: NodeJS.ProcessEnv = {
       SMTP_PASSWORD_FILE: '/run/secrets/smtp_password',
-    } as NodeJS.ProcessEnv;
+    };
     const logger = { warn: jest.fn() };
 
-    (existsSync as jest.Mock).mockReturnValue(true);
-    (readFileSync as jest.Mock).mockReturnValue('secret-from-file\n');
+    jest.mocked(existsSync).mockReturnValue(true);
+    jest.mocked(readFileSync).mockReturnValue('secret-from-file\n');
 
-    loadFileBackedEnv(env, logger as never);
+    loadFileBackedEnv(env, logger);
 
-    expect(env.SMTP_PASSWORD).toBe('secret-from-file');
+    expect(env['SMTP_PASSWORD']).toBe('secret-from-file');
   });
 
   it('keeps direct values when both the env var and *_FILE variant are set', () => {
-    const env = {
+    const env: NodeJS.ProcessEnv = {
       JWT_SECRET: 'direct-secret',
       JWT_SECRET_FILE: '/run/secrets/jwt_secret',
-    } as NodeJS.ProcessEnv;
+    };
     const logger = { warn: jest.fn() };
 
-    (existsSync as jest.Mock).mockReturnValue(true);
+    jest.mocked(existsSync).mockReturnValue(true);
 
-    loadFileBackedEnv(env, logger as never);
+    loadFileBackedEnv(env, logger);
 
-    expect(env.JWT_SECRET).toBe('direct-secret');
+    expect(env['JWT_SECRET']).toBe('direct-secret');
     expect(logger.warn).toHaveBeenCalled();
   });
 });

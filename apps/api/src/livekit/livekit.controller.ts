@@ -1,4 +1,4 @@
-import { Controller, Post, Param, UseGuards, Query, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { Controller, Post, Param, UseGuards, Query, ForbiddenException, Inject, NotFoundException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { LivekitService } from './livekit.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -15,9 +15,15 @@ import { randomUUID } from 'crypto';
 @Controller('livekit')
 export class LivekitController {
   constructor(
-    private readonly livekitService: LivekitService,
-    private readonly robotsService: RobotsService,
-    private readonly queueService: QueueService,
+    @Inject(LivekitService)
+    private readonly livekitService: Pick<LivekitService, 'generateRobotToken' | 'generateViewerToken' | 'getLivekitUrl'>,
+    @Inject(RobotsService)
+    private readonly robotsService: Pick<
+      RobotsService,
+      'findById' | 'getAccessPolicy' | 'resolveGuestActorId' | 'resolveRoomAccessActorId' | 'validateRoomAccess'
+    >,
+    @Inject(QueueService)
+    private readonly queueService: Pick<QueueService, 'getCurrentControllerUserId'>,
   ) {}
 
   @Post('token/viewer/:robotId')
@@ -135,12 +141,12 @@ export class LivekitController {
       return { video: 'AUTHENTICATED' };
     }
 
-    const accessRaw = (metadata as Record<string, unknown>).access;
+    const accessRaw = (metadata as Record<string, unknown>)['access'];
     if (!accessRaw || typeof accessRaw !== 'object' || Array.isArray(accessRaw)) {
       return { video: 'AUTHENTICATED' };
     }
 
-    const video = (accessRaw as Record<string, unknown>).video;
+    const video = (accessRaw as Record<string, unknown>)['video'];
     if (video === 'ALL' || video === 'AUTHENTICATED' || video === 'DISABLED') {
       return { video };
     }

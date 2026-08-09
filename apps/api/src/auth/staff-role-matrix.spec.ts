@@ -6,16 +6,14 @@ import { BillingController } from '../billing/billing.controller';
 import { PayoutsController } from '../earnings/payouts.controller';
 import { ModerationController } from '../moderation/moderation.controller';
 
-type ControllerPrototype = Record<string, (...args: never[]) => unknown>;
-
-function roles(controller: { prototype: ControllerPrototype }, method: string): Role[] {
-  const handler = controller.prototype[method];
-  if (!handler) throw new Error(`Missing controller method: ${method}`);
+function roles(controller: { prototype: object }, method: string): Role[] {
+  const handler: unknown = Reflect.get(controller.prototype, method);
+  if (typeof handler !== 'function') throw new Error(`Missing controller method: ${method}`);
   return Reflect.getMetadata(ROLES_KEY, handler) ?? [];
 }
 
 describe('staff capability matrix', () => {
-  it.each([
+  it.each<[{ prototype: object }, string]>([
     [UsersController, 'updateAdminUser'],
     [UsersController, 'deleteAdminUser'],
     [RobotsController, 'updateAsStaff'],
@@ -32,15 +30,15 @@ describe('staff capability matrix', () => {
     [ModerationController, 'stopAdminRobotRecording'],
     [ModerationController, 'listAdminRecordings'],
   ])('%s.%s is restricted to administrators', (controller, method) => {
-    expect(roles(controller as never, method as string)).toEqual([Role.ADMIN]);
+    expect(roles(controller, method)).toEqual([Role.ADMIN]);
   });
 
-  it.each([
+  it.each<[{ prototype: object }, string]>([
     [UsersController, 'getAdminUsers'],
     [ModerationController, 'getAdminOverview'],
     [ModerationController, 'getAdminRuntimeOverview'],
     [ModerationController, 'getAdminProfanityOverview'],
   ])('%s.%s remains available to the moderation role', (controller, method) => {
-    expect(roles(controller as never, method as string)).toEqual([Role.ADMIN, Role.MOD]);
+    expect(roles(controller, method)).toEqual([Role.ADMIN, Role.MOD]);
   });
 });

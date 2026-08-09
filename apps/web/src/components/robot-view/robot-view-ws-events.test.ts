@@ -61,7 +61,8 @@ function buildHandler() {
   const videoState = stateSetter<VideoState>('ready');
   const inQueue = stateSetter(true);
   const reconnectNotice = stateSetter<ReconnectNotice | null>(null);
-  const ws = { close: vi.fn() };
+  const ws = new WebSocket('ws://localhost');
+  vi.spyOn(ws, 'close').mockImplementation(() => undefined);
   const refreshViewerToken = vi.fn().mockResolvedValue(undefined);
   const activeMotionKeysRef = { current: new Set(['w']) };
   const reconnectRetryAfterRef = { current: null as number | null };
@@ -74,7 +75,7 @@ function buildHandler() {
     initialRobotStatus: RobotStatus.ONLINE,
     refreshViewerToken,
     hasLivekitCreds: () => hasLivekitCreds,
-    wsRef: { current: ws as never },
+    wsRef: { current: ws },
     activeMotionKeysRef,
     reconnectRetryAfterRef,
     shutdownNoticeAtRef,
@@ -139,8 +140,13 @@ describe('createRobotWsEventHandler', () => {
 
   it('maintains presence and crowd-input state without duplicate viewers', () => {
     const { handler, states } = buildHandler();
-    handler('presence:update', { viewers: [{ userId: 'existing' }] });
-    expect(states.viewers.get()).toEqual([{ userId: 'existing' }]);
+    const existingViewer = {
+      userId: 'existing',
+      username: 'Existing',
+      joinedAt: 1_699_999_999_000,
+    } satisfies Viewer;
+    handler('presence:update', { viewers: [existingViewer] });
+    expect(states.viewers.get()).toEqual([existingViewer]);
     handler('presence:join', { userId: 'existing', username: 'Existing' });
     expect(states.viewers.get()).toHaveLength(1);
     handler('presence:join', { userId: 'new', username: 'New' });

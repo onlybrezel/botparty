@@ -28,12 +28,12 @@ export class QueueObservabilityService implements OnModuleInit, OnModuleDestroy 
   private readonly logger = new Logger(QueueObservabilityService.name);
   private timer: ReturnType<typeof setInterval> | null = null;
   private lastErrorLogAt = 0;
-  private readonly queues: Array<{ name: string; queue: Queue }>;
+  private readonly queues: Array<{ name: string; queue: Pick<Queue, 'getJobCounts'> }>;
 
   constructor(
-    @InjectQueue(JOBS_QUEUE_WEBHOOK) webhookQueue: Queue,
-    @InjectQueue(JOBS_QUEUE_MAIL) mailQueue: Queue,
-    @InjectQueue(JOBS_QUEUE_AUDIT_CLEANUP) auditCleanupQueue: Queue,
+    @InjectQueue(JOBS_QUEUE_WEBHOOK) webhookQueue: Pick<Queue, 'getJobCounts'>,
+    @InjectQueue(JOBS_QUEUE_MAIL) mailQueue: Pick<Queue, 'getJobCounts'>,
+    @InjectQueue(JOBS_QUEUE_AUDIT_CLEANUP) auditCleanupQueue: Pick<Queue, 'getJobCounts'>,
   ) {
     this.queues = [
       { name: JOBS_QUEUE_WEBHOOK, queue: webhookQueue },
@@ -65,13 +65,13 @@ export class QueueObservabilityService implements OnModuleInit, OnModuleDestroy 
       );
       queueDepth.set(
         { queue: name },
-        (counts.waiting ?? 0) +
-          (counts.delayed ?? 0) +
-          (counts.prioritized ?? 0) +
+        (counts['waiting'] ?? 0) +
+          (counts['delayed'] ?? 0) +
+          (counts['prioritized'] ?? 0) +
           (counts['waiting-children'] ?? 0),
       );
-      queueActive.set({ queue: name }, counts.active ?? 0);
-      queueFailed.set({ queue: name }, counts.failed ?? 0);
+      queueActive.set({ queue: name }, counts['active'] ?? 0);
+      queueFailed.set({ queue: name }, counts['failed'] ?? 0);
       queueWorkerUp.set({ queue: name }, 1);
     }));
   }

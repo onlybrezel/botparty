@@ -1,5 +1,6 @@
 services:
   postgres:
+    ports: !reset []
     environment:
       POSTGRES_DB: botparty_performance
     command:
@@ -7,21 +8,22 @@ services:
       - -c
       - shared_preload_libraries=pg_stat_statements
       - -c
-      - max_connections=80
+      - max_connections=${PERFORMANCE_POSTGRES_MAX_CONNECTIONS:-80}
       - -c
       - track_io_timing=on
     deploy:
       resources:
         limits:
-          cpus: '2.0'
-          memory: 2048M
+          cpus: '${PERFORMANCE_POSTGRES_CPUS:-2.0}'
+          memory: ${PERFORMANCE_POSTGRES_MEMORY_MB:-2048}M
 
   redis:
+    ports: !reset []
     deploy:
       resources:
         limits:
-          cpus: '0.5'
-          memory: 256M
+          cpus: '${PERFORMANCE_REDIS_CPUS:-0.5}'
+          memory: ${PERFORMANCE_REDIS_MEMORY_MB:-256}M
 
   mail-test:
     image: axllent/mailpit:v1.27@sha256:e22dce5b36f93c77082e204a3942fb6b283b7896e057458400a4c88344c3df68
@@ -50,6 +52,7 @@ services:
       NODE_ENV: development
 
   api:
+    ports: !reset []
     environment:
       NODE_ENV: production
       APP_URL: https://nginx
@@ -62,23 +65,32 @@ services:
       SMTP_PORT: 1025
       SMTP_SECURE: 'false'
       SMTP_FROM: BotParty Performance <no-reply@performance.invalid>
-      MAX_CONCURRENT_REQUESTS: 32
-      MAX_CONCURRENT_LOGIN_REQUESTS: 1
+      METRICS_AUTH_REQUIRED: 'false'
+      REDIS_COMMAND_TIMEOUT_MS: ${PERFORMANCE_REDIS_COMMAND_TIMEOUT_MS:-5000}
+      REDIS_CONNECT_TIMEOUT_MS: ${PERFORMANCE_REDIS_CONNECT_TIMEOUT_MS:-30000}
+      NODE_OPTIONS: --max-old-space-size=${PERFORMANCE_API_MAX_OLD_SPACE_MB:-512}
+      API_WORKERS: ${PERFORMANCE_API_WORKERS:-1}
+      UV_THREADPOOL_SIZE: ${PERFORMANCE_UV_THREADPOOL_SIZE:-4}
+      MAX_CONCURRENT_REQUESTS: ${PERFORMANCE_MAX_CONCURRENT_REQUESTS:-32}
+      MAX_CONCURRENT_LOGIN_REQUESTS: ${PERFORMANCE_MAX_CONCURRENT_LOGIN_REQUESTS:-1}
     volumes:
       - ./scripts/seed-performance.mjs:/performance/seed-performance.mjs:ro
     depends_on:
       mail-test:
         condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget --spider -q http://127.0.0.1:4000/api/v1/health/live']
     deploy:
       resources:
         limits:
-          cpus: '1.0'
-          memory: 768M
+          cpus: '${PERFORMANCE_API_CPUS:-1.0}'
+          memory: ${PERFORMANCE_API_MEMORY_MB:-768}M
         reservations:
           cpus: '0.25'
           memory: 256M
 
   web:
+    ports: !reset []
     deploy:
       resources:
         limits:
@@ -86,11 +98,42 @@ services:
           memory: 768M
 
   nginx:
+    ports: !reset []
     deploy:
       resources:
         limits:
-          cpus: '0.5'
-          memory: 256M
+          cpus: '${PERFORMANCE_NGINX_CPUS:-0.5}'
+          memory: ${PERFORMANCE_NGINX_MEMORY_MB:-256}M
+
+  # API-only gateway used by the isolated matrix. Keeping it separate from the
+  # production nginx service avoids starting or measuring the frontend tier.
+  performance-gateway:
+    profiles: ['performance']
+    image: nginxinc/nginx-unprivileged:1.27-alpine@sha256:65e3e85dbaed8ba248841d9d58a899b6197106c23cb0ff1a132b7bfe0547e4c0
+    restart: 'no'
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    volumes:
+      - ./docker/nginx/performance.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget --spider -q http://127.0.0.1:8080/api/v1/health/live']
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    networks:
+      - frontend
+    deploy:
+      resources:
+        limits:
+          cpus: '${PERFORMANCE_NGINX_CPUS:-0.5}'
+          memory: ${PERFORMANCE_NGINX_MEMORY_MB:-256}M
 
   load-generator:
     profiles: ['performance']
@@ -105,7 +148,7 @@ services:
     working_dir: /performance
     entrypoint: ['node', '/performance/performance-load.mjs']
     environment:
-      PERFORMANCE_BASE_URL: http://nginx
+      PERFORMANCE_BASE_URL: http://performance-gateway:8080
       PERFORMANCE_ORIGIN: https://nginx
       PERFORMANCE_ALLOW_DOCKER: 'true'
       PERFORMANCE_EMAIL: admin@botparty.test
@@ -113,6 +156,7 @@ services:
       PERFORMANCE_UPLOAD_FILE: /fixtures/upload.jpg
     volumes:
       - ./scripts/performance-load.mjs:/performance/performance-load.mjs:ro
+      - ./scripts/performance-target.mjs:/performance/performance-target.mjs:ro
       - ./assets/botparty-hero-1.jpg:/fixtures/upload.jpg:ro
     networks:
       - frontend

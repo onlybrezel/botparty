@@ -4,7 +4,10 @@ import { LivekitModule } from './livekit.module';
 
 describe('LivekitModule', () => {
   it('owns the authentication dependency required by robot runtime endpoints', () => {
-    const imports = Reflect.getMetadata(MODULE_METADATA.IMPORTS, LivekitModule) as unknown[];
+    const imports: unknown = Reflect.getMetadata(MODULE_METADATA.IMPORTS, LivekitModule);
+    if (!Array.isArray(imports)) {
+      throw new Error('Expected LivekitModule imports metadata to be an array');
+    }
 
     expect(imports).toContain(AuthModule);
   });

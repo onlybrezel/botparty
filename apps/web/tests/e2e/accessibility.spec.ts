@@ -35,7 +35,7 @@ async function expectNoWcagViolations(page: Page, context: string) {
       async () =>
         page.evaluate(() => {
           const root = document.documentElement;
-          const theme = root.dataset.theme;
+          const theme = root.dataset['theme'];
           const styles = window.getComputedStyle(root);
           const expectedColors =
             theme === 'light'
@@ -45,7 +45,7 @@ async function expectNoWcagViolations(page: Page, context: string) {
           return (
             (theme === 'light' || theme === 'dark') &&
             root.classList.contains(theme) &&
-            root.dataset.themeChanging !== 'true' &&
+            root.dataset['themeChanging'] !== 'true' &&
             styles.getPropertyValue('--foreground').trim() === expectedColors.foreground &&
             styles.getPropertyValue('--muted-foreground').trim() === expectedColors.mutedForeground
           );

@@ -1,0 +1,14 @@
+{
+  "extends": "@botparty/tsconfig/base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"],
+    "exactOptionalPropertyTypes": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true,
+    "noPropertyAccessFromIndexSignature": true
+  },
+  "include": ["seed.ts"],
+  "exclude": ["node_modules", "generated"]
+}

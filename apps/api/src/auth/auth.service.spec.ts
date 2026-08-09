@@ -5,12 +5,15 @@ import {
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
+import * as argon2 from 'argon2';
 import { AuthService } from './auth.service';
 
 jest.mock('argon2', () => ({
   hash: jest.fn().mockResolvedValue('hashed'),
   verify: jest.fn().mockResolvedValue(true),
 }));
+
+const mockArgon2 = jest.mocked(argon2);
 
 const mockPrisma = {
   user: {
@@ -114,11 +117,11 @@ describe('AuthService', () => {
     });
 
     service = new AuthService(
-      mockPrisma as never,
-      mockJwt as never,
-      mockConfig as never,
-      mockRedis as never,
-      mockMail as never,
+      mockPrisma,
+      mockJwt,
+      mockConfig,
+      mockRedis,
+      mockMail,
     );
   });
 
@@ -143,8 +146,7 @@ describe('AuthService', () => {
     });
 
     it('increments attempt counter and locks after N failures', async () => {
-      const argon2 = jest.requireMock('argon2') as { verify: jest.Mock };
-      argon2.verify.mockResolvedValueOnce(false);
+      mockArgon2.verify.mockResolvedValueOnce(false);
 
       mockRedis.get.mockResolvedValueOnce(null);
       mockPrisma.user.findUnique.mockResolvedValueOnce(fakeUser);
@@ -187,8 +189,8 @@ describe('AuthService', () => {
         ),
       ).resolves.toHaveProperty('accessToken');
 
-      const firstKey = mockRedis.get.mock.calls[0]?.[0] as string;
-      const secondKey = mockRedis.get.mock.calls[1]?.[0] as string;
+      const firstKey = mockRedis.get.mock.calls[0]?.[0];
+      const secondKey = mockRedis.get.mock.calls[1]?.[0];
       expect(firstKey).toContain('auth:client-lockout:');
       expect(secondKey).toContain('auth:client-lockout:');
       expect(firstKey).not.toBe(secondKey);
@@ -207,7 +209,7 @@ describe('AuthService', () => {
     });
 
     it('blocks unverified accounts when verification is required', async () => {
-      configValues.REQUIRE_EMAIL_VERIFICATION = 'true';
+      configValues['REQUIRE_EMAIL_VERIFICATION'] = 'true';
       mockRedis.get.mockResolvedValueOnce(null);
       mockPrisma.user.findUnique.mockResolvedValueOnce({
         ...fakeUser,
@@ -346,7 +348,7 @@ describe('AuthService', () => {
     });
 
     it('returns a verification-pending response when email verification is required', async () => {
-      configValues.REQUIRE_EMAIL_VERIFICATION = 'true';
+      configValues['REQUIRE_EMAIL_VERIFICATION'] = 'true';
       mockPrisma.user.findFirst.mockResolvedValueOnce(null);
       mockPrisma.user.create.mockResolvedValueOnce({
         ...fakeUser,
@@ -420,7 +422,7 @@ describe('AuthService', () => {
     } as const;
 
     it('fails closed when verified registration requires unavailable mail', async () => {
-      configValues.REQUIRE_EMAIL_VERIFICATION = 'true';
+      configValues['REQUIRE_EMAIL_VERIFICATION'] = 'true';
       mockPrisma.user.findFirst.mockResolvedValue(null);
       mockMail.isEnabled.mockReturnValue(false);
       await expect(service.register(registration)).rejects.toBeInstanceOf(ServiceUnavailableException);
@@ -428,7 +430,7 @@ describe('AuthService', () => {
     });
 
     it('deletes a newly created account when the verification message cannot be queued', async () => {
-      configValues.REQUIRE_EMAIL_VERIFICATION = 'true';
+      configValues['REQUIRE_EMAIL_VERIFICATION'] = 'true';
       mockPrisma.user.findFirst.mockResolvedValue(null);
       mockPrisma.user.create.mockResolvedValue({ ...fakeUser, emailVerified: false });
       mockMail.sendEmailVerification.mockRejectedValue(new Error('smtp offline'));
@@ -460,8 +462,7 @@ describe('AuthService', () => {
     it('rejects inactive users and wrong passwords without account-wide lockout', async () => {
       mockPrisma.user.findUnique.mockResolvedValueOnce({ ...fakeUser, isActive: false });
       await expect(service.login({ email: fakeUser.email, password: 'correctpass' }, { remoteIp: '203.0.113.2' })).rejects.toBeInstanceOf(UnauthorizedException);
-      const argon2 = jest.requireMock('argon2') as { verify: jest.Mock };
-      argon2.verify.mockResolvedValueOnce(false);
+      mockArgon2.verify.mockResolvedValueOnce(false);
       mockPrisma.user.findUnique.mockResolvedValueOnce(fakeUser);
       mockRedis.incr.mockResolvedValueOnce(2).mockResolvedValueOnce(2);
       await expect(service.login({ email: fakeUser.email, password: 'wrong' }, { remoteIp: '203.0.113.3' })).rejects.toBeInstanceOf(UnauthorizedException);
@@ -469,8 +470,7 @@ describe('AuthService', () => {
     });
 
     it('does not fail login if the risk-notice email fails', async () => {
-      const argon2 = jest.requireMock('argon2') as { verify: jest.Mock };
-      argon2.verify.mockResolvedValueOnce(false);
+      mockArgon2.verify.mockResolvedValueOnce(false);
       mockPrisma.user.findUnique.mockResolvedValueOnce(fakeUser);
       mockRedis.incr.mockResolvedValueOnce(10).mockResolvedValueOnce(10);
       mockMail.sendAccountLockoutNoticeEmail.mockRejectedValue(new Error('mail offline'));
@@ -484,7 +484,7 @@ describe('AuthService', () => {
       await expect(service.refreshToken('valid-refresh-token')).rejects.toBeInstanceOf(UnauthorizedException);
       mockPrisma.user.findUnique.mockResolvedValueOnce({ ...fakeUser, isActive: false });
       await expect(service.refreshToken('valid-refresh-token')).rejects.toBeInstanceOf(UnauthorizedException);
-      configValues.REQUIRE_EMAIL_VERIFICATION = 'true';
+      configValues['REQUIRE_EMAIL_VERIFICATION'] = 'true';
       mockPrisma.user.findUnique.mockResolvedValueOnce({ ...fakeUser, emailVerified: false });
       await expect(service.refreshToken('valid-refresh-token')).rejects.toBeInstanceOf(ForbiddenException);
       mockJwt.verify.mockImplementationOnce(() => { throw new Error('bad signature'); });
@@ -513,7 +513,7 @@ describe('AuthService', () => {
       await expect(service.resolveValidAccessTokenPayload('valid')).resolves.toBeNull();
       mockPrisma.user.findUnique.mockResolvedValueOnce({ ...fakeUser, isActive: false });
       await expect(service.resolveValidAccessTokenPayload('valid')).resolves.toBeNull();
-      configValues.REQUIRE_EMAIL_VERIFICATION = 'true';
+      configValues['REQUIRE_EMAIL_VERIFICATION'] = 'true';
       mockPrisma.user.findUnique.mockResolvedValueOnce({ ...fakeUser, emailVerified: false });
       await expect(service.resolveValidAccessTokenPayload('valid')).resolves.toBeNull();
     });

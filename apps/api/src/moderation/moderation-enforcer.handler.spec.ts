@@ -16,7 +16,7 @@ describe('ModerationEnforcerHandler', () => {
     };
 
     return {
-      handler: new ModerationEnforcerHandler(ctx as never, queueService as never),
+      handler: new ModerationEnforcerHandler(ctx, queueService),
       ctx,
       queueService,
     };
@@ -76,9 +76,9 @@ describe('ModerationEnforcerHandler', () => {
       readyState: 1,
       close: jest.fn(),
     };
-    ctx.clients.set(matchingViewer.id, matchingViewer as never);
-    ctx.clients.set(otherViewer.id, otherViewer as never);
-    ctx.clients.set(robotSocket.id, robotSocket as never);
+    ctx.clients.set(matchingViewer.id, matchingViewer);
+    ctx.clients.set(otherViewer.id, otherViewer);
+    ctx.clients.set(robotSocket.id, robotSocket);
 
     await handler.enforce('robot-1', {
       event: WS_EVENTS.MOD_BAN,

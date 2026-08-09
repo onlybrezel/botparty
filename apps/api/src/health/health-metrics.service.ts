@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { collectDefaultMetrics, Gauge, register } from 'prom-client';
 
 import { BotGateway } from '../gateway/bot.gateway';
@@ -113,7 +113,7 @@ const gauges = {
 export class HealthMetricsService {
   constructor(
     private readonly health: HealthService,
-    private readonly gateway: BotGateway,
+    @Inject(BotGateway) private readonly gateway: Pick<BotGateway, 'getRuntimeMetricsSnapshot'>,
   ) {
     if (!defaultMetricsEnabled) {
       collectDefaultMetrics({ prefix: 'botparty_api_' });

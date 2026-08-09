@@ -33,7 +33,7 @@ services:
     ports:
       # Exposed on 5433 (not 5432) to avoid clashing with a local Postgres install.
       # The API container connects on the default 5432 via the internal Docker network.
-      - "127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432"
+      - '127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ${BOTPARTY_SECRET_DIR:-./docker/secrets}:/run/secrets:ro
@@ -43,7 +43,11 @@ services:
       # The image starts a temporary PostgreSQL process while initializing a
       # fresh volume. Wait for the final PID 1 server so one-shot migration
       # containers cannot enter during the initialization shutdown window.
-      test: ["CMD-SHELL", "test \"$$(head -n 1 /var/lib/postgresql/data/postmaster.pid 2>/dev/null)\" = '1' && pg_isready -U botparty -d botparty"]
+      test:
+        [
+          'CMD-SHELL',
+          'test "$$(head -n 1 /var/lib/postgresql/data/postmaster.pid 2>/dev/null)" = ''1'' && pg_isready -U botparty -d botparty',
+        ]
       interval: 2s
       timeout: 2s
       retries: 15
@@ -60,10 +64,13 @@ services:
     logging: *default-logging
     image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
     restart: on-failure:10
-    entrypoint: ["/bin/sh", "-ec"]
-    command: ['exec redis-server /usr/local/etc/redis/redis.conf --requirepass "$$(cat /run/secrets/redis_password)"']
+    entrypoint: ['/bin/sh', '-ec']
+    command:
+      [
+        'exec redis-server /usr/local/etc/redis/redis.conf --requirepass "$$(cat /run/secrets/redis_password)"',
+      ]
     ports:
-      - "127.0.0.1:${REDIS_HOST_PORT:-6379}:6379"
+      - '127.0.0.1:${REDIS_HOST_PORT:-6379}:6379'
     volumes:
       - redis_data:/data
       - ./docker/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
@@ -71,7 +78,11 @@ services:
     networks:
       - internal
     healthcheck:
-      test: ["CMD-SHELL", "REDISCLI_AUTH=$$(cat /run/secrets/redis_password) redis-cli --no-auth-warning ping | grep -q PONG"]
+      test:
+        [
+          'CMD-SHELL',
+          'REDISCLI_AUTH=$$(cat /run/secrets/redis_password) redis-cli --no-auth-warning ping | grep -q PONG',
+        ]
       interval: 2s
       timeout: 2s
       retries: 15
@@ -86,9 +97,9 @@ services:
   object-storage-permissions:
     logging: *default-logging
     image: chrislusf/seaweedfs:4.40@sha256:52194fba4fecd0083c842158b3a902ba6e04a63619b2b0efcd08007bdb6a4602
-    restart: "no"
-    entrypoint: ["/bin/sh", "-ec"]
-    command: ["chown 1000:1000 /data"]
+    restart: 'no'
+    entrypoint: ['/bin/sh', '-ec']
+    command: ['chown 1000:1000 /data']
     network_mode: none
     read_only: true
     cap_drop: [ALL]
@@ -100,14 +111,14 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.25"
+          cpus: '0.25'
           memory: 128M
 
   seaweedfs:
     logging: *default-logging
     image: chrislusf/seaweedfs:4.40@sha256:52194fba4fecd0083c842158b3a902ba6e04a63619b2b0efcd08007bdb6a4602
     restart: on-failure:10
-    user: "1000:1000"
+    user: '1000:1000'
     depends_on:
       object-storage-permissions:
         condition: service_completed_successfully
@@ -142,8 +153,8 @@ services:
     healthcheck:
       test:
         [
-          "CMD-SHELL",
-          "wget -q -O /dev/null http://127.0.0.1:8333/status 2>/dev/null || wget -q -O /dev/null http://127.0.0.1:9333/cluster/status 2>/dev/null || exit 1",
+          'CMD-SHELL',
+          'wget -q -O /dev/null http://127.0.0.1:8333/status 2>/dev/null || wget -q -O /dev/null http://127.0.0.1:9333/cluster/status 2>/dev/null || exit 1',
         ]
       interval: 10s
       timeout: 5s
@@ -152,14 +163,14 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${SEAWEEDFS_CPU_LIMIT:-1.0}"
+          cpus: '${SEAWEEDFS_CPU_LIMIT:-1.0}'
           memory: ${SEAWEEDFS_MEMORY_LIMIT:-1024M}
 
   object-storage-init:
     logging: *default-logging
     image: amazon/aws-cli:2.27.50@sha256:48c3d4212e2f5b0e24bdc6af7708f9412ce65425a79575e0f78b8f8c0dcd70ab
-    restart: "no"
-    entrypoint: ["/bin/sh", "-ec"]
+    restart: 'no'
+    entrypoint: ['/bin/sh', '-ec']
     command:
       - |
         export AWS_ACCESS_KEY_ID="$${AWS_ACCESS_KEY_ID:-botparty}"
@@ -200,17 +211,17 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.5"
+          cpus: '0.5'
           memory: 256M
 
   livekit-config:
     logging: *default-logging
     image: node@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2
-    restart: "no"
+    restart: 'no'
     environment:
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?Set LIVEKIT_API_KEY (must not be devkey)}
       LIVEKIT_WHIP_BASE_URL: ${LIVEKIT_WHIP_BASE_URL:-https://botparty.live/whip}
-    command: ["node", "/scripts/render-livekit-config.mjs", "/output"]
+    command: ['node', '/scripts/render-livekit-config.mjs', '/output']
     volumes:
       - ./scripts/render-livekit-config.mjs:/scripts/render-livekit-config.mjs:ro
       - ${BOTPARTY_SECRET_DIR:-./docker/secrets}:/run/secrets:ro
@@ -226,9 +237,9 @@ services:
     image: livekit/livekit-server:v1.8@sha256:621fd87bd64a0c83e1f2418ee0323eb920d00acdd73e5f79b303c64f6cc532af
     restart: on-failure:10
     ports:
-      - "${LIVEKIT_HTTP_HOST_PORT:-7880}:7880"
-      - "${LIVEKIT_TCP_HOST_PORT:-7881}:7881/tcp"
-      - "${LIVEKIT_UDP_HOST_PORT_RANGE:-50000-50100}:50000-50100/udp"
+      - '${LIVEKIT_HTTP_HOST_PORT:-7880}:7880'
+      - '${LIVEKIT_TCP_HOST_PORT:-7881}:7881/tcp'
+      - '${LIVEKIT_UDP_HOST_PORT_RANGE:-50000-50100}:50000-50100/udp'
     depends_on:
       livekit-config:
         condition: service_completed_successfully
@@ -242,7 +253,7 @@ services:
       - livekit_runtime_config:/run/livekit-config:ro
     command: --config /run/livekit-config/livekit.json
     healthcheck:
-      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:7880 2>/dev/null && echo ok || exit 1"]
+      test: ['CMD-SHELL', 'wget --spider -q http://127.0.0.1:7880 2>/dev/null && echo ok || exit 1']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -257,9 +268,9 @@ services:
     image: livekit/ingress:v1.4@sha256:04bdc68b56530870e65086a07daac7743f3f049f0be87e0df2b4b7e51f1b9379
     restart: on-failure:10
     ports:
-      - "${LIVEKIT_INGRESS_WHIP_HOST_PORT:-8080}:8080"
-      - "${LIVEKIT_INGRESS_TCP_HOST_PORT:-7882}:7882/tcp"
-      - "${LIVEKIT_INGRESS_UDP_HOST_PORT:-7885}:7885/udp"
+      - '${LIVEKIT_INGRESS_WHIP_HOST_PORT:-8080}:8080'
+      - '${LIVEKIT_INGRESS_TCP_HOST_PORT:-7882}:7882/tcp'
+      - '${LIVEKIT_INGRESS_UDP_HOST_PORT:-7885}:7885/udp'
     environment:
       INGRESS_CONFIG_FILE: /run/livekit-config/ingress.json
     depends_on:
@@ -276,7 +287,8 @@ services:
     volumes:
       - livekit_runtime_config:/run/livekit-config:ro
     healthcheck:
-      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:9091/ 2>/dev/null && echo ok || exit 1"]
+      test:
+        ['CMD-SHELL', 'wget --spider -q http://127.0.0.1:9091/ 2>/dev/null && echo ok || exit 1']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -310,7 +322,8 @@ services:
     volumes:
       - livekit_runtime_config:/run/livekit-config:ro
     healthcheck:
-      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:9090/ 2>/dev/null && echo ok || exit 1"]
+      test:
+        ['CMD-SHELL', 'wget --spider -q http://127.0.0.1:9090/ 2>/dev/null && echo ok || exit 1']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -322,7 +335,7 @@ services:
 
   cadvisor:
     logging: *default-logging
-    profiles: ["observability"]
+    profiles: ['observability']
     image: ghcr.io/google/cadvisor:v0.57.0@sha256:e75bdb03b74b0b6995f208f166fead2e6e555dde73e44200113bb26f41b1981d
     restart: on-failure:10
     read_only: true
@@ -343,21 +356,25 @@ services:
     networks:
       - internal
     healthcheck:
-      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:8080/healthz 2>/dev/null && echo ok || exit 1"]
+      test:
+        [
+          'CMD-SHELL',
+          'wget --spider -q http://127.0.0.1:8080/healthz 2>/dev/null && echo ok || exit 1',
+        ]
       interval: 15s
       timeout: 5s
       retries: 5
 
   node-exporter:
     logging: *default-logging
-    profiles: ["observability"]
+    profiles: ['observability']
     image: prom/node-exporter:v1.11.1@sha256:e9cff4fc67b1818f8c97adb115b9f12c9a54b533de86765d4a0effc01b357205
     restart: on-failure:10
     read_only: true
     security_opt:
       - no-new-privileges:true
     cap_drop: [ALL]
-    user: "65534:65534"
+    user: '65534:65534'
     command:
       - --path.procfs=/host/proc
       - --path.sysfs=/host/sys
@@ -370,7 +387,11 @@ services:
     networks:
       - internal
     healthcheck:
-      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:9100/metrics 2>/dev/null && echo ok || exit 1"]
+      test:
+        [
+          'CMD-SHELL',
+          'wget --spider -q http://127.0.0.1:9100/metrics 2>/dev/null && echo ok || exit 1',
+        ]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -392,10 +413,14 @@ services:
     # The root entrypoint needs read access to host bind-mounted 0600 secrets;
     # su-exec then drops UID, GID, and all effective capabilities for Node.
     cap_add: [DAC_OVERRIDE, SETGID, SETUID]
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
     expose:
-      - "4000"
+      - '4000'
     environment: &api-environment
       NODE_ENV: production
       PORT: 4000
@@ -404,6 +429,8 @@ services:
       DATABASE_READ_URL_FILE: ${DATABASE_READ_URL_FILE:-/run/secrets/api_database_url}
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      REDIS_COMMAND_TIMEOUT_MS: ${REDIS_COMMAND_TIMEOUT_MS:-2000}
+      REDIS_CONNECT_TIMEOUT_MS: ${REDIS_CONNECT_TIMEOUT_MS:-5000}
       REDIS_PASSWORD_FILE: ${REDIS_PASSWORD_FILE:-/run/secrets/redis_password}
       JWT_SECRET_FILE: ${JWT_SECRET_FILE:-/run/secrets/jwt_secret}
       JWT_REFRESH_SECRET_FILE: ${JWT_REFRESH_SECRET_FILE:-/run/secrets/jwt_refresh_secret}
@@ -450,6 +477,7 @@ services:
       THROTTLE_TTL: ${THROTTLE_TTL:-60000}
       THROTTLE_LIMIT: ${THROTTLE_LIMIT:-100}
       FASTIFY_BODY_LIMIT: ${FASTIFY_BODY_LIMIT:-1048576}
+      API_WORKERS: ${API_WORKERS:-auto}
       MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-64}
       MAX_CONCURRENT_LOGIN_REQUESTS: ${MAX_CONCURRENT_LOGIN_REQUESTS:-2}
       THUMBNAIL_PUBLIC_BASE_URL: ${THUMBNAIL_PUBLIC_BASE_URL:-https://botparty.live/storage/botparty-thumbnails}
@@ -497,7 +525,11 @@ services:
     volumes:
       - ${BOTPARTY_SECRET_DIR:-./docker/secrets}:/run/secrets:ro
     healthcheck:
-      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:4000/api/v1/health/ready 2>/dev/null && echo ok || exit 1"]
+      test:
+        [
+          'CMD-SHELL',
+          'wget --spider -q http://127.0.0.1:4000/api/v1/health/ready 2>/dev/null && echo ok || exit 1',
+        ]
       interval: 3s
       timeout: 2s
       start_period: 5s
@@ -519,7 +551,7 @@ services:
       context: .
       dockerfile: docker/api/Dockerfile
     image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-onlybrezel}/botparty-api:${APP_VERSION:-0.1.3}
-    restart: "no"
+    restart: 'no'
     read_only: true
     security_opt:
       - no-new-privileges:true
@@ -527,7 +559,7 @@ services:
     cap_add: [DAC_OVERRIDE, SETGID, SETUID]
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
-    entrypoint: ["/migrate-entrypoint.sh"]
+    entrypoint: ['/migrate-entrypoint.sh']
     environment:
       <<: *api-environment
     depends_on:
@@ -598,7 +630,8 @@ services:
     networks:
       - frontend
     healthcheck:
-      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:3000/ 2>/dev/null && echo ok || exit 1"]
+      test:
+        ['CMD-SHELL', 'wget --spider -q http://127.0.0.1:3000/ 2>/dev/null && echo ok || exit 1']
       interval: 3s
       timeout: 2s
       start_period: 5s
@@ -618,19 +651,19 @@ services:
   nginx:
     logging: *default-logging
     image: nginxinc/nginx-unprivileged:1.27-alpine@sha256:65e3e85dbaed8ba248841d9d58a899b6197106c23cb0ff1a132b7bfe0547e4c0
-    entrypoint: ["/bin/sh", "/etc/nginx/botparty-entrypoint.sh"]
+    entrypoint: ['/bin/sh', '/etc/nginx/botparty-entrypoint.sh']
     restart: on-failure:10
     read_only: true
     security_opt:
       - no-new-privileges:true
     cap_drop: [ALL]
     group_add:
-      - "${BOTPARTY_SECRET_GID:-1000}"
+      - '${BOTPARTY_SECRET_GID:-1000}'
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
     ports:
-      - "${HTTP_HOST_PORT:-80}:80"
-      - "${HTTPS_HOST_PORT:-443}:443"
+      - '${HTTP_HOST_PORT:-80}:80'
+      - '${HTTPS_HOST_PORT:-443}:443'
     volumes:
       - ${NGINX_CONF:-./docker/nginx/nginx.conf}:/etc/nginx/nginx.conf:ro
       - ./docker/nginx/entrypoint.sh:/etc/nginx/botparty-entrypoint.sh:ro
@@ -643,7 +676,11 @@ services:
     networks:
       - frontend
     healthcheck:
-      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1/api/v1/health/live 2>/dev/null && echo ok || exit 1"]
+      test:
+        [
+          'CMD-SHELL',
+          'wget --spider -q http://127.0.0.1/api/v1/health/live 2>/dev/null && echo ok || exit 1',
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -655,7 +692,7 @@ services:
 
   prometheus:
     logging: *default-logging
-    profiles: ["observability"]
+    profiles: ['observability']
     image: prom/prometheus:v3.13.1@sha256:3c42b892cf723fa54d2f262c37a0e1f80aa8c8ddb1da7b9b0df9455a35a7f893
     restart: on-failure:10
     read_only: true
@@ -663,7 +700,7 @@ services:
       - no-new-privileges:true
     cap_drop: [ALL]
     group_add:
-      - "${BOTPARTY_SECRET_GID:-1000}"
+      - '${BOTPARTY_SECRET_GID:-1000}'
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=32m
     command:
@@ -686,7 +723,11 @@ services:
       - internal
       - frontend
     healthcheck:
-      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:9090/-/ready 2>/dev/null && echo ok || exit 1"]
+      test:
+        [
+          'CMD-SHELL',
+          'wget --spider -q http://127.0.0.1:9090/-/ready 2>/dev/null && echo ok || exit 1',
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -698,7 +739,7 @@ services:
 
   alertmanager:
     logging: *default-logging
-    profiles: ["observability"]
+    profiles: ['observability']
     image: prom/alertmanager:v0.28.1@sha256:27c475db5fb156cab31d5c18a4251ac7ed567746a2483ff264516437a39b15ba
     restart: on-failure:10
     read_only: true
@@ -706,10 +747,10 @@ services:
       - no-new-privileges:true
     cap_drop: [ALL]
     group_add:
-      - "${BOTPARTY_SECRET_GID:-1000}"
+      - '${BOTPARTY_SECRET_GID:-1000}'
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=16m
-    entrypoint: ["/bin/sh", "/etc/alertmanager/entrypoint.sh"]
+    entrypoint: ['/bin/sh', '/etc/alertmanager/entrypoint.sh']
     volumes:
       - ./docker/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - ./docker/alertmanager/entrypoint.sh:/etc/alertmanager/entrypoint.sh:ro
@@ -718,7 +759,11 @@ services:
     networks:
       - frontend
     healthcheck:
-      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:9093/-/ready 2>/dev/null && echo ok || exit 1"]
+      test:
+        [
+          'CMD-SHELL',
+          'wget --spider -q http://127.0.0.1:9093/-/ready 2>/dev/null && echo ok || exit 1',
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -733,13 +778,13 @@ services:
   # ═══════════════════════════════════════════════════
   loki:
     logging: *default-logging
-    profiles: ["observability-logs"]
+    profiles: ['observability-logs']
     image: grafana/loki:3.2.1@sha256:09a53b4a4ff81ffcd8f13886df19d33fac7a8d3aaf952e3c7e66cbade5b2fc31
     restart: on-failure:10
     security_opt:
       - no-new-privileges:true
     cap_drop: [ALL]
-    command: ["-config.file=/etc/loki/config.yaml"]
+    command: ['-config.file=/etc/loki/config.yaml']
     volumes:
       - ./docker/loki/config.yaml:/etc/loki/config.yaml:ro
       - loki_data:/loki
@@ -753,14 +798,14 @@ services:
 
   promtail:
     logging: *default-logging
-    profiles: ["observability-logs"]
+    profiles: ['observability-logs']
     image: grafana/promtail:3.2.1@sha256:bf617e9d67e80247a59f717f9c1ad388d7d32dc0a1d29abd5799516d15e0a9b5
     restart: on-failure:10
     read_only: true
     security_opt:
       - no-new-privileges:true
     cap_drop: [ALL]
-    command: ["-config.file=/etc/promtail/config.yaml"]
+    command: ['-config.file=/etc/promtail/config.yaml']
     volumes:
       - ./docker/promtail/config.yaml:/etc/promtail/config.yaml:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro

@@ -5,6 +5,16 @@ import type { ModerationService } from '../moderation/moderation.service';
 import type { RobotsService } from '../robots/robots.service';
 import type { CommandMetadata, WsClient } from './gateway-types';
 
+type ChatRobots = Pick<RobotsService, 'appendChatMessage' | 'findByIdCached' | 'getAccessPolicy'>;
+type ChatModeration = Pick<
+  ModerationService,
+  | 'containsForbiddenSymbols'
+  | 'containsProfanity'
+  | 'getActiveRestriction'
+  | 'recordProfanityEvent'
+  | 'sanitizeChatContent'
+>;
+
 export interface ChatHandlerContext {
   broadcastToRoom(robotId: string, event: string, data: unknown, excludeClientId?: string): void;
   getOpenRobotClient(robotId: string): WsClient | undefined;
@@ -19,8 +29,8 @@ export class ChatHandler {
 
   constructor(
     private readonly ctx: ChatHandlerContext,
-    private readonly robotsService: RobotsService,
-    private readonly moderationService: ModerationService,
+    private readonly robotsService: ChatRobots,
+    private readonly moderationService: ChatModeration,
   ) {}
 
   async handle(client: WsClient, rawPayload: unknown): Promise<void> {

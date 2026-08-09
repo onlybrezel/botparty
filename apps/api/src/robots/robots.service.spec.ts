@@ -34,34 +34,55 @@ function buildMockPrisma(overrides: Record<string, unknown> = {}) {
       count: jest.fn().mockResolvedValue(0),
       create: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
       delete: jest.fn(),
-      ...((robotOverrides as object | undefined) ?? {}),
+      ...objectOverride(robotOverrides),
     },
     controlButton: {
       createMany: jest.fn().mockResolvedValue(undefined),
-      ...((controlButtonOverrides as object | undefined) ?? {}),
+      count: jest.fn().mockResolvedValue(0),
+      ...objectOverride(controlButtonOverrides),
     },
     slugAlias: {
       deleteMany: jest.fn().mockResolvedValue(undefined),
       findFirst: jest.fn().mockResolvedValue(null),
-      ...((slugAliasOverrides as object | undefined) ?? {}),
+      ...objectOverride(slugAliasOverrides),
     },
     chatMessage: {
       findMany: jest.fn().mockResolvedValue([]),
-      ...((chatMessageOverrides as object | undefined) ?? {}),
+      ...objectOverride(chatMessageOverrides),
     },
     queueEntry: {
       count: jest.fn().mockResolvedValue(0),
-      ...((queueEntryOverrides as object | undefined) ?? {}),
+      ...objectOverride(queueEntryOverrides),
     },
+    user: { findUnique: jest.fn().mockResolvedValue(null) },
+    storageDeletionTask: { createMany: jest.fn().mockResolvedValue({ count: 0 }) },
     ...restOverrides,
   };
-  return {
-    ...prisma,
-    $transaction: jest.fn(async (callback: (tx: typeof prisma) => Promise<unknown>) =>
-      callback(prisma),
-    ),
-  };
+  const database = { ...prisma, $transaction: jest.fn() };
+  database.$transaction.mockImplementation(<T>(callback: (tx: typeof prisma) => Promise<T>) =>
+    callback(prisma),
+  );
+  return database;
+}
+
+function objectOverride(value: unknown): object {
+  return typeof value === 'object' && value !== null ? value : {};
+}
+
+function hasObjectProperty<K extends PropertyKey>(
+  value: unknown,
+  key: K,
+): value is Record<K, unknown> {
+  return typeof value === 'object' && value !== null && key in value;
+}
+
+function hasStringProperty<K extends PropertyKey>(
+  value: unknown,
+  key: K,
+): value is Record<K, string> {
+  return hasObjectProperty(value, key) && typeof value[key] === 'string';
 }
 
 function buildMockRedis() {
@@ -90,16 +111,27 @@ function buildService(
 ) {
   const mockPrisma = buildMockPrisma(prismaOverrides ?? {});
   const mockRedis = buildMockRedis();
-  const mockTelemetry = { record: jest.fn(), touch: jest.fn() };
-  const mockThumbnail = { set: jest.fn() };
+  const mockTelemetry = {
+    getLogs: jest.fn(),
+    getTelemetry: jest.fn(),
+    ingestLogsByRobotId: jest.fn(),
+    ingestTelemetryByRobotId: jest.fn(),
+  };
+  const mockThumbnail = { clear: jest.fn(), read: jest.fn(), save: jest.fn() };
   const mockAccess = {
     invalidateCache: jest.fn(),
     getAccessPolicy: jest.fn(),
     getStreamPolicy: jest.fn(),
+    getAllowedUsers: jest.fn(),
+    addAllowedUser: jest.fn(),
+    removeAllowedUser: jest.fn(),
+    issueRoomAccessGrant: jest.fn(),
     validateRoomAccess: jest.fn(),
     resolveGuestActorId: jest.fn(),
+    resolveRoomAccessActorId: jest.fn(),
+    parseStreamFromMetadata: jest.fn().mockReturnValue({ targetBitrateKbps: 1200, cameras: [] }),
   };
-  const mockWebhooks = { deliver: jest.fn() };
+  const mockWebhooks = { emitRobotStatus: jest.fn() };
   const mockChatPersistence = { enqueue: jest.fn() };
   const mockConfig = buildMockConfig(configValues ?? {});
   const mockActionQueue = {
@@ -110,22 +142,18 @@ function buildService(
   };
 
   // Build real sub-services backed by the mock prisma/config
-  const deviceService = new RobotDeviceService(mockPrisma as never, mockConfig as never);
-  const slugService = new RobotSlugService(mockPrisma as never);
-  const inviteService = new RobotInviteService(mockPrisma as never);
-  const cameraService = new RobotCameraService(
-    mockPrisma as never,
-    mockAccess as never,
-    mockConfig as never,
-  );
+  const deviceService = new RobotDeviceService(mockPrisma, mockConfig);
+  const slugService = new RobotSlugService(mockPrisma);
+  const inviteService = new RobotInviteService(mockPrisma);
+  const cameraService = new RobotCameraService(mockPrisma, mockAccess, mockConfig);
   const mockPlatformUser = {
     getPlatformUserId: jest.fn().mockReturnValue('00000000-0000-0000-0000-00000000fee5'),
-    isPlatformUser: jest.fn((id) => id === '00000000-0000-0000-0000-00000000fee5'),
-  } as never;
+    isPlatformUser: jest.fn((id: string) => id === '00000000-0000-0000-0000-00000000fee5'),
+  };
   const publicOverviewService = new RobotPublicOverviewService(
-    mockPrisma as never,
-    mockRedis as never,
-    mockPlatformUser as never,
+    mockPrisma,
+    mockRedis,
+    mockPlatformUser,
   );
   const mockStorageDeletion = {
     recordingBucket: 'botparty-recordings',
@@ -134,23 +162,23 @@ function buildService(
   };
 
   const service = new RobotsService(
-    mockPrisma as never,
-    mockRedis as never,
-    mockTelemetry as never,
-    mockThumbnail as never,
-    mockAccess as never,
-    mockWebhooks as never,
-    mockChatPersistence as never,
-    mockConfig as never,
+    mockPrisma,
+    mockRedis,
+    mockTelemetry,
+    mockThumbnail,
+    mockAccess,
+    mockWebhooks,
+    mockChatPersistence,
+    mockConfig,
     deviceService,
     slugService,
     inviteService,
     cameraService,
-    mockActionQueue as never,
+    mockActionQueue,
     publicOverviewService,
-    mockPlatformUser as never,
-    { publishSafely: jest.fn().mockResolvedValue(null) } as never,
-    mockStorageDeletion as never,
+    mockPlatformUser,
+    { publishSafely: jest.fn().mockResolvedValue(null) },
+    mockStorageDeletion,
   );
 
   return {
@@ -165,7 +193,32 @@ function buildService(
 }
 
 // Minimal robot fixture matching the shape returned by prisma includes
-function robotFixture(overrides: Record<string, unknown> = {}) {
+interface RobotFixture {
+  id: string;
+  name: string;
+  slug: string;
+  slugAliases: unknown[];
+  description: string | null;
+  tags: string[];
+  visibility: string;
+  status: string;
+  queueMode: 'FIRST_COME' | 'VOTING' | 'DISABLED';
+  lastOnlineAt: Date | null;
+  ownerId: string;
+  claimToken: string;
+  streamKey: string;
+  inviteCode: string | null;
+  accessMode: string;
+  accessPassword: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: Date;
+  updatedAt: Date;
+  owner: { id: string; username: string; displayName: string | null; role: string };
+  controlButtons: unknown[];
+  recordings?: Array<{ objectKey: string }>;
+}
+
+function robotFixture(overrides: Partial<RobotFixture> = {}): RobotFixture {
   return {
     id: 'robot-1',
     name: 'Test Robot',
@@ -175,6 +228,7 @@ function robotFixture(overrides: Record<string, unknown> = {}) {
     tags: [],
     visibility: 'PUBLIC',
     status: 'ONLINE',
+    queueMode: 'FIRST_COME',
     lastOnlineAt: new Date(),
     ownerId: 'owner-1',
     claimToken: 'a'.repeat(64),
@@ -191,6 +245,21 @@ function robotFixture(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function createRobotInput(name: string, slug?: string): Parameters<RobotsService['create']>[1] {
+  return {
+    name,
+    ...(slug === undefined ? {} : { slug }),
+    visibility: 'PRIVATE',
+    accessMode: 'OPEN',
+    queueMode: 'FIRST_COME',
+    maxTurnTime: 60_000,
+    maxViewers: 1000,
+    maxControllers: 10,
+    tags: [],
+    timezone: 'UTC',
+  };
+}
+
 // ──────────────────────────────────────────────────────────────
 // findAll
 // ──────────────────────────────────────────────────────────────
@@ -202,33 +271,43 @@ describe('RobotsService.findAll', () => {
     expect(result).toEqual([]);
   });
 
+  it('coalesces and caches identical public discovery reads', async () => {
+    const findMany = jest.fn().mockResolvedValue([]);
+    const { service } = buildService({ robot: { findMany } });
+
+    await Promise.all([service.findAll({ sort: 'new' }), service.findAll({ sort: 'new' })]);
+    await service.findAll({ sort: 'new' });
+
+    expect(findMany).toHaveBeenCalledTimes(1);
+  });
+
   it('passes status filter to prisma as uppercase', async () => {
     const { service, mockPrisma } = buildService();
     await service.findAll({ status: 'online' });
-    const callArg = mockPrisma.robot.findMany.mock.calls[0][0] as { where?: { status?: string } };
-    expect(callArg.where?.status).toBe('ONLINE');
+    expect(mockPrisma.robot.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ status: 'ONLINE' }) }),
+    );
   });
 
   it('passes tag filter through to prisma', async () => {
     const { service, mockPrisma } = buildService();
     await service.findAll({ tag: 'cute' });
-    const callArg = mockPrisma.robot.findMany.mock.calls[0][0] as {
-      where?: { tags?: { has: string } };
-    };
-    expect(callArg.where?.tags).toEqual({ has: 'cute' });
+    expect(mockPrisma.robot.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ tags: { has: 'cute' } }) }),
+    );
   });
 
   it('selects only fields that are part of the public robot contract', async () => {
     const { service, mockPrisma } = buildService();
     await service.findAll({});
-    const callArg = mockPrisma.robot.findMany.mock.calls[0][0] as {
-      select?: Record<string, unknown>;
-    };
-
-    expect(callArg.select).toMatchObject({ id: true, owner: expect.any(Object) });
-    expect(callArg.select).not.toHaveProperty('streamKeyHash');
-    expect(callArg.select).not.toHaveProperty('claimTokenHash');
-    expect(callArg.select).not.toHaveProperty('accessPassword');
+    const callArgument: unknown = mockPrisma.robot.findMany.mock.calls[0]?.[0];
+    if (!hasObjectProperty(callArgument, 'select')) {
+      throw new Error('Expected the public robot query to define a select clause');
+    }
+    expect(callArgument.select).toMatchObject({ id: true, owner: expect.any(Object) });
+    expect(callArgument.select).not.toHaveProperty('streamKeyHash');
+    expect(callArgument.select).not.toHaveProperty('claimTokenHash');
+    expect(callArgument.select).not.toHaveProperty('accessPassword');
   });
 });
 
@@ -272,7 +351,7 @@ describe('RobotsService.findBySlug', () => {
     });
     const result = await service.findBySlug('test-robot');
     expect(result).toBeDefined();
-    expect((result as { slug: string }).slug).toBe('test-robot');
+    expect(result.slug).toBe('test-robot');
   });
 });
 
@@ -293,9 +372,9 @@ describe('RobotsService.findByClaimToken', () => {
       { robot: { findUnique: jest.fn().mockResolvedValue(robot) } },
       { ROBOT_CLAIM_TOKEN_MAX_AGE_DAYS: '90' },
     );
-    const result = await service.findByClaimToken(robot.claimToken as string);
+    const result = await service.findByClaimToken(robot.claimToken);
     expect(result).toBeDefined();
-    expect((result as { id: string }).id).toBe('robot-1');
+    expect(result?.id).toBe('robot-1');
   });
 
   it('returns null when claim token is older than ROBOT_CLAIM_TOKEN_MAX_AGE_DAYS', async () => {
@@ -305,7 +384,7 @@ describe('RobotsService.findByClaimToken', () => {
       { robot: { findUnique: jest.fn().mockResolvedValue(robot) } },
       { ROBOT_CLAIM_TOKEN_MAX_AGE_DAYS: '90' },
     );
-    const result = await service.findByClaimToken(robot.claimToken as string);
+    const result = await service.findByClaimToken(robot.claimToken);
     expect(result).toBeNull();
   });
 
@@ -319,7 +398,7 @@ describe('RobotsService.findByClaimToken', () => {
       { robot: { findUnique: jest.fn().mockResolvedValue(robot) } },
       { ROBOT_CLAIM_TOKEN_MAX_AGE_DAYS: '0' },
     );
-    const result = await service.findByClaimToken(robot.claimToken as string);
+    const result = await service.findByClaimToken(robot.claimToken);
     expect(result).toBeDefined();
   });
 
@@ -329,7 +408,7 @@ describe('RobotsService.findByClaimToken', () => {
       { robot: { findUnique: jest.fn().mockResolvedValue(robot) } },
       { ROBOT_CLAIM_TOKEN_MAX_AGE_DAYS: '90' },
     );
-    const result = await service.findByClaimToken(robot.claimToken as string);
+    const result = await service.findByClaimToken(robot.claimToken);
     expect(result).toBeDefined();
   });
 });
@@ -674,8 +753,11 @@ describe('RobotsService.getPublicOverview', () => {
 
     await service.getPublicOverview();
 
-    const aggregateQuery = mockPrisma.$queryRaw.mock.calls[0]?.[0] as { sql?: string };
-    const topTagsQuery = mockPrisma.$queryRaw.mock.calls[1]?.[0] as { sql?: string };
+    const aggregateQuery: unknown = mockPrisma.$queryRaw.mock.calls[0]?.[0];
+    const topTagsQuery: unknown = mockPrisma.$queryRaw.mock.calls[1]?.[0];
+    if (!hasStringProperty(aggregateQuery, 'sql') || !hasStringProperty(topTagsQuery, 'sql')) {
+      throw new Error('Expected Prisma SQL query objects');
+    }
 
     expect(aggregateQuery.sql).toContain('"ownerId" != ?::uuid');
     expect(topTagsQuery.sql).toContain('"ownerId" != ?::uuid');
@@ -689,17 +771,17 @@ describe('RobotsService.getPublicOverview', () => {
 describe('RobotsService profanity filter', () => {
   it('create() rejects robot name containing a blocked term', async () => {
     const { service } = buildService();
-    await expect(
-      service.create('owner-1', { name: 'fuck robot', slug: undefined } as never),
-    ).rejects.toThrow(BadRequestException);
+    await expect(service.create('owner-1', createRobotInput('fuck robot'))).rejects.toThrow(
+      BadRequestException,
+    );
   });
 
   it('create() rejects robot name containing unicode-obfuscated profanity', async () => {
     const { service } = buildService();
     // NFKD normalization strips the diacritic: 'f\u00fcck' → 'fuck'
-    await expect(
-      service.create('owner-1', { name: 'f\u00fcck this', slug: undefined } as never),
-    ).rejects.toThrow(BadRequestException);
+    await expect(service.create('owner-1', createRobotInput('f\u00fcck this'))).rejects.toThrow(
+      BadRequestException,
+    );
   });
 
   it('create() rejects when the owner reached the robot cap', async () => {
@@ -712,9 +794,9 @@ describe('RobotsService profanity filter', () => {
       { MAX_ROBOTS_PER_OWNER: '2' },
     );
 
-    await expect(
-      service.create('owner-1', { name: 'Cap reached', slug: undefined } as never),
-    ).rejects.toThrow(BadRequestException);
+    await expect(service.create('owner-1', createRobotInput('Cap reached'))).rejects.toThrow(
+      BadRequestException,
+    );
   });
 });
 
@@ -733,7 +815,7 @@ describe('RobotsService slug management', () => {
       },
     });
     await expect(
-      service.create('owner-1', { name: 'Safe Name', slug: 'my-slug' } as never),
+      service.create('owner-1', createRobotInput('Safe Name', 'my-slug')),
     ).rejects.toThrow(ConflictException);
   });
 });
@@ -748,7 +830,7 @@ describe('RobotsService status normalization', () => {
     const robot = robotFixture({ status: 'ONLINE', lastOnlineAt: staleDate });
     const { service } = buildService({ robot: { findMany: jest.fn().mockResolvedValue([robot]) } });
     const result = await service.findAll({});
-    const normalized = result[0] as { status: string } | undefined;
+    const normalized = result[0];
     expect(normalized?.status).toBe('OFFLINE');
   });
 
@@ -757,7 +839,7 @@ describe('RobotsService status normalization', () => {
     const robot = robotFixture({ status: 'ONLINE', lastOnlineAt: recentDate });
     const { service } = buildService({ robot: { findMany: jest.fn().mockResolvedValue([robot]) } });
     const result = await service.findAll({});
-    const normalized = result[0] as { status: string } | undefined;
+    const normalized = result[0];
     expect(normalized?.status).toBe('ONLINE');
   });
 
@@ -765,7 +847,7 @@ describe('RobotsService status normalization', () => {
     const robot = robotFixture({ status: 'ONLINE', lastOnlineAt: null });
     const { service } = buildService({ robot: { findMany: jest.fn().mockResolvedValue([robot]) } });
     const result = await service.findAll({});
-    const normalized = result[0] as { status: string } | undefined;
+    const normalized = result[0];
     expect(normalized?.status).toBe('OFFLINE');
   });
 });
@@ -775,13 +857,19 @@ describe('RobotsService status normalization', () => {
 // ──────────────────────────────────────────────────────────────
 
 describe('RobotsService.findByIdCached', () => {
-  it('returns cached robot from redis without querying prisma', async () => {
-    const robot = robotFixture();
+  it('returns a valid narrow realtime record from cache without querying Prisma', async () => {
+    const cached = {
+      id: 'robot-1',
+      name: 'Test Robot',
+      ownerId: 'owner-1',
+      queueMode: 'FIRST_COME',
+    };
     const { service, mockPrisma, mockRedis } = buildService();
-    mockRedis.get.mockResolvedValue(JSON.stringify(robot));
+    mockRedis.get.mockResolvedValue(JSON.stringify(cached));
 
-    await service.findByIdCached('robot-1');
+    await expect(service.findByIdCached('robot-1')).resolves.toEqual(cached);
     expect(mockPrisma.robot.findUnique).not.toHaveBeenCalled();
+    expect(mockRedis.set).not.toHaveBeenCalled();
   });
 
   it('queries prisma and caches result when cache is empty', async () => {
@@ -793,18 +881,30 @@ describe('RobotsService.findByIdCached', () => {
 
     await service.findByIdCached('robot-1');
     expect(mockPrisma.robot.findUnique).toHaveBeenCalledTimes(1);
+    expect(mockPrisma.robot.findUnique).toHaveBeenCalledWith({
+      where: { id: 'robot-1' },
+      select: { id: true, name: true, ownerId: true, queueMode: true },
+    });
     expect(mockRedis.set).toHaveBeenCalledTimes(1);
   });
 
-  it('re-fetches from prisma when cached JSON is corrupt', async () => {
+  it.each([
+    '{ invalid json {{',
+    JSON.stringify({
+      id: 'robot-1',
+      name: 'Test Robot',
+      ownerId: 'owner-1',
+      queueMode: 'UNSUPPORTED',
+    }),
+  ])('deletes invalid cache payload and re-fetches from Prisma', async (cachedPayload) => {
     const robot = robotFixture();
     const { service, mockPrisma, mockRedis } = buildService({
       robot: { findUnique: jest.fn().mockResolvedValue(robot) },
     });
-    mockRedis.get.mockResolvedValue('{ invalid json {{');
+    mockRedis.get.mockResolvedValue(cachedPayload);
 
     await service.findByIdCached('robot-1');
-    expect(mockRedis.del).toHaveBeenCalledTimes(1);
+    expect(mockRedis.del).toHaveBeenCalledWith('robot:realtime:robot-1');
     expect(mockPrisma.robot.findUnique).toHaveBeenCalledTimes(1);
   });
 
@@ -825,7 +925,7 @@ describe('RobotsService.delete object cleanup', () => {
     const robot = robotFixture({
       recordings: [{ objectKey: 'sessions/session-1/front.mp4' }],
     });
-    const { service, mockPrisma, mockStorageDeletion } = buildService({
+    const { service, mockPrisma, mockRedis, mockStorageDeletion } = buildService({
       robot: { findUnique: jest.fn().mockResolvedValue(robot) },
     });
     mockPrisma.robot.delete.mockResolvedValue(robot);
@@ -847,6 +947,7 @@ describe('RobotsService.delete object cleanup', () => {
       ['robot-thumbnails/robot-1/'],
     );
     expect(mockPrisma.robot.delete).toHaveBeenCalledWith({ where: { id: robot.id } });
+    expect(mockRedis.del).toHaveBeenCalledWith('robot:realtime:robot-1');
   });
 
   it('conceals a foreign robot without deleting or queueing its objects', async () => {
@@ -870,7 +971,7 @@ describe('RobotsService.update ownership check', () => {
     const { service } = buildService({
       robot: { findUnique: jest.fn().mockResolvedValue(robot) },
     });
-    await expect(service.update('robot-1', 'different-user', {} as never)).rejects.toThrow(
+    await expect(service.update('robot-1', 'different-user', {})).rejects.toThrow(
       NotFoundException,
     );
   });

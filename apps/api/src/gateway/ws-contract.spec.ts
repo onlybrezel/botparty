@@ -43,8 +43,8 @@ function parsePythonProtocolVersion(source: string, sourcePath: string): number 
   throw new Error('Unable to locate WS_PROTOCOL_VERSION in Python protocol file');
 }
 
-const pythonProtocolPath = process.env.BOTPARTY_CLIENT_PROTOCOL_FILE
-  ? path.resolve(process.env.BOTPARTY_CLIENT_PROTOCOL_FILE)
+const pythonProtocolPath = process.env['BOTPARTY_CLIENT_PROTOCOL_FILE']
+  ? path.resolve(process.env['BOTPARTY_CLIENT_PROTOCOL_FILE'])
   : path.resolve(__dirname, '../../../../../botparty-client/botparty_robot/ws_protocol.py');
 
 const canonicalPythonSource = `WS_PROTOCOL_VERSION = ${WS_PROTOCOL_VERSION}\nWS_EVENTS = ${JSON.stringify(WS_EVENTS, null, 2)}\n`;

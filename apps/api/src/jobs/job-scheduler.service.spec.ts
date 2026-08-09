@@ -3,8 +3,8 @@ import { JobSchedulerService } from './job-scheduler.service';
 describe('JobSchedulerService', () => {
   it('atomically upserts one deterministic scheduler from every API instance', async () => {
     const queue = { upsertJobScheduler: jest.fn().mockResolvedValue({ id: 'next-job' }) };
-    const firstInstance = new JobSchedulerService(queue as never);
-    const secondInstance = new JobSchedulerService(queue as never);
+    const firstInstance = new JobSchedulerService(queue);
+    const secondInstance = new JobSchedulerService(queue);
 
     await Promise.all([firstInstance.onModuleInit(), secondInstance.onModuleInit()]);
 

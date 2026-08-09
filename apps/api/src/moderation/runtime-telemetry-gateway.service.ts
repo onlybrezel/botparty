@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { RedisService } from '../redis/redis.service';
+import { parseJsonRecord } from '../common/json-value';
 
 @Injectable()
 export class RuntimeTelemetryGatewayService {
@@ -33,11 +34,7 @@ export class RuntimeTelemetryGatewayService {
             return [robotId, null];
           }
 
-          try {
-            return [robotId, JSON.parse(raw) as Record<string, unknown>];
-          } catch {
-            return [robotId, null];
-          }
+          return [robotId, parseJsonRecord(raw)];
         }),
       ),
     };

@@ -34,7 +34,7 @@ describe('WebhookProcessor', () => {
 
     global.fetch = jest.fn();
 
-    const processor = new WebhookProcessor(prisma as never, config as never);
+    const processor = new WebhookProcessor(prisma, config);
 
     await expect(
       processor.process({
@@ -43,7 +43,7 @@ describe('WebhookProcessor', () => {
           event: 'robot.online',
           payload: { robot: { id: 'robot-1' } },
         },
-      } as never),
+      }),
     ).rejects.toThrow('Webhook URL must not target loopback, private, or link-local IP ranges.');
 
     expect(global.fetch).not.toHaveBeenCalled();

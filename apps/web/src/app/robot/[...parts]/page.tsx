@@ -12,6 +12,7 @@ import {
   shouldRedirectToCanonical,
 } from '@/lib/robot-route';
 import { getServerApiUrl } from '@/lib/server-api-url';
+import { isRobotPublic } from '@/lib/api-response-guards';
 
 async function getRobot(route: {
   username: string | null;
@@ -24,7 +25,8 @@ async function getRobot(route: {
     if (res.status === 404 || !res.ok) {
       return null;
     }
-    return res.json() as Promise<RobotPublic>;
+    const payload: unknown = await res.json();
+    return isRobotPublic(payload) ? payload : null;
   } catch {
     return null;
   }

@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { getServerApiUrl } from '@/lib/server-api-url';
+import { isRecord } from '@/lib/api-response-guards';
 
 export const metadata: Metadata = {
   title: 'Status',
@@ -24,6 +25,17 @@ type StatsResponse = {
   timestamp: string;
 };
 
+function isHealthResponse(value: unknown): value is HealthResponse {
+  if (!isRecord(value) || (value['status'] !== 'healthy' && value['status'] !== 'degraded') || !isRecord(value['checks']) || typeof value['timestamp'] !== 'string') return false;
+  return Object.values(value['checks']).every((check) => check === 'ok' || check === 'error' || check === 'disabled');
+}
+
+function isStatsResponse(value: unknown): value is StatsResponse {
+  if (!isRecord(value) || typeof value['timestamp'] !== 'string') return false;
+  return ['totalUsers', 'totalRobots', 'liveRobots', 'totalLiveViewers', 'activeQueueEntries', 'totalSessions']
+    .every((key) => typeof value[key] === 'number');
+}
+
 async function getHealth() {
   const apiUrl = getServerApiUrl();
   try {
@@ -31,7 +43,8 @@ async function getHealth() {
     if (!response.ok) {
       return null;
     }
-    return response.json() as Promise<HealthResponse>;
+    const payload: unknown = await response.json();
+    return isHealthResponse(payload) ? payload : null;
   } catch {
     return null;
   }
@@ -44,7 +57,8 @@ async function getStats() {
     if (!response.ok) {
       return null;
     }
-    return response.json() as Promise<StatsResponse>;
+    const payload: unknown = await response.json();
+    return isStatsResponse(payload) ? payload : null;
   } catch {
     return null;
   }

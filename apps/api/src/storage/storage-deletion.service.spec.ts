@@ -12,6 +12,17 @@ jest.mock('../common/s3-compatible-storage', () => ({
 }));
 
 describe('StorageDeletionService', () => {
+  function createDatabase() {
+    return {
+      storageDeletionTask: {
+        findMany: jest.fn().mockResolvedValue([]),
+        deleteMany: jest.fn(),
+        update: jest.fn(),
+        count: jest.fn().mockResolvedValue(0),
+      },
+      $transaction: jest.fn().mockResolvedValue([]),
+    };
+  }
   const storage = {
     bucket: 'botparty-recordings',
     region: 'us-east-1',
@@ -28,11 +39,11 @@ describe('StorageDeletionService', () => {
 
   it('deduplicates exact keys when enqueueing in the caller transaction', async () => {
     const tx = { storageDeletionTask: { createMany: jest.fn().mockResolvedValue({ count: 2 }) } };
-    const service = new StorageDeletionService({} as never, new ConfigService({
+    const service = new StorageDeletionService(createDatabase(), new ConfigService({
       LIVEKIT_RECORDINGS_S3_BUCKET: storage.bucket,
     }));
 
-    await service.enqueue(tx as never, storage.bucket, ['sessions/a.mp4', 'sessions/a.mp4', ' sessions/b.mp4 ']);
+    await service.enqueue(tx, storage.bucket, ['sessions/a.mp4', 'sessions/a.mp4', ' sessions/b.mp4 ']);
 
     expect(tx.storageDeletionTask.createMany).toHaveBeenCalledWith({
       data: [
@@ -58,8 +69,8 @@ describe('StorageDeletionService', () => {
       $transaction: jest.fn().mockResolvedValue([]),
     };
     const send = jest.fn().mockResolvedValue({ Errors: [] });
-    jest.mocked(createS3CompatibleStorageClient).mockReturnValue({ send } as never);
-    const service = new StorageDeletionService(prisma as never, new ConfigService());
+    jest.mocked(createS3CompatibleStorageClient).mockReturnValue({ send });
+    const service = new StorageDeletionService(prisma, new ConfigService());
 
     await expect(service.processDue()).resolves.toBe(2);
 
@@ -83,8 +94,8 @@ describe('StorageDeletionService', () => {
     };
     jest.mocked(createS3CompatibleStorageClient).mockReturnValue({
       send: jest.fn().mockRejectedValue(new Error('storage unavailable')),
-    } as never);
-    const service = new StorageDeletionService(prisma as never, new ConfigService());
+    });
+    const service = new StorageDeletionService(prisma, new ConfigService());
 
     await expect(service.processDue()).resolves.toBe(1);
 
@@ -123,8 +134,8 @@ describe('StorageDeletionService', () => {
       .mockResolvedValueOnce({ Contents: [{ Key: 'robot-thumbnails/robot-1/a.webp' }] })
       .mockResolvedValueOnce({ Errors: [] })
       .mockResolvedValueOnce({ Contents: [] });
-    jest.mocked(createS3CompatibleStorageClient).mockReturnValue({ send } as never);
-    const service = new StorageDeletionService(prisma as never, new ConfigService());
+    jest.mocked(createS3CompatibleStorageClient).mockReturnValue({ send });
+    const service = new StorageDeletionService(prisma, new ConfigService());
 
     await expect(service.processDue()).resolves.toBe(1);
 

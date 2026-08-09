@@ -19,13 +19,32 @@ import {
   withStreamKeyIssuedAt,
 } from './robots.service.helpers';
 
+export type RobotWriteTransaction = {
+  $queryRaw: Prisma.TransactionClient['$queryRaw'];
+  controlButton: Pick<Prisma.TransactionClient['controlButton'], 'createMany'>;
+  robot: Pick<
+    Prisma.TransactionClient['robot'],
+    'count' | 'create' | 'delete' | 'findMany' | 'findUnique' | 'update'
+  >;
+  storageDeletionTask: Pick<Prisma.TransactionClient['storageDeletionTask'], 'createMany'>;
+};
+
+export type RobotWriteDatabase = {
+  $transaction<T>(
+    callback: (transaction: RobotWriteTransaction) => Promise<T>,
+    options?: { isolationLevel?: Prisma.TransactionIsolationLevel },
+  ): Promise<T>;
+  robot: Pick<PrismaService['robot'], 'update'>;
+  user: Pick<PrismaService['user'], 'findUnique'>;
+};
+
 export class RobotWriteHelper {
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly access: RobotAccessService,
-    private readonly deviceService: RobotDeviceService,
-    private readonly slugService: RobotSlugService,
-    private readonly inviteService: RobotInviteService,
+    private readonly prisma: RobotWriteDatabase,
+    private readonly access: Pick<RobotAccessService, 'invalidateCache'>,
+    private readonly deviceService: Pick<RobotDeviceService, 'clearBoundDeviceMetadata' | 'withClaimTokenIssuedAt'>,
+    private readonly slugService: Pick<RobotSlugService, 'buildSlugUpdate' | 'generateSlug' | 'validateAndNormalizeSlugInput'>,
+    private readonly inviteService: Pick<RobotInviteService, 'generateUniqueInviteCode' | 'resolveInviteCode'>,
   ) {}
 
   async create(ownerId: string, input: z.infer<typeof createRobotSchema>, maxRobotsPerOwner: number) {
@@ -85,6 +104,7 @@ export class RobotWriteHelper {
         const created = await tx.robot.create({
           data: {
             ...baseData,
+            name: data.name,
             accessPassword: passwordHash,
             inviteCode,
             metadata: metadata as Prisma.InputJsonValue,

@@ -1,4 +1,3 @@
-import type { RedisService } from '../redis/redis.service';
 import { RobotClaimLockHandler } from './robot-claim-lock.handler';
 
 describe('RobotClaimLockHandler', () => {
@@ -15,7 +14,7 @@ describe('RobotClaimLockHandler', () => {
       set: jest.fn().mockResolvedValue('OK'),
       eval: jest.fn().mockResolvedValue(1),
     };
-    handler = new RobotClaimLockHandler(redis as unknown as RedisService);
+    handler = new RobotClaimLockHandler(redis);
   });
 
   it('reuses an existing lock owned by the same client', async () => {

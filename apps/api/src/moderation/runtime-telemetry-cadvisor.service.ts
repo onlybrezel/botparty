@@ -206,10 +206,10 @@ export class RuntimeTelemetryCadvisorService implements OnModuleInit, OnModuleDe
         continue;
       }
 
-      const id = labels.id ?? labels.name ?? '';
-      const containerName = this.normalizeCadvisorContainerName(labels.name?.trim() || labels.container?.trim() || null);
+      const id = labels['id'] ?? labels['name'] ?? '';
+      const containerName = this.normalizeCadvisorContainerName(labels['name']?.trim() || labels['container']?.trim() || null);
       const service = this.resolveCadvisorService(labels, containerName);
-      const interfaceName = labels.interface?.trim();
+      const interfaceName = labels['interface']?.trim();
 
       if (id === '/') {
         if (metric === 'container_cpu_usage_seconds_total') {
@@ -302,8 +302,8 @@ export class RuntimeTelemetryCadvisorService implements OnModuleInit, OnModuleDe
   }
 
   private resolveCadvisorService(labels: Record<string, string>, containerName: string | null) {
-    const composeProject = labels.container_label_com_docker_compose_project?.trim().toLowerCase() ?? '';
-    const composeService = labels.container_label_com_docker_compose_service?.trim();
+    const composeProject = labels['container_label_com_docker_compose_project']?.trim().toLowerCase() ?? '';
+    const composeService = labels['container_label_com_docker_compose_service']?.trim();
     const normalizedContainerName = containerName?.trim().toLowerCase() ?? '';
     const belongsToBotparty = composeProject.includes('botparty') || normalizedContainerName.includes('botparty');
 

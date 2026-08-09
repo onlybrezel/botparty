@@ -4,13 +4,13 @@ import {
   InternalServerErrorException,
   Logger,
   NotFoundException,
+  Inject,
 } from '@nestjs/common';
 import {
   DeleteObjectsCommand,
   GetObjectCommand,
   ListObjectsV2Command,
   PutObjectCommand,
-  type S3Client,
 } from '@aws-sdk/client-s3';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
@@ -31,9 +31,17 @@ export class UserAvatarService {
   private readonly logger = new Logger(UserAvatarService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly config: ConfigService,
-    private readonly storageDeletion: StorageDeletionService,
+    @Inject(PrismaService)
+    private readonly prisma: {
+      $transaction<T>(
+        callback: (transaction: Pick<Prisma.TransactionClient, '$queryRaw' | 'storageDeletionTask' | 'user'>) => Promise<T>,
+        options?: { timeout?: number },
+      ): Promise<T>;
+      user: Pick<PrismaService['user'], 'findUnique'>;
+    },
+    @Inject(ConfigService) private readonly config: { get(key: string): unknown },
+    @Inject(StorageDeletionService)
+    private readonly storageDeletion: Pick<StorageDeletionService, 'enqueue'>,
   ) {}
 
   async save(userId: string, dataUrl: string) {
@@ -163,7 +171,7 @@ export class UserAvatarService {
 
   private async deleteObjectKeys(storage: S3CompatibleStorageConfig, keys: string[]) {
     if (keys.length === 0) return;
-    const client: S3Client = createS3CompatibleStorageClient(storage);
+    const client = createS3CompatibleStorageClient(storage);
     await client.send(new DeleteObjectsCommand({
       Bucket: storage.bucket,
       Delete: { Objects: keys.map((Key) => ({ Key })), Quiet: true },

@@ -77,7 +77,7 @@ export class WalletApi {
     return this.req<{ ledgerGroupId: string; balance: number }>('/wallet/donations', {
       method: 'POST',
       body: JSON.stringify(input),
-      headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
+      ...(idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : {}),
     });
   }
 

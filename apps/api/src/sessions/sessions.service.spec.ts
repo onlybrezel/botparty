@@ -15,6 +15,7 @@ describe('SessionsService', () => {
     };
     robot: { findUnique: jest.Mock; update: jest.Mock };
     analyticsEvent: { create: jest.Mock };
+    $executeRaw: jest.Mock;
     $transaction: jest.Mock;
   };
   let robotsService: {
@@ -52,6 +53,7 @@ describe('SessionsService', () => {
       session,
       robot,
       analyticsEvent: { create: jest.fn().mockResolvedValue(undefined) },
+      $executeRaw: jest.fn().mockResolvedValue(0),
       $transaction: jest.fn(
         async (callback: (tx: { session: typeof session; robot: typeof robot }) => unknown) =>
           callback({ session, robot }),
@@ -70,11 +72,11 @@ describe('SessionsService', () => {
     };
     analytics = { recordConsented: jest.fn().mockResolvedValue({ accepted: true }) };
     service = new SessionsService(
-      prisma as never,
-      robotsService as never,
-      robotWebhookService as never,
-      recordingAdminService as never,
-      analytics as never,
+      prisma,
+      robotsService,
+      robotWebhookService,
+      recordingAdminService,
+      analytics,
     );
   });
 
@@ -156,9 +158,9 @@ describe('SessionsService', () => {
     robotsService.resolveGuestActorId.mockReturnValue('guest-1');
     robotsService.validateRoomAccess.mockResolvedValue(false);
 
-    await expect(
-      service.findByRobotForRequester('private-robot', null),
-    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.findByRobotForRequester('private-robot', null)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
     await expect(
       service.findByRobotForRequester('private-robot', 'foreign-user'),
     ).rejects.toBeInstanceOf(NotFoundException);
@@ -168,9 +170,9 @@ describe('SessionsService', () => {
     prisma.robot.findUnique.mockResolvedValue({ id: 'public-robot', visibility: 'PUBLIC' });
     robotsService.validateRoomAccess.mockResolvedValue(false);
 
-    await expect(
-      service.findByRobotForRequester('public-robot', 'user-1'),
-    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.findByRobotForRequester('public-robot', 'user-1')).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
   });
 
   it('rejects session-history access when the robot does not exist', async () => {
@@ -251,17 +253,28 @@ describe('SessionsService', () => {
   });
 
   it('reconciles orphaned active sessions on startup', async () => {
-    const startedAt = new Date(Date.now() - 30_000);
-    prisma.session.findMany.mockResolvedValue([{ id: 'session-1', startedAt }]);
-    prisma.session.update.mockResolvedValue({ id: 'session-1' });
+    prisma.$executeRaw.mockResolvedValue(3);
 
     await service.endAllActiveSessions();
 
-    expect(prisma.session.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: 'session-1' },
-        data: expect.objectContaining({ status: 'ENDED' }),
-      }),
-    );
+    expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+    const query: unknown = prisma.$executeRaw.mock.calls[0]?.[0];
+    if (
+      typeof query !== 'object' ||
+      query === null ||
+      !('sql' in query) ||
+      typeof query.sql !== 'string' ||
+      !('values' in query) ||
+      !Array.isArray(query.values)
+    ) {
+      throw new Error('Expected a parameterized Prisma SQL query');
+    }
+    expect(query.sql).toContain('UPDATE sessions');
+    expect(query.sql).toContain("WHERE status = 'ACTIVE'");
+    expect(query.sql).not.toContain('2026-');
+    expect(query.values).toHaveLength(2);
+    expect(query.values.every((value) => value instanceof Date)).toBe(true);
+    expect(prisma.session.findMany).not.toHaveBeenCalled();
+    expect(prisma.session.update).not.toHaveBeenCalled();
   });
 });

@@ -1,15 +1,9 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { RobotManaged } from '@/lib/api';
+import { createRobotManaged } from '@/test/robot-fixtures';
 import { DashboardTokenSection } from './dashboard-token-section';
 
-const robot = {
-  id: 'robot-1',
-  name: 'Test Robot',
-  slug: 'test-robot',
-  claimToken: null,
-  streamKey: null,
-} as unknown as RobotManaged;
+const robot = createRobotManaged();
 
 describe('DashboardTokenSection', () => {
   it('keeps token actions safe when an update response does not include the secret', async () => {

@@ -28,7 +28,7 @@ export function EmbedRobotView({ robot }: Props) {
       refreshInFlightRef.current = true;
       setVideoState('loading');
       try {
-        const publicUrl = process.env.NEXT_PUBLIC_LIVEKIT_URL;
+        const publicUrl = process.env['NEXT_PUBLIC_LIVEKIT_URL'];
         const { token, livekitUrl } = await api.robots.getPublicViewerToken(robot.id);
         setLivekitCreds({ token, url: publicUrl ?? livekitUrl });
         setVideoState('ready');

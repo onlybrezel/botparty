@@ -1,6 +1,5 @@
 import { TransactionType } from '@botparty/prisma';
 import { EarningsService } from './earnings.service';
-import type { PrismaService } from '../prisma/prisma.service';
 
 const userId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 
@@ -11,14 +10,11 @@ function build() {
       findMany: jest.fn(),
     },
     $queryRaw: jest.fn(),
-  } as unknown as PrismaService;
+  };
   const svc = new EarningsService(prisma);
   return {
     svc,
-    prisma: prisma as unknown as {
-      transaction: { aggregate: jest.Mock; findMany: jest.Mock };
-      $queryRaw: jest.Mock;
-    },
+    prisma,
   };
 }
 
@@ -64,7 +60,10 @@ describe('EarningsService.getOwnerSummary', () => {
     expect(result.lifetimeCredits).toBe(270);
     expect(result.eventCount).toBe(4);
     expect(result.recent).toHaveLength(4);
-    expect(result.recent[0]!.createdAt).toBe(now.toISOString());
+    const newest = result.recent[0];
+    expect(newest).toBeDefined();
+    if (!newest) throw new Error('Expected a recent earning');
+    expect(newest.createdAt).toBe(now.toISOString());
 
     const r1 = result.perRobot.find((r) => r.robotId === 'r1');
     const r2 = result.perRobot.find((r) => r.robotId === 'r2');

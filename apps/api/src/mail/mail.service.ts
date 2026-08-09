@@ -1,6 +1,6 @@
-import { Injectable, Logger, OnModuleInit, ServiceUnavailableException } from '@nestjs/common';
-import { InjectQueue } from '@nestjs/bullmq';
+import { Inject, Injectable, Logger, OnModuleInit, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import nodemailer from 'nodemailer';
 import { JOBS_QUEUE_MAIL, type MailJobData } from '../jobs/jobs.constants';
@@ -17,6 +17,10 @@ const EMAIL_STYLES = `
   .footer { font-size: 13px; color: #525252; margin-top: 24px; text-align: center; }
   .token { font-family: monospace; font-size: 13px; background: #262626; padding: 8px 12px; border-radius: 6px; word-break: break-all; color: #a3a3a3; }
 `;
+
+interface MailConfig {
+  get(key: string, fallback?: string): string | undefined;
+}
 
 function escapeHtml(value: string): string {
   return value
@@ -47,11 +51,11 @@ export class MailService implements OnModuleInit {
   private transportAvailable = false;
 
   constructor(
-    private readonly config: ConfigService,
-    @InjectQueue(JOBS_QUEUE_MAIL) private readonly mailQueue: Queue<MailJobData>,
+    @Inject(ConfigService) private readonly config: MailConfig,
+    @InjectQueue(JOBS_QUEUE_MAIL) private readonly mailQueue: Pick<Queue<MailJobData>, 'add'>,
   ) {
-    this.fromAddress = this.config.get<string>('SMTP_FROM', 'BotParty <no-reply@botparty.live>');
-    this.appUrl = this.config.get<string>('APP_URL', 'https://botparty.live');
+    this.fromAddress = this.config.get('SMTP_FROM', 'BotParty <no-reply@botparty.live>') ?? 'BotParty <no-reply@botparty.live>';
+    this.appUrl = this.config.get('APP_URL', 'https://botparty.live') ?? 'https://botparty.live';
     this.transport = this.createTransport();
   }
 
@@ -65,7 +69,7 @@ export class MailService implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     if (
-      this.config.get<string>('NODE_ENV', process.env.NODE_ENV ?? 'development') !== 'production'
+      this.config.get('NODE_ENV', process.env['NODE_ENV'] ?? 'development') !== 'production'
     ) {
       return;
     }
@@ -226,15 +230,15 @@ export class MailService implements OnModuleInit {
   }
 
   private createTransport() {
-    const host = this.config.get<string>('SMTP_HOST');
+    const host = this.config.get('SMTP_HOST');
     if (!host) {
       return null;
     }
 
-    const port = Number(this.config.get<string>('SMTP_PORT', '587'));
-    const secure = this.config.get<string>('SMTP_SECURE', 'false') === 'true';
-    const user = this.config.get<string>('SMTP_USER', '');
-    const pass = this.config.get<string>('SMTP_PASSWORD', '');
+    const port = Number(this.config.get('SMTP_PORT', '587'));
+    const secure = this.config.get('SMTP_SECURE', 'false') === 'true';
+    const user = this.config.get('SMTP_USER', '');
+    const pass = this.config.get('SMTP_PASSWORD', '');
 
     return nodemailer.createTransport({
       host,

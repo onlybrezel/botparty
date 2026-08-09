@@ -1,18 +1,15 @@
 import { WS_EVENTS } from '@botparty/shared';
-import type { ModerationService } from '../moderation/moderation.service';
-import type { RobotsService } from '../robots/robots.service';
-import type { GatewayRuntimeSupport } from './gateway-runtime.support';
 import type { WsClient } from './gateway-types';
+import { createWsClient } from '../test/ws-client.fixture';
 import { RoomHandler } from './room.handler';
 
 describe('RoomHandler', () => {
   function createClient(): WsClient {
-    return {
+    return createWsClient({
       id: 'client-1',
       send: jest.fn(),
       close: jest.fn(),
-      readyState: WebSocket.OPEN,
-    } as unknown as WsClient;
+    });
   }
 
   function createDeps() {
@@ -64,11 +61,11 @@ describe('RoomHandler', () => {
     };
 
     return {
-      runtime: runtime as unknown as GatewayRuntimeSupport,
+      runtime,
       runtimeMock: runtime,
-      robotsService: robotsService as unknown as RobotsService,
+      robotsService,
       robotsMock: robotsService,
-      moderationService: moderationService as unknown as ModerationService,
+      moderationService,
       moderationMock: moderationService,
     };
   }

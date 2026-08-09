@@ -1,6 +1,6 @@
 import { WS_EVENTS } from '@botparty/shared';
-import type { QueueService } from '../queue/queue.service';
 import type { WsClient } from './gateway-types';
+import { createWsClient } from '../test/ws-client.fixture';
 import { ModerationEnforcerHandler } from './moderation-enforcer.handler';
 
 describe('ModerationEnforcerHandler', () => {
@@ -27,7 +27,7 @@ describe('ModerationEnforcerHandler', () => {
     };
     handler = new ModerationEnforcerHandler(
       ctx,
-      queueService as unknown as QueueService,
+      queueService,
     );
   });
 
@@ -49,20 +49,18 @@ describe('ModerationEnforcerHandler', () => {
   });
 
   it('disconnects banned users from the affected room', async () => {
-    const target = {
+    const target = createWsClient({
       id: 'viewer-1',
       userId: 'user-1',
       watchingRobotId: 'robot-1',
-      readyState: WebSocket.OPEN,
       close: jest.fn(),
-    } as unknown as WsClient;
-    const unaffected = {
+    });
+    const unaffected = createWsClient({
       id: 'viewer-2',
       userId: 'user-2',
       watchingRobotId: 'robot-1',
-      readyState: WebSocket.OPEN,
       close: jest.fn(),
-    } as unknown as WsClient;
+    });
     ctx.clients.set('viewer-1', target);
     ctx.clients.set('viewer-2', unaffected);
 

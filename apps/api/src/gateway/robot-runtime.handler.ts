@@ -11,14 +11,38 @@ import type { GatewayRuntimeSupport } from './gateway-runtime.support';
 import type { WsClient } from './gateway-types';
 
 type QueueSnapshot = Awaited<ReturnType<QueueService['getQueue']>>;
+type RobotRuntimeSupportPort = Pick<
+  GatewayRuntimeSupport,
+  | 'acquireRobotClaimLock'
+  | 'broadcastToRoom'
+  | 'broadcastToRoomLocally'
+  | 'getOpenRobotClient'
+  | 'parseWsPayload'
+  | 'recordRobotHeartbeat'
+  | 'releaseRobotClaimLock'
+  | 'resolveRobotSocketIdentity'
+  | 'robotClients'
+  | 'transferRobotClaimLock'
+  | 'triggerEmergencyStop'
+> & { logger: Pick<GatewayRuntimeSupport['logger'], 'debug' | 'error' | 'log' | 'warn'> };
+type RobotRuntimeRobotsPort = Pick<
+  RobotsService,
+  | 'consumeActionsByRobotId'
+  | 'findByIdCached'
+  | 'getAccessPolicy'
+  | 'ingestRobotTelemetryByRobotId'
+  | 'touchHeartbeat'
+  | 'updateStatus'
+  | 'validateRobotAuth'
+>;
 
 export class RobotRuntimeHandler {
   private lastHeartbeatPersistenceWarningAt = 0;
 
   constructor(
-    private readonly runtime: GatewayRuntimeSupport,
-    private readonly robotsService: RobotsService,
-    private readonly queueService: QueueService,
+    private readonly runtime: RobotRuntimeSupportPort,
+    private readonly robotsService: RobotRuntimeRobotsPort,
+    private readonly queueService: Pick<QueueService, 'getQueue'>,
     private readonly syncTurnLifecycle: (robotId: string, queue: QueueSnapshot) => Promise<void>,
   ) {}
 

@@ -34,8 +34,12 @@ describe('RecordingAdminService', () => {
     configValues = { JWT_SECRET: 'recording-test-signing-secret' };
 
     service = new RecordingAdminService(
-      prisma as never,
-      {} as never,
+      prisma,
+      {
+        getRoomRecordingStatus: jest.fn(),
+        startRoomRecording: jest.fn(),
+        stopRoomRecording: jest.fn(),
+      },
       {
         get: jest.fn((key: string) => configValues[key]),
         getOrThrow: jest.fn((key: string) => {
@@ -43,7 +47,7 @@ describe('RecordingAdminService', () => {
           if (!value) throw new Error(`Missing ${key}`);
           return value;
         }),
-      } as never,
+      },
     );
   });
 
@@ -52,11 +56,11 @@ describe('RecordingAdminService', () => {
   });
 
   function configureStorage() {
-    configValues.LIVEKIT_RECORDINGS_S3_BUCKET = 'botparty-recordings';
-    configValues.LIVEKIT_RECORDINGS_S3_REGION = 'us-east-1';
-    configValues.LIVEKIT_RECORDINGS_S3_ENDPOINT = 'http://seaweedfs:8333';
-    configValues.LIVEKIT_RECORDINGS_S3_ACCESS_KEY_ID = 'botparty';
-    configValues.LIVEKIT_RECORDINGS_S3_SECRET_ACCESS_KEY = 'object-storage-secret';
+    configValues['LIVEKIT_RECORDINGS_S3_BUCKET'] = 'botparty-recordings';
+    configValues['LIVEKIT_RECORDINGS_S3_REGION'] = 'us-east-1';
+    configValues['LIVEKIT_RECORDINGS_S3_ENDPOINT'] = 'http://seaweedfs:8333';
+    configValues['LIVEKIT_RECORDINGS_S3_ACCESS_KEY_ID'] = 'botparty';
+    configValues['LIVEKIT_RECORDINGS_S3_SECRET_ACCESS_KEY'] = 'object-storage-secret';
   }
 
   it('lists only indexed recording metadata without scanning object storage', async () => {
@@ -91,7 +95,7 @@ describe('RecordingAdminService', () => {
       Body: Readable.from(Buffer.from('video-data')),
       ContentType: 'video/mp4',
     });
-    jest.spyOn(service as never, '_createObjectStorageClient').mockReturnValue({ send } as never);
+    jest.spyOn(service, 'createObjectStorageClient').mockReturnValue({ send });
 
     const file = await service.streamAdminRecording('recording-1', 'staff-1');
 
@@ -107,7 +111,7 @@ describe('RecordingAdminService', () => {
     configureStorage();
     prisma.recording.findUnique.mockResolvedValue(null);
     const send = jest.fn();
-    jest.spyOn(service as never, '_createObjectStorageClient').mockReturnValue({ send } as never);
+    jest.spyOn(service, 'createObjectStorageClient').mockReturnValue({ send });
 
     await expect(service.streamAdminRecording('missing-recording', 'staff-1')).rejects.toThrow(
       'Recording not found',
@@ -117,16 +121,17 @@ describe('RecordingAdminService', () => {
 
   it('streams recordings through a valid short-lived signed playback URL', async () => {
     configureStorage();
-    configValues.JWT_SECRET = 'signing-secret';
+    configValues['JWT_SECRET'] = 'signing-secret';
     const send = jest.fn().mockResolvedValue({
       Body: Readable.from(Buffer.from('video-data')),
       ContentType: 'video/mp4',
     });
-    jest.spyOn(service as never, '_createObjectStorageClient').mockReturnValue({ send } as never);
+    jest.spyOn(service, 'createObjectStorageClient').mockReturnValue({ send });
 
     const [entry] = await service.listAdminRecordings('staff-1');
     expect(entry).toBeDefined();
-    const playbackUrl = new URL(`http://localhost${entry!.playbackPath}`);
+    if (!entry) throw new Error('Expected an admin recording');
+    const playbackUrl = new URL(`http://localhost${entry.playbackPath}`);
     const file = await service.streamSignedAdminRecording(
       'recording-1',
       playbackUrl.searchParams.get('expires') ?? undefined,

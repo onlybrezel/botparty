@@ -9,16 +9,16 @@ export interface RobotAccessPolicy {
 
 export interface RobotStreamCameraDescriptor {
   id: string;
-  label?: string;
-  role?: string;
-  enabled?: boolean;
-  publishMode?: string;
+  label?: string | undefined;
+  role?: string | undefined;
+  enabled?: boolean | undefined;
+  publishMode?: string | undefined;
 }
 
 export interface RobotStreamPolicy {
   targetBitrateKbps: number | null;
-  activeCameraId?: string;
-  cameras?: RobotStreamCameraDescriptor[];
+  activeCameraId?: string | undefined;
+  cameras?: RobotStreamCameraDescriptor[] | undefined;
 }
 
 export interface RoomAccessGrant {
@@ -58,5 +58,5 @@ export type RobotActionType =
 
 export interface RobotActionPayload {
   type: RobotActionType;
-  durationSec?: number;
+  durationSec?: number | undefined;
 }

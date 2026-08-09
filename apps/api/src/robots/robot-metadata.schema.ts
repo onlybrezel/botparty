@@ -53,29 +53,29 @@ export function normalizeRobotMetadata(value: unknown): RobotMetadata {
 
   const next: Record<string, unknown> = {};
 
-  const accessParsed = robotMetadataSchema.shape.access.safeParse(raw.access);
+  const accessParsed = robotMetadataSchema.shape['access'].safeParse(raw['access']);
   if (accessParsed.success) {
-    next.access = accessParsed.data;
+    next['access'] = accessParsed.data;
   }
 
-  const streamParsed = robotMetadataSchema.shape.stream.safeParse(raw.stream);
+  const streamParsed = robotMetadataSchema.shape['stream'].safeParse(raw['stream']);
   if (streamParsed.success) {
-    next.stream = streamParsed.data;
+    next['stream'] = streamParsed.data;
   }
 
-  const authParsed = robotMetadataSchema.shape.auth.safeParse(raw.auth);
+  const authParsed = robotMetadataSchema.shape['auth'].safeParse(raw['auth']);
   if (authParsed.success) {
-    next.auth = authParsed.data;
+    next['auth'] = authParsed.data;
   }
 
-  const claimParsed = z.string().datetime().safeParse(raw.claimTokenIssuedAt);
+  const claimParsed = z.string().datetime().safeParse(raw['claimTokenIssuedAt']);
   if (claimParsed.success) {
-    next.claimTokenIssuedAt = claimParsed.data;
+    next['claimTokenIssuedAt'] = claimParsed.data;
   }
 
-  const streamKeyParsed = z.string().datetime().safeParse(raw.streamKeyIssuedAt);
+  const streamKeyParsed = z.string().datetime().safeParse(raw['streamKeyIssuedAt']);
   if (streamKeyParsed.success) {
-    next.streamKeyIssuedAt = streamKeyParsed.data;
+    next['streamKeyIssuedAt'] = streamKeyParsed.data;
   }
 
   return next as RobotMetadata;
@@ -95,14 +95,14 @@ export function mergeRobotMetadata(
   };
 
   if (patch.access) {
-    next.access = {
+    next['access'] = {
       ...(asRecord(metadata.access)),
       ...patch.access,
     };
   }
 
   if (patch.stream) {
-    next.stream = {
+    next['stream'] = {
       ...(asRecord(metadata.stream)),
       ...patch.stream,
     };

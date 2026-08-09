@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@botparty/prisma';
 import { PrismaService } from '../prisma/prisma.service';
@@ -12,9 +12,17 @@ export class RobotCameraService {
   private readonly maxExternalCamerasPerRobot: number;
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly access: RobotAccessService,
-    private readonly config: ConfigService,
+    @Inject(PrismaService)
+    private readonly prisma: {
+      $transaction<T>(
+        callback: (transaction: Pick<Prisma.TransactionClient, '$queryRaw' | 'robot'>) => Promise<T>,
+        options?: { isolationLevel?: Prisma.TransactionIsolationLevel },
+      ): Promise<T>;
+      robot: Pick<PrismaService['robot'], 'findUnique' | 'update'>;
+    },
+    @Inject(RobotAccessService)
+    private readonly access: Pick<RobotAccessService, 'invalidateCache' | 'parseStreamFromMetadata'>,
+    @Inject(ConfigService) private readonly config: { get(key: string): unknown },
   ) {
     this.maxExternalCamerasPerRobot = readNonNegativeIntegerEnv(
       this.config,
@@ -116,7 +124,7 @@ export class RobotCameraService {
 
   private async findCameraRobot(
     robotId: string,
-    client: Pick<Prisma.TransactionClient, 'robot'> = this.prisma,
+    client: { robot: Pick<Prisma.TransactionClient['robot'], 'findUnique'> } = this.prisma,
   ) {
     const robot = await client.robot.findUnique({
       where: { id: robotId },

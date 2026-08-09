@@ -6,7 +6,10 @@ describe('payment webhook raw body capture', () => {
     const app = Fastify({ bodyLimit: 1024 * 1024 });
     installPaymentRawBodyCapture(app, 256 * 1024);
     app.post('/api/v1/billing/webhooks/stripe', async (request) => ({
-      raw: (request as typeof request & { rawBody?: Buffer }).rawBody?.toString('utf8') ?? null,
+      raw:
+        'rawBody' in request && Buffer.isBuffer(request.rawBody)
+          ? request.rawBody.toString('utf8')
+          : null,
     }));
     app.post('/api/v1/users/profile', async (request) => ({
       captured: 'rawBody' in request,

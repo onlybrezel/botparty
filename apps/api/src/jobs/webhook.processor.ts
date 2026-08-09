@@ -1,5 +1,5 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
-import { Logger } from '@nestjs/common';
+import { Inject, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Job } from 'bullmq';
 import { createHmac, randomUUID } from 'crypto';
@@ -14,23 +14,27 @@ export class WebhookProcessor extends WorkerHost {
   private readonly secretCipher: AeadCipher;
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly config: ConfigService,
+    @Inject(PrismaService)
+    private readonly prisma: { robotWebhook: Pick<PrismaService['robotWebhook'], 'findUnique' | 'update'> },
+    @Inject(ConfigService) private readonly config: { get(key: string): unknown },
   ) {
     super();
-    const explicitKey = this.config.get<string>('WEBHOOK_SECRET_ENCRYPTION_KEY')?.trim();
+    const explicitKeyValue = this.config.get('WEBHOOK_SECRET_ENCRYPTION_KEY');
+    const explicitKey = typeof explicitKeyValue === 'string' ? explicitKeyValue.trim() : '';
     if (explicitKey) {
+      const previousKeysValue = this.config.get('WEBHOOK_SECRET_ENCRYPTION_KEY_PREVIOUS');
       this.secretCipher = new AeadCipher(
         explicitKey,
-        (this.config.get<string>('WEBHOOK_SECRET_ENCRYPTION_KEY_PREVIOUS') ?? '')
+        (typeof previousKeysValue === 'string' ? previousKeysValue : '')
           .split(',')
           .map((key) => key.trim()),
       );
-    } else if (process.env.NODE_ENV === 'production') {
+    } else if (process.env['NODE_ENV'] === 'production') {
       throw new Error('WEBHOOK_SECRET_ENCRYPTION_KEY is required in production');
     } else {
+      const jwtSecretValue = this.config.get('JWT_SECRET');
       this.secretCipher = new AeadCipher(
-        this.config.get<string>('JWT_SECRET')?.trim() ||
+        (typeof jwtSecretValue === 'string' ? jwtSecretValue.trim() : '') ||
           'botparty-webhook-secret-fallback-32-characters',
       );
       this.logger.warn(
@@ -39,7 +43,7 @@ export class WebhookProcessor extends WorkerHost {
     }
   }
 
-  async process(job: Job<WebhookJobData>): Promise<void> {
+  async process(job: Pick<Job<WebhookJobData>, 'data'>): Promise<void> {
     const { hookId, event, payload } = job.data;
 
     const hook = await this.prisma.robotWebhook.findUnique({ where: { id: hookId } });

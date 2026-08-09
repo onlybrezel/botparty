@@ -21,7 +21,7 @@ describe('Prisma + Redis integration (testcontainers)', () => {
     ).withExposedPorts(6379).start();
 
     const databaseUrl = `${pgContainer.getConnectionUri()}?schema=public`;
-    process.env.DATABASE_URL = databaseUrl;
+    process.env['DATABASE_URL'] = databaseUrl;
 
     const repoRoot = path.resolve(process.cwd(), '../..');
     execFileSync(

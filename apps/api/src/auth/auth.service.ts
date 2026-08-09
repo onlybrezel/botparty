@@ -6,12 +6,36 @@ import {
   BadRequestException,
   ForbiddenException,
   ServiceUnavailableException,
+  Inject,
 } from '@nestjs/common';
 import { JwtService, type JwtSignOptions } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { hash, verify } from 'argon2';
 import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { isRecord } from '../common/json-value';
+type AuthDatabase = { user: Pick<PrismaService['user'], 'create' | 'delete' | 'findFirst' | 'findUnique' | 'update'> };
+interface AuthConfig {
+  get(key: string, fallback?: string): string | undefined;
+  getOrThrow(key: string): string;
+}
+interface AuthRedis {
+  del(...keys: string[]): Promise<number>;
+  eval(script: string, numberOfKeys: number, ...args: string[]): Promise<unknown>;
+  expire(key: string, seconds: number): Promise<number>;
+  get(key: string): Promise<string | null>;
+  incr(key: string): Promise<number>;
+  multi(): {
+    set(key: string, value: string, mode: 'EX', seconds: number): unknown;
+    del(key: string): unknown;
+    exec(): Promise<unknown>;
+  };
+  set(key: string, value: string, ...args: Array<string | number>): Promise<unknown>;
+}
+type AuthMail = Pick<
+  MailService,
+  'isEnabled' | 'sendAccountLockoutNoticeEmail' | 'sendEmailVerification' | 'sendPasswordResetEmail'
+>;
 import type { JwtPayload, RefreshTokenPayload, ForgotPasswordInput, ResetPasswordInput } from '@botparty/shared';
 import { registerSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema } from '@botparty/shared';
 import type { z } from 'zod';
@@ -82,11 +106,11 @@ export class AuthService {
   private readonly logger = new Logger(AuthService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly jwt: JwtService,
-    private readonly config: ConfigService,
-    private readonly redis: RedisService,
-    private readonly mail: MailService,
+    @Inject(PrismaService) private readonly prisma: AuthDatabase,
+    @Inject(JwtService) private readonly jwt: Pick<JwtService, 'sign' | 'verify'>,
+    @Inject(ConfigService) private readonly config: AuthConfig,
+    @Inject(RedisService) private readonly redis: AuthRedis,
+    @Inject(MailService) private readonly mail: AuthMail,
   ) {}
 
   async register(input: z.infer<typeof registerSchema>): Promise<AuthResult> {
@@ -260,7 +284,7 @@ export class AuthService {
 
     try {
       const payload = this.jwt.verify<RefreshTokenPayload>(refreshToken, {
-        secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
+        secret: this.config.getOrThrow('JWT_REFRESH_SECRET'),
       });
 
       const user = await this.prisma.user.findUnique({
@@ -339,7 +363,7 @@ export class AuthService {
 
     try {
       const payload = this.jwt.verify<JwtPayload>(token, {
-        secret: this.config.getOrThrow<string>('JWT_SECRET'),
+        secret: this.config.getOrThrow('JWT_SECRET'),
       });
 
       const user = await this.prisma.user.findUnique({
@@ -382,7 +406,7 @@ export class AuthService {
 
     try {
       const payload = this.jwt.verify<JwtPayload>(token, {
-        secret: this.config.getOrThrow<string>('JWT_SECRET'),
+        secret: this.config.getOrThrow('JWT_SECRET'),
       });
       return typeof payload.sub === 'string' ? payload.sub : null;
     } catch {
@@ -398,7 +422,7 @@ export class AuthService {
 
     try {
       const payload = this.jwt.verify<RefreshTokenPayload>(token, {
-        secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
+        secret: this.config.getOrThrow('JWT_REFRESH_SECRET'),
       });
       return typeof payload.sub === 'string' ? payload.sub : null;
     } catch {
@@ -433,7 +457,7 @@ export class AuthService {
 
     const token = randomBytes(32).toString('hex');
     const tokenHash = this.hashResetToken(token);
-    const ttlSec = Number(this.config.get<string>('PASSWORD_RESET_TTL_SEC', '3600'));
+    const ttlSec = Number(this.config.get('PASSWORD_RESET_TTL_SEC', '3600'));
     const payload = JSON.stringify({
       userId: user.id,
       email: user.email,
@@ -485,7 +509,22 @@ export class AuthService {
       throw new BadRequestException('Invalid or expired password reset token');
     }
 
-    const payload = JSON.parse(raw) as { userId: string; email: string };
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      await this.redis.del(this.passwordResetKey(tokenHash));
+      throw new BadRequestException('Invalid or expired password reset token');
+    }
+    if (
+      !isRecord(parsed) ||
+      typeof parsed['userId'] !== 'string' ||
+      typeof parsed['email'] !== 'string'
+    ) {
+      await this.redis.del(this.passwordResetKey(tokenHash));
+      throw new BadRequestException('Invalid or expired password reset token');
+    }
+    const payload = { userId: parsed['userId'], email: parsed['email'] };
     const latestTokenHash = await this.redis.get(this.passwordResetUserKey(payload.userId));
 
     if (!latestTokenHash || latestTokenHash !== tokenHash) {
@@ -530,16 +569,16 @@ export class AuthService {
       tokenVersion: user.tokenVersion,
       jti: randomBytes(16).toString('hex'),
     };
-    const refreshExpiresIn = this.config.getOrThrow<string>('JWT_REFRESH_EXPIRES_IN');
+    const refreshExpiresIn = this.config.getOrThrow('JWT_REFRESH_EXPIRES_IN');
     return this.jwt.sign(refreshPayload, {
-      secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
+      secret: this.config.getOrThrow('JWT_REFRESH_SECRET'),
       expiresIn: asJwtExpiresIn(refreshExpiresIn),
     } satisfies JwtSignOptions);
   }
 
   private refreshTokenTtlSec(refreshToken: string) {
     const payload = this.jwt.verify<RefreshTokenPayload & { exp?: number }>(refreshToken, {
-      secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
+      secret: this.config.getOrThrow('JWT_REFRESH_SECRET'),
     });
     return typeof payload.exp === 'number'
       ? Math.max(1, payload.exp - Math.floor(Date.now() / 1000))
@@ -604,7 +643,7 @@ export class AuthService {
   }
 
   private requiresEmailVerification() {
-    return this.config.get<string>('REQUIRE_EMAIL_VERIFICATION') === 'true';
+    return this.config.get('REQUIRE_EMAIL_VERIFICATION') === 'true';
   }
 
   private async queueEmailVerificationResend(userId: string, email: string) {

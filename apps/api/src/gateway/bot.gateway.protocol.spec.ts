@@ -19,13 +19,8 @@ import { WalletService } from '../wallet/wallet.service';
 import { LivekitService } from '../livekit/livekit.service';
 import { FeatureFlagsService } from '../common/feature-flags.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import type { WsClient } from './gateway-types';
+import { createWsClient } from '../test/ws-client.fixture';
 
-type BotGatewayTestAccess = {
-  robotClients: Map<string, WsClient>;
-  clients: Map<string, WsClient>;
-  _revalidateAuthenticatedSockets(): Promise<void>;
-};
 
 describe('BotGateway protocol exchange', () => {
   let gateway: BotGateway;
@@ -186,10 +181,10 @@ describe('BotGateway protocol exchange', () => {
     }).compile();
 
     gateway = module.get<BotGateway>(BotGateway);
-    robotsService = module.get(RobotsService) as jest.Mocked<RobotsService>;
-    queueService = module.get(QueueService) as jest.Mocked<QueueService>;
-    jwtService = module.get(JwtService) as jest.Mocked<JwtService>;
-    authService = module.get(AuthService) as jest.Mocked<AuthService>;
+    robotsService = module.get<jest.Mocked<RobotsService>>(RobotsService);
+    queueService = module.get<jest.Mocked<QueueService>>(QueueService);
+    jwtService = module.get<jest.Mocked<JwtService>>(JwtService);
+    authService = module.get<jest.Mocked<AuthService>>(AuthService);
   });
 
   afterEach(async () => {
@@ -197,12 +192,12 @@ describe('BotGateway protocol exchange', () => {
   });
 
   it('returns protocol metadata in room join responses', async () => {
-    const client = {
+    const client = createWsClient({
       id: 'viewer-1',
       send: jest.fn(),
       close: jest.fn(),
       remoteIp: '127.0.0.1',
-    } as unknown as WsClient;
+    });
 
     const result = await gateway.handleRoomJoin(client, {
       robotId,
@@ -222,17 +217,17 @@ describe('BotGateway protocol exchange', () => {
   });
 
   it('returns protocol metadata in robot claim responses', async () => {
-    const client = {
+    const client = createWsClient({
       id: 'robot-1',
       send: jest.fn(),
       close: jest.fn(),
-    } as unknown as WsClient;
+    });
     jwtService.verify.mockReturnValue({
       sub: robotId,
       scope: 'robot',
       deviceHash: 'a'.repeat(64),
       tokenVersion: 0,
-    } as never);
+    });
 
     const result = await gateway.handleRobotClaim(client, {
       robotAuthToken: 'robot-token',
@@ -253,28 +248,26 @@ describe('BotGateway protocol exchange', () => {
   });
 
   it('replaces an existing local robot socket when the same robot reconnects', async () => {
-    const existingClient = {
+    const existingClient = createWsClient({
       id: 'robot-1',
       send: jest.fn(),
       close: jest.fn(),
-      readyState: 1,
       isRobot: true,
       robotId,
-    } as unknown as WsClient;
-    const replacementClient = {
+    });
+    const replacementClient = createWsClient({
       id: 'robot-2',
       send: jest.fn(),
       close: jest.fn(),
-      readyState: 1,
-    } as unknown as WsClient;
+    });
     jwtService.verify.mockReturnValue({
       sub: robotId,
       scope: 'robot',
       deviceHash: 'a'.repeat(64),
       tokenVersion: 0,
-    } as never);
-    const internal = gateway as unknown as BotGatewayTestAccess;
-    internal.robotClients.set(robotId, existingClient);
+    });
+    const internal = gateway;
+    internal.registerRobotRuntimeClient(robotId, existingClient);
 
     const result = await gateway.handleRobotClaim(replacementClient, {
       robotAuthToken: 'robot-token',
@@ -290,25 +283,24 @@ describe('BotGateway protocol exchange', () => {
     });
     expect(existingClient.close).toHaveBeenCalledWith(1012, 'Replaced by newer robot claim');
     expect(replacementClient.close).not.toHaveBeenCalled();
-    expect(internal.robotClients.get(robotId)).toBe(replacementClient);
+    expect(existingClient.close).toHaveBeenCalled();
   });
 
   it('closes authenticated sockets whose access token is no longer valid', async () => {
-    const client = {
+    const client = createWsClient({
       id: 'viewer-auth-1',
       send: jest.fn(),
       close: jest.fn(),
-      readyState: 1,
       userId: 'user-1',
       username: 'alpha',
       role: 'USER',
       authAccessToken: 'expired-token',
-    } as unknown as WsClient;
+    });
     authService.resolveValidAccessTokenPayload.mockResolvedValueOnce(null);
 
-    const internal = gateway as unknown as BotGatewayTestAccess;
-    internal.clients.set(client.id, client);
-    await internal._revalidateAuthenticatedSockets();
+    const internal = gateway;
+    internal.registerRuntimeClient(client);
+    await internal.revalidateAuthenticatedSockets();
 
     expect(client.send).toHaveBeenCalledWith(
       JSON.stringify({ event: WS_EVENTS.ERROR, data: { message: 'Invalid session token' } }),

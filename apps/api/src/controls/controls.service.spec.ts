@@ -45,7 +45,11 @@ describe('ControlsService', () => {
         if (typeof input === 'function') {
           return input({ controlButton, robot: prisma.robot, $queryRaw: prisma.$queryRaw });
         }
-        return Promise.all(input as Promise<unknown>[]);
+        if (!Array.isArray(input)) {
+          throw new TypeError('Expected a transaction callback or operation array');
+        }
+        const operations: readonly unknown[] = input;
+        return Promise.all(operations);
       }),
     };
     subscriber = {
@@ -57,7 +61,7 @@ describe('ControlsService', () => {
     redis.duplicate.mockReturnValue(subscriber);
     redis.publish.mockClear();
     features = { assertEnabled: jest.fn() };
-    service = new ControlsService(prisma as never, redis as never, features as never);
+    service = new ControlsService(prisma, redis, features);
   });
 
   afterEach(async () => {
@@ -182,7 +186,10 @@ describe('ControlsService', () => {
     await service.getEnabledButtonsForRobot('robot-1');
     await service.onModuleInit();
     expect(subscriber.psubscribe).toHaveBeenCalledWith('controls:invalidate:*');
-    const listener = subscriber.on.mock.calls[0]?.[1] as (_pattern: string, channel: string) => void;
+    const listener: unknown = subscriber.on.mock.calls[0]?.[1];
+    if (typeof listener !== 'function') {
+      throw new TypeError('Expected a Redis invalidation listener');
+    }
     listener('controls:invalidate:*', 'controls:invalidate:robot-1');
     await service.getEnabledButtonsForRobot('robot-1');
     expect(prisma.controlButton.findMany).toHaveBeenCalledTimes(2);
@@ -194,7 +201,7 @@ describe('ControlsService', () => {
   it('evicts expired local cache entries during the sweeper interval', async () => {
     jest.useFakeTimers();
     try {
-      const local = new ControlsService(prisma as never, redis as never, features as never);
+      const local = new ControlsService(prisma, redis, features);
       prisma.controlButton.findMany.mockResolvedValue([{ id: 'x', label: 'X', command: 'x', hotKey: null, icon: null, cooldownMs: 0, access: 'EVERYONE', position: 0, color: null, costCredits: 0 }]);
       await local.getEnabledButtonsForRobot('robot-expiring');
       jest.advanceTimersByTime(60_001);

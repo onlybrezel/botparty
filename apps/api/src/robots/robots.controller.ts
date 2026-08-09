@@ -52,7 +52,14 @@ export class RobotsController {
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ) {
-    return this.robotsService.findAll({ status, tag, q, sort, limit, offset });
+    return this.robotsService.findAll({
+      ...(status === undefined ? {} : { status }),
+      ...(tag === undefined ? {} : { tag }),
+      ...(q === undefined ? {} : { q }),
+      ...(sort === undefined ? {} : { sort }),
+      ...(limit === undefined ? {} : { limit }),
+      ...(offset === undefined ? {} : { offset }),
+    });
   }
 
   @Get('featured')
@@ -236,9 +243,9 @@ export class RobotsController {
     return this.robotsService.issueRoomAccessGrant({
       robotId: id,
       requesterUserId: await this.resolveRequesterId(authorization, cookieHeader),
-      password: body?.password,
-      guestSessionId: body?.guestSessionId,
-      inviteCode: body?.inviteCode,
+      ...(body.password === undefined ? {} : { password: body.password }),
+      ...(body.guestSessionId === undefined ? {} : { guestSessionId: body.guestSessionId }),
+      ...(body.inviteCode === undefined ? {} : { inviteCode: body.inviteCode }),
     });
   }
 
@@ -264,11 +271,11 @@ export class RobotsController {
     return this.robotsService.getChatHistoryPage({
       robotId: id,
       requesterUserId: await this.resolveRequesterId(authorization, cookieHeader),
-      guestSessionId: query.guestSessionId,
-      roomAccessToken: query.roomAccessToken,
-      before: parsedBefore ?? undefined,
-      beforeId: query.beforeId,
-      limit: parsedLimit ?? undefined,
+      ...(query.guestSessionId === undefined ? {} : { guestSessionId: query.guestSessionId }),
+      ...(query.roomAccessToken === undefined ? {} : { roomAccessToken: query.roomAccessToken }),
+      ...(parsedBefore === null ? {} : { before: parsedBefore }),
+      ...(query.beforeId === undefined ? {} : { beforeId: query.beforeId }),
+      ...(parsedLimit === null ? {} : { limit: parsedLimit }),
     });
   }
 

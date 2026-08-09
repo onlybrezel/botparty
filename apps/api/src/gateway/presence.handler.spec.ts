@@ -1,5 +1,4 @@
-import type { RedisService } from '../redis/redis.service';
-import type { WsClient } from './gateway-types';
+import { createWsClient } from '../test/ws-client.fixture';
 import { PresenceHandler } from './presence.handler';
 
 describe('PresenceHandler', () => {
@@ -22,11 +21,11 @@ describe('PresenceHandler', () => {
       srem: jest.fn().mockResolvedValue(1),
       del: jest.fn().mockResolvedValue(1),
     };
-    handler = new PresenceHandler(redis as unknown as RedisService, 'instance-1');
+    handler = new PresenceHandler(redis, 'instance-1');
   });
 
   it('returns an empty snapshot for anonymous viewers', async () => {
-    const client = { id: 'socket-1' } as WsClient;
+    const client = createWsClient({ id: 'socket-1' });
 
     await expect(handler.refresh(client, 'robot-1')).resolves.toEqual({
       viewerCount: 0,
@@ -52,11 +51,11 @@ describe('PresenceHandler', () => {
       cleanedStaleEntries: false,
     };
     jest.spyOn(handler, 'getSnapshot').mockResolvedValue(snapshot);
-    const client = {
+    const client = createWsClient({
       id: 'socket-1',
       userId: 'user-1',
       username: 'Julien',
-    } as WsClient;
+    });
 
     await expect(handler.refresh(client, 'robot-1')).resolves.toEqual(snapshot);
     expect(multi.set).toHaveBeenCalledWith(
@@ -69,12 +68,12 @@ describe('PresenceHandler', () => {
   });
 
   it('touches an existing socket entry without rejoining the room set', async () => {
-    const client = {
+    const client = createWsClient({
       id: 'socket-1',
       userId: 'user-1',
       username: 'Julien',
       presenceJoinedAt: 100,
-    } as WsClient;
+    });
 
     await handler.touch(client, 'robot-1');
 
@@ -121,10 +120,10 @@ describe('PresenceHandler', () => {
       presenceList: [],
       cleanedStaleEntries: false,
     });
-    const client = {
+    const client = createWsClient({
       id: 'socket-1',
       userId: 'user-1',
-    } as WsClient;
+    });
 
     await handler.remove(client, 'robot-1');
 

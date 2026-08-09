@@ -6,11 +6,11 @@ import { SwaggerModule } from '@nestjs/swagger';
 import { createSwaggerDocumentConfig } from './swagger-config';
 
 function setMetadataOnlyEnvironment() {
-  process.env.NODE_ENV ??= 'test';
-  process.env.DATABASE_URL ??= 'postgresql://openapi:openapi@127.0.0.1:5432/openapi';
-  process.env.REDIS_HOST ??= '127.0.0.1';
-  process.env.REDIS_PORT ??= '6379';
-  process.env.CORS_ORIGIN ??= 'http://127.0.0.1:3000';
+  process.env['NODE_ENV'] ??= 'test';
+  process.env['DATABASE_URL'] ??= 'postgresql://openapi:openapi@127.0.0.1:5432/openapi';
+  process.env['REDIS_HOST'] ??= '127.0.0.1';
+  process.env['REDIS_PORT'] ??= '6379';
+  process.env['CORS_ORIGIN'] ??= 'http://127.0.0.1:3000';
 }
 
 async function main() {

@@ -1,12 +1,8 @@
 import { ControlButtonAccess, LIMITS, WS_EVENTS } from '@botparty/shared';
 import { InsufficientFundsError } from '../wallet/wallet.service';
 import { ControlHandler } from './control.handler';
-import type { WsClient } from './gateway-types';
+import { createWsClient } from '../test/ws-client.fixture';
 
-type ControlHandlerTestAccess = {
-  pending: Map<string, unknown>;
-  _authorizeCommand(input: Record<string, unknown>): Promise<unknown>;
-};
 
 const ROBOT_ID = '550e8400-e29b-41d4-a716-446655440000';
 const COMMAND_ID = 'd9428888-122b-11e1-b85c-61cd3cbb3210';
@@ -49,6 +45,13 @@ describe('ControlHandler', () => {
     };
     const tx = {
       $executeRaw: jest.fn().mockResolvedValue(1),
+      $queryRaw: jest.fn(),
+      transaction: { create: jest.fn(), findUnique: jest.fn() },
+      adminAuditLog: { create: jest.fn() },
+      billingIntent: { findFirst: jest.fn(), findUniqueOrThrow: jest.fn(), update: jest.fn() },
+      billingWebhookEvent: { create: jest.fn() },
+      payoutRequest: { create: jest.fn(), findFirst: jest.fn(), findUnique: jest.fn(), findUniqueOrThrow: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
+      walletIdempotencyKey: { create: jest.fn(), update: jest.fn() },
       controlCommand: {
         findUnique: jest.fn().mockResolvedValue(null),
         create: jest.fn().mockResolvedValue({}),
@@ -59,25 +62,26 @@ describe('ControlHandler', () => {
       },
     };
     const walletService = {
-      runSerializable: jest.fn((callback: (transaction: typeof tx) => unknown) => callback(tx)),
+      runSerializable: jest.fn(),
       debitInTransaction: jest.fn().mockResolvedValue({ balanceAfter: 80 }),
       completeReservedControlInTransaction: jest.fn().mockResolvedValue(undefined),
       compensateReservedControlInTransaction: jest.fn().mockResolvedValue({ balanceAfter: 100 }),
       listStaleReservedControlIds: jest.fn().mockResolvedValue([]),
     };
+    walletService.runSerializable.mockImplementation(<T>(callback: (transaction: typeof tx) => Promise<T>) => callback(tx));
     const features = {
       isEnabled: jest.fn().mockReturnValue(false),
     };
 
     return {
       handler: new ControlHandler(
-        ctx as never,
-        robotsService as never,
-        moderationService as never,
-        queueService as never,
-        controlsService as never,
-        walletService as never,
-        features as never,
+        ctx,
+        robotsService,
+        moderationService,
+        queueService,
+        controlsService,
+        walletService,
+        features,
       ),
       ctx,
       robotsService,
@@ -91,7 +95,7 @@ describe('ControlHandler', () => {
   }
 
   function createClient(overrides: Record<string, unknown> = {}) {
-    return {
+    return createWsClient({
       id: 'viewer-1',
       send: jest.fn(),
       watchingRobotId: ROBOT_ID,
@@ -100,7 +104,7 @@ describe('ControlHandler', () => {
       role: 'USER',
       isGuest: false,
       ...overrides,
-    } as unknown as WsClient;
+    });
   }
 
   function payload(overrides: Record<string, unknown> = {}) {
@@ -304,7 +308,7 @@ describe('ControlHandler', () => {
 
       const failed = preparePaid();
       failed.features.isEnabled.mockReturnValue(true);
-      (failed.walletService.runSerializable as jest.Mock).mockRejectedValue(
+      failed.walletService.runSerializable.mockRejectedValue(
         new Error('database offline'),
       );
       const failedClient = createClient();
@@ -445,7 +449,7 @@ describe('ControlHandler', () => {
       const { handler, tx, walletService } = buildHandler();
       const viewer = createClient();
       const timer = setTimeout(() => undefined, 60_000);
-      (handler as unknown as ControlHandlerTestAccess).pending.set(COMMAND_ID, {
+      handler.trackPendingCommand(COMMAND_ID, {
         robotId: ROBOT_ID,
         userId: 'user-1',
         ownerId: 'owner-1',
@@ -495,7 +499,7 @@ describe('ControlHandler', () => {
       built: ReturnType<typeof buildHandler>,
       overrides: Record<string, unknown> = {},
     ) {
-      return (built.handler as unknown as ControlHandlerTestAccess)._authorizeCommand({
+      return built.handler.authorizeCommand({
         robot: { id: ROBOT_ID, ownerId: 'owner-1', queueMode: 'FIRST_COME' },
         client: createClient(),
         command: 'forward',

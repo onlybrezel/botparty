@@ -1,6 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { WS_EVENTS, LIMITS, ControlButtonAccess, controlCommandSchema } from '@botparty/shared';
-import { TransactionType } from '@botparty/prisma';
+import { TransactionType, type Prisma } from '@botparty/prisma';
 import type { ModerationService } from '../moderation/moderation.service';
 import type { RobotsService } from '../robots/robots.service';
 import type { QueueService } from '../queue/queue.service';
@@ -21,25 +21,67 @@ export interface ControlHandlerContext {
   triggerEmergencyStop(robotId: string, reason: string): void;
 }
 
+type ControlRobotsPort = Pick<RobotsService, 'findByIdCached' | 'getAccessPolicy'>;
+type ControlModerationPort = Pick<ModerationService, 'getActiveRestriction'>;
+type ControlQueuePort = Pick<QueueService, 'getCurrentControllerUserId'>;
+type ControlButtonsPort = Pick<ControlsService, 'getEnabledButtonsForRobot'>;
+type ControlFeaturesPort = Pick<FeatureFlagsService, 'isEnabled'>;
+type PendingControlCommand = {
+  robotId: string;
+  userId: string;
+  ownerId: string;
+  amount: number;
+  timer: ReturnType<typeof setTimeout>;
+  client: WsClient;
+};
+export interface ControlAuthorizationInput {
+  robot: { id: string; ownerId: string | null; queueMode: string };
+  client: WsClient;
+  command: string;
+  buttonId?: string | undefined;
+  currentControllerUserId: string | null;
+}
+type ControlTransaction = {
+  $executeRaw: Prisma.TransactionClient['$executeRaw'];
+  controlCommand: Pick<Prisma.TransactionClient['controlCommand'], 'create' | 'findUnique' | 'update'>;
+  robot: Pick<Prisma.TransactionClient['robot'], 'findUnique'>;
+};
+interface ControlWalletPort {
+  runSerializable<T>(callback: (transaction: ControlTransaction) => Promise<T>): Promise<T>;
+  debitInTransaction(
+    transaction: ControlTransaction,
+    userId: string,
+    amount: number,
+    type: TransactionType,
+    options: Parameters<WalletService['debitInTransaction']>[4],
+  ): ReturnType<WalletService['debitInTransaction']>;
+  completeReservedControlInTransaction(
+    transaction: ControlTransaction,
+    input: Parameters<WalletService['completeReservedControlInTransaction']>[1],
+  ): ReturnType<WalletService['completeReservedControlInTransaction']>;
+  compensateReservedControlInTransaction(
+    transaction: ControlTransaction,
+    input: Parameters<WalletService['compensateReservedControlInTransaction']>[1],
+  ): ReturnType<WalletService['compensateReservedControlInTransaction']>;
+  listStaleReservedControlIds: WalletService['listStaleReservedControlIds'];
+}
+
 const incomingControlSchema = controlCommandSchema
   .extend({ robotId: z.string().uuid() })
   .strict();
 
 export class ControlHandler {
   private readonly logger = new Logger(ControlHandler.name);
-  private readonly pending = new Map<
-    string,
-    { robotId: string; userId: string; ownerId: string; amount: number; timer: ReturnType<typeof setTimeout>; client: WsClient }
-  >();
+  private readonly pending = new Map<string, PendingControlCommand>();
 
   constructor(
     private readonly ctx: ControlHandlerContext,
-    private readonly robotsService: RobotsService,
-    private readonly moderationService: ModerationService,
-    private readonly queueService: QueueService,
-    private readonly controlsService: ControlsService,
-    private readonly walletService: WalletService,
-    private readonly features: FeatureFlagsService,
+    private readonly robotsService: ControlRobotsPort,
+    private readonly moderationService: ControlModerationPort,
+    private readonly queueService: ControlQueuePort,
+    private readonly controlsService: ControlButtonsPort,
+    private readonly walletService: ControlWalletPort,
+    private readonly features: ControlFeaturesPort,
   ) {}
 
   async handle(client: WsClient, rawPayload: unknown): Promise<void> {
@@ -94,7 +136,7 @@ export class ControlHandler {
         ? null
         : await this.queueService.getCurrentControllerUserId(data.robotId);
 
-    const commandAccess = await this._authorizeCommand({
+    const commandAccess = await this.authorizeCommand({
       robot,
       client,
       command,
@@ -148,6 +190,7 @@ export class ControlHandler {
         );
         return;
       }
+      const payerId = client.userId;
 
       if (!robot.ownerId) {
         client.send(
@@ -159,7 +202,7 @@ export class ControlHandler {
         return;
       }
 
-      if (client.userId !== robot.ownerId) {
+      if (payerId !== robot.ownerId) {
         try {
           const ledgerGroupId = randomUUID();
           const reservation = await this.walletService.runSerializable(async (tx) => {
@@ -169,7 +212,7 @@ export class ControlHandler {
               data: {
                 id: data.commandId,
                 robotId: robot.id,
-                userId: client.userId!,
+                userId: payerId,
                 buttonId: commandAccess.buttonId,
                 command,
                 costCredits: cost,
@@ -178,7 +221,7 @@ export class ControlHandler {
             });
             const debit = await this.walletService.debitInTransaction(
               tx,
-              client.userId!,
+              payerId,
               cost,
               TransactionType.BUTTON_SPEND,
               {
@@ -371,13 +414,11 @@ export class ControlHandler {
     }
   }
 
-  private async _authorizeCommand(input: {
-    robot: Awaited<ReturnType<RobotsService['findById']>>;
-    client: WsClient;
-    command: string;
-    buttonId?: string;
-    currentControllerUserId: string | null;
-  }): Promise<{ allowed: boolean; message: string; cooldownMs: number; costCredits: number; buttonId: string | null }> {
+  trackPendingCommand(commandId: string, command: PendingControlCommand): void {
+    this.pending.set(commandId, command);
+  }
+
+  async authorizeCommand(input: ControlAuthorizationInput): Promise<{ allowed: boolean; message: string; cooldownMs: number; costCredits: number; buttonId: string | null }> {
     const { robot, client, command, currentControllerUserId, buttonId } = input;
     const normalizedCommand = command.trim();
     const queueDisabled = robot.queueMode === 'DISABLED';
@@ -428,8 +469,8 @@ export class ControlHandler {
       this._canUseButton({ buttonAccess: button.access, client, ownerId: robot.ownerId, isCurrentController, queueDisabled }),
     );
 
-    if (allowedButtons.length > 0) {
-      const selected = allowedButtons[0]!;
+    const selected = allowedButtons[0];
+    if (selected) {
       return {
         allowed: true,
         message: '',

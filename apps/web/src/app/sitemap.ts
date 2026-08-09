@@ -1,7 +1,7 @@
 import type { MetadataRoute } from 'next';
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://botparty.live';
+  const baseUrl = process.env['NEXT_PUBLIC_APP_URL'] ?? 'https://botparty.live';
   return [
     { url: baseUrl, lastModified: new Date(), changeFrequency: 'hourly', priority: 1 },
     { url: `${baseUrl}/explore`, lastModified: new Date(), changeFrequency: 'hourly', priority: 0.9 },

@@ -5,27 +5,79 @@ import type { RedisService } from '../redis/redis.service';
 import type { RobotAccessService } from './robot-access.service';
 import type { ChatPersistenceService } from './chat-persistence.service';
 import type { ChatHistoryMessage, ChatHistoryPage } from './robots.types';
+import { parseJsonRecord } from '../common/json-value';
+import type { QueueMode } from '@botparty/prisma';
+
+export type RobotRoomStateDatabase = {
+  chatMessage: Pick<PrismaService['chatMessage'], 'findMany'>;
+  robot: Pick<PrismaService['robot'], 'findUnique' | 'update'>;
+};
 
 const REALTIME_ROBOT_CACHE_TTL_SEC = 30;
 const PUBLIC_OVERVIEW_CACHE_KEY = 'robots:public-overview';
 
+const REALTIME_QUEUE_MODES: ReadonlySet<string> = new Set<QueueMode>([
+  'FIRST_COME',
+  'VOTING',
+  'DISABLED',
+]);
+
+function isQueueMode(value: string): value is QueueMode {
+  return REALTIME_QUEUE_MODES.has(value);
+}
+
+export interface RealtimeRobotRecord {
+  id: string;
+  name: string;
+  ownerId: string;
+  queueMode: QueueMode;
+}
+
+function decodeRealtimeRobot(raw: string): RealtimeRobotRecord | null {
+  const record = parseJsonRecord(raw);
+  if (!record) return null;
+
+  const id = record['id'];
+  const name = record['name'];
+  const ownerId = record['ownerId'];
+  const queueMode = record['queueMode'];
+  if (
+    typeof id !== 'string' ||
+    id.length === 0 ||
+    typeof name !== 'string' ||
+    name.length === 0 ||
+    typeof ownerId !== 'string' ||
+    ownerId.length === 0 ||
+    typeof queueMode !== 'string' ||
+    !isQueueMode(queueMode)
+  ) {
+    return null;
+  }
+
+  return { id, name, ownerId, queueMode };
+}
+
 export class RobotRoomStateHelper {
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly redis: RedisService,
-    private readonly access: RobotAccessService,
-    private readonly chatPersistence: ChatPersistenceService,
+    private readonly prisma: RobotRoomStateDatabase,
+    private readonly redis: Pick<RedisService, 'del' | 'get' | 'set'>,
+    private readonly access: Pick<
+      RobotAccessService,
+      'getAccessPolicy' | 'resolveGuestActorId' | 'validateRoomAccess'
+    >,
+    private readonly chatPersistence: Pick<ChatPersistenceService, 'enqueue'>,
   ) {}
 
-  async findByIdCached<T>(robotId: string, loader: () => Promise<T>): Promise<T> {
+  async findByIdCached(
+    robotId: string,
+    loader: () => Promise<RealtimeRobotRecord>,
+  ): Promise<RealtimeRobotRecord> {
     const cacheKey = this.realtimeRobotCacheKey(robotId);
     const cached = await this.redis.get(cacheKey);
     if (cached) {
-      try {
-        return JSON.parse(cached) as T;
-      } catch {
-        await this.redis.del(cacheKey);
-      }
+      const robot = decodeRealtimeRobot(cached);
+      if (robot) return robot;
+      await this.redis.del(cacheKey);
     }
 
     const robot = await loader();
@@ -33,7 +85,17 @@ export class RobotRoomStateHelper {
     return robot;
   }
 
-  async appendChatMessage(robotId: string, userId: string | null | undefined, content: string, timestampMs: number, clientMessageId: string) {
+  async invalidateRealtimeRobot(robotId: string): Promise<void> {
+    await this.redis.del(this.realtimeRobotCacheKey(robotId));
+  }
+
+  async appendChatMessage(
+    robotId: string,
+    userId: string | null | undefined,
+    content: string,
+    timestampMs: number,
+    clientMessageId: string,
+  ) {
     if (!userId || userId.startsWith('guest:')) {
       return;
     }
@@ -85,7 +147,7 @@ export class RobotRoomStateHelper {
     robotId: string;
     requesterUserId: string | null;
     guestSessionId?: string;
-    roomAccessToken?: string;
+    roomAccessToken?: string | undefined;
     before?: number;
     beforeId?: string;
     limit?: number;
@@ -98,9 +160,10 @@ export class RobotRoomStateHelper {
       throw new NotFoundException('Robot not found');
     }
 
-    const actorId = input.requesterUserId
-      ?? this.access.resolveGuestActorId(input.guestSessionId)
-      ?? 'guest:chat-history';
+    const actorId =
+      input.requesterUserId ??
+      this.access.resolveGuestActorId(input.guestSessionId) ??
+      'guest:chat-history';
 
     const canAccessRoom = await this.access.validateRoomAccess({
       robotId: input.robotId,
@@ -128,7 +191,8 @@ export class RobotRoomStateHelper {
       typeof input.before === 'number' && Number.isFinite(input.before)
         ? new Date(input.before)
         : null;
-    const beforeId = typeof input.beforeId === 'string' && input.beforeId.length > 0 ? input.beforeId : null;
+    const beforeId =
+      typeof input.beforeId === 'string' && input.beforeId.length > 0 ? input.beforeId : null;
 
     // Stable cursor on (createdAt desc, id desc): when beforeId is provided
     // along with the timestamp, fetch strictly older rows including ties on
@@ -150,10 +214,7 @@ export class RobotRoomStateHelper {
         deletedAt: null,
         ...cursorWhere,
       },
-      orderBy: [
-        { createdAt: 'desc' },
-        { id: 'desc' },
-      ],
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: clampedLimit + 1,
       select: {
         id: true,
@@ -178,7 +239,7 @@ export class RobotRoomStateHelper {
       timestamp: row.createdAt.getTime(),
     }));
 
-    const oldest = messages.length > 0 ? messages[0]! : null;
+    const oldest = messages[0] ?? null;
     return {
       messages,
       nextCursor: hasMore && oldest ? oldest.timestamp : null,

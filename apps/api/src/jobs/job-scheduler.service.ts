@@ -7,7 +7,10 @@ import { JOBS_QUEUE_AUDIT_CLEANUP } from './jobs.constants';
 export class JobSchedulerService implements OnModuleInit {
   private readonly logger = new Logger(JobSchedulerService.name);
 
-  constructor(@InjectQueue(JOBS_QUEUE_AUDIT_CLEANUP) private readonly auditCleanupQueue: Queue) {}
+  constructor(
+    @InjectQueue(JOBS_QUEUE_AUDIT_CLEANUP)
+    private readonly auditCleanupQueue: Pick<Queue, 'upsertJobScheduler'>,
+  ) {}
 
   async onModuleInit() {
     await this.scheduleAuditCleanup();

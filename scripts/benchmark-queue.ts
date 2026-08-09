@@ -3,18 +3,20 @@ import Redis from 'ioredis';
 import { PrismaClient } from '../packages/prisma/generated/client/index.js';
 import { QueueService } from '../apps/api/src/queue/queue.service.js';
 
-const databaseUrl = process.env.DATABASE_URL ?? '';
+type QueueServiceDependencies = ConstructorParameters<typeof QueueService>;
+
+const databaseUrl = process.env['DATABASE_URL'] ?? '';
 const parsed = new URL(databaseUrl);
-if (process.env.QUEUE_BENCHMARK_ALLOW_WRITES !== 'true' || !/benchmark/.test(parsed.pathname)) {
+if (process.env['QUEUE_BENCHMARK_ALLOW_WRITES'] !== 'true' || !/benchmark/.test(parsed.pathname)) {
   throw new Error(
     'Queue benchmark requires QUEUE_BENCHMARK_ALLOW_WRITES=true and a database name containing benchmark',
   );
 }
 const prisma = new PrismaClient();
 const redis = new Redis({
-  host: process.env.REDIS_HOST ?? '127.0.0.1',
-  port: Number(process.env.REDIS_PORT ?? 6379),
-  password: process.env.REDIS_PASSWORD || undefined,
+  host: process.env['REDIS_HOST'] ?? '127.0.0.1',
+  port: Number(process.env['REDIS_PORT'] ?? 6379),
+  ...(process.env['REDIS_PASSWORD'] ? { password: process.env['REDIS_PASSWORD'] } : {}),
 });
 const prefix = `benchmark_${Date.now()}`;
 const ownerId = randomUUID();
@@ -72,19 +74,30 @@ async function main() {
         .map((user, index) => ({ robotId, userId: user.id, position: index + 1 })),
     });
 
-    const robots = {
-      getAccessPolicy: async () => ({ control: 'AUTHENTICATED' }),
-      findById: async () => ({ status: 'ONLINE' }),
+    const robots: QueueServiceDependencies[2] = {
+      getAccessPolicy: async () => ({
+        video: 'AUTHENTICATED',
+        control: 'AUTHENTICATED',
+        chat: 'AUTHENTICATED',
+        estop: 'AUTHENTICATED',
+      }),
+      findById: async (id) => {
+        const robot = await prisma.robot.findUnique({
+          where: { id },
+          include: {
+            owner: {
+              select: { id: true, username: true, displayName: true, avatarUrl: true },
+            },
+          },
+        });
+        if (!robot) throw new Error('Benchmark robot not found');
+        return robot;
+      },
       validateRoomAccess: async () => true,
       resolveGuestActorId: () => null,
     };
-    const config = { get: () => '0' };
-    const queue = new QueueService(
-      prisma as never,
-      redis as never,
-      robots as never,
-      config as never,
-    );
+    const config: QueueServiceDependencies[3] = { get: () => '0' };
+    const queue = new QueueService(prisma, redis, robots, config);
     const read = await measure(() => queue.getQueue(robotId));
 
     const mutationSamples: number[] = [];

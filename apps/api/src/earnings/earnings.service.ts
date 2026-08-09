@@ -1,10 +1,16 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { Prisma, TransactionType } from '@botparty/prisma';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class EarningsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService)
+    private readonly prisma: {
+      $queryRaw: PrismaService['$queryRaw'];
+      transaction: Pick<PrismaService['transaction'], 'aggregate' | 'findMany'>;
+    },
+  ) {}
 
   /**
    * Returns lifetime earnings (BUTTON_PAYOUT + DONATION_RECEIVED) for the user

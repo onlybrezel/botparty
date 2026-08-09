@@ -298,7 +298,7 @@ export function useDashboardPage() {
       try {
         api.setToken(accessToken);
         const { token, livekitUrl } = await api.robots.getViewerToken(selectedRobotId, false);
-        setPreview({ token, url: process.env.NEXT_PUBLIC_LIVEKIT_URL ?? livekitUrl });
+        setPreview({ token, url: process.env['NEXT_PUBLIC_LIVEKIT_URL'] ?? livekitUrl });
         if (forceRemount) {
           setPreviewVersion((value) => value + 1);
         }
@@ -662,7 +662,7 @@ export function useDashboardPage() {
       api.setToken(accessToken);
       const created = await api.robots.createRobotIngressCamera(selectedRobot.id, {
         cameraId,
-        label: newIngressLabel.trim() || undefined,
+        ...(newIngressLabel.trim() ? { label: newIngressLabel.trim() } : {}),
         compatibilityMode: newIngressCompatibilityMode,
       });
       setIngressCameras((prev) => {
@@ -794,7 +794,10 @@ export function useDashboardPage() {
     setError(null);
     try {
       api.setToken(accessToken);
-      const result = await api.robots.enqueueRobotAction(selectedRobot.id, { type, durationSec });
+      const result = await api.robots.enqueueRobotAction(selectedRobot.id, {
+        type,
+        ...(durationSec !== undefined ? { durationSec } : {}),
+      });
       if (result.alreadyQueued) {
         const message = 'Action is already queued, waiting for pickup.';
         setStatus(message);

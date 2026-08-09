@@ -16,19 +16,19 @@ const ROBOT_WEBHOOK_EVENTS = ['robot.online', 'robot.offline', 'session.started'
 
 export class UploadThumbnailDto {
   @IsString()
-  dataUrl!: string;
+  declare dataUrl: string;
 }
 
 export class AddAllowedUserDto {
   @IsString()
   @MaxLength(64)
-  username!: string;
+  declare username: string;
 }
 
 export class CreateIngressCameraDto {
   @IsString()
   @MaxLength(64)
-  cameraId!: string;
+  declare cameraId: string;
 
   @IsOptional()
   @IsString()
@@ -86,7 +86,7 @@ export class GetChatHistoryDto {
 
 export class ClaimRobotDto {
   @IsString()
-  claimToken!: string;
+  declare claimToken: string;
 
   @IsOptional()
   @IsString()
@@ -103,14 +103,14 @@ export class IngestRobotLogsDto {
   @IsArray()
   @IsString({ each: true })
   @MaxLength(4096, { each: true })
-  lines!: string[];
+  declare lines: string[];
 }
 
 const ROBOT_ACTION_TYPES = ['restart_video', 'restart_control', 'restart_chat', 'update_client', 'set_log_stream'] as const;
 
 export class EnqueueActionDto {
   @IsIn(ROBOT_ACTION_TYPES)
-  type!: (typeof ROBOT_ACTION_TYPES)[number];
+  declare type: (typeof ROBOT_ACTION_TYPES)[number];
 
   @IsOptional()
   @IsNumber()
@@ -190,13 +190,13 @@ export class PushTelemetryDto {
 export class CreateRobotWebhookDto {
   @IsUrl({ require_tld: false })
   @MaxLength(1024)
-  url!: string;
+  declare url: string;
 
   @IsArray()
   @ArrayNotEmpty()
   @IsString({ each: true })
   @IsIn(ROBOT_WEBHOOK_EVENTS, { each: true })
-  events!: Array<(typeof ROBOT_WEBHOOK_EVENTS)[number]>;
+  declare events: Array<(typeof ROBOT_WEBHOOK_EVENTS)[number]>;
 
   @IsOptional()
   @IsBoolean()

@@ -1,28 +1,28 @@
 import type WebSocket from 'ws';
 
-export interface WsClient extends WebSocket {
+export interface WsClient extends Pick<WebSocket, 'close' | 'ping' | 'readyState' | 'send'> {
   id: string;
-  userId?: string;
-  username?: string;
-  authAccessToken?: string;
-  protocolVersion?: number;
-  isGuest?: boolean;
+  userId?: string | undefined;
+  username?: string | undefined;
+  authAccessToken?: string | undefined;
+  protocolVersion?: number | undefined;
+  isGuest?: boolean | undefined;
   /** Which robot room this client is subscribed to */
-  watchingRobotId?: string;
+  watchingRobotId?: string | undefined;
   /** True if this socket is the robot hardware client */
-  isRobot?: boolean;
-  robotId?: string;
+  isRobot?: boolean | undefined;
+  robotId?: string | undefined;
   /** Timestamp of last chat message (for rate limiting) */
-  lastChatAt?: number;
+  lastChatAt?: number | undefined;
   /** User role (for rate-limit tier) */
-  role?: string;
-  remoteIp?: string;
-  cookieHeader?: string;
-  presenceJoinedAt?: number;
+  role?: string | undefined;
+  remoteIp?: string | undefined;
+  cookieHeader?: string | undefined;
+  presenceJoinedAt?: number | undefined;
   /** Per-client generic event rate limiting */
-  wsEventCount?: number;
-  wsEventWindowStart?: number;
-  wsEventTypeCounts?: Record<string, number>;
+  wsEventCount?: number | undefined;
+  wsEventWindowStart?: number | undefined;
+  wsEventTypeCounts?: Record<string, number> | undefined;
 }
 
 /** Lightweight presence record broadcast to the room */

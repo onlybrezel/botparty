@@ -1,4 +1,4 @@
-import { BadRequestException, Controller, Get, Param, ParseUUIDPipe, UseGuards, Query, Headers } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Param, ParseUUIDPipe, UseGuards, Query, Headers, Inject } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { SessionsService } from './sessions.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -12,16 +12,16 @@ import { ConfigService } from '@nestjs/config';
 @Controller('sessions')
 export class SessionsController {
   constructor(
-    private readonly sessionsService: SessionsService,
-    private readonly authService: AuthService,
-    private readonly configService: ConfigService,
+    @Inject(SessionsService) private readonly sessionsService: Pick<SessionsService, 'findByUser' | 'findDetailForRequester' | 'findByRobotForRequester' | 'getActiveSessionForRequester'>,
+    @Inject(AuthService) private readonly authService: Pick<AuthService, 'resolveValidAccessTokenPayload'>,
+    @Inject(ConfigService) private readonly configService: Pick<ConfigService, 'get'>,
   ) {}
 
   @Get('my')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get my session history' })
-  async getMySessions(@CurrentUser() user: JwtPayload, @Query('limit') limit?: string) {
+  async getMySessions(@CurrentUser() user: Pick<JwtPayload, 'sub'>, @Query('limit') limit?: string) {
     return this.sessionsService.findByUser(user.sub, this.parseLimit(limit));
   }
 
@@ -29,7 +29,7 @@ export class SessionsController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get detailed session replay data for the authenticated requester' })
-  async getMySession(@CurrentUser() user: JwtPayload, @Param('sessionId', ParseUUIDPipe) sessionId: string) {
+  async getMySession(@CurrentUser() user: Pick<JwtPayload, 'sub'>, @Param('sessionId', ParseUUIDPipe) sessionId: string) {
     return this.sessionsService.findDetailForRequester(sessionId, user.sub);
   }
 

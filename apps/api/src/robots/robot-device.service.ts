@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash } from 'crypto';
 import type { Prisma } from '@botparty/prisma';
@@ -16,8 +16,9 @@ export class RobotDeviceService {
   private readonly logger = new Logger(RobotDeviceService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly configService: ConfigService,
+    @Inject(PrismaService)
+    private readonly prisma: { robot: Pick<PrismaService['robot'], 'findUnique' | 'update'> },
+    @Inject(ConfigService) private readonly configService: { get(key: string, defaultValue?: string): unknown },
   ) {}
 
   async validateOrBindRobotDevice(robotId: string, deviceKey?: string | null) {
@@ -59,7 +60,7 @@ export class RobotDeviceService {
       return null;
     }
 
-    const maxAgeDays = Number(this.configService.get<string>('ROBOT_CLAIM_TOKEN_MAX_AGE_DAYS', '90'));
+    const maxAgeDays = Number(this.configService.get('ROBOT_CLAIM_TOKEN_MAX_AGE_DAYS', '90'));
     if (!Number.isFinite(maxAgeDays) || maxAgeDays <= 0) {
       return robot;
     }
@@ -98,7 +99,7 @@ export class RobotDeviceService {
     }
 
     const auth = { ...(existing.auth as Record<string, unknown>) };
-    delete auth.boundDeviceHash;
+    delete auth['boundDeviceHash'];
     existing.auth = auth;
     return existing;
   }
@@ -134,7 +135,7 @@ export class RobotDeviceService {
       existing.auth && typeof existing.auth === 'object' && !Array.isArray(existing.auth)
         ? { ...(existing.auth as Record<string, unknown>) }
         : {};
-    auth.boundDeviceHash = deviceHash;
+    auth['boundDeviceHash'] = deviceHash;
     existing.auth = auth;
     return existing;
   }

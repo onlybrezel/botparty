@@ -71,7 +71,10 @@ export function checkWsEventRateLimit(client: WsClient, eventType = 'generic'): 
   }
   const isPrivileged = client.isRobot || isStaffRole(client.role);
   const globalLimit = isPrivileged ? LIMITS.WS_EVENT_RATE_LIMIT_ADMIN : LIMITS.WS_EVENT_RATE_LIMIT;
-  const bucket = WS_EVENT_TYPE_LIMITS[eventType] ?? WS_EVENT_TYPE_LIMITS.generic!;
+  const bucket = WS_EVENT_TYPE_LIMITS[eventType] ?? {
+    normal: LIMITS.WS_EVENT_RATE_LIMIT,
+    privileged: LIMITS.WS_EVENT_RATE_LIMIT_ADMIN,
+  };
   const bucketLimit = isPrivileged ? bucket.privileged : bucket.normal;
   return client.wsEventCount <= globalLimit
     && client.wsEventTypeCounts[eventType] <= bucketLimit

@@ -1,5 +1,4 @@
 import { S3Client } from '@aws-sdk/client-s3';
-import type { ConfigService } from '@nestjs/config';
 
 export type S3CompatibleStorageConfig = {
   bucket: string;
@@ -10,38 +9,43 @@ export type S3CompatibleStorageConfig = {
   sessionToken?: string;
   forcePathStyle: boolean;
 };
+export type S3CompatibleStorageClient = Pick<S3Client, 'send'>;
 
 export function resolveS3CompatibleStorageConfig(
-  config: ConfigService,
+  config: { get(key: string): unknown },
   envPrefix: string,
 ): S3CompatibleStorageConfig | null {
-  const bucket = config.get<string>(`${envPrefix}BUCKET`)?.trim();
-  const region = config.get<string>(`${envPrefix}REGION`)?.trim();
-  const accessKeyId = config.get<string>(`${envPrefix}ACCESS_KEY_ID`)?.trim();
-  const secretAccessKey = config.get<string>(`${envPrefix}SECRET_ACCESS_KEY`)?.trim();
+  const readString = (name: string): string | undefined => {
+    const value = config.get(name);
+    return typeof value === 'string' ? value.trim() : undefined;
+  };
+  const bucket = readString(`${envPrefix}BUCKET`);
+  const region = readString(`${envPrefix}REGION`);
+  const accessKeyId = readString(`${envPrefix}ACCESS_KEY_ID`);
+  const secretAccessKey = readString(`${envPrefix}SECRET_ACCESS_KEY`);
 
   if (!bucket || !region || !accessKeyId || !secretAccessKey) {
     return null;
   }
 
-  const endpoint = config.get<string>(`${envPrefix}ENDPOINT`)?.trim();
-  const sessionToken = config.get<string>(`${envPrefix}SESSION_TOKEN`)?.trim();
+  const endpoint = readString(`${envPrefix}ENDPOINT`);
+  const sessionToken = readString(`${envPrefix}SESSION_TOKEN`);
 
   return {
     bucket,
     region,
-    endpoint: endpoint && endpoint.length > 0 ? endpoint : undefined,
+    ...(endpoint && endpoint.length > 0 ? { endpoint } : {}),
     accessKeyId,
     secretAccessKey,
-    sessionToken: sessionToken && sessionToken.length > 0 ? sessionToken : undefined,
-    forcePathStyle: readBooleanFlag(config.get<string>(`${envPrefix}FORCE_PATH_STYLE`)),
+    ...(sessionToken && sessionToken.length > 0 ? { sessionToken } : {}),
+    forcePathStyle: readBooleanFlag(readString(`${envPrefix}FORCE_PATH_STYLE`)),
   };
 }
 
-export function createS3CompatibleStorageClient(config: S3CompatibleStorageConfig): S3Client {
+export function createS3CompatibleStorageClient(config: S3CompatibleStorageConfig): S3CompatibleStorageClient {
   return new S3Client({
     region: config.region,
-    endpoint: config.endpoint,
+    ...(config.endpoint === undefined ? {} : { endpoint: config.endpoint }),
     forcePathStyle: config.forcePathStyle,
     credentials: {
       accessKeyId: config.accessKeyId,

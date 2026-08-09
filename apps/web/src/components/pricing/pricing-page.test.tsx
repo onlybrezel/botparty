@@ -122,15 +122,13 @@ describe('PricingPage', () => {
   });
 
   it('does not update state after an in-flight catalog request is unmounted', async () => {
-    let resolvePackages!: (value: { packages: (typeof creditPackage)[] }) => void;
-    mockApi.packages.mockReturnValueOnce(
-      new Promise((resolve) => {
-        resolvePackages = resolve;
-      }),
-    );
+    const { promise, resolve } = Promise.withResolvers<{
+      packages: (typeof creditPackage)[];
+    }>();
+    mockApi.packages.mockReturnValueOnce(promise);
     const view = render(<PricingPage />);
     view.unmount();
-    resolvePackages({ packages: [creditPackage] });
+    resolve({ packages: [creditPackage] });
     await Promise.resolve();
     expect(screen.queryByRole('heading', { name: 'Starter' })).not.toBeInTheDocument();
   });

@@ -15,6 +15,7 @@ function build() {
   const prisma = {
     user: { findUnique: jest.fn() },
     notification: {
+      count: jest.fn(),
       create: jest.fn(),
       findUnique: jest.fn(),
       findMany: jest.fn().mockResolvedValue([]),
@@ -28,7 +29,7 @@ function build() {
     },
   };
   const mail = { isEnabled: jest.fn().mockReturnValue(true), sendRaw: jest.fn() };
-  return { service: new NotificationsService(prisma as never, mail as never), prisma, mail };
+  return { service: new NotificationsService(prisma, mail), prisma, mail };
 }
 
 describe('NotificationsService', () => {

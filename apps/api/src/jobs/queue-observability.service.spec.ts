@@ -12,7 +12,7 @@ describe('QueueObservabilityService', () => {
         failed: 0,
       }),
     };
-    const service = new QueueObservabilityService(queue as never, queue as never, queue as never);
+    const service = new QueueObservabilityService(queue, queue, queue);
 
     await service.collect();
 

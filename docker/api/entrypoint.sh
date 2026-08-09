@@ -17,4 +17,4 @@ echo "════════════════════════�
 echo "  Starting NestJS API..."
 echo "════════════════════════════════════════"
 
-exec su-exec "${APP_USER}:${APP_GROUP}" node apps/api/dist/main.js
+exec su-exec "${APP_USER}:${APP_GROUP}" node scripts/api-cluster.mjs

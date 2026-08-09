@@ -57,8 +57,8 @@ export class BillingController {
       userId: user.sub,
       provider: dto.provider,
       packageId: dto.packageId,
-      successUrl: dto.successUrl,
-      cancelUrl: dto.cancelUrl,
+      ...(dto.successUrl === undefined ? {} : { successUrl: dto.successUrl }),
+      ...(dto.cancelUrl === undefined ? {} : { cancelUrl: dto.cancelUrl }),
       termsVersion: dto.termsVersion,
       immediateDeliveryConsent: dto.immediateDeliveryConsent,
     });

@@ -1,7 +1,7 @@
 import { StripeProvider } from './stripe.provider';
 
 function provider() {
-  return new StripeProvider({ get: jest.fn().mockReturnValue(undefined) } as never);
+  return new StripeProvider({ get: jest.fn().mockReturnValue(undefined) });
 }
 
 describe('StripeProvider', () => {
@@ -15,7 +15,7 @@ describe('StripeProvider', () => {
         creditsAmount: 500,
         currency: 'EUR',
         packageId: 'credits-500',
-      } as never,
+      },
       successUrl: 'https://example.test/success',
       cancelUrl: 'https://example.test/cancel',
     };

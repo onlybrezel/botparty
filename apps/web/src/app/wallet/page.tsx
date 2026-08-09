@@ -63,7 +63,11 @@ export default function WalletPage() {
       setHistoryLoading(true);
       try {
         api.setToken(accessToken);
-        const page = await api.wallet.transactions({ ...historyFilters(), cursor, limit: 50 });
+        const page = await api.wallet.transactions({
+          ...historyFilters(),
+          ...(cursor ? { cursor } : {}),
+          limit: 50,
+        });
         setHistory((current) =>
           cursor
             ? [
@@ -177,7 +181,7 @@ export default function WalletPage() {
           amount,
           destination: payoutDestination,
           destinationType: payoutDestinationType,
-          notes: payoutNotes || undefined,
+          ...(payoutNotes ? { notes: payoutNotes } : {}),
         });
         setPayoutAmount('');
         setPayoutDestination('');

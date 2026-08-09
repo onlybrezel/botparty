@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
+import { parseJsonRecord } from '../common/json-value';
 
 @Injectable()
 export class RobotTelemetryService {
@@ -31,22 +32,22 @@ export class RobotTelemetryService {
   async ingestTelemetryByRobotId(
     robotId: string,
     payload: {
-      clientVersion?: string;
-      gitBranch?: string;
-      gitCommit?: string;
-      gitDirty?: boolean;
-      botpartyStreamerVersion?: string;
-      streamerVersion?: string;
-      pythonVersion?: string;
-      cpuPercent?: number;
-      memoryPercent?: number;
-      temperatureC?: number;
-      uptimeSec?: number;
-      controlConnected?: boolean;
-      livekitConnected?: boolean;
-      commandsReceived?: number;
-      cameraFrames?: number;
-      emergencyStopVerified?: boolean;
+      clientVersion?: string | undefined;
+      gitBranch?: string | undefined;
+      gitCommit?: string | undefined;
+      gitDirty?: boolean | undefined;
+      botpartyStreamerVersion?: string | undefined;
+      streamerVersion?: string | undefined;
+      pythonVersion?: string | undefined;
+      cpuPercent?: number | undefined;
+      memoryPercent?: number | undefined;
+      temperatureC?: number | undefined;
+      uptimeSec?: number | undefined;
+      controlConnected?: boolean | undefined;
+      livekitConnected?: boolean | undefined;
+      commandsReceived?: number | undefined;
+      cameraFrames?: number | undefined;
+      emergencyStopVerified?: boolean | undefined;
     },
   ) {
     const telemetry = {
@@ -129,15 +130,9 @@ export class RobotTelemetryService {
       this.redis.lrange(historyKey, -120, -1),
     ]);
 
-    const latest = latestRaw ? (JSON.parse(latestRaw) as Record<string, unknown>) : null;
+    const latest = latestRaw ? parseJsonRecord(latestRaw) : null;
     const history = historyRaw
-      .map((entry) => {
-        try {
-          return JSON.parse(entry) as Record<string, unknown>;
-        } catch {
-          return null;
-        }
-      })
+      .map(parseJsonRecord)
       .filter((entry): entry is Record<string, unknown> => entry !== null);
 
     return { latest, history };
@@ -155,11 +150,11 @@ export class RobotTelemetryService {
     return raw
       .map((entry) => {
         try {
-          const parsed = JSON.parse(entry) as { ts?: number; line?: string };
-          if (!parsed.line) return null;
+          const parsed = parseJsonRecord(entry);
+          if (!parsed || typeof parsed['line'] !== 'string' || !parsed['line']) return null;
           return {
-            ts: typeof parsed.ts === 'number' ? parsed.ts : Date.now(),
-            line: parsed.line,
+            ts: typeof parsed['ts'] === 'number' ? parsed['ts'] : Date.now(),
+            line: parsed['line'],
           };
         } catch {
           return null;

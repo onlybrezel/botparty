@@ -1,4 +1,4 @@
-import { Controller, Post, Delete, Get, Param, ParseUUIDPipe, UseGuards, Body, Headers, Query } from '@nestjs/common';
+import { Controller, Post, Delete, Get, Param, ParseUUIDPipe, UseGuards, Body, Headers, Query, Inject } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { QueueService } from './queue.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -12,9 +12,9 @@ import { AuthService } from '../auth/auth.service';
 @Controller('queue')
 export class QueueController {
   constructor(
-    private readonly queueService: QueueService,
-    private readonly authService: AuthService,
-    private readonly configService: ConfigService,
+    @Inject(QueueService) private readonly queueService: Pick<QueueService, 'getQueueForRequester' | 'join' | 'leave' | 'vote'>,
+    @Inject(AuthService) private readonly authService: Pick<AuthService, 'resolveValidAccessTokenPayload'>,
+    @Inject(ConfigService) private readonly configService: Pick<ConfigService, 'get'>,
   ) {}
 
   @Get(':robotId')
@@ -40,7 +40,7 @@ export class QueueController {
   @ApiOperation({ summary: 'Join the control queue' })
   async join(
     @Param('robotId', ParseUUIDPipe) robotId: string,
-    @CurrentUser() user: JwtPayload,
+    @CurrentUser() user: Pick<JwtPayload, 'sub'>,
     @Body() body?: { roomAccessToken?: string },
   ) {
     return this.queueService.join(robotId, user.sub, body?.roomAccessToken);
@@ -50,7 +50,7 @@ export class QueueController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Leave the control queue' })
-  async leave(@Param('robotId', ParseUUIDPipe) robotId: string, @CurrentUser() user: JwtPayload) {
+  async leave(@Param('robotId', ParseUUIDPipe) robotId: string, @CurrentUser() user: Pick<JwtPayload, 'sub'>) {
     const result = await this.queueService.leave(robotId, user.sub);
     return { message: result.removed ? 'Left queue' : 'Not in queue' };
   }
@@ -62,7 +62,7 @@ export class QueueController {
   async vote(
     @Param('robotId', ParseUUIDPipe) robotId: string,
     @Param('targetUserId', ParseUUIDPipe) targetUserId: string,
-    @CurrentUser() user: JwtPayload,
+    @CurrentUser() user: Pick<JwtPayload, 'sub'>,
     @Body() body?: { roomAccessToken?: string },
   ) {
     return this.queueService.vote(robotId, targetUserId, user.sub, body?.roomAccessToken);

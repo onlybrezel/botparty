@@ -3,13 +3,32 @@ import { RobotAccessService } from './robot-access.service';
 type AccessMode = 'OPEN' | 'PASSWORD' | 'ALLOWED_USERS' | 'LINK_ONLY';
 type Visibility = 'PUBLIC' | 'UNLISTED' | 'PRIVATE';
 
+const PUBLIC_VISIBILITIES: readonly Visibility[] = ['PUBLIC', 'UNLISTED'];
+const RESTRICTED_ACCESS_MODES: readonly AccessMode[] = ['PASSWORD', 'LINK_ONLY', 'ALLOWED_USERS'];
+
+interface RobotAccessContext {
+  id: string;
+  ownerId: string;
+  visibility: Visibility;
+  accessMode: AccessMode;
+  accessPassword: string | null;
+  inviteCode: string | null;
+  allowedUsers: Array<{ userId: string }>;
+}
+
 function buildService() {
   const prisma = {
     robot: {
       findUnique: jest.fn(),
+      update: jest.fn(),
     },
     user: {
       findUnique: jest.fn(),
+    },
+    robotAllowedUser: {
+      deleteMany: jest.fn(),
+      findMany: jest.fn(),
+      upsert: jest.fn(),
     },
   };
 
@@ -18,22 +37,18 @@ function buildService() {
     set: jest.fn().mockResolvedValue('OK'),
   };
 
-  const service = new RobotAccessService(prisma as never, redis as never);
+  const service = new RobotAccessService(prisma, redis);
   return { service, prisma, redis };
 }
 
 function robotContext(
-  overrides: Partial<{
-    visibility: Visibility;
-    accessMode: AccessMode;
-    allowedUsers: Array<{ userId: string }>;
-  }> = {},
-) {
+  overrides: Partial<RobotAccessContext> = {},
+): RobotAccessContext {
   return {
     id: 'robot-1',
     ownerId: 'owner-1',
-    visibility: 'PUBLIC' as Visibility,
-    accessMode: 'OPEN' as AccessMode,
+    visibility: 'PUBLIC',
+    accessMode: 'OPEN',
     accessPassword: null,
     inviteCode: null,
     allowedUsers: [],
@@ -114,7 +129,7 @@ describe('RobotAccessService room authorization', () => {
     ).resolves.toBe(false);
   });
 
-  it.each(['PUBLIC', 'UNLISTED'] as Visibility[])(
+  it.each(PUBLIC_VISIBILITIES)(
     'allows open %s rooms without a grant',
     async (visibility) => {
       const { service } = setup({ visibility });
@@ -139,7 +154,7 @@ describe('RobotAccessService room authorization', () => {
     );
   });
 
-  it.each(['PASSWORD', 'LINK_ONLY', 'ALLOWED_USERS'] as AccessMode[])(
+  it.each(RESTRICTED_ACCESS_MODES)(
     'requires a grant for guests in %s rooms',
     async (accessMode) => {
       const { service } = setup({ accessMode });
@@ -161,7 +176,7 @@ describe('RobotAccessService room authorization', () => {
     ).resolves.toBe(true);
   });
 
-  it.each(['PASSWORD', 'LINK_ONLY', 'ALLOWED_USERS'] as AccessMode[])(
+  it.each(RESTRICTED_ACCESS_MODES)(
     'allows owners and staff in %s rooms without a grant',
     async (accessMode) => {
       const owner = setup({ accessMode });

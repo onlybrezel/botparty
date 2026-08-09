@@ -1,10 +1,6 @@
 import { WS_EVENTS } from '@botparty/shared';
 import { RedisPubSubHandler, type RedisPubSubContext } from './redis-pubsub.handler';
 
-type RedisPubSubHandlerTestAccess = {
-  handleMessage(channel: string, message: string): Promise<void>;
-};
-
 describe('RedisPubSubHandler', () => {
   let duplicateClient: {
     connect: jest.Mock;
@@ -14,8 +10,7 @@ describe('RedisPubSubHandler', () => {
   };
   let redis: { duplicate: jest.Mock };
   let queueService: { getQueue: jest.Mock };
-  let ctx: {
-    instanceId: string;
+  let ctx: RedisPubSubContext & {
     hasOpenRobotClient: jest.Mock;
     hasLocalActiveTurn: jest.Mock;
     syncTurnLifecycle: jest.Mock;
@@ -51,7 +46,7 @@ describe('RedisPubSubHandler', () => {
       buildModerationSystemMessage: jest.fn().mockReturnValue(null),
       broadcastSystemLocally: jest.fn(),
     };
-    handler = new RedisPubSubHandler(redis as never, queueService as never, ctx as RedisPubSubContext);
+    handler = new RedisPubSubHandler(redis, queueService, ctx);
   });
 
   it('subscribes to gateway relay channels and shuts down cleanly', async () => {
@@ -74,8 +69,8 @@ describe('RedisPubSubHandler', () => {
   });
 
   it('syncs queue state from Redis events', async () => {
-    const internal = handler as unknown as RedisPubSubHandlerTestAccess;
-    await internal.handleMessage('queue:robot-1', JSON.stringify({ type: 'join' }));
+    const internal = handler;
+    await internal.handlePublishedMessage('queue:robot-1', JSON.stringify({ type: 'join' }));
 
     expect(queueService.getQueue).toHaveBeenCalledWith('robot-1');
     expect(ctx.syncTurnLifecycle).toHaveBeenCalledWith('robot-1', [
@@ -89,7 +84,7 @@ describe('RedisPubSubHandler', () => {
   it('broadcasts moderation events and derived system chat messages', async () => {
     ctx.buildModerationSystemMessage.mockReturnValue('pilot was timed out.');
 
-    await (handler as unknown as RedisPubSubHandlerTestAccess).handleMessage(
+    await handler.handlePublishedMessage(
       'ws:moderation:robot-1',
       JSON.stringify({ event: WS_EVENTS.MOD_TIMEOUT, data: { userId: 'user-1' } }),
     );
@@ -107,16 +102,16 @@ describe('RedisPubSubHandler', () => {
   });
 
   it('relays only foreign room events and system broadcasts', async () => {
-    const internal = handler as unknown as RedisPubSubHandlerTestAccess;
-    await internal.handleMessage(
+    const internal = handler;
+    await internal.handlePublishedMessage(
       'ws:room:robot-1',
       JSON.stringify({ originId: 'instance-a', event: WS_EVENTS.ROBOT_STATUS, data: { status: 'ONLINE' } }),
     );
-    await internal.handleMessage(
+    await internal.handlePublishedMessage(
       'ws:room:robot-1',
       JSON.stringify({ originId: 'instance-b', event: WS_EVENTS.ROBOT_STATUS, data: { status: 'ONLINE' } }),
     );
-    await internal.handleMessage(
+    await internal.handlePublishedMessage(
       'ws:system:broadcast',
       JSON.stringify({ event: WS_EVENTS.SERVER_SHUTDOWN, data: { reason: 'restart' } }),
     );

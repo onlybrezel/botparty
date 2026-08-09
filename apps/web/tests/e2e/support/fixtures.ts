@@ -99,7 +99,10 @@ export function monitorBrowserIssues(page: Page): BrowserIssueMonitor {
       allowedHttpErrors.push({ status, urlPattern });
     },
     allowRequestFailure(urlPattern, failurePattern) {
-      allowedRequestFailures.push({ urlPattern, failurePattern });
+      allowedRequestFailures.push({
+        urlPattern,
+        ...(failurePattern ? { failurePattern } : {}),
+      });
     },
     assertNoUnexpectedIssues() {
       const resourceErrorsByStatus = new Map<number, Array<{ status: number; message: string }>>();

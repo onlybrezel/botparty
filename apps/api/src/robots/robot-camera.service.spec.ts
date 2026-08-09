@@ -40,7 +40,7 @@ describe('RobotCameraService', () => {
     config = {
       get: jest.fn().mockReturnValue(undefined),
     };
-    service = new RobotCameraService(prisma as never, access as never, config as never);
+    service = new RobotCameraService(prisma, access, config);
   });
 
   it('adds a new external camera and makes it active when none is selected', async () => {
@@ -119,7 +119,7 @@ describe('RobotCameraService', () => {
     config.get.mockImplementation((key: string) =>
       key === 'MAX_EXTERNAL_CAMERAS_PER_ROBOT' ? '1' : undefined,
     );
-    service = new RobotCameraService(prisma as never, access as never, config as never);
+    service = new RobotCameraService(prisma, access, config);
     access.parseStreamFromMetadata.mockReturnValue({
       targetBitrateKbps: 1200,
       cameras: [{ id: 'front', label: 'Front' }],

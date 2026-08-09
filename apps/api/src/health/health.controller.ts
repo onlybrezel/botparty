@@ -5,6 +5,7 @@ import {
   Headers,
   HttpCode,
   InternalServerErrorException,
+  Inject,
   Logger,
   PayloadTooLargeException,
   Post,
@@ -14,12 +15,17 @@ import { ConfigService } from '@nestjs/config';
 import { RouteConfig } from '@nestjs/platform-fastify';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { SkipThrottle, Throttle } from '@nestjs/throttler';
-import type { FastifyReply } from 'fastify';
 import { register } from 'prom-client';
 
 import { hasBasicAuthCredentials, isAuthorizedBasicAuth } from '../common/http-basic-auth';
 import { HealthMetricsService } from './health-metrics.service';
 import { HealthService } from './health.service';
+
+interface HealthReply {
+  code(statusCode: number): HealthReply;
+  header(name: string, value: string): HealthReply;
+  send(payload: unknown): unknown;
+}
 
 @ApiTags('health')
 @Controller('health')
@@ -29,7 +35,7 @@ export class HealthController {
   constructor(
     private readonly health: HealthService,
     private readonly healthMetrics: HealthMetricsService,
-    private readonly config: ConfigService,
+    @Inject(ConfigService) private readonly config: Pick<ConfigService, 'get'>,
   ) {}
 
   @Get()
@@ -42,7 +48,7 @@ export class HealthController {
   @Get('ready')
   @SkipThrottle()
   @ApiOperation({ summary: 'Readiness check for traffic routing' })
-  async ready(@Res() reply: FastifyReply) {
+  async ready(@Res() reply: HealthReply) {
     const snapshot = await this.health.getHealthSnapshot();
     return reply.code(snapshot.status === 'healthy' ? 200 : 503).send(snapshot);
   }
@@ -65,7 +71,7 @@ export class HealthController {
   @ApiOperation({ summary: 'Prometheus metrics endpoint' })
   async metrics(
     @Headers('authorization') authorization: string | undefined,
-    @Res() reply: FastifyReply,
+    @Res() reply: HealthReply,
   ) {
     if (!this.authorizeMetricsRequest(authorization, reply)) return;
 
@@ -94,7 +100,7 @@ export class HealthController {
     this.logger.warn(`CSP violation: ${directive}`);
   }
 
-  private authorizeMetricsRequest(authorization: string | undefined, reply: FastifyReply): boolean {
+  private authorizeMetricsRequest(authorization: string | undefined, reply: HealthReply): boolean {
     const metricsAuthValue = this.config.get<string | boolean>('METRICS_AUTH_REQUIRED');
     const metricsAuthMode =
       typeof metricsAuthValue === 'boolean'
@@ -116,7 +122,7 @@ export class HealthController {
       );
     }
 
-    if (isAuthorizedBasicAuth(authorization, { username, password: password! })) return true;
+    if (password && isAuthorizedBasicAuth(authorization, { username, password })) return true;
 
     reply.header('www-authenticate', 'Basic realm="BotParty Metrics"');
     reply.code(401).send({ message: 'Authentication required' });

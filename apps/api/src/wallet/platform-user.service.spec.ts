@@ -1,4 +1,3 @@
-import type { ConfigService } from '@nestjs/config';
 import { PlatformUserService } from './platform-user.service';
 
 const PLATFORM_ID = '00000000-0000-0000-0000-00000000fee5';
@@ -6,8 +5,8 @@ const PLATFORM_ID = '00000000-0000-0000-0000-00000000fee5';
 function build(configMap: Record<string, string | undefined> = {}) {
   const config = {
     get: jest.fn((key: string) => configMap[key]),
-  } as unknown as ConfigService;
-  const prisma = {} as never;
+  };
+  const prisma = { user: { findUnique: jest.fn() } };
   return new PlatformUserService(prisma, config);
 }
 

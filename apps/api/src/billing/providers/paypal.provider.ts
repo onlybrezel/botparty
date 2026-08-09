@@ -1,7 +1,11 @@
-import { BadRequestException, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { BillingIntent } from '@botparty/prisma';
-import type { CheckoutSession, PaymentProvider, VerifiedWebhookEvent } from './payment-provider.interface';
+import type { CheckoutBillingIntent, CheckoutSession, PaymentProvider, VerifiedWebhookEvent } from './payment-provider.interface';
+import { isRecord } from '../../common/json-value';
+
+interface PaypalConfig {
+  get(key: string): string | undefined;
+}
 
 /**
  * Minimal PayPal Orders v2 integration using the provider's REST API.
@@ -22,11 +26,11 @@ export class PaypalProvider implements PaymentProvider {
   private consecutiveTransientFailures = 0;
   private circuitOpenUntil = 0;
 
-  constructor(private readonly config: ConfigService) {
-    this.clientId = this.config.get<string>('PAYPAL_CLIENT_ID') ?? null;
-    this.clientSecret = this.config.get<string>('PAYPAL_CLIENT_SECRET') ?? null;
-    this.webhookId = this.config.get<string>('PAYPAL_WEBHOOK_ID') ?? null;
-    const env = (this.config.get<string>('PAYPAL_ENV') ?? 'sandbox').toLowerCase();
+  constructor(@Inject(ConfigService) private readonly config: PaypalConfig) {
+    this.clientId = this.config.get('PAYPAL_CLIENT_ID') ?? null;
+    this.clientSecret = this.config.get('PAYPAL_CLIENT_SECRET') ?? null;
+    this.webhookId = this.config.get('PAYPAL_WEBHOOK_ID') ?? null;
+    const env = (this.config.get('PAYPAL_ENV') ?? 'sandbox').toLowerCase();
     this.apiBase = env === 'live' ? 'https://api-m.paypal.com' : 'https://api-m.sandbox.paypal.com';
     this.requestTimeoutMs = this.readBoundedInteger('PAYPAL_REQUEST_TIMEOUT_MS', 8_000, 500, 30_000);
     this.maxRetries = this.readBoundedInteger('PAYPAL_MAX_RETRIES', 2, 0, 4);
@@ -65,7 +69,7 @@ export class PaypalProvider implements PaymentProvider {
   }
 
   async createCheckout(input: {
-    intent: BillingIntent;
+    intent: CheckoutBillingIntent;
     successUrl: string;
     cancelUrl: string;
   }): Promise<CheckoutSession> {
@@ -128,6 +132,14 @@ export class PaypalProvider implements PaymentProvider {
     } catch {
       throw new BadRequestException('PayPal webhook payload is invalid JSON');
     }
+    if (
+      !isRecord(webhookEvent) ||
+      typeof webhookEvent['id'] !== 'string' ||
+      typeof webhookEvent['event_type'] !== 'string' ||
+      !isRecord(webhookEvent['resource'])
+    ) {
+      throw new BadRequestException('PayPal webhook payload is invalid');
+    }
     const token = await this.getAccessToken();
     const verifyRes = await this.request('/v1/notifications/verify-webhook-signature', {
       method: 'POST',
@@ -150,10 +162,10 @@ export class PaypalProvider implements PaymentProvider {
       throw new BadRequestException('PayPal webhook signature verification failed');
     }
 
-    const event = webhookEvent as {
-      id: string;
-      event_type: string;
-      resource: Record<string, unknown>;
+    const event = {
+      id: webhookEvent['id'],
+      event_type: webhookEvent['event_type'],
+      resource: webhookEvent['resource'],
     };
     return this.parseEvent(event);
   }
@@ -346,7 +358,7 @@ export class PaypalProvider implements PaymentProvider {
   }
 
   private readBoundedInteger(key: string, fallback: number, minimum: number, maximum: number) {
-    const parsed = Number(this.config.get<string>(key) ?? fallback);
+    const parsed = Number(this.config.get(key) ?? fallback);
     return Number.isInteger(parsed) && parsed >= minimum && parsed <= maximum ? parsed : fallback;
   }
 }

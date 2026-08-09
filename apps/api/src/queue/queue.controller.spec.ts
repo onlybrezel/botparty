@@ -8,7 +8,7 @@ describe('QueueController', () => {
     vote: jest.Mock;
   };
   let authService: { resolveValidAccessTokenPayload: jest.Mock };
-  let configService: { getOrThrow: jest.Mock };
+  let configService: { get: jest.Mock };
   let controller: QueueController;
 
   beforeEach(() => {
@@ -19,8 +19,8 @@ describe('QueueController', () => {
       vote: jest.fn(),
     };
     authService = { resolveValidAccessTokenPayload: jest.fn() };
-    configService = { getOrThrow: jest.fn().mockReturnValue('secret') };
-    controller = new QueueController(queueService as never, authService as never, configService as never);
+    configService = { get: jest.fn().mockReturnValue('secret') };
+    controller = new QueueController(queueService, authService, configService);
   });
 
   it('resolves the requester id from bearer auth when fetching the queue', async () => {
@@ -47,10 +47,10 @@ describe('QueueController', () => {
     queueService.leave.mockResolvedValue({ removed: true });
     queueService.vote.mockResolvedValue({ userId: 'target-1' });
 
-    await expect(controller.join('robot-1', { sub: 'user-1' } as never, { roomAccessToken: 'room-token' })).resolves.toEqual({ userId: 'user-1' });
-    await expect(controller.leave('robot-1', { sub: 'user-1' } as never)).resolves.toEqual({ message: 'Left queue' });
+    await expect(controller.join('robot-1', { sub: 'user-1' }, { roomAccessToken: 'room-token' })).resolves.toEqual({ userId: 'user-1' });
+    await expect(controller.leave('robot-1', { sub: 'user-1' })).resolves.toEqual({ message: 'Left queue' });
     await expect(
-      controller.vote('robot-1', 'target-1', { sub: 'user-1' } as never, { roomAccessToken: 'room-token' }),
+      controller.vote('robot-1', 'target-1', { sub: 'user-1' }, { roomAccessToken: 'room-token' }),
     ).resolves.toEqual({ userId: 'target-1' });
 
     expect(queueService.join).toHaveBeenCalledWith('robot-1', 'user-1', 'room-token');
@@ -61,6 +61,6 @@ describe('QueueController', () => {
   it('returns a stable response when the user was not in the queue', async () => {
     queueService.leave.mockResolvedValue({ removed: false });
 
-    await expect(controller.leave('robot-1', { sub: 'user-1' } as never)).resolves.toEqual({ message: 'Not in queue' });
+    await expect(controller.leave('robot-1', { sub: 'user-1' })).resolves.toEqual({ message: 'Not in queue' });
   });
 });

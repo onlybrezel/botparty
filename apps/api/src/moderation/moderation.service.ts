@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, StreamableFile } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, StreamableFile } from '@nestjs/common';
 import { ModerationActionType, WS_EVENTS } from '@botparty/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
@@ -7,16 +7,34 @@ import { ModerationAuditService } from './moderation-audit.service';
 import { ModerationOverviewService } from './moderation-overview.service';
 import type { RobotActionPayload } from '../robots/robots.types';
 import { isStaffRole } from '../common/robot-access';
+import { parseJsonRecord } from '../common/json-value';
 
 @Injectable()
 export class ModerationService {
   private static readonly ACTION_COOLDOWN_SEC = 4;
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly redis: RedisService,
-    private readonly auditService: ModerationAuditService,
-    private readonly overviewService: ModerationOverviewService,
+    @Inject(PrismaService)
+    private readonly prisma: {
+      robot: Pick<PrismaService['robot'], 'findMany' | 'findUnique'>;
+      robotModerationEntry: Pick<PrismaService['robotModerationEntry'], 'create' | 'findFirst' | 'findMany' | 'update' | 'updateMany'>;
+      user: Pick<PrismaService['user'], 'findUnique'>;
+    },
+    @Inject(RedisService) private readonly redis: Pick<RedisService, 'del' | 'get' | 'publish' | 'set'>,
+    @Inject(ModerationAuditService) private readonly auditService: ModerationAuditService,
+    @Inject(ModerationOverviewService)
+    private readonly overviewService: Pick<
+      ModerationOverviewService,
+      | 'enqueueStaffRobotAction'
+      | 'getAdminOverview'
+      | 'getAdminRobotRecordingStatus'
+      | 'getAdminRuntimeOverview'
+      | 'listAdminRecordings'
+      | 'startAdminRobotRecording'
+      | 'stopAdminRobotRecording'
+      | 'streamAdminRecording'
+      | 'streamSignedAdminRecording'
+    >,
   ) {}
 
   async moderate(robotId: string, dto: ModerateUserDto, moderatorId: string) {
@@ -122,7 +140,7 @@ export class ModerationService {
         robotId,
         userId: dto.targetUserId,
         action: dto.action,
-        reason: dto.reason,
+        ...(dto.reason === undefined ? {} : { reason: dto.reason }),
         expiresAt,
         isActive: createsActiveRestriction,
         moderatorId,
@@ -207,20 +225,20 @@ export class ModerationService {
     await this._assertActionNotCoolingDown(robotId, dto.targetUserId, dto.action, moderatorId);
 
     const existing = await this._getGuestRestriction(robotId, dto.targetUserId);
-    if (dto.action === ModerationActionType.BAN && existing?.action === ModerationActionType.BAN) {
+    if (dto.action === ModerationActionType.BAN && existing?.['action'] === ModerationActionType.BAN) {
       throw new ConflictException('User is already banned');
     }
     if (dto.action === ModerationActionType.TIMEOUT) {
-      if (existing?.action === ModerationActionType.BAN) {
+      if (existing?.['action'] === ModerationActionType.BAN) {
         throw new ConflictException('User is already banned');
       }
-      if (existing?.action === ModerationActionType.TIMEOUT) {
+      if (existing?.['action'] === ModerationActionType.TIMEOUT) {
         throw new ConflictException('User is already timed out');
       }
     }
 
     if (dto.action === ModerationActionType.UNBAN) {
-      if (!existing || existing.action !== ModerationActionType.BAN) {
+      if (!existing || existing['action'] !== ModerationActionType.BAN) {
         throw new BadRequestException('User is not currently banned');
       }
 
@@ -299,14 +317,15 @@ export class ModerationService {
     if (!raw) return null;
 
     try {
-      const parsed = JSON.parse(raw) as {
-        action?: string;
-        expiresAt?: string | null;
-        [key: string]: unknown;
-      };
+      const parsed = parseJsonRecord(raw);
+      if (!parsed) {
+        await this.redis.del(this._guestRestrictionKey(robotId, userId));
+        return null;
+      }
 
-      if (parsed.expiresAt) {
-        const exp = Date.parse(parsed.expiresAt);
+      const expiresAt = parsed['expiresAt'];
+      if (typeof expiresAt === 'string') {
+        const exp = Date.parse(expiresAt);
         if (Number.isFinite(exp) && exp <= Date.now()) {
           await this.redis.del(this._guestRestrictionKey(robotId, userId));
           return null;

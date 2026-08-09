@@ -19,7 +19,7 @@ function guard() {
           CORS_ORIGIN: 'https://botparty.test',
         })[key],
     ),
-  } as never);
+  });
 }
 
 function cookieRequest(overrides: Record<string, string | undefined> = {}) {
@@ -38,23 +38,23 @@ describe('CsrfOriginGuard', () => {
   it.each(['robots', 'queue', 'wallet', 'payouts', 'users', 'controls', 'moderation'])(
     'rejects a cookie-authenticated %s mutation without an origin',
     () => {
-      expect(() => guard().canActivate(cookieRequest({ origin: undefined }) as never)).toThrow(
+      expect(() => guard().canActivate(cookieRequest({ origin: undefined }))).toThrow(
         ForbiddenException,
       );
     },
   );
 
   it('requires the double-submit token for allowed browser origins', () => {
-    expect(() => guard().canActivate(cookieRequest({ 'x-csrf-token': 'wrong' }) as never)).toThrow(
+    expect(() => guard().canActivate(cookieRequest({ 'x-csrf-token': 'wrong' }))).toThrow(
       'CSRF token mismatch',
     );
-    expect(guard().canActivate(cookieRequest() as never)).toBe(true);
+    expect(guard().canActivate(cookieRequest())).toBe(true);
   });
 
   it('accepts an allowed Referer when Origin is unavailable', () => {
     expect(
       guard().canActivate(
-        cookieRequest({ origin: undefined, referer: 'https://botparty.test/dashboard' }) as never,
+        cookieRequest({ origin: undefined, referer: 'https://botparty.test/dashboard' }),
       ),
     ).toBe(true);
   });
@@ -62,12 +62,12 @@ describe('CsrfOriginGuard', () => {
   it('keeps bearer clients and safe methods independent of browser CSRF cookies', () => {
     expect(
       guard().canActivate(
-        context({ method: 'DELETE', headers: { authorization: 'Bearer token' } }) as never,
+        context({ method: 'DELETE', headers: { authorization: 'Bearer token' } }),
       ),
     ).toBe(true);
     expect(
       guard().canActivate(
-        context({ method: 'GET', headers: { cookie: 'bp_access=token' } }) as never,
+        context({ method: 'GET', headers: { cookie: 'bp_access=token' } }),
       ),
     ).toBe(true);
   });

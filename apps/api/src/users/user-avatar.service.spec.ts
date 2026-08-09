@@ -1,6 +1,6 @@
 import {
   DeleteObjectsCommand,
-  type GetObjectCommand,
+  GetObjectCommand,
   ListObjectsV2Command,
   PutObjectCommand,
 } from '@aws-sdk/client-s3';
@@ -33,6 +33,7 @@ describe('UserAvatarService', () => {
     $transaction: jest.Mock;
     $queryRaw: jest.Mock;
     user: { findUnique: jest.Mock; update: jest.Mock };
+    storageDeletionTask: { createMany: jest.Mock };
   };
   let storageDeletion: { enqueue: jest.Mock };
 
@@ -40,6 +41,7 @@ describe('UserAvatarService', () => {
     jest.clearAllMocks();
     const transactionClient = {
       $queryRaw: jest.fn().mockResolvedValue([]),
+      storageDeletionTask: { createMany: jest.fn() },
       user: {
         findUnique: jest.fn().mockResolvedValue({ id: USER_ID, isActive: true }),
         update: jest.fn().mockImplementation(async ({ data }) => ({ id: USER_ID, avatarUrl: data.avatarUrl })),
@@ -54,7 +56,7 @@ describe('UserAvatarService', () => {
   });
 
   function service() {
-    return new UserAvatarService(prisma as never, new ConfigService(), storageDeletion as never);
+    return new UserAvatarService(prisma, new ConfigService(), storageDeletion);
   }
 
   it('stores a normalized avatar privately and exposes only the API proxy URL', async () => {
@@ -63,7 +65,7 @@ describe('UserAvatarService', () => {
         Contents: [{ Key: `avatars/${USER_ID}/old.webp`, LastModified: new Date('2026-01-01') }],
       })
       .mockResolvedValueOnce({});
-    jest.mocked(createS3CompatibleStorageClient).mockReturnValue({ send } as never);
+    jest.mocked(createS3CompatibleStorageClient).mockReturnValue({ send });
 
     const result = await service().save(USER_ID, VALID_PNG_DATA_URL);
 
@@ -93,13 +95,16 @@ describe('UserAvatarService', () => {
         Body: { transformToByteArray: jest.fn().mockResolvedValue(Uint8Array.from([1, 2, 3])) },
         ContentType: 'image/webp',
       });
-    jest.mocked(createS3CompatibleStorageClient).mockReturnValue({ send } as never);
+    jest.mocked(createS3CompatibleStorageClient).mockReturnValue({ send });
 
     await expect(service().read(USER_ID)).resolves.toEqual({
       buffer: Buffer.from([1, 2, 3]),
       contentType: 'image/webp',
     });
-    const get = send.mock.calls[1]?.[0] as GetObjectCommand;
+    const get: unknown = send.mock.calls[1]?.[0];
+    if (!(get instanceof GetObjectCommand)) {
+      throw new Error('Expected the second storage request to read an object');
+    }
     expect(get.input.Key).toBe(`avatars/${USER_ID}/new.webp`);
 
     prisma.user.findUnique.mockResolvedValue({ avatarUrl: null, isActive: true });
@@ -111,7 +116,7 @@ describe('UserAvatarService', () => {
     const send = jest.fn().mockResolvedValueOnce({
       Contents: [{ Key: `avatars/${USER_ID}/avatar.webp` }],
     });
-    jest.mocked(createS3CompatibleStorageClient).mockReturnValue({ send } as never);
+    jest.mocked(createS3CompatibleStorageClient).mockReturnValue({ send });
 
     await expect(service().clear(USER_ID)).resolves.toEqual({ id: USER_ID, avatarUrl: null });
 
@@ -129,7 +134,7 @@ describe('UserAvatarService', () => {
       .mockResolvedValueOnce({ Contents: [] })
       .mockResolvedValueOnce({})
       .mockResolvedValueOnce({ Errors: [] });
-    jest.mocked(createS3CompatibleStorageClient).mockReturnValue({ send } as never);
+    jest.mocked(createS3CompatibleStorageClient).mockReturnValue({ send });
 
     await expect(service().save(USER_ID, VALID_PNG_DATA_URL)).rejects.toThrow('database unavailable');
 

@@ -49,13 +49,14 @@ function build(configValues: Record<string, string | undefined> = { PAYOUT_DESTI
     },
   };
   const wallet = {
-    runSerializable: jest.fn((callback: (client: typeof tx) => Promise<unknown>) => callback(tx)),
+    runSerializable: jest.fn(),
     debitInTransaction: jest.fn().mockResolvedValue({ balanceAfter: 95_000 }),
   };
+  wallet.runSerializable.mockImplementation(<T>(callback: (client: typeof tx) => Promise<T>) => callback(tx));
   const features = { assertEnabled: jest.fn() };
   const notifications = { publishSafely: jest.fn().mockResolvedValue(null) };
   const config = { get: jest.fn((key: string) => configValues[key]) };
-  const service = new PayoutsService(prisma as never, wallet as never, features as never, notifications as never, config as never);
+  const service = new PayoutsService(prisma, wallet, features, notifications, config);
   return { service, prisma, wallet, features, notifications, tx, request, config };
 }
 
@@ -74,7 +75,9 @@ describe('PayoutsService', () => {
   it('normalizes and encrypts PayPal destinations and notes', async () => {
     const { service, tx, features, notifications } = build();
     const result = await service.createRequest({ ...paypalRequest, destination: ' payee @example.com ', notes: `  ${'n'.repeat(1100)}  ` });
-    const created = tx.payoutRequest.create.mock.calls[0]![0].data;
+    const createCall = tx.payoutRequest.create.mock.calls[0];
+    if (!createCall) throw new Error('Expected payout creation');
+    const created = createCall[0].data;
     expect(features.assertEnabled).toHaveBeenCalledWith('PAYOUTS');
     expect(created.destination).not.toContain('payee@example.com');
     expect(created.destinationType).toBe(PayoutDestinationType.PAYPAL_EMAIL);

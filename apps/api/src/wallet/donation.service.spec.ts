@@ -41,14 +41,15 @@ function build() {
     decrby: jest.fn().mockResolvedValue(0),
   };
   const wallet = {
-    runSerializable: jest.fn(async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx)),
+    runSerializable: jest.fn(),
     transferInTransaction: jest.fn().mockResolvedValue({
       ledgerGroupId: 'ledger-1', payerBalanceAfter: 400, payeeBalanceAfter: 90, payeeReceived: 90, fee: 10,
     }),
   };
   const platform = { isPlatformUser: jest.fn((id: string) => id === platformId) };
+  wallet.runSerializable.mockImplementation(<T>(callback: (client: typeof tx) => Promise<T>) => callback(tx));
   const features = { assertEnabled: jest.fn() };
-  const service = new DonationService(prisma as never, redis as never, wallet as never, platform as never, features as never);
+  const service = new DonationService(prisma, redis, wallet, platform, features);
   return { service, tx, prisma, redis, wallet, platform, features };
 }
 

@@ -1,8 +1,9 @@
-import { Injectable, Logger, OnModuleInit, InternalServerErrorException } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleInit, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 
 const PLATFORM_USER_FALLBACK_ID = '00000000-0000-0000-0000-00000000fee5';
+interface PlatformConfig { get(key: string): string | undefined; }
 
 @Injectable()
 export class PlatformUserService implements OnModuleInit {
@@ -11,11 +12,11 @@ export class PlatformUserService implements OnModuleInit {
   private readonly feeBps: number;
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly config: ConfigService,
+    @Inject(PrismaService) private readonly prisma: { user: Pick<PrismaService['user'], 'findUnique'> },
+    @Inject(ConfigService) private readonly config: PlatformConfig,
   ) {
-    this.platformUserId = this.config.get<string>('PLATFORM_USER_ID') ?? PLATFORM_USER_FALLBACK_ID;
-    const rawBps = Number(this.config.get<string>('PLATFORM_FEE_BPS') ?? '1000');
+    this.platformUserId = this.config.get('PLATFORM_USER_ID') ?? PLATFORM_USER_FALLBACK_ID;
+    const rawBps = Number(this.config.get('PLATFORM_FEE_BPS') ?? '1000');
     this.feeBps = Number.isFinite(rawBps) && rawBps >= 0 && rawBps <= 5_000 ? Math.round(rawBps) : 1_000;
   }
 

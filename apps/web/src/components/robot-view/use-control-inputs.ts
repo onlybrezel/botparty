@@ -23,7 +23,11 @@ export function useHeldControlRepeater({
     const interval = window.setInterval(() => {
       for (const command of held) {
         const button = controlButtons.find((entry) => entry.command === command);
-        sendCommand(command, { cooldownMs: 0, access: 'QUEUE_TURN', buttonId: button?.id });
+        sendCommand(command, {
+          cooldownMs: 0,
+          access: 'QUEUE_TURN',
+          ...(button ? { buttonId: button.id } : {}),
+        });
       }
     }, 400);
     return () => window.clearInterval(interval);
@@ -55,7 +59,9 @@ export function useControlKeyboard({
 }) {
   useEffect(() => {
     const keyToButton = new Map(
-      controlButtons.filter((button) => button.hotKey).map((button) => [button.hotKey!.toLowerCase(), button]),
+      controlButtons.flatMap((button) =>
+        button.hotKey ? [[button.hotKey.toLowerCase(), button] as const] : [],
+      ),
     );
     const isEditing = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
@@ -82,13 +88,13 @@ export function useControlKeyboard({
         setActiveCommands((current) => new Set(current).add(command));
         activeMotionKeysRef.current.add(key);
         sendCommand(command, {
-          cooldownMs: button?.cooldownMs,
+          ...(button ? { cooldownMs: button.cooldownMs, buttonId: button.id } : {}),
           access: button?.access ?? 'QUEUE_TURN',
-          buttonId: button?.id,
         });
       } else if (keyToButton.has(key) && !event.repeat) {
         event.preventDefault();
-        const button = keyToButton.get(key)!;
+        const button = keyToButton.get(key);
+        if (!button) return;
         setActiveKeys((current) => new Set(current).add(key));
         sendCommand(button.command, {
           cooldownMs: button.cooldownMs,
@@ -170,7 +176,11 @@ export function useGamepadControl({
       for (const command of next) {
         if (!previous.has(command)) {
           const button = controlButtons.find((entry) => entry.command === command);
-          sendCommand(command, { cooldownMs: 0, access: 'QUEUE_TURN', buttonId: button?.id });
+          sendCommand(command, {
+            cooldownMs: 0,
+            access: 'QUEUE_TURN',
+            ...(button ? { buttonId: button.id } : {}),
+          });
         }
       }
       if (previous.size > 0 && next.size === 0) sendCommand('stop', { cooldownMs: 0, access: 'QUEUE_TURN' });

@@ -4,6 +4,7 @@ import {
   BadRequestException,
   OnModuleDestroy,
   OnModuleInit,
+  Inject,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateControlButtonDto, UpdateControlButtonDto, ReorderControlButtonsDto } from './controls.dto';
@@ -32,6 +33,22 @@ type VisibleControlsRequester = {
   role: Role | null;
   hasRoomAccess: boolean;
 };
+type ControlsTransaction = Pick<Prisma.TransactionClient, '$queryRaw'> & {
+  controlButton: Pick<Prisma.TransactionClient['controlButton'], 'count' | 'create' | 'createMany'>;
+};
+interface ControlsDatabase {
+  $queryRaw: PrismaService['$queryRaw'];
+  $transaction<T>(
+    callback: (transaction: ControlsTransaction) => Promise<T>,
+    options?: { isolationLevel?: Prisma.TransactionIsolationLevel },
+  ): Promise<T>;
+  $transaction<T extends readonly unknown[]>(operations: [...T]): Promise<{ [K in keyof T]: Awaited<T[K]> }>;
+  controlButton: Pick<
+    PrismaService['controlButton'],
+    'count' | 'create' | 'createMany' | 'delete' | 'findMany' | 'findUnique' | 'update' | 'updateMany'
+  >;
+  robot: Pick<PrismaService['robot'], 'findUnique'>;
+}
 
 const ENABLED_BUTTON_CACHE_TTL_MS = 5_000;
 
@@ -45,9 +62,9 @@ export class ControlsService implements OnModuleInit, OnModuleDestroy {
   private cacheSubscriber: Redis | null = null;
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly redis: RedisService,
-    private readonly features: FeatureFlagsService,
+    @Inject(PrismaService) private readonly prisma: ControlsDatabase,
+    @Inject(RedisService) private readonly redis: Pick<RedisService, 'duplicate' | 'publish'>,
+    @Inject(FeatureFlagsService) private readonly features: Pick<FeatureFlagsService, 'assertEnabled'>,
   ) {
     // Sweep expired entries every 60s to prevent unbounded Map growth.
     this._cacheSweeper = setInterval(() => {
@@ -242,13 +259,13 @@ export class ControlsService implements OnModuleInit, OnModuleDestroy {
           robotId,
           label: dto.label,
           command: dto.command,
-          hotKey: dto.hotKey,
-          icon: dto.icon,
+          ...(dto.hotKey === undefined ? {} : { hotKey: dto.hotKey }),
+          ...(dto.icon === undefined ? {} : { icon: dto.icon }),
           cooldownMs: dto.cooldownMs ?? LIMITS.DEFAULT_CONTROL_COOLDOWN_MS,
           access: dto.access ?? 'QUEUE_TURN',
           position: dto.position ?? count,
           isEnabled: dto.isEnabled ?? true,
-          color: dto.color,
+          ...(dto.color === undefined ? {} : { color: dto.color }),
           costCredits: dto.costCredits ?? 0,
         },
       });

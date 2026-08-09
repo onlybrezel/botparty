@@ -1,5 +1,10 @@
 import type { BillingIntent } from '@botparty/prisma';
 
+export type CheckoutBillingIntent = Pick<
+  BillingIntent,
+  'id' | 'userId' | 'amountCents' | 'creditsAmount' | 'currency' | 'packageId'
+>;
+
 export interface CheckoutSession {
   intentId: string;
   redirectUrl: string;
@@ -29,12 +34,12 @@ export interface PaymentProvider {
   readonly name: 'stripe' | 'paypal';
   readonly capabilities: ProviderCapabilities;
   createCheckout(input: {
-    intent: BillingIntent;
+    intent: CheckoutBillingIntent;
     successUrl: string;
     cancelUrl: string;
   }): Promise<CheckoutSession>;
   createSubscriptionCheckout(input: {
-    intent: BillingIntent;
+    intent: CheckoutBillingIntent;
     successUrl: string;
     cancelUrl: string;
   }): Promise<CheckoutSession>;

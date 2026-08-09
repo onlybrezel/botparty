@@ -1,14 +1,21 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { Prisma } from '@botparty/prisma';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AnalyticsEventInput } from '@botparty/shared';
 
 const ANALYTICS_SCHEMA_VERSION = 1;
 const ANALYTICS_RETENTION_DAYS = 90;
+type AnalyticsDatabase = {
+  user: Pick<PrismaService['user'], 'findUnique' | 'findUniqueOrThrow' | 'update'>;
+  analyticsEvent: Pick<PrismaService['analyticsEvent'], 'create' | 'deleteMany' | 'groupBy' | 'findMany'>;
+  session: Pick<PrismaService['session'], 'aggregate' | 'count'>;
+  robot: Pick<PrismaService['robot'], 'count'>;
+  billingIntent: Pick<PrismaService['billingIntent'], 'aggregate' | 'count'>;
+};
 
 @Injectable()
 export class AnalyticsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(PrismaService) private readonly prisma: AnalyticsDatabase) {}
 
   async getConsent(userId: string) {
     return this.prisma.user.findUniqueOrThrow({
@@ -47,10 +54,10 @@ export class AnalyticsService {
     await this.prisma.analyticsEvent.create({
       data: {
         userId,
-        robotId,
+        ...(robotId === undefined ? {} : { robotId }),
         event,
         schemaVersion: ANALYTICS_SCHEMA_VERSION,
-        payload,
+        ...(payload === undefined ? {} : { payload }),
       },
     });
     return { accepted: true };
@@ -90,8 +97,8 @@ export class AnalyticsService {
     const webVitalValues = (metric: string) => webVitalEvents.flatMap((entry) => {
       const payload = entry.payload;
       if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return [];
-      const value = 'value' in payload ? payload.value : null;
-      return payload.metric === metric && typeof value === 'number' && Number.isFinite(value)
+      const value = 'value' in payload ? payload['value'] : null;
+      return payload['metric'] === metric && typeof value === 'number' && Number.isFinite(value)
         ? [value]
         : [];
     });

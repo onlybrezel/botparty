@@ -30,16 +30,16 @@ export const DEFAULT_ROBOT_CONTROLS = [
 const ROBOT_TEXT_PROFANITY_TERMS = Array.from(new Set(SLUG_PROFANITY_TERMS));
 
 type RobotAclPatch = {
-  video?: GuestAccess;
-  control?: GuestAccess;
-  chat?: GuestAccess;
-  estop?: GuestAccess;
+  video?: GuestAccess | undefined;
+  control?: GuestAccess | undefined;
+  chat?: GuestAccess | undefined;
+  estop?: GuestAccess | undefined;
 };
 
 type RobotStreamPatch = {
-  targetBitrateKbps?: number;
-  activeCameraId?: string;
-  cameras?: RobotStreamCameraDescriptor[];
+  targetBitrateKbps?: number | undefined;
+  activeCameraId?: string | undefined;
+  cameras?: RobotStreamCameraDescriptor[] | undefined;
 };
 
 export function mergeRobotMetadataPatch(
@@ -48,51 +48,61 @@ export function mergeRobotMetadataPatch(
   stream?: RobotStreamPatch,
 ): Record<string, unknown> {
   return mergeRobotMetadata(current, {
-    access: acl
-      ? {
+    ...(acl ? { access: {
           ...DEFAULT_ACCESS_POLICY,
           ...acl,
-        }
-      : undefined,
-    stream: stream
-      ? {
+        } } : {}),
+    ...(stream ? { stream: {
           ...DEFAULT_STREAM_POLICY,
           ...stream,
-        }
-      : undefined,
+        } } : {}),
   }) as Record<string, unknown>;
 }
 
-export function stripRobotWriteFields<
-  T extends { acl?: unknown; stream?: unknown; accessPassword?: unknown; slug?: unknown },
->(data: T): Omit<T, 'acl' | 'stream' | 'accessPassword' | 'slug'> {
-  const rest = {
-    ...(data as T & {
-      acl?: unknown;
-      stream?: unknown;
-      accessPassword?: unknown;
-      slug?: unknown;
-    }),
+export function stripRobotWriteFields(data: {
+  name?: string | undefined;
+  description?: string | undefined;
+  thumbnailUrl?: string | undefined;
+  visibility?: 'PUBLIC' | 'UNLISTED' | 'PRIVATE' | undefined;
+  accessMode?: 'OPEN' | 'PASSWORD' | 'LINK_ONLY' | 'ALLOWED_USERS' | undefined;
+  queueMode?: 'FIRST_COME' | 'VOTING' | 'DISABLED' | undefined;
+  maxTurnTime?: number | undefined;
+  maxViewers?: number | undefined;
+  maxControllers?: number | undefined;
+  tags?: string[] | undefined;
+  scheduleStart?: string | null | undefined;
+  scheduleEnd?: string | null | undefined;
+  timezone?: string | undefined;
+}) {
+  return {
+    ...(data.name === undefined ? {} : { name: data.name }),
+    ...(data.description === undefined ? {} : { description: data.description }),
+    ...(data.thumbnailUrl === undefined ? {} : { thumbnailUrl: data.thumbnailUrl }),
+    ...(data.visibility === undefined ? {} : { visibility: data.visibility }),
+    ...(data.accessMode === undefined ? {} : { accessMode: data.accessMode }),
+    ...(data.queueMode === undefined ? {} : { queueMode: data.queueMode }),
+    ...(data.maxTurnTime === undefined ? {} : { maxTurnTime: data.maxTurnTime }),
+    ...(data.maxViewers === undefined ? {} : { maxViewers: data.maxViewers }),
+    ...(data.maxControllers === undefined ? {} : { maxControllers: data.maxControllers }),
+    ...(data.tags === undefined ? {} : { tags: data.tags }),
+    ...(data.scheduleStart === undefined ? {} : { scheduleStart: data.scheduleStart }),
+    ...(data.scheduleEnd === undefined ? {} : { scheduleEnd: data.scheduleEnd }),
+    ...(data.timezone === undefined ? {} : { timezone: data.timezone }),
   };
-  delete rest.acl;
-  delete rest.stream;
-  delete rest.accessPassword;
-  delete rest.slug;
-  return rest as Omit<T, 'acl' | 'stream' | 'accessPassword' | 'slug'>;
 }
 
 export function withStreamKeyIssuedAt(metadata: unknown): Record<string, unknown> {
   const base = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
     ? { ...(metadata as Record<string, unknown>) }
     : {};
-  base.streamKeyIssuedAt = new Date().toISOString();
+  base['streamKeyIssuedAt'] = new Date().toISOString();
   return base;
 }
 
 export function assertRobotTextAllowed(input: {
-  name?: string;
-  description?: string;
-  tags?: string[];
+  name?: string | undefined;
+  description?: string | undefined;
+  tags?: string[] | undefined;
 }) {
   assertFieldModeration('name', input.name);
   assertFieldModeration('description', input.description);
@@ -187,7 +197,7 @@ export function toPublicRobot<
   const metadata = robot.recordSessions
     ? {
         ...baseMetadata,
-        recording: { ...(baseMetadata.recording ?? {}), enabled: true },
+        recording: { ...(baseMetadata['recording'] ?? {}), enabled: true },
       }
     : baseMetadata;
 

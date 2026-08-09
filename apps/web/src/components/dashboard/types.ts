@@ -219,9 +219,9 @@ export function toUpdatePayload(form: RobotFormState) {
 
   return {
     name: form.name.trim(),
-    slug: form.slug.trim() || undefined,
-    description: form.description.trim() || undefined,
-    thumbnailUrl: form.thumbnailUrl.trim() || undefined,
+    ...(form.slug.trim() ? { slug: form.slug.trim() } : {}),
+    ...(form.description.trim() ? { description: form.description.trim() } : {}),
+    ...(form.thumbnailUrl.trim() ? { thumbnailUrl: form.thumbnailUrl.trim() } : {}),
     visibility,
     accessMode,
     queueMode: form.queueMode,
@@ -231,9 +231,7 @@ export function toUpdatePayload(form: RobotFormState) {
       chat: form.aclChat,
       estop: form.aclEStop,
     },
-    stream: {
-      targetBitrateKbps: hasBitrate ? Math.round(bitrate) : undefined,
-    },
+    stream: hasBitrate ? { targetBitrateKbps: Math.round(bitrate) } : {},
     scheduleStart,
     scheduleEnd,
     timezone: form.timezone.trim() || detectDefaultTimezone(),
@@ -241,7 +239,7 @@ export function toUpdatePayload(form: RobotFormState) {
     maxViewers: Number(form.maxViewers),
     maxControllers: Number(form.maxControllers),
     tags: form.tags.split(',').map((tag) => tag.trim()).filter(Boolean),
-    accessPassword: form.accessPassword.trim() || undefined,
+    ...(form.accessPassword.trim() ? { accessPassword: form.accessPassword.trim() } : {}),
   };
 }
 

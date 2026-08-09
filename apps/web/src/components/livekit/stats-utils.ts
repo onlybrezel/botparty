@@ -181,11 +181,14 @@ export function readVolumePreference(storageKey?: string | null): VolumePreferen
       return DEFAULT_VOLUME_PREFERENCE;
     }
 
-    const parsed = JSON.parse(raw) as Partial<VolumePreference>;
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null) return DEFAULT_VOLUME_PREFERENCE;
+    const volume = 'volume' in parsed ? parsed.volume : undefined;
+    const isMuted = 'isMuted' in parsed ? parsed.isMuted : undefined;
     return {
       volume:
-        typeof parsed.volume === 'number' ? Math.max(0, Math.min(parsed.volume, 100)) : DEFAULT_VOLUME_PREFERENCE.volume,
-      isMuted: Boolean(parsed.isMuted),
+        typeof volume === 'number' ? Math.max(0, Math.min(volume, 100)) : DEFAULT_VOLUME_PREFERENCE.volume,
+      isMuted: Boolean(isMuted),
     };
   } catch {
     return DEFAULT_VOLUME_PREFERENCE;

@@ -2,6 +2,7 @@ import type { PublicRobotOverview, RobotPublic } from '@botparty/shared';
 import { Bot } from 'lucide-react';
 import RobotCard from '@/components/robot-card';
 import { getServerApiUrl } from '@/lib/server-api-url';
+import { isPublicRobotOverview, isRobotPublic, parseJsonArray } from '@/lib/api-response-guards';
 import { ExploreFilters } from './explore-filters';
 
 export type ExploreParams = {
@@ -36,7 +37,7 @@ async function getRobots(params: ExploreParams): Promise<RobotPublic[]> {
       next: { revalidate: 30 },
     });
     if (!res.ok) return [];
-    return res.json() as Promise<RobotPublic[]>;
+    return parseJsonArray(await res.json(), isRobotPublic);
   } catch {
     return [];
   }
@@ -49,7 +50,8 @@ async function getOverview(): Promise<PublicRobotOverview | null> {
       next: { revalidate: 30 },
     });
     if (!res.ok) return null;
-    return res.json() as Promise<PublicRobotOverview>;
+    const payload: unknown = await res.json();
+    return isPublicRobotOverview(payload) ? payload : null;
   } catch {
     return null;
   }
@@ -90,10 +92,10 @@ export async function ExploreResults({
 
       <ExploreFilters
         action={filterAction}
-        q={params.q}
-        status={params.status}
-        sort={params.sort}
-        tag={params.tag}
+        {...(params.q ? { q: params.q } : {})}
+        {...(params.status ? { status: params.status } : {})}
+        {...(params.sort ? { sort: params.sort } : {})}
+        {...(params.tag ? { tag: params.tag } : {})}
       />
 
       {overview && overview.topTags.length > 0 && !params.q && (

@@ -1,7 +1,7 @@
 'use client';
 
 import { VideoTrack, useRoomContext, useTracks } from '@livekit/components-react';
-import { Track, RoomEvent, VideoQuality, type RemoteVideoTrack, type RemoteTrackPublication } from 'livekit-client';
+import { Track, RoomEvent, VideoQuality, type RemoteVideoTrack, type RemoteTrackPublication, type TrackPublication } from 'livekit-client';
 import type { TrackReference } from '@livekit/components-react';
 import { Maximize, Minimize, Radio, Volume2, VolumeX } from 'lucide-react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
@@ -271,8 +271,8 @@ export function VideoRenderer({
       }
     };
 
-    const scheduleTrackRecovery = (publication?: RemoteTrackPublication | null) => {
-      const targetPublication = publication ?? (robotTrack?.publication as RemoteTrackPublication | undefined);
+    const scheduleTrackRecovery = (publication?: TrackPublication | null) => {
+      const targetPublication = publication ?? robotTrack?.publication;
       if (!targetPublication || targetPublication.source !== Track.Source.Camera) {
         return;
       }
@@ -289,22 +289,14 @@ export function VideoRenderer({
       }, 3000);
     };
 
-    const onTrackUnmuted = (...args: unknown[]) => {
-      const publication =
-        args.find(
-          (value): value is RemoteTrackPublication =>
-            typeof value === 'object'
-            && value !== null
-            && 'source' in value
-            && 'trackSid' in value,
-        ) ?? null;
+    const onTrackUnmuted = (publication: TrackPublication) => {
       scheduleTrackRecovery(publication);
     };
 
-    room.on(RoomEvent.TrackUnmuted, onTrackUnmuted as never);
+    room.on(RoomEvent.TrackUnmuted, onTrackUnmuted);
     return () => {
       clearRecoveryTimeout();
-      room.off(RoomEvent.TrackUnmuted, onTrackUnmuted as never);
+      room.off(RoomEvent.TrackUnmuted, onTrackUnmuted);
     };
   }, [onStreamStalled, robotTrack?.publication, room]);
 

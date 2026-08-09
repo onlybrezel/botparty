@@ -87,8 +87,8 @@ export default function Nav() {
       }
 
       try {
-        const payload = JSON.parse(event.newValue) as { type?: string };
-        if (payload.type === 'logout') {
+        const payload: unknown = JSON.parse(event.newValue);
+        if (typeof payload === 'object' && payload !== null && 'type' in payload && payload.type === 'logout') {
           api.setToken(null);
           syncLogout();
         }

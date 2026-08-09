@@ -4,6 +4,8 @@ import {
   BadRequestException,
   Logger,
   InternalServerErrorException,
+  Inject,
+  Optional,
 } from '@nestjs/common';
 import {
   DeleteObjectsCommand,
@@ -29,6 +31,38 @@ type ThumbnailObjectStorageConfig = {
   forcePathStyle: boolean;
 };
 
+type ThumbnailObjectStorageClient = Pick<S3Client, 'send'>;
+type ThumbnailObjectStorageClientFactory = (
+  config: ThumbnailObjectStorageConfig,
+) => ThumbnailObjectStorageClient;
+
+const createThumbnailObjectStorageClient: ThumbnailObjectStorageClientFactory = (config) =>
+  new S3Client({
+    region: config.region,
+    ...(config.endpoint === undefined ? {} : { endpoint: config.endpoint }),
+    forcePathStyle: config.forcePathStyle,
+    credentials: {
+      accessKeyId: config.accessKeyId,
+      secretAccessKey: config.secretAccessKey,
+    },
+  });
+
+export const THUMBNAIL_OBJECT_STORAGE_CLIENT_FACTORY = Symbol('THUMBNAIL_OBJECT_STORAGE_CLIENT_FACTORY');
+
+type ThumbnailTransaction = {
+  $queryRaw: Prisma.TransactionClient['$queryRaw'];
+  robot: Pick<Prisma.TransactionClient['robot'], 'findUnique' | 'update'>;
+  storageDeletionTask: Pick<Prisma.TransactionClient['storageDeletionTask'], 'createMany'>;
+};
+interface ThumbnailDatabase {
+  $transaction<T>(
+    callback: (transaction: ThumbnailTransaction) => Promise<T>,
+    options?: { timeout?: number },
+  ): Promise<T>;
+  robot: Pick<PrismaService['robot'], 'findUnique'>;
+  user: Pick<PrismaService['user'], 'findUnique'>;
+}
+
 const MAX_INPUT_PIXELS = 4_096 * 4_096;
 
 @Injectable()
@@ -36,9 +70,17 @@ export class RobotThumbnailService {
   private readonly logger = new Logger(RobotThumbnailService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly storageDeletion: StorageDeletionService,
-  ) {}
+    @Inject(PrismaService) private readonly prisma: ThumbnailDatabase,
+    @Inject(StorageDeletionService)
+    private readonly storageDeletion: Pick<StorageDeletionService, 'enqueue'>,
+    @Optional()
+    @Inject(THUMBNAIL_OBJECT_STORAGE_CLIENT_FACTORY)
+    objectStorageClientFactory?: ThumbnailObjectStorageClientFactory,
+  ) {
+    this.objectStorageClientFactory = objectStorageClientFactory ?? createThumbnailObjectStorageClient;
+  }
+
+  private readonly objectStorageClientFactory: ThumbnailObjectStorageClientFactory;
 
   async save(robotId: string, ownerId: string, dataUrl: string) {
     const parsed = this._parseDataUrl(dataUrl);
@@ -150,21 +192,21 @@ export class RobotThumbnailService {
   }
 
   private _objectStorageConfig(): ThumbnailObjectStorageConfig | null {
-    const bucket = process.env.THUMBNAIL_S3_BUCKET?.trim();
-    const region = process.env.THUMBNAIL_S3_REGION?.trim();
-    const accessKeyId = process.env.THUMBNAIL_S3_ACCESS_KEY_ID?.trim();
-    const secretAccessKey = process.env.THUMBNAIL_S3_SECRET_ACCESS_KEY?.trim();
-    const publicBaseUrl = process.env.THUMBNAIL_PUBLIC_BASE_URL?.trim();
+    const bucket = process.env['THUMBNAIL_S3_BUCKET']?.trim();
+    const region = process.env['THUMBNAIL_S3_REGION']?.trim();
+    const accessKeyId = process.env['THUMBNAIL_S3_ACCESS_KEY_ID']?.trim();
+    const secretAccessKey = process.env['THUMBNAIL_S3_SECRET_ACCESS_KEY']?.trim();
+    const publicBaseUrl = process.env['THUMBNAIL_PUBLIC_BASE_URL']?.trim();
 
     if (!bucket || !region || !accessKeyId || !secretAccessKey || !publicBaseUrl) {
       return null;
     }
 
-    const endpoint = process.env.THUMBNAIL_S3_ENDPOINT?.trim();
+    const endpoint = process.env['THUMBNAIL_S3_ENDPOINT']?.trim();
     return {
       bucket,
       region,
-      endpoint: endpoint && endpoint.length > 0 ? endpoint : undefined,
+      ...(endpoint && endpoint.length > 0 ? { endpoint } : {}),
       accessKeyId,
       secretAccessKey,
       publicBaseUrl,
@@ -183,18 +225,6 @@ export class RobotThumbnailService {
   private _envFlag(name: string): boolean {
     const value = process.env[name]?.trim().toLowerCase();
     return value === '1' || value === 'true' || value === 'yes';
-  }
-
-  private _createObjectStorageClient(config: ThumbnailObjectStorageConfig): S3Client {
-    return new S3Client({
-      region: config.region,
-      endpoint: config.endpoint,
-      forcePathStyle: config.forcePathStyle,
-      credentials: {
-        accessKeyId: config.accessKeyId,
-        secretAccessKey: config.secretAccessKey,
-      },
-    });
   }
 
   private _normalizePublicBaseUrl(value: string): string {
@@ -216,7 +246,7 @@ export class RobotThumbnailService {
   }
 
   private async _putObject(config: ThumbnailObjectStorageConfig, objectKey: string, buffer: Buffer): Promise<void> {
-    const client = this._createObjectStorageClient(config);
+    const client = this.objectStorageClientFactory(config);
     await client.send(
       new PutObjectCommand({
         Bucket: config.bucket,
@@ -229,7 +259,7 @@ export class RobotThumbnailService {
   }
 
   private async _listObjectKeys(config: ThumbnailObjectStorageConfig, robotId: string): Promise<string[]> {
-    const client = this._createObjectStorageClient(config);
+    const client = this.objectStorageClientFactory(config);
     const keys: string[] = [];
     let continuationToken: string | undefined;
     do {
@@ -246,7 +276,7 @@ export class RobotThumbnailService {
 
   private async _deleteObjectKeys(config: ThumbnailObjectStorageConfig, keys: string[]): Promise<void> {
     if (keys.length === 0) return;
-    const client = this._createObjectStorageClient(config);
+    const client = this.objectStorageClientFactory(config);
     await client.send(
       new DeleteObjectsCommand({
         Bucket: config.bucket,
@@ -259,7 +289,7 @@ export class RobotThumbnailService {
   }
 
   private async _findLatestObjectKey(config: ThumbnailObjectStorageConfig, robotId: string): Promise<string | null> {
-    const client = this._createObjectStorageClient(config);
+    const client = this.objectStorageClientFactory(config);
     let latest: { key: string; modifiedAt: number } | null = null;
     let continuationToken: string | undefined;
     do {
@@ -286,7 +316,7 @@ export class RobotThumbnailService {
     config: ThumbnailObjectStorageConfig,
     objectKey: string,
   ): Promise<{ buffer: Buffer; contentType: string }> {
-    const client = this._createObjectStorageClient(config);
+    const client = this.objectStorageClientFactory(config);
     const response = await client.send(
       new GetObjectCommand({
         Bucket: config.bucket,
@@ -311,7 +341,7 @@ export class RobotThumbnailService {
       throw new BadRequestException('Thumbnail must be a PNG, JPEG, or WebP image');
     }
 
-    const mime = match[1]!.toLowerCase();
+    const mime = (match[1] ?? '').toLowerCase();
     const buffer = Buffer.from(match[2] ?? '', 'base64');
     if (!buffer.length) throw new BadRequestException('Thumbnail image is empty');
     if (buffer.length > 3 * 1024 * 1024) throw new BadRequestException('Thumbnail image must be 3 MB or smaller');

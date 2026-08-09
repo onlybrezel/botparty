@@ -39,10 +39,10 @@ describe('ControlsController', () => {
       getOrThrow: jest.fn().mockReturnValue('secret'),
     };
     controller = new ControlsController(
-      controlsService as never,
-      robotsService as never,
-      authService as never,
-      configService as never,
+      controlsService,
+      robotsService,
+      authService,
+      configService,
     );
   });
 
@@ -106,9 +106,9 @@ describe('ControlsController', () => {
     controlsService.reorder.mockResolvedValue(undefined);
 
     await expect(controller.getAllButtons('robot-1', 'owner-1')).resolves.toEqual([{ id: 'button-1' }]);
-    await expect(controller.create('robot-1', { label: 'Horn', command: 'horn' } as never, 'owner-1')).resolves.toEqual({ id: 'button-2' });
-    await expect(controller.update('button-2', { label: 'Horn' } as never, 'owner-1')).resolves.toEqual({ id: 'button-2', label: 'Horn' });
+    await expect(controller.create('robot-1', { label: 'Horn', command: 'horn' }, 'owner-1')).resolves.toEqual({ id: 'button-2' });
+    await expect(controller.update('button-2', { label: 'Horn' }, 'owner-1')).resolves.toEqual({ id: 'button-2', label: 'Horn' });
     await expect(controller.remove('button-2', 'owner-1')).resolves.toBeUndefined();
-    await expect(controller.reorder('robot-1', { order: [{ id: 'button-1', position: 0 }] } as never, 'owner-1')).resolves.toBeUndefined();
+    await expect(controller.reorder('robot-1', { order: [{ id: 'button-1', position: 0 }] }, 'owner-1')).resolves.toBeUndefined();
   });
 });

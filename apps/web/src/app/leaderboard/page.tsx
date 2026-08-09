@@ -3,6 +3,7 @@ import Link from 'next/link';
 import type { PublicRobotOverview, RobotPublic } from '@botparty/shared';
 import { Trophy, Eye, Radio, Clock3, Sparkles, Flame } from 'lucide-react';
 import { getServerApiUrl } from '@/lib/server-api-url';
+import { isPublicRobotOverview, isRecord, isRobotPublic, parseJsonArray } from '@/lib/api-response-guards';
 
 type CreatorLeaderboardEntry = {
   id: string;
@@ -16,6 +17,20 @@ type CreatorLeaderboardEntry = {
   robotCount: number;
   isNewOperator: boolean;
 };
+
+function isCreatorLeaderboardEntry(value: unknown): value is CreatorLeaderboardEntry {
+  return isRecord(value)
+    && typeof value['id'] === 'string'
+    && typeof value['username'] === 'string'
+    && (value['displayName'] === null || typeof value['displayName'] === 'string')
+    && (value['avatarUrl'] === null || typeof value['avatarUrl'] === 'string')
+    && typeof value['credits'] === 'number'
+    && typeof value['createdAt'] === 'string'
+    && typeof value['recentSessions'] === 'number'
+    && typeof value['streakDays'] === 'number'
+    && typeof value['robotCount'] === 'number'
+    && typeof value['isNewOperator'] === 'boolean';
+}
 
 const PERIOD_OPTIONS = [
   { id: '7d', label: '7 days' },
@@ -46,7 +61,7 @@ async function getRobots(): Promise<RobotPublic[]> {
   try {
     const res = await fetch(`${apiUrl}/api/v1/robots`);
     if (!res.ok) return [];
-    return res.json() as Promise<RobotPublic[]>;
+    return parseJsonArray(await res.json(), isRobotPublic);
   } catch {
     return [];
   }
@@ -59,7 +74,7 @@ async function getTopCreators(period: string): Promise<CreatorLeaderboardEntry[]
       `${apiUrl}/api/v1/users/leaderboard?limit=10&metric=engagement&period=${encodeURIComponent(period)}`,
     );
     if (!res.ok) return [];
-    return res.json() as Promise<CreatorLeaderboardEntry[]>;
+    return parseJsonArray(await res.json(), isCreatorLeaderboardEntry);
   } catch {
     return [];
   }
@@ -70,7 +85,8 @@ async function getOverview(): Promise<PublicRobotOverview | null> {
   try {
     const res = await fetch(`${apiUrl}/api/v1/robots/overview`);
     if (!res.ok) return null;
-    return res.json() as Promise<PublicRobotOverview>;
+    const payload: unknown = await res.json();
+    return isPublicRobotOverview(payload) ? payload : null;
   } catch {
     return null;
   }

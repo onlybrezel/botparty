@@ -11,6 +11,7 @@
     "db:migrate:prod": "prisma migrate deploy",
     "db:studio": "prisma studio",
     "db:seed": "tsx seed.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "clean": "rm -rf generated .turbo"
   },
   "dependencies": {
@@ -19,5 +20,9 @@
     "prisma": "6.19.2",
     "tsx": "^4.19.0"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "@botparty/tsconfig": "workspace:*",
+    "@types/node": "^22.13.0",
+    "typescript": "^5.7.3"
+  }
 }

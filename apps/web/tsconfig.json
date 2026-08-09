@@ -2,6 +2,11 @@
   "extends": "@botparty/tsconfig/nextjs.json",
   "compilerOptions": {
     "baseUrl": ".",
+    "noPropertyAccessFromIndexSignature": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true,
+    "exactOptionalPropertyTypes": true,
     "types": [
       "vitest/globals",
       "@testing-library/jest-dom"

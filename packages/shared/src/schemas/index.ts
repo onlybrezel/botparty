@@ -41,7 +41,10 @@ const robotTimezoneSchema = z
   .refine((value) => isValidTimezone(value), 'Timezone must be a valid IANA timezone');
 
 function validateRobotScheduleRange(
-  data: { scheduleStart?: string | null; scheduleEnd?: string | null },
+  data: {
+    scheduleStart?: string | null | undefined;
+    scheduleEnd?: string | null | undefined;
+  },
   ctx: z.RefinementCtx,
 ) {
   if (!data.scheduleStart || !data.scheduleEnd) {

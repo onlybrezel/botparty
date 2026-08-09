@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaClient } from '@botparty/prisma';
 import { PrismaService } from './prisma.service';
 
@@ -7,15 +7,15 @@ export class PrismaReadService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PrismaReadService.name);
   private readonly replica: PrismaClient | null;
 
-  constructor(private readonly primary: PrismaService) {
-    const readUrl = process.env.DATABASE_READ_URL?.trim();
-    const writeUrl = (process.env.DATABASE_WRITE_URL ?? process.env.DATABASE_URL)?.trim();
+  constructor(@Inject(PrismaService) private readonly primary: Pick<PrismaService, '$queryRaw'>) {
+    const readUrl = process.env['DATABASE_READ_URL']?.trim();
+    const writeUrl = (process.env['DATABASE_WRITE_URL'] ?? process.env['DATABASE_URL'])?.trim();
     this.replica = readUrl && readUrl !== writeUrl
       ? new PrismaClient({ datasources: { db: { url: readUrl } } })
       : null;
   }
 
-  get client(): PrismaClient {
+  get client(): Pick<PrismaClient, '$queryRaw'> {
     return this.replica ?? this.primary;
   }
 

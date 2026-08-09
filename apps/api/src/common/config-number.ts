@@ -1,12 +1,10 @@
-import type { ConfigService } from '@nestjs/config';
-
 export function readNonNegativeIntegerEnv(
-  config: ConfigService,
+  config: { get(key: string): unknown },
   key: string,
   defaultValue: number,
 ): number {
-  const raw = config.get<string>(key);
-  if (!raw?.trim()) {
+  const raw = config.get(key);
+  if (typeof raw !== 'string' || !raw.trim()) {
     return defaultValue;
   }
 

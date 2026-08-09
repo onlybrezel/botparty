@@ -4,6 +4,9 @@ import { HealthController } from './health.controller';
 import { HealthMetricsService } from './health-metrics.service';
 import { HealthService } from './health.service';
 
+type HealthServiceParameters = ConstructorParameters<typeof HealthService>;
+type HealthMetricsServiceParameters = ConstructorParameters<typeof HealthMetricsService>;
+
 function createReply() {
   return {
     header: jest.fn().mockReturnThis(),
@@ -19,16 +22,16 @@ function createConfig(values: Record<string, string | boolean | undefined> = {})
 }
 
 function createController(
-  prisma: ConstructorParameters<typeof HealthService>[0],
-  redis: ConstructorParameters<typeof HealthService>[1],
-  gateway: ConstructorParameters<typeof HealthMetricsService>[1],
-  config: ConstructorParameters<typeof HealthService>[2],
-  livekitService: ConstructorParameters<typeof HealthService>[3],
-  mailService: ConstructorParameters<typeof HealthService>[4],
-  featureFlags: ConstructorParameters<typeof HealthService>[5],
-  readPrisma: ConstructorParameters<typeof HealthService>[6],
+  prisma: HealthServiceParameters[0],
+  redis: HealthServiceParameters[1],
+  gateway: HealthMetricsServiceParameters[1],
+  config: HealthServiceParameters[2],
+  livekitService: HealthServiceParameters[3],
+  mailService: HealthServiceParameters[4],
+  featureFlags: HealthServiceParameters[5],
+  readPrisma: HealthServiceParameters[6],
 ) {
-  const health = new HealthService(
+  const health = createHealthService(
     prisma,
     redis,
     config,
@@ -41,17 +44,114 @@ function createController(
   return new HealthController(health, metrics, config);
 }
 
+function createHealthService(
+  prisma: HealthServiceParameters[0],
+  redis: HealthServiceParameters[1],
+  config: HealthServiceParameters[2],
+  livekitService: HealthServiceParameters[3],
+  mailService: HealthServiceParameters[4],
+  featureFlags: HealthServiceParameters[5],
+  readPrisma: HealthServiceParameters[6],
+): HealthService {
+  return new HealthService(
+    prisma,
+    redis,
+    config,
+    livekitService,
+    mailService,
+    featureFlags,
+    readPrisma,
+  );
+}
+
 const livekit = { listRooms: jest.fn().mockResolvedValue([]) };
 const mail = {
   isEnabled: jest.fn().mockReturnValue(true),
   isAvailable: jest.fn().mockReturnValue(true),
 };
 const features = { isEnabled: jest.fn().mockReturnValue(false) };
-function createReadPrisma(client: unknown, isReplicaConfigured = false, available = true) {
+
+const thumbnailStorageConfig = {
+  THUMBNAIL_S3_BUCKET: 'botparty-thumbnails',
+  THUMBNAIL_S3_REGION: 'us-east-1',
+  THUMBNAIL_S3_ENDPOINT: 'http://seaweedfs:8333',
+  THUMBNAIL_S3_ACCESS_KEY_ID: 'test-access',
+  THUMBNAIL_S3_SECRET_ACCESS_KEY: 'test-secret',
+};
+function createReadPrisma(
+  client: PublicDatabaseOverrides | HealthDatabaseOverrides,
+  isReplicaConfigured = false,
+  available = true,
+): HealthServiceParameters[6] {
   return {
-    client,
+    client: createPublicDatabase(client),
     isReplicaConfigured,
     isAvailable: jest.fn().mockResolvedValue(available),
+  };
+}
+
+type PublicDatabaseOverrides = {
+  user?: { count?: jest.Mock };
+  robot?: { count?: jest.Mock; aggregate?: jest.Mock };
+  queueEntry?: { count?: jest.Mock };
+  session?: { count?: jest.Mock };
+};
+
+function createPublicDatabase(
+  overrides: PublicDatabaseOverrides = {},
+): HealthServiceParameters[6]['client'] {
+  return {
+    user: { count: overrides.user?.count ?? jest.fn() },
+    robot: {
+      count: overrides.robot?.count ?? jest.fn(),
+      aggregate: overrides.robot?.aggregate ?? jest.fn(),
+    },
+    queueEntry: { count: overrides.queueEntry?.count ?? jest.fn() },
+    session: { count: overrides.session?.count ?? jest.fn() },
+  };
+}
+
+type HealthDatabaseOverrides = {
+  $queryRaw?: jest.Mock;
+  user?: { count?: jest.Mock };
+  queueEntry?: { count?: jest.Mock; findFirst?: jest.Mock };
+  billingIntent?: { count?: jest.Mock };
+  notification?: { count?: jest.Mock };
+  robotWebhook?: { count?: jest.Mock };
+  robot?: { count?: jest.Mock; aggregate?: jest.Mock; findMany?: jest.Mock };
+  session?: { count?: jest.Mock };
+};
+
+function createDatabase(overrides: HealthDatabaseOverrides = {}): HealthServiceParameters[0] {
+  const publicDatabase = createPublicDatabase(overrides);
+  return {
+    ...publicDatabase,
+    $queryRaw: overrides.$queryRaw ?? jest.fn(),
+    queueEntry: {
+      ...publicDatabase.queueEntry,
+      findFirst: overrides.queueEntry?.findFirst ?? jest.fn(),
+    },
+    billingIntent: { count: overrides.billingIntent?.count ?? jest.fn() },
+    notification: { count: overrides.notification?.count ?? jest.fn() },
+    robotWebhook: { count: overrides.robotWebhook?.count ?? jest.fn() },
+    robot: {
+      ...publicDatabase.robot,
+      findMany: overrides.robot?.findMany ?? jest.fn(),
+    },
+  };
+}
+
+function createRedis(
+  overrides: {
+    ping?: jest.Mock;
+    info?: jest.Mock;
+    mget?: jest.Mock;
+  } = {},
+): HealthServiceParameters[1] {
+  return {
+    ping: overrides.ping ?? jest.fn(),
+    info: overrides.info ?? jest.fn(),
+    mget: overrides.mget ?? jest.fn(),
   };
 }
 
@@ -110,24 +210,26 @@ describe('HealthController.metrics', () => {
     };
 
     const controller = createController(
-      prisma as never,
-      redis as never,
-      gateway as never,
-      createConfig({ NODE_ENV: 'development' }) as never,
-      livekit as never,
-      mail as never,
-      features as never,
-      createReadPrisma(prisma) as never,
+      createDatabase(prisma),
+      createRedis(redis),
+      gateway,
+      createConfig({ NODE_ENV: 'development' }),
+      livekit,
+      mail,
+      features,
+      createReadPrisma(prisma),
     );
     const reply = createReply();
 
-    await controller.metrics(undefined, reply as never);
+    await controller.metrics(undefined, reply);
 
     expect(reply.header).toHaveBeenCalledWith('Content-Type', register.contentType);
 
     const sentMetrics = reply.send.mock.calls.at(-1)?.[0];
-    expect(typeof sentMetrics).toBe('string');
-    const metrics = sentMetrics as string;
+    if (typeof sentMetrics !== 'string') {
+      throw new Error('Expected metrics response to be a string');
+    }
+    const metrics = sentMetrics;
     expect(metrics).toContain('botparty_dependency_database_up 1');
     expect(metrics).toContain('botparty_dependency_redis_up 1');
     expect(metrics).toContain('botparty_ws_connected_clients 6');
@@ -144,6 +246,15 @@ describe('HealthController.metrics', () => {
     expect(metrics).toContain('botparty_webhook_delivery_failed 2');
     expect(metrics).toContain('botparty_database_connections 4');
     expect(metrics).toContain('botparty_redis_memory_used_bytes 12345');
+    expect(prisma.robot.findMany).toHaveBeenCalledWith({
+      select: { id: true },
+      orderBy: { id: 'asc' },
+      take: 250,
+    });
+    expect(redis.mget).toHaveBeenCalledWith(
+      'robot:telemetry:robot-1:latest',
+      'robot:telemetry:robot-2:latest',
+    );
   });
 
   it('falls back to zeroed dependency-backed metrics when prisma or redis are unavailable', async () => {
@@ -175,22 +286,24 @@ describe('HealthController.metrics', () => {
     };
 
     const controller = createController(
-      prisma as never,
-      redis as never,
-      gateway as never,
-      createConfig({ NODE_ENV: 'development' }) as never,
-      livekit as never,
-      mail as never,
-      features as never,
-      createReadPrisma(prisma, true, false) as never,
+      createDatabase(prisma),
+      createRedis(redis),
+      gateway,
+      createConfig({ NODE_ENV: 'development' }),
+      livekit,
+      mail,
+      features,
+      createReadPrisma(prisma, true, false),
     );
     const reply = createReply();
 
-    await controller.metrics(undefined, reply as never);
+    await controller.metrics(undefined, reply);
 
     const sentMetrics = reply.send.mock.calls.at(-1)?.[0];
-    expect(typeof sentMetrics).toBe('string');
-    const metrics = sentMetrics as string;
+    if (typeof sentMetrics !== 'string') {
+      throw new Error('Expected metrics response to be a string');
+    }
+    const metrics = sentMetrics;
     expect(metrics).toContain('botparty_dependency_database_up 0');
     expect(metrics).toContain('botparty_dependency_redis_up 0');
     expect(metrics).toContain('botparty_queue_depth 0');
@@ -204,27 +317,27 @@ describe('HealthController.metrics', () => {
     };
 
     const controller = createController(
-      {
+      createDatabase({
         $queryRaw: jest.fn(),
         queueEntry: { count: jest.fn() },
         robot: { findMany: jest.fn() },
-      } as never,
-      { ping: jest.fn(), mget: jest.fn() } as never,
-      gateway as never,
+      }),
+      createRedis({ ping: jest.fn(), mget: jest.fn() }),
+      gateway,
       createConfig({
         NODE_ENV: 'production',
         METRICS_AUTH_REQUIRED: true,
         METRICS_USERNAME: 'metrics',
         METRICS_PASSWORD: 'super-secret-password',
-      }) as never,
-      livekit as never,
-      mail as never,
-      features as never,
-      createReadPrisma({}) as never,
+      }),
+      livekit,
+      mail,
+      features,
+      createReadPrisma({}),
     );
     const reply = createReply();
 
-    await controller.metrics(undefined, reply as never);
+    await controller.metrics(undefined, reply);
 
     expect(reply.header).toHaveBeenCalledWith('www-authenticate', 'Basic realm="BotParty Metrics"');
     expect(reply.code).toHaveBeenCalledWith(401);
@@ -234,18 +347,18 @@ describe('HealthController.metrics', () => {
 
   it('accepts CSP violation reports without throwing', () => {
     const controller = createController(
-      {
+      createDatabase({
         $queryRaw: jest.fn(),
         queueEntry: { count: jest.fn() },
         robot: { findMany: jest.fn() },
-      } as never,
-      { ping: jest.fn(), mget: jest.fn() } as never,
-      { getRuntimeMetricsSnapshot: jest.fn() } as never,
-      createConfig({ NODE_ENV: 'development' }) as never,
-      livekit as never,
-      mail as never,
-      features as never,
-      createReadPrisma({}) as never,
+      }),
+      createRedis({ ping: jest.fn(), mget: jest.fn() }),
+      { getRuntimeMetricsSnapshot: jest.fn() },
+      createConfig({ NODE_ENV: 'development' }),
+      livekit,
+      mail,
+      features,
+      createReadPrisma({}),
     );
 
     expect(
@@ -271,16 +384,16 @@ describe('HealthController readiness', () => {
         .mockResolvedValueOnce([{ total: 10n, pending: 0n }]),
     };
     const redis = { ping: jest.fn().mockResolvedValue('PONG') };
-    jest.spyOn(global, 'fetch').mockResolvedValue({ ok: true } as Response);
+    jest.spyOn(global, 'fetch').mockResolvedValue(new Response(null, { status: 200 }));
     const controller = createController(
-      prisma as never,
-      redis as never,
-      { getRuntimeMetricsSnapshot: jest.fn() } as never,
-      createConfig({ THUMBNAIL_S3_ENDPOINT: 'http://seaweedfs:8333' }) as never,
-      livekit as never,
-      mail as never,
-      features as never,
-      createReadPrisma(prisma) as never,
+      createDatabase(prisma),
+      createRedis(redis),
+      { getRuntimeMetricsSnapshot: jest.fn() },
+      createConfig(thumbnailStorageConfig),
+      livekit,
+      mail,
+      features,
+      createReadPrisma(prisma),
     );
 
     await expect(controller.check()).resolves.toMatchObject({
@@ -303,20 +416,20 @@ describe('HealthController readiness', () => {
         .mockResolvedValueOnce([{ ok: 1 }])
         .mockResolvedValueOnce([{ total: 0n, pending: 0n }]),
     };
-    jest.spyOn(global, 'fetch').mockResolvedValue({ ok: false } as Response);
+    jest.spyOn(global, 'fetch').mockResolvedValue(new Response(null, { status: 503 }));
     const controller = createController(
-      prisma as never,
-      { ping: jest.fn().mockResolvedValue('PONG') } as never,
-      { getRuntimeMetricsSnapshot: jest.fn() } as never,
-      createConfig({ THUMBNAIL_S3_ENDPOINT: 'http://seaweedfs:8333' }) as never,
-      livekit as never,
-      mail as never,
-      features as never,
-      createReadPrisma(prisma) as never,
+      createDatabase(prisma),
+      createRedis({ ping: jest.fn().mockResolvedValue('PONG') }),
+      { getRuntimeMetricsSnapshot: jest.fn() },
+      createConfig(thumbnailStorageConfig),
+      livekit,
+      mail,
+      features,
+      createReadPrisma(prisma),
     );
     const reply = createReply();
 
-    await controller.ready(reply as never);
+    await controller.ready(reply);
 
     expect(reply.code).toHaveBeenCalledWith(503);
     expect(reply.send).toHaveBeenCalledWith(
@@ -331,20 +444,20 @@ describe('HealthController readiness', () => {
     jest.useFakeTimers();
     const never = new Promise<never>(() => undefined);
     const prisma = { $queryRaw: jest.fn().mockReturnValue(never) };
-    jest.spyOn(global, 'fetch').mockResolvedValue({ ok: true } as Response);
+    jest.spyOn(global, 'fetch').mockResolvedValue(new Response(null, { status: 200 }));
     const controller = createController(
-      prisma as never,
-      { ping: jest.fn().mockResolvedValue('PONG') } as never,
-      { getRuntimeMetricsSnapshot: jest.fn() } as never,
-      createConfig({ THUMBNAIL_S3_ENDPOINT: 'http://seaweedfs:8333' }) as never,
-      livekit as never,
-      mail as never,
-      features as never,
-      createReadPrisma(prisma) as never,
+      createDatabase(prisma),
+      createRedis({ ping: jest.fn().mockResolvedValue('PONG') }),
+      { getRuntimeMetricsSnapshot: jest.fn() },
+      createConfig(),
+      livekit,
+      mail,
+      features,
+      createReadPrisma(prisma),
     );
     const reply = createReply();
 
-    const readiness = controller.ready(reply as never);
+    const readiness = controller.ready(reply);
     await jest.advanceTimersByTimeAsync(2_000);
     await readiness;
 
@@ -375,14 +488,14 @@ describe('HealthService public stats', () => {
       queueEntry: { count: jest.fn().mockResolvedValue(5) },
       session: { count: jest.fn().mockResolvedValue(6) },
     };
-    const health = new HealthService(
-      database as never,
-      {} as never,
-      createConfig() as never,
-      livekit as never,
-      mail as never,
-      features as never,
-      createReadPrisma(database) as never,
+    const health = createHealthService(
+      createDatabase(database),
+      createRedis(),
+      createConfig(),
+      livekit,
+      mail,
+      features,
+      createReadPrisma(database),
     );
 
     const [first, concurrent] = await Promise.all([

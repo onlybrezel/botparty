@@ -6,6 +6,11 @@ type Visibility = 'PUBLIC' | 'UNLISTED' | 'PRIVATE';
 type AccessMode = 'OPEN' | 'PASSWORD' | 'ALLOWED_USERS' | 'LINK_ONLY';
 type VideoAccess = 'ALL' | 'AUTHENTICATED' | 'DISABLED';
 
+const VISIBILITIES: readonly Visibility[] = ['PUBLIC', 'UNLISTED', 'PRIVATE'];
+const ACCESS_MODES: readonly AccessMode[] = ['OPEN', 'PASSWORD', 'ALLOWED_USERS', 'LINK_ONLY'];
+const RESTRICTED_ACCESS_MODES: readonly AccessMode[] = ['PASSWORD', 'ALLOWED_USERS', 'LINK_ONLY'];
+const VIDEO_ACCESS_POLICIES: readonly VideoAccess[] = ['ALL', 'AUTHENTICATED', 'DISABLED'];
+
 const user: JwtPayload = {
   sub: 'user-1',
   username: 'viewer',
@@ -29,7 +34,7 @@ function buildController() {
   const queue = {
     getCurrentControllerUserId: jest.fn().mockResolvedValue(null),
   };
-  const controller = new LivekitController(livekit as never, robots as never, queue as never);
+  const controller = new LivekitController(livekit, robots, queue);
   return { controller, livekit, robots, queue };
 }
 
@@ -50,9 +55,9 @@ function robot(
 }
 
 describe('LivekitController access policy', () => {
-  const matrix = (['PUBLIC', 'UNLISTED', 'PRIVATE'] as Visibility[]).flatMap((visibility) =>
-    (['OPEN', 'PASSWORD', 'ALLOWED_USERS', 'LINK_ONLY'] as AccessMode[]).flatMap((accessMode) =>
-      (['ALL', 'AUTHENTICATED', 'DISABLED'] as VideoAccess[]).map((video) => ({
+  const matrix = VISIBILITIES.flatMap((visibility) =>
+    ACCESS_MODES.flatMap((accessMode) =>
+      VIDEO_ACCESS_POLICIES.map((video) => ({
         visibility,
         accessMode,
         video,
@@ -99,7 +104,7 @@ describe('LivekitController access policy', () => {
     },
   );
 
-  it.each(['PASSWORD', 'ALLOWED_USERS', 'LINK_ONLY'] as AccessMode[])(
+  it.each(RESTRICTED_ACCESS_MODES)(
     'accepts a verified guest grant for %s rooms',
     async (accessMode) => {
       const { controller, robots, livekit } = buildController();

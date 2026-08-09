@@ -10,7 +10,7 @@ describe('RobotWebhookService', () => {
   const robotId = '00000000-0000-4000-8000-000000000001';
   let prisma: {
     robot: { findUnique: jest.Mock };
-    robotWebhook: { count: jest.Mock; create: jest.Mock; findMany: jest.Mock };
+    robotWebhook: { count: jest.Mock; create: jest.Mock; findMany: jest.Mock; findFirst: jest.Mock; delete: jest.Mock };
     $queryRaw: jest.Mock;
     $transaction: jest.Mock;
   };
@@ -21,6 +21,8 @@ describe('RobotWebhookService', () => {
     const robotWebhook = {
       count: jest.fn().mockResolvedValue(0),
       findMany: jest.fn().mockResolvedValue([{ id: 'hook-1' }]),
+      findFirst: jest.fn(),
+      delete: jest.fn(),
       create: jest.fn().mockImplementation(({ data }) => Promise.resolve({
         ...data,
         createdAt: new Date('2026-07-18T00:00:00Z'),
@@ -42,7 +44,7 @@ describe('RobotWebhookService', () => {
       })[key]),
     };
     webhookQueue = { addBulk: jest.fn().mockResolvedValue([]) };
-    service = new RobotWebhookService(prisma as never, config as never, webhookQueue as never);
+    service = new RobotWebhookService(prisma, config, webhookQueue);
     jest.mocked(assertSafeWebhookTarget).mockResolvedValue(new URL('https://hooks.example.test/events'));
   });
 

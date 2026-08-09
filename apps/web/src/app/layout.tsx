@@ -62,7 +62,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             try {
               const raw = window.localStorage.getItem('botparty.preferences.v2');
               const parsed = raw ? JSON.parse(raw) : null;
-              const storedTheme = parsed?.state?.theme;
+              const storedTheme = parsed && typeof parsed === 'object'
+                && parsed.state && typeof parsed.state === 'object'
+                ? parsed.state.theme
+                : null;
               const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
               const theme = storedTheme === 'dark' || storedTheme === 'light'
                 ? storedTheme
@@ -76,11 +79,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               } else if (!currentTheme) {
                 root.classList.add(theme);
               }
-              root.dataset.theme = theme;
+              root.dataset['theme'] = theme;
             } catch {
               const root = document.documentElement;
               root.classList.add('dark');
-              root.dataset.theme = 'dark';
+              root.dataset['theme'] = 'dark';
             }
           })();`}
         </Script>

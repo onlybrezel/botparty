@@ -1,27 +1,47 @@
-import { Injectable, Logger, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Logger, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RobotsService } from '../robots/robots.service';
 import { RobotWebhookService } from '../robots/robot-webhook.service';
 import { RecordingAdminService } from '../moderation/recording-admin.service';
 import { AnalyticsService } from '../analytics/analytics.service';
+import { Prisma } from '@botparty/prisma';
+type SessionsDatabase = {
+  $executeRaw: PrismaService['$executeRaw'];
+  $transaction: PrismaService['$transaction'];
+  robot: Pick<PrismaService['robot'], 'findUnique'>;
+  session: Pick<PrismaService['session'], 'findFirst' | 'findMany' | 'findUnique' | 'update'>;
+  user: Pick<PrismaService['user'], 'findUnique'>;
+};
 
 @Injectable()
 export class SessionsService {
   private readonly logger = new Logger(SessionsService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly robotsService: RobotsService,
-    private readonly robotWebhookService: RobotWebhookService,
-    private readonly recordingAdminService: RecordingAdminService,
-    private readonly analytics: AnalyticsService,
+    @Inject(PrismaService) private readonly prisma: SessionsDatabase,
+    @Inject(RobotsService)
+    private readonly robotsService: Pick<
+      RobotsService,
+      'resolveGuestActorId' | 'validateRoomAccess'
+    >,
+    @Inject(RobotWebhookService)
+    private readonly robotWebhookService: Pick<
+      RobotWebhookService,
+      'emitSessionEnded' | 'emitSessionStarted'
+    >,
+    @Inject(RecordingAdminService)
+    private readonly recordingAdminService: Pick<
+      RecordingAdminService,
+      'findReplayCandidatesForSession'
+    >,
+    @Inject(AnalyticsService) private readonly analytics: Pick<AnalyticsService, 'recordConsented'>,
   ) {}
 
   async create(robotId: string, userId: string, sessionId?: string) {
     const session = await this.prisma.$transaction(
       async (tx) => {
         const createdSession = await tx.session.create({
-          data: { id: sessionId, robotId, userId },
+          data: { ...(sessionId === undefined ? {} : { id: sessionId }), robotId, userId },
         });
 
         await tx.robot.update({
@@ -180,25 +200,21 @@ export class SessionsService {
 
   async endAllActiveSessions() {
     const now = new Date();
-    const active = await this.prisma.session.findMany({
-      where: { status: 'ACTIVE' },
-      select: { id: true, startedAt: true },
-    });
+    const reconciled = await this.prisma.$executeRaw(Prisma.sql`
+      UPDATE sessions
+      SET
+        status = 'ENDED',
+        "endedAt" = ${now},
+        "durationMs" = LEAST(
+          2147483647,
+          GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (${now} - "startedAt")) * 1000))
+        )::int
+      WHERE status = 'ACTIVE'
+    `);
 
-    if (active.length === 0) return;
-
-    for (const session of active) {
-      await this.prisma.session.update({
-        where: { id: session.id },
-        data: {
-          status: 'ENDED',
-          endedAt: now,
-          durationMs: now.getTime() - session.startedAt.getTime(),
-        },
-      });
+    if (reconciled > 0) {
+      this.logger.log(`Reconciled ${reconciled} orphaned active session(s) on startup`);
     }
-
-    this.logger.log(`Reconciled ${active.length} orphaned active session(s) on startup`);
   }
 
   async findActiveForTurnRecovery(robotId: string) {

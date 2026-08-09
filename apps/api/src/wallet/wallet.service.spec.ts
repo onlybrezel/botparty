@@ -8,31 +8,59 @@ describe('WalletService', () => {
   const userId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
   const payeeId = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
 
+
+  const ledgerRecord = {
+    id: 'mock-transaction',
+    createdAt: new Date(0),
+    type: TransactionType.REWARD,
+    amount: 1,
+    balanceAfter: 1,
+    ledgerGroupId: null,
+  };
+  const historyItem = {
+    ...ledgerRecord,
+    reconciliationId: 'mock-transaction',
+    createdAt: new Date(0).toISOString(),
+    metadata: null,
+    description: null,
+    billingIntentId: null,
+    payoutRequestId: null,
+    controlCommandId: null,
+  };
+
   function build() {
     const tx = {
+      adminAuditLog: { create: jest.fn() },
+      billingIntent: { findFirst: jest.fn(), findUniqueOrThrow: jest.fn(), update: jest.fn() },
+      billingWebhookEvent: { create: jest.fn() },
+      payoutRequest: { create: jest.fn(), findFirst: jest.fn(), findUnique: jest.fn(), findUniqueOrThrow: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
+      robot: { findUnique: jest.fn() },
+      walletIdempotencyKey: { create: jest.fn(), update: jest.fn() },
       user: {
         findUnique: jest.fn().mockResolvedValue({ balance: 100 }),
         update: jest.fn().mockResolvedValue({}),
       },
       transaction: {
+        findUnique: jest.fn(),
         create: jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: `tx-${data.type}`, ...data, createdAt: new Date(0) })),
       },
-      controlCommand: { findMany: jest.fn().mockResolvedValue([]) },
+      controlCommand: { findMany: jest.fn().mockResolvedValue([]), findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
       $queryRaw: jest.fn().mockResolvedValue([{ balance: 100 }]),
       $executeRaw: jest.fn().mockResolvedValue(3),
     };
     const prisma = {
       user: { findUnique: jest.fn().mockResolvedValue({ balance: 250 }) },
       transaction: { findMany: jest.fn().mockResolvedValue([]) },
-      controlCommand: { findMany: jest.fn().mockResolvedValue([]) },
-      $transaction: jest.fn(async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx)),
+      controlCommand: { findMany: jest.fn().mockResolvedValue([]), findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
+      $transaction: jest.fn(),
     };
+    prisma.$transaction.mockImplementation(<T>(callback: (client: typeof tx) => Promise<T>) => callback(tx));
     const platform = {
       getPlatformUserId: jest.fn().mockReturnValue(platformId),
       computeFee: jest.fn((gross: number) => Math.floor(gross * 0.1)),
       isPlatformUser: jest.fn((id: string) => id === platformId),
     };
-    const service = new WalletService(prisma as never, platform as never);
+    const service = new WalletService(prisma, platform);
     return { service, prisma, tx, platform };
   }
 
@@ -78,9 +106,9 @@ describe('WalletService', () => {
   it('exports every history page until the cursor is exhausted', async () => {
     const { service } = build();
     jest.spyOn(service, 'listTransactions')
-      .mockResolvedValueOnce({ items: [{ id: 'one' }] as never, nextCursor: 'one' })
-      .mockResolvedValueOnce({ items: [{ id: 'two' }] as never, nextCursor: null });
-    await expect(service.exportTransactions(userId, { type: TransactionType.REWARD })).resolves.toEqual([{ id: 'one' }, { id: 'two' }]);
+      .mockResolvedValueOnce({ items: [{ ...historyItem, id: 'one', reconciliationId: 'one' }], nextCursor: 'one' })
+      .mockResolvedValueOnce({ items: [{ ...historyItem, id: 'two', reconciliationId: 'two' }], nextCursor: null });
+    await expect(service.exportTransactions(userId, { type: TransactionType.REWARD })).resolves.toEqual([{ ...historyItem, id: 'one', reconciliationId: 'one' }, { ...historyItem, id: 'two', reconciliationId: 'two' }]);
     expect(service.listTransactions).toHaveBeenNthCalledWith(2, userId, expect.objectContaining({ cursor: 'one', limit: 200 }));
   });
 
@@ -144,7 +172,7 @@ describe('WalletService', () => {
   it('skips the platform leg for a fee-free transfer and honors an existing ledger group', async () => {
     const { service, tx, platform } = build();
     platform.computeFee.mockReturnValue(0);
-    const result = await service.transferInTransaction(tx as never, userId, payeeId, 100, {
+    const result = await service.transferInTransaction(tx, userId, payeeId, 100, {
       payerType: TransactionType.DONATION_SENT, payeeType: TransactionType.DONATION_RECEIVED, ledgerGroupId: 'fixed',
     });
     expect(result).toEqual({ ledgerGroupId: 'fixed', payerBalanceAfter: 100, payeeBalanceAfter: 100, payeeReceived: 100, fee: 0 });
@@ -154,7 +182,7 @@ describe('WalletService', () => {
   it('creates debt and a financial hold when a billing reversal exceeds balance', async () => {
     const { service, tx } = build();
     tx.user.findUnique.mockResolvedValue({ balance: 40 });
-    await service.reverseBillingCreditInTransaction(tx as never, {
+    await service.reverseBillingCreditInTransaction(tx, {
       userId, amount: 100, type: TransactionType.CHARGEBACK, reversalKey: 'reversal', billingIntentId: 'bill', metadata: { event: 'e' },
     });
     expect(tx.user.update).toHaveBeenCalledWith({ where: { id: userId }, data: { creditDebt: { increment: 60 }, financialHold: true } });
@@ -164,12 +192,12 @@ describe('WalletService', () => {
   it('handles a full-balance and zero-balance billing reversal', async () => {
     const full = build();
     full.tx.user.findUnique.mockResolvedValue({ balance: 200 });
-    await full.service.reverseBillingCreditInTransaction(full.tx as never, { userId, amount: 100, type: TransactionType.REFUND, reversalKey: 'r1', billingIntentId: 'b', metadata: {} });
+    await full.service.reverseBillingCreditInTransaction(full.tx, { userId, amount: 100, type: TransactionType.REFUND, reversalKey: 'r1', billingIntentId: 'b', metadata: {} });
     expect(full.tx.user.update).not.toHaveBeenCalled();
 
     const zero = build();
     zero.tx.user.findUnique.mockResolvedValue({ balance: 0 });
-    await zero.service.reverseBillingCreditInTransaction(zero.tx as never, { userId, amount: 100, type: TransactionType.REFUND, reversalKey: 'r2', billingIntentId: 'b', metadata: {} });
+    await zero.service.reverseBillingCreditInTransaction(zero.tx, { userId, amount: 100, type: TransactionType.REFUND, reversalKey: 'r2', billingIntentId: 'b', metadata: {} });
     expect(zero.tx.$queryRaw).not.toHaveBeenCalled();
     expect(zero.tx.user.update).toHaveBeenCalled();
   });
@@ -177,31 +205,31 @@ describe('WalletService', () => {
   it('rejects a billing reversal for an unknown user', async () => {
     const { service, tx } = build();
     tx.user.findUnique.mockResolvedValue(null);
-    await expect(service.reverseBillingCreditInTransaction(tx as never, { userId, amount: 1, type: TransactionType.REFUND, reversalKey: 'r', billingIntentId: 'b', metadata: {} })).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.reverseBillingCreditInTransaction(tx, { userId, amount: 1, type: TransactionType.REFUND, reversalKey: 'r', billingIntentId: 'b', metadata: {} })).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('completes reserved control payout and fee legs', async () => {
     const { service, tx } = build();
-    await expect(service.completeReservedControlInTransaction(tx as never, { payeeId, gross: 100, ledgerGroupId: 'group', controlCommandId: 'command', metadata: { button: 'b' } })).resolves.toEqual({ payeeBalanceAfter: 100, received: 90, fee: 10 });
+    await expect(service.completeReservedControlInTransaction(tx, { payeeId, gross: 100, ledgerGroupId: 'group', controlCommandId: 'command', metadata: { button: 'b' } })).resolves.toEqual({ payeeBalanceAfter: 100, received: 90, fee: 10 });
     expect(tx.transaction.create).toHaveBeenCalledTimes(2);
   });
 
   it('completes a fee-free reserved control with one ledger leg', async () => {
     const { service, tx, platform } = build();
     platform.computeFee.mockReturnValue(0);
-    await service.completeReservedControlInTransaction(tx as never, { payeeId, gross: 100, ledgerGroupId: 'group', controlCommandId: 'command', metadata: {} });
+    await service.completeReservedControlInTransaction(tx, { payeeId, gross: 100, ledgerGroupId: 'group', controlCommandId: 'command', metadata: {} });
     expect(tx.transaction.create).toHaveBeenCalledTimes(1);
   });
 
   it('compensates an unacknowledged control through the refund ledger', async () => {
     const { service, tx } = build();
-    await service.compensateReservedControlInTransaction(tx as never, { userId, amount: 12, controlCommandId: 'command', sourceLedgerGroupId: 'source' });
+    await service.compensateReservedControlInTransaction(tx, { userId, amount: 12, controlCommandId: 'command', sourceLedgerGroupId: 'source' });
     expect(tx.transaction.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ type: TransactionType.REFUND, amount: 12, controlCommandId: 'command' }) }));
   });
 
   it('uses default and explicit refund descriptions', async () => {
     const { service } = build();
-    const credit = jest.spyOn(service, 'credit').mockResolvedValue({} as never);
+    const credit = jest.spyOn(service, 'credit').mockResolvedValue(ledgerRecord);
     await service.refund(userId, 5, 'source');
     await service.refund(userId, 6, 'source2', TransactionType.REWARD, 'manual');
     expect(credit).toHaveBeenNthCalledWith(1, userId, 5, TransactionType.REFUND, expect.objectContaining({ description: 'Refund of source' }));
@@ -217,8 +245,8 @@ describe('WalletService', () => {
     await expect(blocked.service.adminAdjust({ userId: platformId, delta: 1, reason: 'bad', requesterId: 'staff' })).rejects.toBeInstanceOf(ForbiddenException);
 
     const { service, tx } = build();
-    const credit = jest.spyOn(service, 'creditInTransaction').mockResolvedValue({} as never);
-    const debit = jest.spyOn(service, 'debitInTransaction').mockResolvedValue({} as never);
+    const credit = jest.spyOn(service, 'creditInTransaction').mockResolvedValue(ledgerRecord);
+    const debit = jest.spyOn(service, 'debitInTransaction').mockResolvedValue(ledgerRecord);
     await service.adminAdjust({ userId, delta: 5, reason: 'grant', requesterId: 'staff' });
     await service.adminAdjust({ userId, delta: -7, reason: 'remove', requesterId: 'staff' });
     expect(credit).toHaveBeenCalledWith(tx, userId, 5, TransactionType.ADMIN_ADJUSTMENT, expect.any(Object));
@@ -228,24 +256,24 @@ describe('WalletService', () => {
   it('reports not-found and insufficient-funds outcomes from guarded balance updates', async () => {
     const creditMissing = build();
     creditMissing.tx.$queryRaw.mockResolvedValue([]);
-    await expect(creditMissing.service.creditInTransaction(creditMissing.tx as never, userId, 1, TransactionType.REWARD)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(creditMissing.service.creditInTransaction(creditMissing.tx, userId, 1, TransactionType.REWARD)).rejects.toBeInstanceOf(NotFoundException);
 
     const debitMissing = build();
     debitMissing.tx.$queryRaw.mockResolvedValue([]);
     debitMissing.tx.user.findUnique.mockResolvedValue(null);
-    await expect(debitMissing.service.debitInTransaction(debitMissing.tx as never, userId, 5, TransactionType.WITHDRAWAL)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(debitMissing.service.debitInTransaction(debitMissing.tx, userId, 5, TransactionType.WITHDRAWAL)).rejects.toBeInstanceOf(NotFoundException);
 
     const insufficient = build();
     insufficient.tx.$queryRaw.mockResolvedValue([]);
     insufficient.tx.user.findUnique.mockResolvedValue({ balance: 3 });
-    await expect(insufficient.service.debitInTransaction(insufficient.tx as never, userId, 5, TransactionType.WITHDRAWAL)).rejects.toEqual(expect.objectContaining<Partial<InsufficientFundsError>>({ required: 5, balance: 3 }));
+    await expect(insufficient.service.debitInTransaction(insufficient.tx, userId, 5, TransactionType.WITHDRAWAL)).rejects.toEqual(expect.objectContaining<Partial<InsufficientFundsError>>({ required: 5, balance: 3 }));
   });
 
   it('handles a zero delta and rejects an unknown zero-delta user', async () => {
     const found = build();
-    await expect((found.service as never as { applyDelta(tx: unknown, id: string, delta: number): Promise<number> }).applyDelta(found.tx, userId, 0)).resolves.toBe(100);
+    await expect(found.service.applyDelta(found.tx, userId, 0)).resolves.toBe(100);
     found.tx.user.findUnique.mockResolvedValue(null);
-    await expect((found.service as never as { applyDelta(tx: unknown, id: string, delta: number): Promise<number> }).applyDelta(found.tx, userId, 0)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(found.service.applyDelta(found.tx, userId, 0)).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('retries serialization and deadlock failures, then succeeds', async () => {

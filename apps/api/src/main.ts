@@ -5,7 +5,6 @@ import { WsAdapter } from '@nestjs/platform-ws';
 import { SwaggerModule } from '@nestjs/swagger';
 import { ConsoleLogger, Logger, ValidationPipe } from '@nestjs/common';
 import helmet, { type FastifyHelmetOptions } from '@fastify/helmet';
-import type { FastifyPluginAsync } from 'fastify';
 import { randomUUID } from 'crypto';
 import { AppModule } from './bootstrap/app.module';
 import { loadFileBackedEnv } from './common/env-file';
@@ -47,7 +46,11 @@ function collectConnectSrcOrigins(env: NodeJS.ProcessEnv): string[] {
   return [...origins];
 }
 
-function assertRequiredSecret(env: NodeJS.ProcessEnv, name: string, options?: { minLength?: number; bannedValues?: string[] }) {
+function assertRequiredSecret(
+  env: NodeJS.ProcessEnv,
+  name: string,
+  options?: { minLength?: number; bannedValues?: string[] },
+) {
   const value = env[name]?.trim();
   if (!value) {
     throw new Error(`${name} must be set`);
@@ -70,7 +73,7 @@ function isProtectedSwaggerPath(url: string | undefined): boolean {
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
-  const instanceId = process.env.INSTANCE_ID?.trim() || randomUUID();
+  const instanceId = process.env['INSTANCE_ID']?.trim() || randomUUID();
   loadFileBackedEnv(process.env, logger);
   await initTracing(logger);
 
@@ -78,11 +81,17 @@ async function bootstrap() {
   try {
     assertRequiredSecret(process.env, 'JWT_SECRET', {
       minLength: 32,
-      bannedValues: ['CHANGE_ME_IN_PRODUCTION_min_32_chars_long!!', 'change_me_in_production_min_32_chars_long!!'],
+      bannedValues: [
+        'CHANGE_ME_IN_PRODUCTION_min_32_chars_long!!',
+        'change_me_in_production_min_32_chars_long!!',
+      ],
     });
     assertRequiredSecret(process.env, 'JWT_REFRESH_SECRET', {
       minLength: 32,
-      bannedValues: ['CHANGE_ME_REFRESH_SECRET_min_32_chars!!', 'change_me_refresh_secret_min_32_chars!!'],
+      bannedValues: [
+        'CHANGE_ME_REFRESH_SECRET_min_32_chars!!',
+        'change_me_refresh_secret_min_32_chars!!',
+      ],
     });
     assertRequiredSecret(process.env, 'ROBOT_JWT_SECRET', { minLength: 32 });
     assertRequiredSecret(process.env, 'LIVEKIT_API_KEY', {
@@ -93,7 +102,7 @@ async function bootstrap() {
       bannedValues: ['secret_that_is_at_least_32_characters_long'],
     });
 
-    if (process.env.NODE_ENV === 'production') {
+    if (process.env['NODE_ENV'] === 'production') {
       assertRequiredSecret(process.env, 'WEBHOOK_SECRET_ENCRYPTION_KEY', {
         minLength: 32,
         bannedValues: ['botparty-webhook-secret-fallback'],
@@ -101,117 +110,106 @@ async function bootstrap() {
     }
 
     // Stripe is opt-in via STRIPE_SECRET_KEY. Once enabled, the webhook secret is mandatory.
-    const stripeKey = process.env.STRIPE_SECRET_KEY?.trim();
+    const stripeKey = process.env['STRIPE_SECRET_KEY']?.trim();
     if (stripeKey) {
       assertRequiredSecret(process.env, 'STRIPE_WEBHOOK_SECRET', { minLength: 16 });
     }
 
     // PayPal is opt-in via PAYPAL_CLIENT_ID. Both the secret and the webhook id are needed.
-    const paypalClientId = process.env.PAYPAL_CLIENT_ID?.trim();
+    const paypalClientId = process.env['PAYPAL_CLIENT_ID']?.trim();
     if (paypalClientId) {
       assertRequiredSecret(process.env, 'PAYPAL_CLIENT_SECRET');
       assertRequiredSecret(process.env, 'PAYPAL_WEBHOOK_ID');
     }
 
-    const metricsAuthMode = process.env.METRICS_AUTH_REQUIRED?.trim().toLowerCase();
+    const metricsAuthMode = process.env['METRICS_AUTH_REQUIRED']?.trim().toLowerCase();
     const metricsAuthRequired =
-      metricsAuthMode === 'true' || (metricsAuthMode !== 'false' && process.env.NODE_ENV === 'production');
+      metricsAuthMode === 'true' ||
+      (metricsAuthMode !== 'false' && process.env['NODE_ENV'] === 'production');
     if (metricsAuthRequired) {
       assertRequiredSecret(process.env, 'METRICS_USERNAME');
       assertRequiredSecret(process.env, 'METRICS_PASSWORD', { minLength: 12 });
     }
   } catch (error) {
-    if (process.env.NODE_ENV === 'production') {
+    if (process.env['NODE_ENV'] === 'production') {
       throw error;
     }
     logger.warn(`Security configuration warning: ${(error as Error).message}`);
   }
 
   const connectSrc = ["'self'", 'https:', 'wss:', ...collectConnectSrcOrigins(process.env)];
-  if (process.env.NODE_ENV !== 'production') {
+  if (process.env['NODE_ENV'] !== 'production') {
     connectSrc.push('http:', 'ws:');
   }
 
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     new FastifyAdapter({
-      bodyLimit: Number(process.env.FASTIFY_BODY_LIMIT ?? 1024 * 1024),
+      bodyLimit: Number(process.env['FASTIFY_BODY_LIMIT'] ?? 1024 * 1024),
       genReqId: (req: { headers: Record<string, string | string[] | undefined> }) => {
         return normalizeCorrelationId(req.headers['x-correlation-id']) ?? randomUUID();
       },
       requestIdHeader: 'x-correlation-id',
       logger: {
-        level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
+        level: process.env['NODE_ENV'] === 'production' ? 'info' : 'debug',
         base: { instanceId },
-        transport:
-          process.env.NODE_ENV !== 'production'
-            ? { target: 'pino-pretty', options: { colorize: true } }
-            : undefined,
+        ...(process.env['NODE_ENV'] !== 'production'
+          ? { transport: { target: 'pino-pretty', options: { colorize: true } } }
+          : {}),
       },
       // Trust proxy headers from private-network addresses only (loopback,
       // Docker bridge, RFC-1918).  Override via TRUST_PROXY env var if needed.
-      trustProxy: process.env.TRUST_PROXY ?? 'loopback, linklocal, uniquelocal',
+      trustProxy: process.env['TRUST_PROXY'] ?? 'loopback, linklocal, uniquelocal',
     }),
-    {
-      logger: process.env.NODE_ENV === 'production'
-        ? new ConsoleLogger({ json: true, colors: false, compact: true })
-        : undefined,
-    },
+    process.env['NODE_ENV'] === 'production'
+      ? { logger: new ConsoleLogger({ json: true, colors: false, compact: true }) }
+      : {},
   );
 
   installPaymentRawBodyCapture(
     app.getHttpAdapter().getInstance(),
-    Number(process.env.PAYMENT_WEBHOOK_BODY_LIMIT ?? 262_144),
+    Number(process.env['PAYMENT_WEBHOOK_BODY_LIMIT'] ?? 262_144),
   );
 
   // ─── WebSocket adapter (ws, not socket.io) ────────
   app.useWebSocketAdapter(new WsAdapter(app));
   app.enableShutdownHooks();
 
-  app.getHttpAdapter().getInstance().addHook('onRequest', (request, reply, done) => {
-    const correlationId = typeof request.id === 'string' ? request.id : randomUUID();
-    reply.header('x-correlation-id', correlationId);
-    reply.header('x-instance-id', instanceId);
-    done();
+  app
+    .getHttpAdapter()
+    .getInstance()
+    .addHook('onRequest', (request, reply, done) => {
+      const correlationId = typeof request.id === 'string' ? request.id : randomUUID();
+      reply.header('x-correlation-id', correlationId);
+      reply.header('x-instance-id', instanceId);
+      done();
+    });
+
+  installConcurrentRequestLimit(app.getHttpAdapter().getInstance(), {
+    all: parseMaxConcurrentRequests(process.env['MAX_CONCURRENT_REQUESTS']),
+    login: parseMaxConcurrentLoginRequests(process.env['MAX_CONCURRENT_LOGIN_REQUESTS']),
   });
 
-  installConcurrentRequestLimit(
-    app.getHttpAdapter().getInstance(),
-    {
-      all: parseMaxConcurrentRequests(process.env.MAX_CONCURRENT_REQUESTS),
-      login: parseMaxConcurrentLoginRequests(process.env.MAX_CONCURRENT_LOGIN_REQUESTS),
-    },
-  );
-
-  const helmetRegistration = (async (instance: Parameters<FastifyPluginAsync<FastifyHelmetOptions>>[0]) => {
-    const registerHelmet = helmet as unknown as (
-      appInstance: Parameters<FastifyPluginAsync<FastifyHelmetOptions>>[0],
-      opts: FastifyHelmetOptions,
-    ) => ReturnType<FastifyPluginAsync<FastifyHelmetOptions>>;
-
-    await registerHelmet(instance, {
-      global: true,
-      contentSecurityPolicy: {
-        directives: {
-          defaultSrc: ["'self'"],
-          baseUri: ["'self'"],
-          scriptSrc: ["'self'", "'unsafe-inline'"],
-          styleSrc: ["'self'", "'unsafe-inline'"],
-          imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
-          connectSrc,
-          mediaSrc: ["'self'", 'blob:', 'https:'],
-          fontSrc: ["'self'", 'data:'],
-          workerSrc: ["'self'", 'blob:'],
-          manifestSrc: ["'self'"],
-          objectSrc: ["'none'"],
-          frameAncestors: ["'none'"],
-          upgradeInsecureRequests: [],
-        },
+  await app.register(helmet, {
+    global: true,
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        baseUri: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
+        connectSrc,
+        mediaSrc: ["'self'", 'blob:', 'https:'],
+        fontSrc: ["'self'", 'data:'],
+        workerSrc: ["'self'", 'blob:'],
+        manifestSrc: ["'self'"],
+        objectSrc: ["'none'"],
+        frameAncestors: ["'none'"],
+        upgradeInsecureRequests: [],
       },
-    } satisfies FastifyHelmetOptions);
-  }) as unknown as Parameters<typeof app.register>[0];
-
-  await app.register(helmetRegistration);
+    },
+  } satisfies FastifyHelmetOptions);
 
   // ─── Global exception filter ─────────────────────
   app.useGlobalFilters(new AllExceptionsFilter());
@@ -219,15 +217,18 @@ async function bootstrap() {
   // ─── Global validation ────────────────────────────
   app.useGlobalPipes(
     new ValidationPipe({
-      whitelist: true,      // strip unknown fields
+      whitelist: true, // strip unknown fields
       forbidNonWhitelisted: true,
-      transform: true,      // auto-cast primitives (e.g. string -> number)
+      transform: true, // auto-cast primitives (e.g. string -> number)
     }),
   );
 
   // ─── CORS (strict) ────────────────────────────────
   app.enableCors({
-    origin: process.env.CORS_ORIGIN?.split(',').map((o) => o.trim()).filter(Boolean) ?? ['http://localhost:3000'],
+    origin: process.env['CORS_ORIGIN']
+      ?.split(',')
+      .map((o) => o.trim())
+      .filter(Boolean) ?? ['http://localhost:3000'],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token', 'X-Correlation-Id'],
@@ -236,12 +237,18 @@ async function bootstrap() {
   // ─── Global prefix ────────────────────────────────
   app.setGlobalPrefix('api/v1');
 
+  const httpServer = app.getHttpAdapter().getInstance().server;
+  httpServer.keepAliveTimeout = 65_000;
+  httpServer.headersTimeout = 66_000;
+  httpServer.requestTimeout = 30_000;
+
   // ─── Swagger / OpenAPI ─────────────────────────────
-  const enableSwagger = process.env.NODE_ENV !== 'production' || process.env.SWAGGER_DOCS === 'true';
+  const enableSwagger =
+    process.env['NODE_ENV'] !== 'production' || process.env['SWAGGER_DOCS'] === 'true';
   if (enableSwagger) {
-    if (process.env.NODE_ENV === 'production') {
-      const swaggerUser = process.env.SWAGGER_DOCS_USERNAME?.trim();
-      const swaggerPassword = process.env.SWAGGER_DOCS_PASSWORD?.trim();
+    if (process.env['NODE_ENV'] === 'production') {
+      const swaggerUser = process.env['SWAGGER_DOCS_USERNAME']?.trim();
+      const swaggerPassword = process.env['SWAGGER_DOCS_PASSWORD']?.trim();
 
       if (!swaggerUser || !swaggerPassword) {
         throw new Error(
@@ -249,14 +256,17 @@ async function bootstrap() {
         );
       }
 
-      app.getHttpAdapter().getInstance().addHook('onRequest', async (request, reply) => {
+      app
+        .getHttpAdapter()
+        .getInstance()
+        .addHook('onRequest', async (request, reply) => {
           if (!isProtectedSwaggerPath(request.raw.url)) {
             return;
           }
 
           if (
-            hasBasicAuthCredentials(swaggerUser, swaggerPassword)
-            && isAuthorizedBasicAuth(request.headers.authorization, {
+            hasBasicAuthCredentials(swaggerUser, swaggerPassword) &&
+            isAuthorizedBasicAuth(request.headers.authorization, {
               username: swaggerUser,
               password: swaggerPassword,
             })
@@ -264,9 +274,9 @@ async function bootstrap() {
             return;
           }
 
-        reply.header('www-authenticate', 'Basic realm="BotParty API Docs"');
-        reply.code(401).send({ message: 'Authentication required' });
-      });
+          reply.header('www-authenticate', 'Basic realm="BotParty API Docs"');
+          reply.code(401).send({ message: 'Authentication required' });
+        });
     }
 
     const document = SwaggerModule.createDocument(app, createSwaggerDocumentConfig());
@@ -274,8 +284,8 @@ async function bootstrap() {
     logger.log('📖 Swagger docs available at /api-docs');
   }
 
-  const port = process.env.PORT ?? 4000;
-  await app.listen({ port: Number(port), host: '0.0.0.0' });
+  const port = process.env['PORT'] ?? 4000;
+  await app.listen({ port: Number(port), host: '0.0.0.0', backlog: 2_048 });
 
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     process.once(signal, () => {
@@ -284,7 +294,7 @@ async function bootstrap() {
   }
 
   logger.log(`🚀 BotParty API running on http://0.0.0.0:${port}`);
-  logger.log(`🌍 Environment: ${process.env.NODE_ENV ?? 'development'}`);
+  logger.log(`🌍 Environment: ${process.env['NODE_ENV'] ?? 'development'}`);
 }
 
 bootstrap();

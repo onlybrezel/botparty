@@ -1,9 +1,11 @@
 import type { RedisService } from '../redis/redis.service';
 
+type RobotClaimRedis = Pick<RedisService, 'eval' | 'get' | 'set'>;
+
 const ROBOT_CLAIM_TTL_MS = 45_000;
 
 export class RobotClaimLockHandler {
-  constructor(private readonly redis: RedisService) {}
+  constructor(private readonly redis: RobotClaimRedis) {}
 
   claimKey(robotId: string) {
     return `ws:robot-claim:${robotId}`;

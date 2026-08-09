@@ -1,6 +1,6 @@
 import { LIMITS, WS_EVENTS } from '@botparty/shared';
 import { ChatHandler } from './chat.handler';
-import type { WsClient } from './gateway-types';
+import { createWsClient } from '../test/ws-client.fixture';
 
 const ROBOT_ID = '550e8400-e29b-41d4-a716-446655440000';
 const CLIENT_MESSAGE_ID = '8d56b8dc-d747-4e2b-a9ee-6a1f97083c44';
@@ -29,7 +29,7 @@ describe('ChatHandler', () => {
     };
 
     return {
-      handler: new ChatHandler(ctx as never, robotsService as never, moderationService as never),
+      handler: new ChatHandler(ctx, robotsService, moderationService),
       ctx,
       robotsService,
       moderationService,
@@ -37,7 +37,7 @@ describe('ChatHandler', () => {
   }
 
   function createClient(overrides: Record<string, unknown> = {}) {
-    return {
+    return createWsClient({
       id: 'viewer-1',
       send: jest.fn(),
       watchingRobotId: ROBOT_ID,
@@ -46,7 +46,7 @@ describe('ChatHandler', () => {
       role: 'USER',
       isGuest: false,
       ...overrides,
-    } as unknown as WsClient;
+    });
   }
 
   it('requires authenticated users when chat access is restricted', async () => {

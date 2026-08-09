@@ -67,8 +67,9 @@ export function Dialog({
         panel.focus();
         return;
       }
-      const firstElement = focusable[0]!;
-      const lastElement = focusable[focusable.length - 1]!;
+      const firstElement = focusable[0];
+      const lastElement = focusable.at(-1);
+      if (!firstElement || !lastElement) return;
       if (event.shiftKey && document.activeElement === firstElement) {
         event.preventDefault();
         lastElement.focus();

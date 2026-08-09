@@ -1,9 +1,21 @@
-import { Injectable, CanActivate, ExecutionContext, ForbiddenException } from '@nestjs/common';
+import { Inject, Injectable, CanActivate, ForbiddenException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { FastifyRequest } from 'fastify';
 import { getCsrfCookieName, parseCookie } from '../auth.cookies';
 import { getAccessCookieName, getRefreshCookieName } from '../auth.cookies';
 import { timingSafeEqual } from 'crypto';
+
+interface CsrfRequest {
+  readonly method?: string;
+  readonly headers: Record<string, string | string[] | undefined>;
+}
+
+interface CsrfExecutionContext {
+  switchToHttp(): { getRequest(): CsrfRequest };
+}
+
+interface CsrfConfig {
+  get(key: string): string | undefined;
+}
 
 /**
  * Defense-in-depth CSRF origin guard for cookie-based mutation endpoints.
@@ -15,12 +27,12 @@ import { timingSafeEqual } from 'crypto';
  */
 @Injectable()
 export class CsrfOriginGuard implements CanActivate {
-  constructor(private readonly configService: ConfigService) {}
+  constructor(@Inject(ConfigService) private readonly configService: CsrfConfig) {}
 
-  canActivate(context: ExecutionContext): boolean {
-    const request = context.switchToHttp().getRequest<FastifyRequest>();
-    const origin = request.headers['origin'] as string | undefined;
-    const referer = request.headers['referer'] as string | undefined;
+  canActivate(context: CsrfExecutionContext): boolean {
+    const request = context.switchToHttp().getRequest();
+    const origin = typeof request.headers['origin'] === 'string' ? request.headers['origin'] : undefined;
+    const referer = typeof request.headers['referer'] === 'string' ? request.headers['referer'] : undefined;
     const method = (request.method ?? 'GET').toUpperCase();
 
     if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
@@ -28,13 +40,13 @@ export class CsrfOriginGuard implements CanActivate {
     }
 
     if (
-      typeof request.headers.authorization === 'string' &&
-      request.headers.authorization.startsWith('Bearer ')
+      typeof request.headers['authorization'] === 'string' &&
+      request.headers['authorization'].startsWith('Bearer ')
     ) {
       return true;
     }
 
-    const cookieHeader = request.headers['cookie'] as string | undefined;
+    const cookieHeader = typeof request.headers['cookie'] === 'string' ? request.headers['cookie'] : undefined;
     const csrfCookieName = getCsrfCookieName(this.configService);
     const hasAuthCookie = Boolean(
       parseCookie(cookieHeader, getAccessCookieName(this.configService)) ||
@@ -63,7 +75,8 @@ export class CsrfOriginGuard implements CanActivate {
     }
 
     const cookieToken = parseCookie(cookieHeader, csrfCookieName);
-    const headerToken = (request.headers['x-csrf-token'] as string | undefined)?.trim();
+    const csrfHeader = request.headers['x-csrf-token'];
+    const headerToken = typeof csrfHeader === 'string' ? csrfHeader.trim() : undefined;
 
     if (!cookieToken || !headerToken || !this._sameToken(cookieToken, headerToken)) {
       throw new ForbiddenException('CSRF token mismatch');
@@ -74,9 +87,9 @@ export class CsrfOriginGuard implements CanActivate {
 
   private _allowedOrigins(): Set<string> {
     const configured = [
-      this.configService.get<string>('APP_URL'),
-      this.configService.get<string>('PUBLIC_WEB_URL'),
-      this.configService.get<string>('CORS_ORIGIN'),
+      this.configService.get('APP_URL'),
+      this.configService.get('PUBLIC_WEB_URL'),
+      this.configService.get('CORS_ORIGIN'),
     ];
     const origins = new Set<string>();
     for (const raw of configured) {

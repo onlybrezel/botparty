@@ -5,6 +5,7 @@ import {
   Logger,
   BadRequestException,
   NotFoundException,
+  Inject,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
@@ -19,10 +20,26 @@ export class QueueService {
   private readonly maxActiveQueueEntriesPerUser: number;
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly redis: RedisService,
-    private readonly robotsService: RobotsService,
-    private readonly config: ConfigService,
+    @Inject(PrismaService)
+    private readonly prisma: {
+      $transaction<T>(
+        callback: (transaction: Pick<Prisma.TransactionClient, '$executeRaw' | 'queueEntry' | 'robot'>) => Promise<T>,
+        options?: { isolationLevel?: Prisma.TransactionIsolationLevel },
+      ): Promise<T>;
+      queueEntry: Pick<
+        PrismaService['queueEntry'],
+        'aggregate' | 'count' | 'create' | 'delete' | 'deleteMany' | 'findFirst' | 'findMany' | 'findUnique' | 'update' | 'updateMany'
+      >;
+      robot: Pick<PrismaService['robot'], 'findUnique'>;
+    },
+    @Inject(RedisService)
+    private readonly redis: Pick<RedisService, 'del' | 'eval' | 'expire' | 'hgetall' | 'hset' | 'publish' | 'set'>,
+    @Inject(RobotsService)
+    private readonly robotsService: Pick<
+      RobotsService,
+      'findById' | 'getAccessPolicy' | 'resolveGuestActorId' | 'validateRoomAccess'
+    >,
+    @Inject(ConfigService) private readonly config: Pick<ConfigService, 'get'>,
   ) {
     this.maxActiveQueueEntriesPerUser = readNonNegativeIntegerEnv(
       this.config,

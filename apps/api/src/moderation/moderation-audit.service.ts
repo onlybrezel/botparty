@@ -1,7 +1,29 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { assertStaffOrRobotOwner, isStaffRole } from '../common/robot-access';
+import { parseJsonRecord } from '../common/json-value';
+
+type ProfanityEvent = { ts: number; userId: string; username: string; content: string };
+
+function parseProfanityEvent(raw: string): ProfanityEvent | null {
+  const parsed = parseJsonRecord(raw);
+  if (
+    !parsed ||
+    typeof parsed['ts'] !== 'number' ||
+    typeof parsed['userId'] !== 'string' ||
+    typeof parsed['username'] !== 'string' ||
+    typeof parsed['content'] !== 'string'
+  ) {
+    return null;
+  }
+  return {
+    ts: parsed['ts'],
+    userId: parsed['userId'],
+    username: parsed['username'],
+    content: parsed['content'],
+  };
+}
 
 const PROFANITY_TERMS = {
   english: [
@@ -224,8 +246,14 @@ function replaceControlCharacters(value: string): string {
 @Injectable()
 export class ModerationAuditService {
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly redis: RedisService,
+    @Inject(PrismaService)
+    private readonly prisma: {
+      robot: Pick<PrismaService['robot'], 'findMany' | 'findUnique'>;
+      robotModerationEntry: Pick<PrismaService['robotModerationEntry'], 'findMany'>;
+      user: Pick<PrismaService['user'], 'findUnique'>;
+    },
+    @Inject(RedisService)
+    private readonly redis: Pick<RedisService, 'get' | 'hgetall' | 'lrange' | 'pipeline'>,
   ) {}
 
   sanitizeChatContent(raw: string): { sanitized: string; hasIllegalChars: boolean } {
@@ -332,20 +360,7 @@ export class ModerationAuditService {
       this.redis.lrange(listKey, 0, 99),
     ]);
 
-    const events = eventsRaw
-      .map((row) => {
-        try {
-          return JSON.parse(row) as {
-            ts: number;
-            userId: string;
-            username: string;
-            content: string;
-          };
-        } catch {
-          return null;
-        }
-      })
-      .filter((row): row is { ts: number; userId: string; username: string; content: string } => row !== null);
+    const events = eventsRaw.map(parseProfanityEvent).filter((row): row is ProfanityEvent => row !== null);
 
     return {
       total: totalRaw ? Number(totalRaw) : 0,
@@ -382,22 +397,16 @@ export class ModerationAuditService {
 
         const events = eventsRaw
           .map((row) => {
-            try {
-              const parsed = JSON.parse(row) as {
-                ts: number;
-                userId: string;
-                username: string;
-                content: string;
-              };
+            const parsed = parseProfanityEvent(row);
+            if (parsed) {
               return {
                 ...parsed,
                 robotId: robot.id,
                 robotName: robot.name,
                 robotSlug: robot.slug,
               };
-            } catch {
-              return null;
             }
+            return null;
           })
           .filter(
             (

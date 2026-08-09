@@ -1,12 +1,17 @@
-import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable } from '@nestjs/common';
 import { randomBytes } from 'crypto';
-import type { Prisma } from '@botparty/prisma';
 import { PrismaService } from '../prisma/prisma.service';
 import { SLUG_PROFANITY_TERMS } from './profanity-terms';
 
 @Injectable()
 export class RobotSlugService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService)
+    private readonly prisma: {
+      $transaction: PrismaService['$transaction'];
+      robot: Pick<PrismaService['robot'], 'findFirst' | 'findMany' | 'findUnique' | 'update'>;
+    },
+  ) {}
 
   generateSlug(name: string): string {
     const base =
@@ -74,7 +79,7 @@ export class RobotSlugService {
 
     if (holders.length === 0) return;
 
-    await (this.prisma as unknown as { $transaction: (ops: Prisma.PrismaPromise<unknown>[]) => Promise<unknown[]> }).$transaction(
+    await this.prisma.$transaction(
       holders.map((row) =>
         this.prisma.robot.update({
           where: { id: row.id },

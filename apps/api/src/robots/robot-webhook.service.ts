@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { ConfigService } from '@nestjs/config';
 import { createHash, randomBytes, randomUUID } from 'crypto';
@@ -9,6 +9,12 @@ import { assertSafeWebhookTarget } from '../common/webhook-target';
 import { readNonNegativeIntegerEnv } from '../common/config-number';
 import { AeadCipher } from '../common/aead-cipher';
 import { Prisma } from '@botparty/prisma';
+type RobotWebhookDatabase = {
+  $transaction: PrismaService['$transaction'];
+  robot: Pick<PrismaService['robot'], 'findUnique'>;
+  robotWebhook: Pick<PrismaService['robotWebhook'], 'delete' | 'findFirst' | 'findMany'>;
+};
+interface WebhookConfig { get(key: string): string | undefined; }
 
 type RobotWebhookEvent =
   | 'robot.online'
@@ -25,23 +31,23 @@ export class RobotWebhookService {
   private readonly maxWebhooksPerRobot: number;
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly config: ConfigService,
-    @InjectQueue(JOBS_QUEUE_WEBHOOK) private readonly webhookQueue: Queue<WebhookJobData>,
+    @Inject(PrismaService) private readonly prisma: RobotWebhookDatabase,
+    @Inject(ConfigService) private readonly config: WebhookConfig,
+    @InjectQueue(JOBS_QUEUE_WEBHOOK) private readonly webhookQueue: Pick<Queue<WebhookJobData>, 'addBulk'>,
   ) {
-    const explicitKey = this.config.get<string>('WEBHOOK_SECRET_ENCRYPTION_KEY')?.trim();
+    const explicitKey = this.config.get('WEBHOOK_SECRET_ENCRYPTION_KEY')?.trim();
     if (explicitKey) {
       this.secretCipher = new AeadCipher(
         explicitKey,
-        (this.config.get<string>('WEBHOOK_SECRET_ENCRYPTION_KEY_PREVIOUS') ?? '')
+        (this.config.get('WEBHOOK_SECRET_ENCRYPTION_KEY_PREVIOUS') ?? '')
           .split(',')
           .map((key) => key.trim()),
       );
-    } else if (process.env.NODE_ENV === 'production') {
+    } else if (process.env['NODE_ENV'] === 'production') {
       throw new Error('WEBHOOK_SECRET_ENCRYPTION_KEY is required in production');
     } else {
       this.secretCipher = new AeadCipher(
-        this.config.get<string>('JWT_SECRET')?.trim() ||
+        this.config.get('JWT_SECRET')?.trim() ||
           'botparty-webhook-secret-fallback-32-characters',
       );
       this.logger.warn(

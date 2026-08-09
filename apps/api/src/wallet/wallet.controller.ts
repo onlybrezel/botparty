@@ -53,12 +53,12 @@ export class WalletController {
       ? (query.type as TransactionType)
       : undefined;
     return this.wallet.listTransactions(user.sub, {
-      limit: query.limit,
-      cursor: query.cursor,
-      type,
-      from: query.from ? new Date(query.from) : undefined,
-      to: query.to ? new Date(query.to) : undefined,
-      robotId: query.robotId,
+      ...(query.limit === undefined ? {} : { limit: query.limit }),
+      ...(query.cursor === undefined ? {} : { cursor: query.cursor }),
+      ...(type === undefined ? {} : { type }),
+      ...(query.from ? { from: new Date(query.from) } : {}),
+      ...(query.to ? { to: new Date(query.to) } : {}),
+      ...(query.robotId === undefined ? {} : { robotId: query.robotId }),
     });
   }
 
@@ -77,10 +77,10 @@ export class WalletController {
     return {
       exportedAt: new Date().toISOString(),
       items: await this.wallet.exportTransactions(user.sub, {
-        type,
-        from: query.from ? new Date(query.from) : undefined,
-        to: query.to ? new Date(query.to) : undefined,
-        robotId: query.robotId,
+        ...(type === undefined ? {} : { type }),
+        ...(query.from ? { from: new Date(query.from) } : {}),
+        ...(query.to ? { to: new Date(query.to) } : {}),
+        ...(query.robotId === undefined ? {} : { robotId: query.robotId }),
       }),
     };
   }
@@ -98,8 +98,8 @@ export class WalletController {
       donorId: user.sub,
       robotId: dto.robotId,
       amount: dto.amount,
-      message: dto.message,
-      idempotencyKey: idempotencyKey?.slice(0, 128),
+      ...(dto.message === undefined ? {} : { message: dto.message }),
+      ...(idempotencyKey === undefined ? {} : { idempotencyKey: idempotencyKey.slice(0, 128) }),
     });
   }
 }

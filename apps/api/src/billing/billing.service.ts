@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
@@ -7,7 +8,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { BillingIntentStatus, Prisma, TransactionType } from '@botparty/prisma';
 import { PrismaService } from '../prisma/prisma.service';
-import { WalletService } from '../wallet/wallet.service';
+import { WalletService, type WalletTransaction } from '../wallet/wallet.service';
 import { findPackage, CREDIT_PACKAGES } from './credit-packages';
 import { StripeProvider } from './providers/stripe.provider';
 import { PaypalProvider } from './providers/paypal.provider';
@@ -15,18 +16,34 @@ import type { PaymentProvider, VerifiedWebhookEvent } from './providers/payment-
 import { FeatureFlagsService } from '../common/feature-flags.service';
 import { NotificationsService } from '../notifications/notifications.service';
 
+type BillingPaymentProvider = Pick<
+  PaymentProvider,
+  'createCheckout' | 'name' | 'parseStoredWebhookEvent' | 'verifyWebhook'
+>;
+
 @Injectable()
 export class BillingService {
   private readonly logger = new Logger(BillingService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly wallet: WalletService,
-    private readonly stripe: StripeProvider,
-    private readonly paypal: PaypalProvider,
-    private readonly config: ConfigService,
-    private readonly features: FeatureFlagsService,
-    private readonly notifications: NotificationsService,
+    @Inject(PrismaService)
+    private readonly prisma: {
+      billingIntent: Pick<PrismaService['billingIntent'], 'create' | 'findUnique' | 'update'>;
+      billingWebhookEvent: Pick<PrismaService['billingWebhookEvent'], 'findMany' | 'findUnique'>;
+    },
+    @Inject(WalletService)
+    private readonly wallet: Pick<
+      WalletService,
+      'creditInTransaction' | 'reverseBillingCreditInTransaction' | 'runSerializable'
+    >,
+    @Inject(StripeProvider) private readonly stripe: BillingPaymentProvider,
+    @Inject(PaypalProvider)
+    private readonly paypal: BillingPaymentProvider & Pick<PaypalProvider, 'captureApprovedOrder'>,
+    @Inject(ConfigService) private readonly config: { get(key: string): unknown },
+    @Inject(FeatureFlagsService)
+    private readonly features: Pick<FeatureFlagsService, 'assertEnabled' | 'isEnabled'>,
+    @Inject(NotificationsService)
+    private readonly notifications: Pick<NotificationsService, 'publishSafely'>,
   ) {}
 
   listPackages() {
@@ -68,7 +85,7 @@ export class BillingService {
     };
   }
 
-  private getProvider(name: string): PaymentProvider {
+  private getProvider(name: string): BillingPaymentProvider {
     if (name === 'stripe') return this.stripe;
     if (name === 'paypal') return this.paypal;
     throw new BadRequestException('Unknown payment provider');
@@ -105,7 +122,8 @@ export class BillingService {
       },
     });
 
-    const baseUrl = this.config.get<string>('PUBLIC_WEB_URL') ?? 'http://localhost:3000';
+    const publicWebUrl = this.config.get('PUBLIC_WEB_URL');
+    const baseUrl = typeof publicWebUrl === 'string' ? publicWebUrl : 'http://localhost:3000';
     let session;
     try {
       session = await provider.createCheckout({
@@ -322,7 +340,7 @@ export class BillingService {
     }
   }
 
-  private async notifyPaymentFinal(
+  async notifyPaymentFinal(
     provider: 'stripe' | 'paypal',
     persistedEventId: string,
     eventType: VerifiedWebhookEvent['type'],
@@ -359,7 +377,7 @@ export class BillingService {
   }
 
   private async resolveIntent(
-    tx: Prisma.TransactionClient,
+    tx: WalletTransaction,
     provider: 'stripe' | 'paypal',
     event: VerifiedWebhookEvent,
   ) {
@@ -400,7 +418,7 @@ export class BillingService {
   }
 
   private recordEvent(
-    tx: Prisma.TransactionClient,
+    tx: WalletTransaction,
     provider: 'stripe' | 'paypal',
     event: VerifiedWebhookEvent,
     persistedEventId: string,

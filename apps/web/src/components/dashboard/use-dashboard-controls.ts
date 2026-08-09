@@ -106,15 +106,16 @@ export function useDashboardControls({
     setError(null);
     try {
       api.setToken(accessToken);
+      const widgetSpec = buildWidgetSpec(controlDraft);
       const next = await api.controls.createControl(selectedRobotId, {
         label,
         command,
-        hotKey: controlDraft.hotKey.trim() || undefined,
-        icon: buildWidgetSpec(controlDraft),
+        ...(controlDraft.hotKey.trim() ? { hotKey: controlDraft.hotKey.trim() } : {}),
+        ...(widgetSpec ? { icon: widgetSpec } : {}),
         cooldownMs: Number(controlDraft.cooldownMs),
         costCredits: Math.max(0, Number(controlDraft.costCredits) || 0),
         access: controlDraft.access,
-        color: controlDraft.color.trim() || undefined,
+        ...(controlDraft.color.trim() ? { color: controlDraft.color.trim() } : {}),
       });
       setControlButtons((current) => [...current, next].sort((left, right) => left.position - right.position));
       resetControlDraft();
@@ -164,11 +165,12 @@ export function useDashboardControls({
     setControlOp(editingControlId);
     try {
       api.setToken(accessToken);
+      const widgetSpec = buildWidgetSpec(controlEditDraft);
       const updated = await api.controls.updateControl(editingControlId, {
         label,
         command,
-        hotKey: controlEditDraft.hotKey.trim() || undefined,
-        icon: buildWidgetSpec(controlEditDraft),
+        ...(controlEditDraft.hotKey.trim() ? { hotKey: controlEditDraft.hotKey.trim() } : {}),
+        ...(widgetSpec ? { icon: widgetSpec } : {}),
         cooldownMs: Number(controlEditDraft.cooldownMs),
         costCredits: Math.max(0, Number(controlEditDraft.costCredits) || 0),
         access: controlEditDraft.access,

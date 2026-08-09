@@ -50,23 +50,45 @@ function getEventTimestamp(value: unknown) {
   return typeof value === 'number' && Number.isFinite(value) ? value : Date.now();
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isViewer(value: unknown): value is Viewer {
+  return isRecord(value)
+    && typeof value['userId'] === 'string'
+    && typeof value['username'] === 'string'
+    && typeof value['joinedAt'] === 'number';
+}
+
+function isQueueEntryWire(value: unknown): value is QueueEntryWire {
+  if (!isRecord(value) || typeof value['userId'] !== 'string' || typeof value['position'] !== 'number') {
+    return false;
+  }
+  return value['username'] === undefined || typeof value['username'] === 'string';
+}
+
+function isRobotStatus(value: unknown): value is RobotPublic['status'] {
+  return value === 'ONLINE' || value === 'OFFLINE' || value === 'BUSY' || value === 'MAINTENANCE';
+}
+
 function buildActiveSessionState(data: Record<string, unknown>) {
-  const userId = typeof data.userId === 'string' ? data.userId : null;
+  const userId = typeof data['userId'] === 'string' ? data['userId'] : null;
   if (!userId) {
     return null;
   }
 
   const expiresAtValue =
-    typeof data.expiresAt === 'number'
-      ? data.expiresAt
-      : typeof data.expiresAt === 'string'
-        ? Date.parse(data.expiresAt)
+    typeof data['expiresAt'] === 'number'
+      ? data['expiresAt']
+      : typeof data['expiresAt'] === 'string'
+        ? Date.parse(data['expiresAt'])
         : null;
 
   return {
-    sessionId: typeof data.sessionId === 'string' ? data.sessionId : `session-${userId}`,
+    sessionId: typeof data['sessionId'] === 'string' ? data['sessionId'] : `session-${userId}`,
     userId,
-    username: typeof data.username === 'string' ? data.username : userId.slice(0, 8),
+    username: typeof data['username'] === 'string' ? data['username'] : userId.slice(0, 8),
     startedAt: Date.now(),
     expiresAt: Number.isFinite(expiresAtValue) ? expiresAtValue : null,
   } satisfies ActiveSessionState;
@@ -98,7 +120,7 @@ function handleRestrictionEvent(params: {
   setChatRestriction: Dispatch<SetStateAction<string | null>>;
 }) {
   const { event, data, currentViewerId, setChatRestriction } = params;
-  const targetUserId = typeof data.userId === 'string' ? data.userId : null;
+  const targetUserId = typeof data['userId'] === 'string' ? data['userId'] : null;
 
   if (!targetUserId || targetUserId !== currentViewerId) {
     return;
@@ -106,7 +128,7 @@ function handleRestrictionEvent(params: {
 
   const action = event === 'mod:ban' ? 'BAN' : 'TIMEOUT';
   const expiresAt =
-    typeof data.expiresAt === 'string' && data.expiresAt.length > 0 ? data.expiresAt : null;
+    typeof data['expiresAt'] === 'string' && data['expiresAt'].length > 0 ? data['expiresAt'] : null;
   const until = expiresAt ? ` Until ${new Date(expiresAt).toLocaleTimeString()}.` : '';
 
   setChatRestriction(
@@ -125,7 +147,7 @@ function handleRestrictionEvent(params: {
 }
 
 function handleWalletUpdate(data: Record<string, unknown>) {
-  const balance = typeof data.balance === 'number' ? data.balance : null;
+  const balance = typeof data['balance'] === 'number' ? data['balance'] : null;
 
   if (balance === null || typeof window === 'undefined') {
     return;
@@ -142,42 +164,59 @@ export function createRobotWsEventHandler(params: RobotWsEventHandlerParams) {
   return (event: string, data: Record<string, unknown>) => {
     switch (event) {
       case 'presence:update':
-        params.setViewers((data.viewers as Viewer[]) ?? []);
+        params.setViewers(Array.isArray(data['viewers']) ? data['viewers'].filter(isViewer) : []);
         break;
-      case 'presence:join':
+      case 'presence:join': {
+        if (typeof data['userId'] !== 'string' || typeof data['username'] !== 'string') break;
+        const userId = data['userId'];
+        const username = data['username'];
         params.setViewers((current) => {
-          if (current.some((entry) => entry.userId === data.userId)) {
+          if (current.some((entry) => entry.userId === userId)) {
             return current;
           }
 
           return [
             ...current,
             {
-              userId: data.userId as string,
-              username: data.username as string,
+              userId,
+              username,
               joinedAt: Date.now(),
             },
           ];
         });
         break;
+      }
       case 'presence:leave':
-        params.setViewers((current) => current.filter((entry) => entry.userId !== data.userId));
+        params.setViewers((current) => current.filter((entry) => entry.userId !== data['userId']));
         break;
-      case 'crowd:input':
-        params.setCrowdInputs((current) => new Map(current).set(data.command as string, Date.now()));
+      case 'crowd:input': {
+        if (typeof data['command'] === 'string') {
+          const command = data['command'];
+          params.setCrowdInputs((current) => new Map(current).set(command, Date.now()));
+        }
         break;
-      case 'chat:message':
+      }
+      case 'chat:message': {
+        if (
+          typeof data['userId'] !== 'string'
+          || typeof data['username'] !== 'string'
+          || typeof data['content'] !== 'string'
+        ) break;
+        const userId = data['userId'];
+        const username = data['username'];
+        const content = data['content'];
         params.setMessages((current) => {
           const nextMessage: ChatMsg = {
-            userId: data.userId as string,
-            username: data.username as string,
-            content: data.content as string,
-            timestamp: getEventTimestamp(data.timestamp),
-            clientMessageId:
-              typeof data.clientMessageId === 'string' ? data.clientMessageId : undefined,
+            userId,
+            username,
+            content,
+            timestamp: getEventTimestamp(data['timestamp']),
+            ...(typeof data['clientMessageId'] === 'string'
+              ? { clientMessageId: data['clientMessageId'] }
+              : {}),
           };
 
-          if (data.historical === true) {
+          if (data['historical'] === true) {
             params.setChatHistoryCursor((cursor) =>
               cursor === null ? nextMessage.timestamp : Math.min(cursor, nextMessage.timestamp),
             );
@@ -187,21 +226,27 @@ export function createRobotWsEventHandler(params: RobotWsEventHandlerParams) {
           return mergeChatMessages(current, [nextMessage]);
         });
         break;
-      case 'chat:system':
+      }
+      case 'chat:system': {
+        if (typeof data['message'] !== 'string') break;
+        const message = data['message'];
         params.setMessages((current) =>
           mergeChatMessages(current, [
             {
               userId: 'system',
               username: 'system',
-              content: data.message as string,
-              timestamp: getEventTimestamp(data.timestamp),
+              content: message,
+              timestamp: getEventTimestamp(data['timestamp']),
               isSystem: true,
             },
           ]),
         );
         break;
+      }
       case 'queue:update':
-        params.setQueue(normalizeQueueEntries(data.queue as QueueEntryWire[] | undefined));
+        params.setQueue(
+          normalizeQueueEntries(Array.isArray(data['queue']) ? data['queue'].filter(isQueueEntryWire) : undefined),
+        );
         break;
       case 'session:start':
       case 'queue:turn-start': {
@@ -214,7 +259,7 @@ export function createRobotWsEventHandler(params: RobotWsEventHandlerParams) {
       case 'session:end':
       case 'queue:turn-end':
         params.setActiveSession((current) => {
-          const targetUserId = typeof data.userId === 'string' ? data.userId : null;
+          const targetUserId = typeof data['userId'] === 'string' ? data['userId'] : null;
           if (targetUserId && current && current.userId !== targetUserId) {
             return current;
           }
@@ -240,7 +285,7 @@ export function createRobotWsEventHandler(params: RobotWsEventHandlerParams) {
         });
         break;
       case 'mod:kick': {
-        const targetUserId = typeof data.userId === 'string' ? data.userId : null;
+        const targetUserId = typeof data['userId'] === 'string' ? data['userId'] : null;
         if (!targetUserId || targetUserId !== params.currentViewerId) {
           break;
         }
@@ -250,7 +295,7 @@ export function createRobotWsEventHandler(params: RobotWsEventHandlerParams) {
         break;
       }
       case 'mod:unban': {
-        const targetUserId = typeof data.userId === 'string' ? data.userId : null;
+        const targetUserId = typeof data['userId'] === 'string' ? data['userId'] : null;
         if (!targetUserId || targetUserId !== params.currentViewerId) {
           break;
         }
@@ -260,8 +305,7 @@ export function createRobotWsEventHandler(params: RobotWsEventHandlerParams) {
         break;
       }
       case 'robot:status': {
-        const status =
-          typeof data.status === 'string' ? (data.status as RobotPublic['status']) : params.initialRobotStatus;
+        const status = isRobotStatus(data['status']) ? data['status'] : params.initialRobotStatus;
         params.setRobotStatus(status);
         if (status === 'OFFLINE') {
           params.setLivekitCreds(null);
@@ -276,13 +320,13 @@ export function createRobotWsEventHandler(params: RobotWsEventHandlerParams) {
       }
       case 'server:shutdown': {
         const retryAfterMs =
-          typeof data.retryAfterMs === 'number' && Number.isFinite(data.retryAfterMs)
-            ? Math.max(1000, data.retryAfterMs)
+          typeof data['retryAfterMs'] === 'number' && Number.isFinite(data['retryAfterMs'])
+            ? Math.max(1000, data['retryAfterMs'])
             : 12000;
-        const reason = typeof data.reason === 'string' ? data.reason : 'restart';
+        const reason = typeof data['reason'] === 'string' ? data['reason'] : 'restart';
         const message =
-          typeof data.message === 'string'
-            ? data.message
+          typeof data['message'] === 'string'
+            ? data['message']
             : 'Realtime connection is restarting. Reconnecting soon...';
 
         params.reconnectRetryAfterRef.current = retryAfterMs;
@@ -300,7 +344,7 @@ export function createRobotWsEventHandler(params: RobotWsEventHandlerParams) {
         break;
       }
       case 'wallet:insufficient': {
-        const required = typeof data.required === 'number' ? data.required : null;
+        const required = typeof data['required'] === 'number' ? data['required'] : null;
         pushToast(
           required !== null
             ? `Not enough credits for this press (${required} cr needed).`
@@ -315,7 +359,7 @@ export function createRobotWsEventHandler(params: RobotWsEventHandlerParams) {
         break;
       case 'error': {
         const message =
-          typeof data.message === 'string' ? data.message : 'Unknown websocket error';
+          typeof data['message'] === 'string' ? data['message'] : 'Unknown websocket error';
 
         if (message === 'Invalid session token') {
           void api.restoreSession().finally(() => {
@@ -326,9 +370,10 @@ export function createRobotWsEventHandler(params: RobotWsEventHandlerParams) {
         }
 
         if (message.includes('restricted')) {
-          const restriction =
-            (data.restriction as { action?: string; expiresAt?: string | null } | undefined) ?? {};
-          const action = restriction.action;
+          const restriction = data['restriction'];
+          const action = isRecord(restriction) && typeof restriction['action'] === 'string'
+            ? restriction['action']
+            : undefined;
           const text =
             action === 'BAN'
               ? 'You are banned from this room.'

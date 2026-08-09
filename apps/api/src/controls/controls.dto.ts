@@ -18,11 +18,11 @@ import { ControlButtonAccess, LIMITS } from '@botparty/shared';
 export class CreateControlButtonDto {
   @IsString()
   @MaxLength(32)
-  label!: string;
+  declare label: string;
 
   @IsString()
   @MaxLength(64)
-  command!: string;
+  declare command: string;
 
   @IsOptional()
   @IsString()
@@ -119,11 +119,11 @@ export class UpdateControlButtonDto {
 
 class ReorderControlButtonItemDto {
   @IsUUID()
-  id!: string;
+  declare id: string;
 
   @IsInt()
   @Min(0)
-  position!: number;
+  declare position: number;
 }
 
 export class ReorderControlButtonsDto {
@@ -131,5 +131,5 @@ export class ReorderControlButtonsDto {
   @ArrayMaxSize(64)
   @ValidateNested({ each: true })
   @Type(() => ReorderControlButtonItemDto)
-  order!: ReorderControlButtonItemDto[];
+  declare order: ReorderControlButtonItemDto[];
 }

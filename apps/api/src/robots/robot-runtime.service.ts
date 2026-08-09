@@ -33,7 +33,18 @@ export class RobotRuntimeService {
     };
     const configuredRobotExpiry = this.configService.get<string>('ROBOT_JWT_EXPIRES_IN')?.trim();
     if (configuredRobotExpiry) {
-      robotJwtOptions.expiresIn = configuredRobotExpiry as JwtSignOptions['expiresIn'];
+      const match = /^(\d+)([smhd])$/.exec(configuredRobotExpiry);
+      if (match) {
+        const amount = Number(match[1]);
+        const multiplier = match[2] === 'd'
+          ? 86_400
+          : match[2] === 'h'
+            ? 3_600
+            : match[2] === 'm'
+              ? 60
+              : 1;
+        robotJwtOptions.expiresIn = amount * multiplier;
+      }
     }
 
     const robotAuthToken = this.jwtService.sign(
@@ -135,8 +146,9 @@ export class RobotRuntimeService {
         throw new UnauthorizedException('Invalid robot authorization');
       }
       if (
-        !Number.isInteger(payload.tokenVersion)
-        || !(await this.robotsService.validateRobotAuth(payload.sub, payload.deviceHash, payload.tokenVersion!))
+        typeof payload.tokenVersion !== 'number'
+        || !Number.isInteger(payload.tokenVersion)
+        || !(await this.robotsService.validateRobotAuth(payload.sub, payload.deviceHash, payload.tokenVersion))
       ) {
         throw new UnauthorizedException('Robot authorization has been revoked');
       }

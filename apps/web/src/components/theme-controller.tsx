@@ -13,7 +13,7 @@ export function ThemeController() {
       if (releaseFrame !== undefined) {
         window.cancelAnimationFrame(releaseFrame);
       }
-      delete document.documentElement.dataset.themeChanging;
+      delete document.documentElement.dataset['themeChanging'];
     };
 
     const applyTheme = () => {
@@ -28,17 +28,17 @@ export function ThemeController() {
       if (releaseFrame !== undefined) {
         window.cancelAnimationFrame(releaseFrame);
       }
-      root.dataset.themeChanging = 'true';
+      root.dataset['themeChanging'] = 'true';
       if (currentTheme && currentTheme !== nextTheme) {
         root.classList.replace(currentTheme, nextTheme);
       } else if (!currentTheme) {
         root.classList.add(nextTheme);
       }
-      root.dataset.theme = nextTheme;
+      root.dataset['theme'] = nextTheme;
 
       releaseFrame = window.requestAnimationFrame(() => {
         releaseFrame = window.requestAnimationFrame(() => {
-          delete root.dataset.themeChanging;
+          delete root.dataset['themeChanging'];
           releaseFrame = undefined;
         });
       });

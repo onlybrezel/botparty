@@ -92,7 +92,7 @@ export interface ReconnectNotice {
 export type FocusMode = 'controls' | 'chat';
 
 export function resolveWsUrl(): string {
-  const configured = process.env.NEXT_PUBLIC_API_URL;
+  const configured = process.env['NEXT_PUBLIC_API_URL'];
 
   if (!configured) {
     return `${window.location.origin.replace(/^https?/, (m) => (m === 'https' ? 'wss' : 'ws'))}/ws`;

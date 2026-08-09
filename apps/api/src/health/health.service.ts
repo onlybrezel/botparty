@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { PrismaClient } from '@botparty/prisma';
 import { HeadBucketCommand } from '@aws-sdk/client-s3';
@@ -8,6 +8,7 @@ import {
   resolveS3CompatibleStorageConfig,
 } from '../common/s3-compatible-storage';
 import { FeatureFlagsService } from '../common/feature-flags.service';
+import { isRecord } from '../common/json-value';
 import { LivekitService } from '../livekit/livekit.service';
 import { MailService } from '../mail/mail.service';
 import { PrismaReadService } from '../prisma/prisma-read.service';
@@ -17,6 +18,27 @@ import { RedisService } from '../redis/redis.service';
 const ROBOT_TELEMETRY_FRESH_WINDOW_MS = 180_000;
 const DEPENDENCY_CHECK_TIMEOUT_MS = 1_500;
 const PUBLIC_STATS_CACHE_TTL_MS = 5_000;
+const ROBOT_TELEMETRY_BATCH_SIZE = 250;
+
+type PublicStatsDatabase = {
+  user: Pick<PrismaClient['user'], 'count'>;
+  robot: Pick<PrismaClient['robot'], 'aggregate' | 'count'>;
+  queueEntry: Pick<PrismaClient['queueEntry'], 'count'>;
+  session: Pick<PrismaClient['session'], 'count'>;
+};
+
+type HealthDatabase = PublicStatsDatabase & {
+  $queryRaw: PrismaService['$queryRaw'];
+  billingIntent: Pick<PrismaService['billingIntent'], 'count'>;
+  notification: Pick<PrismaService['notification'], 'count'>;
+  queueEntry: Pick<PrismaService['queueEntry'], 'count' | 'findFirst'>;
+  robot: Pick<PrismaService['robot'], 'aggregate' | 'count' | 'findMany'>;
+  robotWebhook: Pick<PrismaService['robotWebhook'], 'count'>;
+};
+
+type HealthReadDatabase = Pick<PrismaReadService, 'isAvailable' | 'isReplicaConfigured'> & {
+  readonly client: PublicStatsDatabase;
+};
 
 async function resolveWithin<T>(operation: Promise<T>, fallback: T): Promise<T> {
   let timeout: NodeJS.Timeout | undefined;
@@ -40,6 +62,18 @@ type RobotTelemetrySummary = {
   avgCpuPercent: number;
   avgMemoryPercent: number;
   avgTemperatureC: number;
+};
+
+type RobotTelemetryAccumulator = {
+  freshRobots: number;
+  controlConnectedRobots: number;
+  livekitConnectedRobots: number;
+  cpuSum: number;
+  cpuSamples: number;
+  memorySum: number;
+  memorySamples: number;
+  temperatureSum: number;
+  temperatureSamples: number;
 };
 
 type PublicStatsSnapshot = {
@@ -76,13 +110,13 @@ export class HealthService {
   private publicStatsRefresh: Promise<PublicStatsSnapshot> | null = null;
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly redis: RedisService,
-    private readonly config: ConfigService,
-    private readonly livekit: LivekitService,
-    private readonly mail: MailService,
-    private readonly features: FeatureFlagsService,
-    private readonly readPrisma: PrismaReadService,
+    @Inject(PrismaService) private readonly prisma: HealthDatabase,
+    @Inject(RedisService) private readonly redis: Pick<RedisService, 'info' | 'mget' | 'ping'>,
+    @Inject(ConfigService) private readonly config: Pick<ConfigService, 'get'>,
+    @Inject(LivekitService) private readonly livekit: Pick<LivekitService, 'listRooms'>,
+    @Inject(MailService) private readonly mail: Pick<MailService, 'isAvailable'>,
+    @Inject(FeatureFlagsService) private readonly features: Pick<FeatureFlagsService, 'isEnabled'>,
+    @Inject(PrismaReadService) private readonly readPrisma: HealthReadDatabase,
   ) {}
 
   async getHealthSnapshot() {
@@ -175,7 +209,7 @@ export class HealthService {
     };
   }
 
-  private async buildPublicStats(database: PrismaClient) {
+  private async buildPublicStats(database: PublicStatsDatabase) {
     const [
       totalUsers,
       totalRobots,
@@ -334,49 +368,71 @@ export class HealthService {
     };
 
     try {
-      const robots = await this.prisma.robot.findMany({ select: { id: true } });
-      if (robots.length === 0) return emptySummary;
+      const accumulator: RobotTelemetryAccumulator = {
+        freshRobots: 0,
+        controlConnectedRobots: 0,
+        livekitConnectedRobots: 0,
+        cpuSum: 0,
+        cpuSamples: 0,
+        memorySum: 0,
+        memorySamples: 0,
+        temperatureSum: 0,
+        temperatureSamples: 0,
+      };
+      const now = Date.now();
+      let cursor: string | undefined;
 
-      const telemetryRows = await this.redis.mget(
-        ...robots.map((robot) => `robot:telemetry:${robot.id}:latest`),
-      );
-      return this.summarizeTelemetry(telemetryRows, Date.now());
+      while (true) {
+        const robots = await this.prisma.robot.findMany({
+          select: { id: true },
+          orderBy: { id: 'asc' },
+          take: ROBOT_TELEMETRY_BATCH_SIZE,
+          ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        });
+        if (robots.length === 0) break;
+
+        const telemetryRows = await this.redis.mget(
+          ...robots.map((robot) => `robot:telemetry:${robot.id}:latest`),
+        );
+        this.accumulateTelemetry(telemetryRows, now, accumulator);
+        if (robots.length < ROBOT_TELEMETRY_BATCH_SIZE) break;
+        cursor = robots[robots.length - 1]?.id;
+        if (!cursor) break;
+      }
+
+      return this.toTelemetrySummary(accumulator);
     } catch {
       return emptySummary;
     }
   }
 
-  private summarizeTelemetry(
+  private accumulateTelemetry(
     telemetryRows: Array<string | null>,
     now: number,
-  ): RobotTelemetrySummary {
-    const cpuSamples: number[] = [];
-    const memorySamples: number[] = [];
-    const temperatureSamples: number[] = [];
-    let freshRobots = 0;
-    let controlConnectedRobots = 0;
-    let livekitConnectedRobots = 0;
-
+    accumulator: RobotTelemetryAccumulator,
+  ): void {
     for (const rawTelemetry of telemetryRows) {
       const telemetry = this.parseFreshTelemetry(rawTelemetry, now);
       if (!telemetry) continue;
 
-      freshRobots += 1;
-      if (telemetry.controlConnected) controlConnectedRobots += 1;
-      if (telemetry.livekitConnected) livekitConnectedRobots += 1;
+      accumulator.freshRobots += 1;
+      if (telemetry['controlConnected']) accumulator.controlConnectedRobots += 1;
+      if (telemetry['livekitConnected']) accumulator.livekitConnectedRobots += 1;
 
-      this.collectNumber(telemetry.cpuPercent, cpuSamples);
-      this.collectNumber(telemetry.memoryPercent, memorySamples);
-      this.collectNumber(telemetry.temperatureC, temperatureSamples);
+      this.collectNumber(telemetry['cpuPercent'], accumulator, 'cpu');
+      this.collectNumber(telemetry['memoryPercent'], accumulator, 'memory');
+      this.collectNumber(telemetry['temperatureC'], accumulator, 'temperature');
     }
+  }
 
+  private toTelemetrySummary(accumulator: RobotTelemetryAccumulator): RobotTelemetrySummary {
     return {
-      freshRobots,
-      controlConnectedRobots,
-      livekitConnectedRobots,
-      avgCpuPercent: this.average(cpuSamples),
-      avgMemoryPercent: this.average(memorySamples),
-      avgTemperatureC: this.average(temperatureSamples),
+      freshRobots: accumulator.freshRobots,
+      controlConnectedRobots: accumulator.controlConnectedRobots,
+      livekitConnectedRobots: accumulator.livekitConnectedRobots,
+      avgCpuPercent: this.average(accumulator.cpuSum, accumulator.cpuSamples),
+      avgMemoryPercent: this.average(accumulator.memorySum, accumulator.memorySamples),
+      avgTemperatureC: this.average(accumulator.temperatureSum, accumulator.temperatureSamples),
     };
   }
 
@@ -385,27 +441,43 @@ export class HealthService {
 
     let telemetry: Record<string, unknown>;
     try {
-      telemetry = JSON.parse(rawTelemetry) as Record<string, unknown>;
+      const parsed: unknown = JSON.parse(rawTelemetry);
+      if (!isRecord(parsed)) return null;
+      telemetry = parsed;
     } catch {
       return null;
     }
 
-    const timestamp = this.asNumber(telemetry.ts);
+    const timestamp = this.asNumber(telemetry['ts']);
     if (timestamp === null || now - timestamp > ROBOT_TELEMETRY_FRESH_WINDOW_MS) return null;
     return telemetry;
   }
 
-  private collectNumber(value: unknown, samples: number[]) {
+  private collectNumber(
+    value: unknown,
+    accumulator: RobotTelemetryAccumulator,
+    metric: 'cpu' | 'memory' | 'temperature',
+  ) {
     const number = this.asNumber(value);
-    if (number !== null) samples.push(number);
+    if (number === null) return;
+    if (metric === 'cpu') {
+      accumulator.cpuSum += number;
+      accumulator.cpuSamples += 1;
+    } else if (metric === 'memory') {
+      accumulator.memorySum += number;
+      accumulator.memorySamples += 1;
+    } else {
+      accumulator.temperatureSum += number;
+      accumulator.temperatureSamples += 1;
+    }
   }
 
   private asNumber(value: unknown): number | null {
     return typeof value === 'number' && Number.isFinite(value) ? value : null;
   }
 
-  private average(values: number[]): number {
-    if (values.length === 0) return 0;
-    return Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(1));
+  private average(sum: number, sampleCount: number): number {
+    if (sampleCount === 0) return 0;
+    return Number((sum / sampleCount).toFixed(1));
   }
 }

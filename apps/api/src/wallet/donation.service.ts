@@ -5,6 +5,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Inject,
 } from '@nestjs/common';
 import { Prisma, TransactionType } from '@botparty/prisma';
 import { LIMITS } from '@botparty/shared';
@@ -13,6 +14,23 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { WalletService } from './wallet.service';
 import { PlatformUserService } from './platform-user.service';
+type DonationDatabase = {
+  robot: Pick<PrismaService['robot'], 'findUnique'>;
+  walletIdempotencyKey: Pick<PrismaService['walletIdempotencyKey'], 'findUnique'>;
+};
+type DonationTransaction = {
+  walletIdempotencyKey: Pick<Prisma.TransactionClient['walletIdempotencyKey'], 'create' | 'update'>;
+};
+interface DonationWallet {
+  runSerializable<T>(fn: (tx: DonationTransaction) => Promise<T>): Promise<T>;
+  transferInTransaction(
+    tx: DonationTransaction,
+    fromUserId: string,
+    toUserId: string,
+    amount: number,
+    options: Parameters<WalletService['transferInTransaction']>[4],
+  ): ReturnType<WalletService['transferInTransaction']>;
+}
 import { FeatureFlagsService } from '../common/feature-flags.service';
 
 const DONATION_RATE_HOUR_KEY = (userId: string) => `wallet:donations:hour:${userId}`;
@@ -23,11 +41,11 @@ export class DonationService {
   private readonly logger = new Logger(DonationService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly redis: RedisService,
-    private readonly wallet: WalletService,
-    private readonly platform: PlatformUserService,
-    private readonly features: FeatureFlagsService,
+    @Inject(PrismaService) private readonly prisma: DonationDatabase,
+    @Inject(RedisService) private readonly redis: Pick<RedisService, 'decr' | 'decrby' | 'expire' | 'incr' | 'incrby'>,
+    @Inject(WalletService) private readonly wallet: DonationWallet,
+    @Inject(PlatformUserService) private readonly platform: Pick<PlatformUserService, 'isPlatformUser'>,
+    @Inject(FeatureFlagsService) private readonly features: Pick<FeatureFlagsService, 'assertEnabled'>,
   ) {}
 
   async donate(input: {

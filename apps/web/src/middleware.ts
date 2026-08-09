@@ -14,19 +14,19 @@ function parseOrigins(raw: string | undefined): string[] {
 
 function buildCsp(nonce: string, pathname: string): string {
   const connectOrigins = [
-    ...parseOrigins(process.env.NEXT_PUBLIC_API_URL),
-    ...parseOrigins(process.env.NEXT_PUBLIC_WS_URL),
-    ...parseOrigins(process.env.NEXT_PUBLIC_LIVEKIT_URL),
-    ...parseOrigins(process.env.NEXT_PUBLIC_APP_URL),
-    ...parseOrigins(process.env.CSP_EXTRA_CONNECT_ORIGINS),
+    ...parseOrigins(process.env['NEXT_PUBLIC_API_URL']),
+    ...parseOrigins(process.env['NEXT_PUBLIC_WS_URL']),
+    ...parseOrigins(process.env['NEXT_PUBLIC_LIVEKIT_URL']),
+    ...parseOrigins(process.env['NEXT_PUBLIC_APP_URL']),
+    ...parseOrigins(process.env['CSP_EXTRA_CONNECT_ORIGINS']),
   ];
   const imageOrigins = [
-    ...parseOrigins(process.env.NEXT_PUBLIC_APP_URL),
-    ...parseOrigins(process.env.THUMBNAIL_PUBLIC_BASE_URL),
-    ...parseOrigins(process.env.CSP_EXTRA_IMG_ORIGINS),
+    ...parseOrigins(process.env['NEXT_PUBLIC_APP_URL']),
+    ...parseOrigins(process.env['THUMBNAIL_PUBLIC_BASE_URL']),
+    ...parseOrigins(process.env['CSP_EXTRA_IMG_ORIGINS']),
   ];
-  const devConnect = process.env.NODE_ENV === 'production' ? [] : ['http:', 'ws:'];
-  const devScript = process.env.NODE_ENV === 'production' ? [] : ["'unsafe-eval'"];
+  const devConnect = process.env['NODE_ENV'] === 'production' ? [] : ['http:', 'ws:'];
+  const devScript = process.env['NODE_ENV'] === 'production' ? [] : ["'unsafe-eval'"];
 
   return [
     "default-src 'self'",

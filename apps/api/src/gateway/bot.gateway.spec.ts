@@ -14,17 +14,7 @@ import { WalletService } from '../wallet/wallet.service';
 import { LivekitService } from '../livekit/livekit.service';
 import { FeatureFlagsService } from '../common/feature-flags.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import type { WsClient } from './gateway-types';
-
-type BotGatewayTestAccess = {
-  runtime: { robotClients: Map<string, WsClient> };
-  consumeControlCooldown(
-    client: WsClient,
-    robotId: string,
-    command: string,
-    cooldownMs: number,
-  ): Promise<boolean>;
-};
+import { createWsClient } from '../test/ws-client.fixture';
 
 describe('BotGateway', () => {
   let gateway: BotGateway;
@@ -180,9 +170,9 @@ describe('BotGateway', () => {
     }).compile();
 
     gateway = module.get<BotGateway>(BotGateway);
-    redisService = module.get(RedisService) as jest.Mocked<RedisService>;
-    jwtService = module.get(JwtService) as jest.Mocked<JwtService>;
-    livekitService = module.get(LivekitService) as jest.Mocked<LivekitService>;
+    redisService = module.get<jest.Mocked<RedisService>>(RedisService);
+    jwtService = module.get<jest.Mocked<JwtService>>(JwtService);
+    livekitService = module.get<jest.Mocked<LivekitService>>(LivekitService);
   });
 
   afterEach(async () => {
@@ -198,10 +188,10 @@ describe('BotGateway', () => {
 
   describe('connection handling', () => {
     it('assigns identity metadata on connect', async () => {
-      const mockSocket = {
+      const mockSocket = createWsClient({
         id: 'test-socket-1',
         close: jest.fn(),
-      } as unknown as WsClient;
+      });
 
       await gateway.handleConnection(mockSocket, {});
       expect(mockSocket.id).toBeDefined();
@@ -209,12 +199,11 @@ describe('BotGateway', () => {
     });
 
     it('should accept connection with valid token', async () => {
-      const mockSocket = {
+      const mockSocket = createWsClient({
         id: 'test-socket-2',
-        on: jest.fn(),
         close: jest.fn(),
         send: jest.fn(),
-      } as unknown as WsClient;
+      });
 
       jwtService.verify.mockReturnValueOnce({ userId: 'user-1', sub: 'user-1' });
 
@@ -224,10 +213,9 @@ describe('BotGateway', () => {
     });
 
     it('should handle disconnection gracefully', async () => {
-      const mockSocket = {
+      const mockSocket = createWsClient({
         id: 'test-socket-3',
-        on: jest.fn(),
-      } as unknown as WsClient;
+      });
 
       jwtService.verify.mockReturnValueOnce({ userId: 'user-1', sub: 'user-1' });
       await gateway.handleConnection(mockSocket, {});
@@ -238,16 +226,15 @@ describe('BotGateway', () => {
 
     it('stops active room recording when a robot socket disconnects', async () => {
       jest.useFakeTimers();
-      const robotSocket = {
+      const robotSocket = createWsClient({
         id: 'robot-socket-1',
         robotId: 'robot-1',
         isRobot: true,
-        readyState: 1,
-        close: jest.fn(),
-      } as unknown as WsClient;
+          close: jest.fn(),
+      });
 
       await gateway.handleConnection(robotSocket, {});
-      (gateway as unknown as BotGatewayTestAccess).runtime.robotClients.set('robot-1', robotSocket);
+      gateway.registerRobotRuntimeClient('robot-1', robotSocket);
       await gateway.handleDisconnect(robotSocket);
       await jest.advanceTimersByTimeAsync(10_000);
 
@@ -269,9 +256,9 @@ describe('BotGateway', () => {
     });
 
     it('stores control cooldowns in redis with a shared TTL gate', async () => {
-      const client = { id: 'viewer-1', userId: 'user-1' } as unknown as WsClient;
+      const client = createWsClient({ id: 'viewer-1', userId: 'user-1' });
 
-      const allowed = await (gateway as unknown as BotGatewayTestAccess).consumeControlCooldown(
+      const allowed = await gateway.consumeControlCooldown(
         client,
         'robot-1',
         'Forward',
@@ -289,12 +276,12 @@ describe('BotGateway', () => {
     });
 
     it('falls back to local cooldown tracking when redis is unavailable', async () => {
-      const client = { id: 'viewer-1', userId: 'user-1' } as unknown as WsClient;
+      const client = createWsClient({ id: 'viewer-1', userId: 'user-1' });
       redisService.set.mockRejectedValueOnce(new Error('redis down'));
       redisService.set.mockRejectedValueOnce(new Error('redis still down'));
       redisService.set.mockResolvedValueOnce('OK');
 
-      const internal = gateway as unknown as BotGatewayTestAccess;
+      const internal = gateway;
       const first = await internal.consumeControlCooldown(
         client,
         'robot-1',

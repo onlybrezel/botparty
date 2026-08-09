@@ -33,7 +33,7 @@ export class PayoutsController {
       amount: dto.amount,
       destination: dto.destination,
       destinationType: dto.destinationType,
-      notes: dto.notes,
+      ...(dto.notes === undefined ? {} : { notes: dto.notes }),
     });
   }
 

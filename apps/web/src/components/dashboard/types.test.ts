@@ -1,4 +1,4 @@
-import { ControlButtonAccess } from '@botparty/shared';
+import { ControlButtonAccess, QueueMode, RobotAccessMode, RobotStatus, RobotVisibility } from '@botparty/shared';
 import type { ControlButtonRecord, RobotManaged } from '@/lib/api';
 import {
   applyControlPreset,
@@ -14,26 +14,26 @@ import {
   validateRobotFormSchedule,
 } from './types';
 import type { RoomMode } from './types';
+import { createRobotManaged } from '@/test/robot-fixtures';
 
-const robot = {
+const robot = createRobotManaged({
   id: 'robot-1',
   name: 'Rover',
   slug: 'rover',
   description: null,
   thumbnailUrl: null,
-  visibility: 'PUBLIC',
-  accessMode: 'OPEN',
-  queueMode: 'FIRST_COME',
-  status: 'ONLINE',
+  visibility: RobotVisibility.PUBLIC,
+  accessMode: RobotAccessMode.OPEN,
+  queueMode: QueueMode.FIRST_COME,
+  status: RobotStatus.ONLINE,
   maxTurnTime: 60_000,
   maxViewers: 100,
   maxControllers: 5,
   scheduleStart: null,
   scheduleEnd: null,
-  timezone: null,
   tags: ['demo'],
   metadata: null,
-} as unknown as RobotManaged;
+});
 
 const button: ControlButtonRecord = {
   id: 'button-1',
@@ -153,15 +153,15 @@ describe('dashboard domain mappings', () => {
     });
     expect(defaults).toEqual(
       expect.objectContaining({
-        slug: undefined,
-        description: undefined,
-        thumbnailUrl: undefined,
-        accessPassword: undefined,
         scheduleStart: null,
         scheduleEnd: null,
-        stream: { targetBitrateKbps: undefined },
+        stream: {},
       }),
     );
+    expect(defaults).not.toHaveProperty('slug');
+    expect(defaults).not.toHaveProperty('description');
+    expect(defaults).not.toHaveProperty('thumbnailUrl');
+    expect(defaults).not.toHaveProperty('accessPassword');
     expect(defaults.timezone).toBeTruthy();
   });
 

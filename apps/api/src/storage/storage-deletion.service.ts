@@ -1,9 +1,13 @@
-import { DeleteObjectsCommand, ListObjectsV2Command, type S3Client } from '@aws-sdk/client-s3';
-import { Injectable, Logger } from '@nestjs/common';
+import { DeleteObjectsCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Prisma } from '@botparty/prisma';
 import { Gauge, register } from 'prom-client';
-import { createS3CompatibleStorageClient, resolveS3CompatibleStorageConfig } from '../common/s3-compatible-storage';
+import {
+  createS3CompatibleStorageClient,
+  resolveS3CompatibleStorageConfig,
+  type S3CompatibleStorageClient,
+} from '../common/s3-compatible-storage';
 import { PrismaService } from '../prisma/prisma.service';
 
 const deletionBacklog = (register.getSingleMetric('botparty_storage_deletion_backlog') as Gauge | undefined)
@@ -22,8 +26,12 @@ export class StorageDeletionService {
   private readonly logger = new Logger(StorageDeletionService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly config: ConfigService,
+    @Inject(PrismaService)
+    private readonly prisma: {
+      $transaction: PrismaService['$transaction'];
+      storageDeletionTask: Pick<PrismaService['storageDeletionTask'], 'count' | 'deleteMany' | 'findMany' | 'update'>;
+    },
+    @Inject(ConfigService) private readonly config: { get<T = unknown>(key: string): T | undefined },
   ) {}
 
   get recordingBucket(): string {
@@ -35,7 +43,7 @@ export class StorageDeletionService {
   }
 
   async enqueue(
-    tx: Prisma.TransactionClient,
+    tx: { storageDeletionTask: Pick<Prisma.TransactionClient['storageDeletionTask'], 'createMany'> },
     bucket: string,
     objectKeys: string[],
   ): Promise<void> {
@@ -103,7 +111,7 @@ export class StorageDeletionService {
   }
 
   private async processExactTasks(
-    client: S3Client,
+    client: S3CompatibleStorageClient,
     bucket: string,
     tasks: Array<{ id: string; objectKey: string; attempts: number }>,
   ) {
@@ -134,7 +142,7 @@ export class StorageDeletionService {
   }
 
   private async processPrefixTask(
-    client: S3Client,
+    client: S3CompatibleStorageClient,
     task: { id: string; bucket: string; objectKey: string; attempts: number },
   ) {
     try {

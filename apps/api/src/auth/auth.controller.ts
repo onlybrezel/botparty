@@ -1,10 +1,9 @@
-import { Controller, Post, Get, Query, Body, HttpCode, HttpStatus, Headers, Req, Res, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Query, Body, HttpCode, HttpStatus, Headers, Req, Res, UseGuards, Inject } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { Throttle } from '@nestjs/throttler';
 import { randomBytes } from 'crypto';
 import { AuthService } from './auth.service';
-import type { FastifyReply, FastifyRequest } from 'fastify';
 import {
   buildClientCookie,
   buildClearedCookie,
@@ -37,12 +36,20 @@ import { ZodValidationPipe } from '../common/zod-validation.pipe';
 
 const CSRF_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
+interface AuthReply {
+  header(name: string, value: string | string[]): unknown;
+}
+
+interface AuthRequest {
+  readonly ip: string;
+}
+
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
   constructor(
-    private readonly authService: AuthService,
-    private readonly configService: ConfigService,
+    @Inject(AuthService) private readonly authService: Pick<AuthService, 'login' | 'refreshToken' | 'register' | 'requestPasswordReset' | 'resendEmailVerification' | 'resetPassword' | 'resolveAccessTokenSubject' | 'resolveRefreshTokenSubject' | 'revokeRefreshTokens' | 'verifyEmail'>,
+    @Inject(ConfigService) private readonly configService: Pick<ConfigService, 'get'>,
   ) {}
 
   @Post('register')
@@ -50,7 +57,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Register a new user' })
   async register(
     @Body(new ZodValidationPipe(registerSchema)) body: RegisterInput,
-    @Res({ passthrough: true }) reply: FastifyReply,
+    @Res({ passthrough: true }) reply: AuthReply,
   ) {
     const result = await this.authService.register(body);
     if (result.accessToken && result.refreshToken) {
@@ -64,7 +71,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Issue CSRF token for double-submit protection' })
   getCsrfToken(
     @Headers('cookie') cookieHeader: string | undefined,
-    @Res({ passthrough: true }) reply: FastifyReply,
+    @Res({ passthrough: true }) reply: AuthReply,
   ) {
     const secure = shouldUseSecureAuthCookies(this.configService);
     const sameSite = getAuthCookieSameSite(this.configService);
@@ -94,8 +101,8 @@ export class AuthController {
   @ApiOperation({ summary: 'Login with email/password' })
   async login(
     @Body(new ZodValidationPipe(loginSchema)) body: LoginInput,
-    @Req() request: FastifyRequest,
-    @Res({ passthrough: true }) reply: FastifyReply,
+    @Req() request: AuthRequest,
+    @Res({ passthrough: true }) reply: AuthReply,
   ) {
     const tokens = await this.authService.login(body, { remoteIp: request.ip });
     this.applyAuthCookies(reply, tokens.accessToken, tokens.refreshToken);
@@ -109,7 +116,7 @@ export class AuthController {
   async refresh(
     @Body() body: { refreshToken?: string } | undefined,
     @Headers('cookie') cookieHeader: string | undefined,
-    @Res({ passthrough: true }) reply: FastifyReply,
+    @Res({ passthrough: true }) reply: AuthReply,
   ) {
     const refreshToken =
       body?.refreshToken?.trim() ||
@@ -131,7 +138,7 @@ export class AuthController {
     @Headers('authorization') authorization: string | undefined,
     @Headers('cookie') cookieHeader: string | undefined,
     @Body() body: { refreshToken?: string } | undefined,
-    @Res({ passthrough: true }) reply: FastifyReply,
+    @Res({ passthrough: true }) reply: AuthReply,
   ) {
     const accessToken =
       extractBearerToken(authorization) ||
@@ -157,8 +164,8 @@ export class AuthController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Revoke all refresh tokens for the current user (sign out everywhere)' })
   async logoutAll(
-    @CurrentUser() user: JwtPayload,
-    @Res({ passthrough: true }) reply: FastifyReply,
+    @CurrentUser() user: Pick<JwtPayload, 'sub'>,
+    @Res({ passthrough: true }) reply: AuthReply,
   ) {
     await this.authService.revokeRefreshTokens(user.sub);
     this.clearAuthCookies(reply);
@@ -198,7 +205,7 @@ export class AuthController {
     return this.authService.resendEmailVerification(body);
   }
 
-  private applyAuthCookies(reply: FastifyReply, accessToken: string, refreshToken: string) {
+  private applyAuthCookies(reply: AuthReply, accessToken: string, refreshToken: string) {
     const secure = shouldUseSecureAuthCookies(this.configService);
     const sameSite = getAuthCookieSameSite(this.configService);
     reply.header('set-cookie', [
@@ -217,7 +224,7 @@ export class AuthController {
     ]);
   }
 
-  private applyAccessCookie(reply: FastifyReply, accessToken: string) {
+  private applyAccessCookie(reply: AuthReply, accessToken: string) {
     const secure = shouldUseSecureAuthCookies(this.configService);
     const sameSite = getAuthCookieSameSite(this.configService);
     reply.header(
@@ -231,7 +238,7 @@ export class AuthController {
     );
   }
 
-  private clearAuthCookies(reply: FastifyReply) {
+  private clearAuthCookies(reply: AuthReply) {
     const secure = shouldUseSecureAuthCookies(this.configService);
     const sameSite = getAuthCookieSameSite(this.configService);
     reply.header('set-cookie', [

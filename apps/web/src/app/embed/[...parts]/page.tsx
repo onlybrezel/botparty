@@ -3,6 +3,7 @@ import type { Metadata } from 'next';
 import type { RobotPublic } from '@botparty/shared';
 import { EmbedRobotView } from '@/components/embed-robot-view';
 import { getServerApiUrl } from '@/lib/server-api-url';
+import { isRobotPublic } from '@/lib/api-response-guards';
 
 function parseParts(parts: string[]): { username: string | null; slug: string } | null {
   if (parts.length === 1) {
@@ -25,7 +26,8 @@ async function getRobot(username: string | null, slug: string): Promise<RobotPub
     if (!res.ok) {
       return null;
     }
-    return res.json() as Promise<RobotPublic>;
+    const payload: unknown = await res.json();
+    return isRobotPublic(payload) ? payload : null;
   } catch {
     return null;
   }

@@ -77,7 +77,7 @@ export function loadStoredChatMessages(robotId: string): ChatMsg[] {
       return [];
     }
 
-    const parsed = JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed) || parsed.length === 0) {
       return [];
     }
@@ -92,7 +92,15 @@ export function loadStoredChatMessages(robotId: string): ChatMsg[] {
       return [];
     }
 
-    return mergeChatMessages([], parsed as ChatMsg[]);
+    const messages = parsed.filter((entry): entry is ChatMsg =>
+      typeof entry === 'object'
+      && entry !== null
+      && typeof entry.userId === 'string'
+      && typeof entry.username === 'string'
+      && typeof entry.content === 'string'
+      && typeof entry.timestamp === 'number',
+    );
+    return mergeChatMessages([], messages);
   } catch {
     return [];
   }

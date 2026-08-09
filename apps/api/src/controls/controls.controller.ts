@@ -13,6 +13,7 @@ import {
   HttpStatus,
   Headers,
   Query,
+  Inject,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ControlsService } from './controls.service';
@@ -29,10 +30,10 @@ import { AuthService } from '../auth/auth.service';
 @Controller('controls')
 export class ControlsController {
   constructor(
-    private readonly controlsService: ControlsService,
-    private readonly robotsService: RobotsService,
-    private readonly authService: AuthService,
-    private readonly configService: ConfigService,
+    @Inject(ControlsService) private readonly controlsService: Pick<ControlsService, 'getVisibleButtons' | 'getAllButtons' | 'create' | 'update' | 'remove' | 'reorder'>,
+    @Inject(RobotsService) private readonly robotsService: Pick<RobotsService, 'resolveGuestActorId' | 'validateRoomAccess' | 'getAccessPolicy'>,
+    @Inject(AuthService) private readonly authService: Pick<AuthService, 'resolveValidAccessTokenPayload'>,
+    @Inject(ConfigService) private readonly configService: Pick<ConfigService, 'get'>,
   ) {}
 
   /** Public: get active buttons for a robot (used by front-end + robot client). */
@@ -47,12 +48,11 @@ export class ControlsController {
   ) {
     const requester = await this.resolveRequester(authorization, cookieHeader);
     const actorId = requester?.sub ?? this.robotsService.resolveGuestActorId(guestSessionId);
-    const hasRoomAccess =
-      Boolean(actorId) &&
+    const hasRoomAccess = actorId !== null &&
       (await this.robotsService.validateRoomAccess({
         robotId,
-        actorId: actorId!,
-        roomAccessToken,
+        actorId,
+        ...(roomAccessToken === undefined ? {} : { roomAccessToken }),
       }));
 
     if (!hasRoomAccess) {

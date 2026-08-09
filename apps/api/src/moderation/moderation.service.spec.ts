@@ -41,7 +41,7 @@ function buildService() {
     lrange: jest.fn().mockResolvedValue([]),
     pipeline: jest.fn().mockReturnValue(pipeline),
   };
-  const auditService = new ModerationAuditService(prisma as never, redis as never);
+  const auditService = new ModerationAuditService(prisma, redis);
   const overviewService = {
     getAdminOverview: jest.fn(),
     getAdminRuntimeOverview: jest.fn(),
@@ -55,10 +55,10 @@ function buildService() {
   };
 
   const service = new ModerationService(
-    prisma as never,
-    redis as never,
-    auditService as never,
-    overviewService as never,
+    prisma,
+    redis,
+    auditService,
+    overviewService,
   );
 
   return { service, prisma, redis, pipeline };

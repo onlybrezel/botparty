@@ -26,7 +26,7 @@ describe('AllExceptionsFilter', () => {
       code: 'P1001',
     });
 
-    new AllExceptionsFilter().catch(error, host as never);
+    new AllExceptionsFilter().catch(error, host);
 
     expect(reply.status).toHaveBeenCalledWith(HttpStatus.SERVICE_UNAVAILABLE);
     expect(reply.header).toHaveBeenCalledWith('retry-after', '1');
@@ -47,7 +47,7 @@ describe('AllExceptionsFilter', () => {
       name: 'PrismaClientUnknownRequestError',
     });
 
-    new AllExceptionsFilter().catch(error, host as never);
+    new AllExceptionsFilter().catch(error, host);
 
     expect(reply.status).toHaveBeenCalledWith(HttpStatus.SERVICE_UNAVAILABLE);
     expect(reply.send).toHaveBeenCalledWith({
@@ -62,7 +62,7 @@ describe('AllExceptionsFilter', () => {
       name: 'PrismaClientUnknownRequestError',
     });
 
-    new AllExceptionsFilter().catch(error, host as never);
+    new AllExceptionsFilter().catch(error, host);
 
     expect(reply.status).toHaveBeenCalledWith(HttpStatus.INTERNAL_SERVER_ERROR);
     expect(reply.send).toHaveBeenCalledWith({
@@ -76,7 +76,7 @@ describe('AllExceptionsFilter', () => {
 
     new AllExceptionsFilter().catch(
       new ServiceUnavailableException('Request protection is temporarily unavailable'),
-      host as never,
+      host,
     );
 
     expect(reply.status).toHaveBeenCalledWith(HttpStatus.SERVICE_UNAVAILABLE);

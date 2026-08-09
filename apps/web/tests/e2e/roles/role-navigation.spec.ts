@@ -90,7 +90,7 @@ test('disabled accounts receive a visible login error and no authenticated navig
   await page.goto('/login');
   await waitForLoginForm(page);
   await page.getByLabel('Email').fill('disabled@botparty.test');
-  await page.getByLabel('Password').fill(process.env.E2E_USER_PASSWORD ?? 'E2eDemoPassword!2026');
+  await page.getByLabel('Password').fill(process.env['E2E_USER_PASSWORD'] ?? 'E2eDemoPassword!2026');
   await page.getByRole('button', { name: 'Continue' }).click();
 
   await expect(page).toHaveURL(/\/login$/);

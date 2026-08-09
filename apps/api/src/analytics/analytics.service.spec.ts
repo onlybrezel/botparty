@@ -8,7 +8,7 @@ function build() {
     robot: { count: jest.fn() },
     billingIntent: { count: jest.fn(), aggregate: jest.fn() },
   };
-  return { service: new AnalyticsService(prisma as never), prisma };
+  return { service: new AnalyticsService(prisma), prisma };
 }
 
 describe('AnalyticsService', () => {

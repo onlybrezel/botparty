@@ -1,10 +1,13 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class RobotInviteService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService)
+    private readonly prisma: { robot: Pick<PrismaService['robot'], 'findUnique' | 'update'> },
+  ) {}
 
   async generateUniqueInviteCode(): Promise<string> {
     for (let attempt = 0; attempt < 5; attempt += 1) {

@@ -11,6 +11,7 @@ import { NotificationsApi } from './api/notifications';
 import { AnalyticsApi } from './api/analytics';
 import type { ApiRequestOptions, AuthSessionResponse, RequestFn } from './api/types';
 import type { PlatformStats } from './api-types';
+import { isRecord } from './api-response-guards';
 
 export type {
   ActiveSessionRecord,
@@ -55,7 +56,7 @@ const wait = (delayMs: number) =>
   });
 
 function resolveApiUrl() {
-  const configured = process.env.NEXT_PUBLIC_API_URL;
+  const configured = process.env['NEXT_PUBLIC_API_URL'];
 
   // Server-side: use env var or localhost default.
   if (typeof window === 'undefined') {
@@ -116,9 +117,11 @@ class ApiClient {
   }
 
   private async parseError(res: Response): Promise<ApiError> {
-    const error = await res.json().catch(() => ({ message: res.statusText }));
+    const error: unknown = await res.json().catch(() => null);
     return new ApiError(
-      (error as { message?: string }).message ?? `API error: ${res.status}`,
+      isRecord(error) && typeof error['message'] === 'string'
+        ? error['message']
+        : res.statusText || `API error: ${res.status}`,
       res.status,
     );
   }
@@ -152,8 +155,8 @@ class ApiClient {
           };
         }
 
-        const refreshed = (await refreshRes.json()) as AuthSessionResponse;
-        if (!refreshed.accessToken) {
+        const refreshed: unknown = await refreshRes.json();
+        if (!isAuthSessionResponse(refreshed) || !refreshed.accessToken) {
           useAuth.getState().logout();
           this.setToken(null);
           return { token: null, retryable: false };
@@ -161,10 +164,10 @@ class ApiClient {
         this.setToken(refreshed.accessToken);
         useAuth.getState().login({
           accessToken: refreshed.accessToken,
-          username: refreshed.user.username,
-          userId: refreshed.user.id,
-          displayName: refreshed.user.displayName,
-          role: refreshed.user.role,
+          username: refreshed.user['username'],
+          userId: refreshed.user['id'],
+          displayName: refreshed.user['displayName'],
+          role: refreshed.user['role'],
         });
 
         return { token: refreshed.accessToken, retryable: false };
@@ -237,7 +240,7 @@ class ApiClient {
       try {
         return await makeRequest();
       } catch (error) {
-        if (error instanceof DOMException && error.name === 'AbortError') {
+        if (error instanceof DOMException && error['name'] === 'AbortError') {
           throw error;
         }
         throw new ApiError('Cannot reach the service. Check your connection and try again.', 0);
@@ -257,7 +260,7 @@ class ApiClient {
     ) {
       const refreshed = await this.refreshSession();
       if (refreshed.token) {
-        headers.Authorization = `Bearer ${refreshed.token}`;
+        headers['Authorization'] = `Bearer ${refreshed.token}`;
         res = await performRequest();
       }
     }
@@ -290,8 +293,10 @@ class ApiClient {
         throw new ApiError('Could not establish a secure session. Try again.', response.status);
       }
 
-      const payload = (await response.json().catch(() => null)) as { csrfToken?: string } | null;
-      const csrfToken = payload?.csrfToken?.trim();
+      const payload: unknown = await response.json().catch(() => null);
+      const csrfToken = isRecord(payload) && typeof payload['csrfToken'] === 'string'
+        ? payload['csrfToken'].trim()
+        : '';
       if (!csrfToken) {
         throw new ApiError('Could not establish a secure session. Try again.', 503);
       }
@@ -321,3 +326,15 @@ export function createApiClient(baseUrl = API_URL) {
   return new ApiClient(baseUrl);
 }
 export { ApiError };
+
+function isAuthSessionResponse(value: unknown): value is AuthSessionResponse {
+  if (!isRecord(value) || !isRecord(value['user'])) return false;
+  const user = value['user'];
+  return (value['accessToken'] === undefined || typeof value['accessToken'] === 'string')
+    && typeof user['id'] === 'string'
+    && typeof user['username'] === 'string'
+    && (user['displayName'] === null || typeof user['displayName'] === 'string')
+    && (user['avatarUrl'] === null || typeof user['avatarUrl'] === 'string')
+    && (user['role'] === 'USER' || user['role'] === 'MOD' || user['role'] === 'ADMIN')
+    && typeof user['createdAt'] === 'string';
+}

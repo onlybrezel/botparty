@@ -93,6 +93,7 @@ COPY --from=build-api --chown=botparty:botparty /app/packages/prisma/prisma     
 COPY --from=build-api --chown=botparty:botparty /app/packages/prisma/seed.ts    ./packages/prisma/seed.ts
 COPY --chown=botparty:botparty scripts/prepare-prisma-baseline.mjs              ./scripts/prepare-prisma-baseline.mjs
 COPY --chown=botparty:botparty scripts/migrate-webhook-secrets.mjs              ./scripts/migrate-webhook-secrets.mjs
+COPY --chown=botparty:botparty scripts/api-cluster.mjs                          ./scripts/api-cluster.mjs
 
 # Shared + API compiled output
 COPY --from=build-shared --chown=botparty:botparty /app/packages/shared/dist   ./packages/shared/dist

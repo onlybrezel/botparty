@@ -36,14 +36,14 @@ import { NotificationsService } from '../notifications/notifications.service';
 @WebSocketGateway({
   path: '/ws',
   cors: {
-    origin: process.env.CORS_ORIGIN?.split(',') ?? ['http://localhost:3000'],
+    origin: process.env['CORS_ORIGIN']?.split(',') ?? ['http://localhost:3000'],
   },
 })
 export class BotGateway
   implements OnGatewayConnection, OnGatewayDisconnect, OnModuleInit, OnModuleDestroy, BeforeApplicationShutdown
 {
   @WebSocketServer()
-  server!: Server;
+  declare server: Server;
 
   private readonly logger = new Logger(BotGateway.name);
   private readonly runtime: GatewayRuntimeSupport;
@@ -348,16 +348,24 @@ export class BotGateway
     return this.moderationEnforcer.buildSystemMessage(event, data);
   }
 
-  private async _revalidateAuthenticatedSockets() {
+  async revalidateAuthenticatedSockets() {
     return this.runtime.revalidateAuthenticatedSockets();
   }
 
-  private async consumeControlCooldown(
+  async consumeControlCooldown(
     client: WsClient,
     robotId: string,
     command: string,
     cooldownMs: number,
   ): Promise<boolean> {
     return this.runtime.consumeControlCooldown(client, robotId, command, cooldownMs);
+  }
+
+  registerRuntimeClient(client: WsClient): void {
+    this.clients.set(client.id, client);
+  }
+
+  registerRobotRuntimeClient(robotId: string, client: WsClient): void {
+    this.robotClients.set(robotId, client);
   }
 }

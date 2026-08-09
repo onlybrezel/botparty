@@ -182,8 +182,11 @@ describe('useDashboardControls', () => {
     await act(() => minimal.result.current.handleCreateControl());
     expect(mockApi.createControl).toHaveBeenLastCalledWith(
       'robot-1',
-      expect.objectContaining({ hotKey: undefined, costCredits: 0, color: undefined }),
+      expect.objectContaining({ costCredits: 0 }),
     );
+    const minimalPayload = mockApi.createControl.mock.lastCall?.[1];
+    expect(minimalPayload).not.toHaveProperty('hotKey');
+    expect(minimalPayload).not.toHaveProperty('color');
 
     const invalidProps = buildProps({
       controlDraft: { ...DEFAULT_CONTROL_DRAFT, label: ' ', command: '' },

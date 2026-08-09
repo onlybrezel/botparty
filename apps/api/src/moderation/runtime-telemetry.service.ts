@@ -51,7 +51,7 @@ export class RuntimeTelemetryService {
       const room = livekitRoomByRobot.get(robot.id) ?? null;
       const queue = this.db.sortQueueEntries(robot.queueMode, queueByRobot.get(robot.id) ?? []);
       const activeSession = activeSessionByRobot.get(robot.id) ?? null;
-      const telemetryTs = this.asNumber(telemetry?.ts);
+      const telemetryTs = this.asNumber(telemetry?.['ts']);
 
       return {
         id: robot.id,
@@ -79,20 +79,20 @@ export class RuntimeTelemetryService {
         telemetry: telemetry
           ? {
               ts: telemetryTs,
-              clientVersion: this.asString(telemetry.clientVersion),
-              botpartyStreamerVersion: this.asString(telemetry.botpartyStreamerVersion),
-              gitBranch: this.asString(telemetry.gitBranch),
-              gitCommit: this.asString(telemetry.gitCommit),
-              gitDirty: Boolean(telemetry.gitDirty),
-              pythonVersion: this.asString(telemetry.pythonVersion),
-              cpuPercent: this.asNumber(telemetry.cpuPercent),
-              memoryPercent: this.asNumber(telemetry.memoryPercent),
-              temperatureC: this.asNumber(telemetry.temperatureC),
-              uptimeSec: this.asNumber(telemetry.uptimeSec),
-              controlConnected: Boolean(telemetry.controlConnected),
-              livekitConnected: Boolean(telemetry.livekitConnected),
-              commandsReceived: this.asNumber(telemetry.commandsReceived) ?? 0,
-              cameraFrames: this.asNumber(telemetry.cameraFrames) ?? 0,
+              clientVersion: this.asString(telemetry['clientVersion']),
+              botpartyStreamerVersion: this.asString(telemetry['botpartyStreamerVersion']),
+              gitBranch: this.asString(telemetry['gitBranch']),
+              gitCommit: this.asString(telemetry['gitCommit']),
+              gitDirty: Boolean(telemetry['gitDirty']),
+              pythonVersion: this.asString(telemetry['pythonVersion']),
+              cpuPercent: this.asNumber(telemetry['cpuPercent']),
+              memoryPercent: this.asNumber(telemetry['memoryPercent']),
+              temperatureC: this.asNumber(telemetry['temperatureC']),
+              uptimeSec: this.asNumber(telemetry['uptimeSec']),
+              controlConnected: Boolean(telemetry['controlConnected']),
+              livekitConnected: Boolean(telemetry['livekitConnected']),
+              commandsReceived: this.asNumber(telemetry['commandsReceived']) ?? 0,
+              cameraFrames: this.asNumber(telemetry['cameraFrames']) ?? 0,
             }
           : null,
         livekit: room,

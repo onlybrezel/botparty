@@ -2,7 +2,7 @@ import path from 'path';
 import type { NextConfig } from 'next';
 import bundleAnalyzer from '@next/bundle-analyzer';
 
-const API_URL = process.env.API_URL ?? 'http://localhost:4000';
+const API_URL = process.env['API_URL'] ?? 'http://localhost:4000';
 
 function readOrigin(value: string | undefined): string | null {
   const trimmed = value?.trim();
@@ -14,7 +14,7 @@ function readOrigin(value: string | undefined): string | null {
   }
 }
 
-const isDev = process.env.NODE_ENV !== 'production';
+const isDev = process.env['NODE_ENV'] !== 'production';
 
 const securityHeaders = [
   { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
@@ -27,7 +27,7 @@ function buildImageRemotePatterns(): NonNullable<
   NonNullable<NextConfig['images']>['remotePatterns']
 > {
   const patterns: NonNullable<NonNullable<NextConfig['images']>['remotePatterns']> = [];
-  const extra = process.env.NEXT_PUBLIC_IMAGE_REMOTE_HOSTS;
+  const extra = process.env['NEXT_PUBLIC_IMAGE_REMOTE_HOSTS'];
   const hosts = new Set<string>();
 
   for (const key of ['THUMBNAIL_PUBLIC_BASE_URL', 'NEXT_PUBLIC_API_URL', 'NEXT_PUBLIC_APP_URL']) {
@@ -83,7 +83,7 @@ const nextConfig: NextConfig = {
   outputFileTracingRoot: path.join(__dirname, '../../'),
   reactStrictMode: true,
   transpilePackages: ['@botparty/shared'],
-  allowedDevOrigins: isDev ? ['127.0.0.1', 'localhost'] : undefined,
+  ...(isDev ? { allowedDevOrigins: ['127.0.0.1', 'localhost'] } : {}),
   experimental: {
     serverActions: {
       bodySizeLimit: '2mb',
@@ -111,7 +111,7 @@ const nextConfig: NextConfig = {
 };
 
 const withBundleAnalyzer = bundleAnalyzer({
-  enabled: process.env.ANALYZE === 'true',
+  enabled: process.env['ANALYZE'] === 'true',
   openAnalyzer: false,
 });
 

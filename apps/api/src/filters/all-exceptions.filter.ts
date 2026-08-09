@@ -1,12 +1,18 @@
 import {
   ExceptionFilter,
   Catch,
-  ArgumentsHost,
   HttpException,
   HttpStatus,
   Logger,
 } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
+
+interface HttpExceptionHost {
+  switchToHttp(): {
+    getResponse(): Pick<FastifyReply, 'header' | 'send' | 'status'>;
+    getRequest(): Pick<FastifyRequest, 'method' | 'url'>;
+  };
+}
 
 const DATABASE_UNAVAILABLE_CODES = new Set(['P1001', 'P1002', 'P1008', 'P1017', 'P2024']);
 const DATABASE_UNAVAILABLE_PATTERNS = [
@@ -40,10 +46,10 @@ function isDatabaseUnavailable(exception: unknown): boolean {
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger(AllExceptionsFilter.name);
 
-  catch(exception: unknown, host: ArgumentsHost) {
+  catch(exception: unknown, host: HttpExceptionHost) {
     const ctx = host.switchToHttp();
-    const reply = ctx.getResponse<FastifyReply>();
-    const request = ctx.getRequest<FastifyRequest>();
+    const reply = ctx.getResponse();
+    const request = ctx.getRequest();
 
     const databaseUnavailable = isDatabaseUnavailable(exception);
     const status = databaseUnavailable

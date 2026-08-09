@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -14,13 +15,46 @@ import type { JwtPayload } from '@botparty/shared';
 import { PlatformUserService } from '../wallet/platform-user.service';
 import { StorageDeletionService } from '../storage/storage-deletion.service';
 
+type UsersTransaction = {
+  $queryRaw: Prisma.TransactionClient['$queryRaw'];
+  user: Pick<Prisma.TransactionClient['user'], 'count' | 'findUnique' | 'findUniqueOrThrow' | 'update'>;
+  robot: Pick<Prisma.TransactionClient['robot'], 'deleteMany' | 'findMany'>;
+  recording: Pick<Prisma.TransactionClient['recording'], 'findMany'>;
+  storageDeletionTask: Pick<Prisma.TransactionClient['storageDeletionTask'], 'createMany'>;
+};
+
+type UsersDatabase = {
+  $transaction<T>(callback: (tx: UsersTransaction) => Promise<T>): Promise<T>;
+  adminAuditLog: Pick<PrismaService['adminAuditLog'], 'findMany'>;
+  analyticsEvent: Pick<PrismaService['analyticsEvent'], 'findMany'>;
+  billingIntent: Pick<PrismaService['billingIntent'], 'findMany'>;
+  chatMessage: Pick<PrismaService['chatMessage'], 'findMany'>;
+  payoutRequest: Pick<PrismaService['payoutRequest'], 'findMany'>;
+  queueEntry: Pick<PrismaService['queueEntry'], 'findMany'>;
+  recording: Pick<PrismaService['recording'], 'findMany'>;
+  robot: Pick<PrismaService['robot'], 'findMany'>;
+  robotModerationEntry: Pick<PrismaService['robotModerationEntry'], 'findMany'>;
+  session: Pick<PrismaService['session'], 'findMany' | 'groupBy'>;
+  transaction: Pick<PrismaService['transaction'], 'findMany' | 'groupBy'>;
+  user: Pick<PrismaService['user'], 'findMany' | 'findUnique' | 'update'>;
+};
+
+type StaffWallet = {
+  adminAdjustInTransaction(
+    tx: UsersTransaction,
+    input: { userId: string; delta: number; reason: string; requesterId: string },
+  ): Promise<unknown>;
+};
+
 @Injectable()
 export class UsersService {
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly walletService: WalletService,
-    private readonly platformUser: PlatformUserService,
-    private readonly storageDeletion: StorageDeletionService,
+    @Inject(PrismaService) private readonly prisma: UsersDatabase,
+    @Inject(WalletService) private readonly walletService: StaffWallet,
+    @Inject(PlatformUserService)
+    private readonly platformUser: Pick<PlatformUserService, 'getPlatformUserId' | 'isPlatformUser'>,
+    @Inject(StorageDeletionService)
+    private readonly storageDeletion: Pick<StorageDeletionService, 'enqueue' | 'recordingBucket' | 'thumbnailBucket'>,
   ) {}
 
   private resolveLeaderboardSince(period?: string) {
@@ -211,8 +245,9 @@ export class UsersService {
     const since = this.resolveLeaderboardSince(input?.period);
     const metric = input?.metric ?? 'engagement';
     const newOperatorThreshold = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    const ranked = metric === 'creator_revenue'
-      ? await this.prisma.transaction.groupBy({
+    const scoreByUser = new Map<string, number>();
+    if (metric === 'creator_revenue') {
+      const ranked = await this.prisma.transaction.groupBy({
           by: ['userId'],
           where: {
             type: { in: ['BUTTON_PAYOUT', 'DONATION_RECEIVED'] },
@@ -221,20 +256,22 @@ export class UsersService {
           _sum: { amount: true },
           orderBy: { _sum: { amount: 'desc' } },
           take: limit,
-        })
-      : await this.prisma.session.groupBy({
+        });
+      for (const row of ranked) {
+        scoreByUser.set(row.userId, row._sum.amount ?? 0);
+      }
+    } else {
+      const ranked = await this.prisma.session.groupBy({
           by: ['userId'],
-          where: since ? { startedAt: { gte: since } } : undefined,
+          ...(since ? { where: { startedAt: { gte: since } } } : {}),
           _count: { _all: true },
           orderBy: { _count: { userId: 'desc' } },
           take: limit,
         });
-    const scoreByUser = new Map(ranked.map((row) => [
-      row.userId,
-      metric === 'creator_revenue'
-        ? ('_sum' in row ? row._sum.amount ?? 0 : 0)
-        : ('_count' in row ? row._count._all : 0),
-    ]));
+      for (const row of ranked) {
+        scoreByUser.set(row.userId, row._count._all);
+      }
+    }
     const users = await this.prisma.user.findMany({
       where: { id: { in: [...scoreByUser.keys()], not: this.platformUser.getPlatformUserId() } },
       select: {
@@ -245,7 +282,7 @@ export class UsersService {
         balance: true,
         createdAt: true,
         sessions: {
-          where: since ? { startedAt: { gte: since } } : undefined,
+          ...(since ? { where: { startedAt: { gte: since } } } : {}),
           orderBy: { startedAt: 'desc' },
           take: 180,
           select: {
@@ -579,7 +616,7 @@ export class UsersService {
     });
   }
 
-  private anonymizeUser(tx: Prisma.TransactionClient, userId: string) {
+  private anonymizeUser(tx: UsersTransaction, userId: string) {
     const suffix = userId.replace(/-/g, '').slice(0, 20);
     return tx.user.update({
       where: { id: userId },
@@ -600,7 +637,7 @@ export class UsersService {
     });
   }
 
-  private async enqueueOwnedObjectDeletions(tx: Prisma.TransactionClient, ownerId: string) {
+  private async enqueueOwnedObjectDeletions(tx: UsersTransaction, ownerId: string) {
     await tx.$queryRaw(Prisma.sql`
       SELECT id FROM "robots" WHERE "ownerId" = ${ownerId}::uuid FOR UPDATE
     `);
@@ -626,7 +663,7 @@ export class UsersService {
     );
   }
 
-  private async ensureAnotherActiveAdminExists(tx: Prisma.TransactionClient, excludedUserId: string) {
+  private async ensureAnotherActiveAdminExists(tx: UsersTransaction, excludedUserId: string) {
     const otherAdminCount = await tx.user.count({
       where: {
         role: 'ADMIN',

@@ -1,6 +1,29 @@
 import { Logger } from '@nestjs/common';
-import type { RedisService } from '../redis/redis.service';
 import type { PresenceRecord, SharedPresenceSnapshot, WsClient } from './gateway-types';
+import { parseJsonRecord } from '../common/json-value';
+
+interface PresenceRedisTransaction {
+  set(key: string, value: string, mode: 'EX', seconds: number): PresenceRedisTransaction;
+  sadd(key: string, member: string): PresenceRedisTransaction;
+  expire(key: string, seconds: number): PresenceRedisTransaction;
+  del(key: string): PresenceRedisTransaction;
+  srem(key: string, member: string): PresenceRedisTransaction;
+  exec(): Promise<unknown>;
+}
+
+interface PresenceRedisPipeline {
+  get(key: string): PresenceRedisPipeline;
+  exec(): Promise<Array<[Error | null, unknown]> | null>;
+}
+
+interface PresenceRedis {
+  multi(): PresenceRedisTransaction;
+  pipeline(): PresenceRedisPipeline;
+  set(key: string, value: string, mode: 'EX', seconds: number): Promise<unknown>;
+  smembers(key: string): Promise<string[]>;
+  srem(key: string, ...members: string[]): Promise<number>;
+  del(...keys: string[]): Promise<number>;
+}
 
 const VIEWER_PRESENCE_TTL_SEC = 45;
 
@@ -8,7 +31,7 @@ export class PresenceHandler {
   private readonly logger = new Logger(PresenceHandler.name);
 
   constructor(
-    private readonly redis: RedisService,
+    private readonly redis: PresenceRedis,
     private readonly instanceId: string,
   ) {}
 
@@ -100,33 +123,29 @@ export class PresenceHandler {
       }
 
       try {
-        const parsed = JSON.parse(raw) as {
-          robotId?: string;
-          userId?: string;
-          username?: string;
-          joinedAt?: number;
-        };
+        const parsed = parseJsonRecord(raw);
         if (
-          parsed.robotId !== robotId ||
-          typeof parsed.userId !== 'string' ||
-          typeof parsed.username !== 'string' ||
-          typeof parsed.joinedAt !== 'number'
+          !parsed ||
+          parsed['robotId'] !== robotId ||
+          typeof parsed['userId'] !== 'string' ||
+          typeof parsed['username'] !== 'string' ||
+          typeof parsed['joinedAt'] !== 'number'
         ) {
           staleSocketKeys.push(socketKey);
           continue;
         }
 
         viewerCount += 1;
-        if (parsed.userId === focusUserId) {
+        if (parsed['userId'] === focusUserId) {
           focusUserConnections += 1;
         }
 
-        const existing = presenceByUser.get(parsed.userId);
-        if (!existing || parsed.joinedAt < existing.joinedAt) {
-          presenceByUser.set(parsed.userId, {
-            userId: parsed.userId,
-            username: parsed.username,
-            joinedAt: parsed.joinedAt,
+        const existing = presenceByUser.get(parsed['userId']);
+        if (!existing || parsed['joinedAt'] < existing.joinedAt) {
+          presenceByUser.set(parsed['userId'], {
+            userId: parsed['userId'],
+            username: parsed['username'],
+            joinedAt: parsed['joinedAt'],
           });
         }
       } catch {

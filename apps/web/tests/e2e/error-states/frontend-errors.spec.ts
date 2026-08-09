@@ -153,7 +153,11 @@ test('conflict and validation responses preserve profile edits for correction an
       await route.continue();
       return;
     }
-    const failure = failures[attempt]!;
+    const failure = failures[attempt];
+    if (!failure) {
+      await route.continue();
+      return;
+    }
     attempt += 1;
     await route.fulfill({
       status: failure.status,
