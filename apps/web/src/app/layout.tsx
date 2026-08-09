@@ -57,7 +57,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang={locale} suppressHydrationWarning>
       <head>
-        <Script id="theme-bootstrap" strategy="beforeInteractive">
+        <Script id="theme-bootstrap" strategy="beforeInteractive" suppressHydrationWarning>
           {`(() => {
             try {
               const raw = window.localStorage.getItem('botparty.preferences.v2');

@@ -193,6 +193,7 @@ export default function Nav() {
               alt="BotParty"
               width={28}
               height={28}
+              style={{ width: 28, height: 28 }}
               className="h-7 w-7"
               priority
             />

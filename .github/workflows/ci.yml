@@ -338,6 +338,8 @@ jobs:
           NEXT_PUBLIC_WS_URL: ws://127.0.0.1:4000
           NEXT_PUBLIC_LIVEKIT_URL: ws://127.0.0.1:7880
           API_URL: http://127.0.0.1:4000
+          E2E_ADMIN_PASSWORD: e2e-admin-password-at-least-16
+          E2E_USER_PASSWORD: e2e-user-password
 
       - name: Build applications for Lighthouse
         run: pnpm build
