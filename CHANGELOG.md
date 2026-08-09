@@ -4,12 +4,9 @@ All notable operator-facing changes are recorded here. Releases use semantic ver
 
 ## Unreleased
 
-### Changed
-- Replaced MinIO with SeaweedFS mini (S3-compatible) for object storage. Thumbnails and LiveKit recordings use private buckets on `seaweedfs:8333`. Public `/storage/` remains blocked; media is served only through authorized API streams. Backup/restore and readiness checks use the S3 API instead of MinIO-specific health endpoints.
-
-## Unreleased
-
 ### Added
+
+- MIT license and standard contribution, support, conduct, issue, and pull request files.
 
 - Durable notifications for queue turns, robot state, and financial events with in-app, browser, email, quiet-hour, retry, and preference handling.
 - Consent-gated first-party product analytics, funnel dashboard, immediate withdrawal deletion, and retention enforcement.
@@ -22,6 +19,9 @@ All notable operator-facing changes are recorded here. Releases use semantic ver
 
 ### Changed
 
+- Updated the workspace, CI, and container builds to pnpm 11.20 and moved dependency overrides to `pnpm-workspace.yaml`.
+- Consolidated project documentation under `docs/` and reduced the repository root to entry-point files and runtime configuration.
+- Replaced MinIO with SeaweedFS mini (S3-compatible) for object storage. Thumbnails and LiveKit recordings use private buckets on `seaweedfs:8333`. Public `/storage/` remains blocked; media is served only through authorized API streams. Backup/restore and readiness checks use the S3 API instead of MinIO-specific health endpoints.
 - Active turns now use Redis leases and fencing tokens across API replicas.
 - Billing, donations, payouts, and paid controls are fail-closed and use atomic idempotent ledger transitions.
 - Robot, LiveKit, email, stream, and webhook credentials are hashed or AEAD-encrypted and revocable.

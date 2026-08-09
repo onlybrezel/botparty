@@ -3,7 +3,7 @@
 ## Start here
 
 BotParty is a pnpm/Turbo monorepo. Docker is the supported runtime for development, integration
-tests, and production. Install Docker Engine with the Compose plugin, Node 24, and pnpm 9.15.
+tests, and production. Install Docker Engine with the Compose plugin, Node 24, and pnpm 11.20.
 
 ```bash
 pnpm install
@@ -125,8 +125,4 @@ understood security or concurrency path.
 - Realtime wire contract: `docs/websocket-protocol.md`
 - Robot authentication: `docs/robot-auth.md`
 - Architecture decisions: `docs/adr/`
-- Security reporting: `SECURITY.md`
-
-Root files ending in `_AUDIT.md` and the final readiness reports are dated verification records.
-They are evidence, not competing setup or operations manuals. Current operating instructions live
-in this guide, the README, and `docs/runbook.md`.
+- Security reporting: [`SECURITY.md`](../SECURITY.md)

@@ -23,7 +23,6 @@ out/
 *.swp
 *.swo
 *~
-.github/prompts/
 design-system/
 
 # OS

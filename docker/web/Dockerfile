@@ -8,10 +8,10 @@
 
 # ─── deps: install workspace dependencies ─────
 FROM node:24-alpine@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd AS deps
-RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
+RUN corepack enable && corepack prepare pnpm@11.20.0 --activate
 WORKDIR /app
 
-COPY .npmrc pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY packages/tsconfig/      packages/tsconfig/
 COPY packages/eslint-config/ packages/eslint-config/
 COPY packages/shared/package.json  packages/shared/package.json
@@ -30,7 +30,7 @@ CMD ["pnpm", "--filter", "@botparty/web", "dev"]
 
 # ─── builder: compile shared, then Next.js ────
 FROM node:24-alpine@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd AS builder
-RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
+RUN corepack enable && corepack prepare pnpm@11.20.0 --activate
 WORKDIR /app
 ARG NEXT_PUBLIC_APP_VERSION=dev
 ARG PUBLIC_DEPLOYMENT=true
@@ -53,7 +53,7 @@ ARG NEXT_PUBLIC_FEATURE_PAYOUTS=false
 ARG NEXT_PUBLIC_FEATURE_PAID_CONTROLS=false
 
 # Restore workspace config so pnpm --filter resolves correctly.
-COPY --from=deps /app/.npmrc /app/pnpm-workspace.yaml /app/package.json ./
+COPY --from=deps /app/pnpm-workspace.yaml /app/package.json ./
 COPY --from=deps /app/node_modules ./node_modules
 
 COPY packages/tsconfig/      packages/tsconfig/

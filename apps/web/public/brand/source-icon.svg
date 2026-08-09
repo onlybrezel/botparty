@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <title>Lachender Roboter Avatar</title>
+  <title>Smiling Robot Avatar</title>
   <circle cx="32" cy="9.5" r="8.5" fill="#f59e0b" opacity="0.18"/>
   <line x1="32" y1="11.5" x2="32" y2="18.5" stroke="#7c3aed" stroke-width="3" stroke-linecap="round"/>
   <circle cx="32" cy="9.5" r="2.9" fill="#f59e0b"/>

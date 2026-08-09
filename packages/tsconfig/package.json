@@ -2,5 +2,10 @@
   "name": "@botparty/tsconfig",
   "version": "0.1.3",
   "private": true,
-  "files": ["base.json", "nextjs.json", "nestjs.json"]
+  "license": "MIT",
+  "files": [
+    "base.json",
+    "nextjs.json",
+    "nestjs.json"
+  ]
 }

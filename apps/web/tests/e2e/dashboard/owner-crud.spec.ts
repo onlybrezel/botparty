@@ -19,8 +19,8 @@ test('robot owners can create, edit, open, and delete a robot through visible co
   const slug = `qa-rover-${suffix}`.toLowerCase();
   await page.getByPlaceholder('Robot name').fill(robotName);
   await page.getByPlaceholder('custom-slug (optional)').fill(slug);
-  await page.getByPlaceholder('Description').fill('Mobile-ready rover – Grüße 🚗');
-  await page.getByPlaceholder('Tags (comma separated)').fill('qa, responsive, umlaut-ä');
+  await page.getByPlaceholder('Description').fill('Mobile-ready rover – hello 🚗');
+  await page.getByPlaceholder('Tags (comma separated)').fill('qa, responsive, unicode-ready');
   await page.getByRole('button', { name: 'Create robot' }).dblclick();
 
   await expect(

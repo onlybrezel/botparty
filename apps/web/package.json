@@ -2,6 +2,7 @@
   "name": "@botparty/web",
   "version": "0.1.3",
   "private": true,
+  "license": "MIT",
   "scripts": {
     "dev": "next dev --port 3000",
     "build": "node ../../scripts/validate-public-env.mjs && next build",

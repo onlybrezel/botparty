@@ -42,7 +42,7 @@ groups:
         labels: { severity: warning, owner: application }
         annotations:
           summary: API instances are continuously rejecting work at their concurrency limit
-          runbook_url: PERFORMANCE_RUNBOOK.md#overload-diagnose
+          runbook_url: docs/performance-runbook.md#diagnosing-overload
 
   - name: botparty-product-flows
     rules:
@@ -138,7 +138,7 @@ groups:
         labels: { severity: warning, owner: application }
         annotations:
           summary: API event-loop p99 lag exceeds 100 ms
-          runbook_url: PERFORMANCE_RUNBOOK.md#nodejs-diagnose
+          runbook_url: docs/performance-runbook.md#diagnosing-overload
       - alert: BotPartyContainerMemoryHigh
         expr: container_memory_working_set_bytes{name=~"botparty-.+"} / clamp_min(container_spec_memory_limit_bytes{name=~"botparty-.+"}, 1) > 0.9
         for: 10m

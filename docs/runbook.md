@@ -40,7 +40,7 @@ Quick reference for common production incident scenarios.
 **Steps:**
 
 1. Check memory: `docker compose exec redis redis-cli info memory | grep used_memory_human`
-2. Check max memory config in [docker/redis/redis.conf](docker/redis/redis.conf)
+2. Check max memory config in [docker/redis/redis.conf](../docker/redis/redis.conf)
 3. Inspect keyspace and allocator pressure without reading values: `docker compose exec redis sh -lc 'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning info keyspace; redis-cli -a "$REDIS_PASSWORD" --no-auth-warning memory doctor'`.
 4. Redis carries leases, fencing tokens, queue state, presence, and pub/sub coordination. Do not delete keys or flush the database to recover memory. Stop API traffic before changing memory limits or restoring Redis so two replicas cannot reconstruct conflicting leases.
 5. After correcting the capacity or host-memory problem, restart Redis with `docker compose restart redis`, confirm AOF loading in the logs, then restore API traffic only after readiness succeeds.

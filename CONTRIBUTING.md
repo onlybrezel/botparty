@@ -2,7 +2,7 @@
 
 ## Setup
 
-1. Install Docker Engine, the Docker Compose plugin, Node 24, and pnpm 9.15.
+1. Install Docker Engine, the Docker Compose plugin, Node 24, and pnpm 11.20.
 2. Run `pnpm install` for editor tooling and the containerized browser runner.
 3. Run `bash setup-env.sh` and choose the local development configuration.
 4. Start the Docker development stack:
@@ -12,7 +12,8 @@
    ```
 
 The one-shot `migrate` service owns schema changes and seed convergence. API replicas do not run
-migrations during startup. See `DEVELOPER_GUIDE.md` for module ownership and common workflows.
+migrations during startup. See [`docs/development.md`](docs/development.md) for module ownership and
+common workflows.
 
 ## Validation
 

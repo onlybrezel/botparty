@@ -7,14 +7,14 @@
 
 # ─── base: pnpm enabled ───────────────────────
 FROM node:24-alpine@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd AS base
-RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
+RUN corepack enable && corepack prepare pnpm@11.20.0 --activate
 
 # ─── deps: install ALL workspace deps ─────────
 # python3/make/g++ compile native modules (argon2)
 FROM base AS deps
 WORKDIR /app
 RUN apk add --no-cache python3 make g++
-COPY .npmrc pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY packages/tsconfig/      packages/tsconfig/
 COPY packages/eslint-config/ packages/eslint-config/
 COPY packages/shared/package.json   packages/shared/package.json
@@ -61,7 +61,7 @@ RUN --mount=type=cache,id=nest-build-cache,target=/app/node_modules/.cache \
 FROM base AS prod-deps
 WORKDIR /app
 RUN apk add --no-cache python3 make g++
-COPY .npmrc pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY packages/tsconfig/      packages/tsconfig/
 COPY packages/eslint-config/ packages/eslint-config/
 COPY packages/shared/package.json   packages/shared/package.json

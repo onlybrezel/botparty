@@ -26,7 +26,7 @@ test('a new user can register, update settings, upload an avatar, export data, a
   await page.getByRole('link', { name: 'Settings', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
 
-  await page.getByLabel('Display Name').fill('QA Änne 🚀');
+  await page.getByLabel('Display Name').fill('QA Annie 🚀');
   await page.getByRole('button', { name: 'Save Profile' }).click();
   await expect(page.getByText('Profile updated.')).toBeVisible();
 
