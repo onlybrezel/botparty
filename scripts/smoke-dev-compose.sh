@@ -117,29 +117,6 @@ wait_for_reload() {
   return 1
 }
 
-wait_for_web_reload() {
-  local source_file="$1"
-  local probe_url="$2"
-  local marker='botparty-dev-reload-marker'
-
-  if ! grep -q '<section' "${source_file}"; then
-    echo 'Web reload fixture section was not found.' >&2
-    return 1
-  fi
-  sed -i "0,/<section/s//<span hidden>${marker}<\\/span>\n      <section/" "${source_file}"
-
-  for _ in $(seq 1 60); do
-    if curl --fail --silent "${probe_url}" | grep -q "${marker}"; then
-      return 0
-    fi
-    sleep 1
-  done
-
-  docker logs "${PROJECT}-web-1" 2>&1 | tail -n 100
-  echo 'web did not serve its mounted source change.' >&2
-  return 1
-}
-
 "${COMPOSE[@]}" config --quiet
 if [[ "${DEV_COMPOSE_SKIP_BUILD:-false}" != true ]]; then
   "${COMPOSE[@]}" build api web
@@ -173,7 +150,7 @@ grep -q '"dev"' <<<"$(docker inspect -f '{{json .Config.Cmd}}' "${PROJECT}-web-1
 
 wait_for_reload api "${API_SOURCE_DIR}/main.ts" 'File change detected|Starting incremental compilation'
 wait_for_health api
-wait_for_web_reload "${WEB_SOURCE_DIR}/app/page.tsx" "http://127.0.0.1:${web_port}/"
+wait_for_reload web "${WEB_SOURCE_DIR}/app/page.tsx" 'Compiled' "http://127.0.0.1:${web_port}/"
 wait_for_health web
 
 echo 'Development Compose runtime smoke passed.'
