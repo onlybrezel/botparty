@@ -45,7 +45,7 @@ function buildCsp(nonce: string, pathname: string): string {
   ].join('; ');
 }
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   if (request.nextUrl.pathname === '/dashboard/robots/new') {
     const dashboard = request.nextUrl.clone();
     dashboard.pathname = '/dashboard';

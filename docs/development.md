@@ -3,7 +3,7 @@
 ## Start here
 
 BotParty is a pnpm/Turbo monorepo. Docker is the supported runtime for development, integration
-tests, and production. Install Docker Engine with the Compose plugin, Node 24, and pnpm 11.20.
+tests, and production. Install Docker Engine with the Compose plugin, Node 24, and pnpm 11.21.
 
 ```bash
 pnpm install

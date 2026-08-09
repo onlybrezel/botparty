@@ -46,7 +46,7 @@ The robot client is maintained separately at [onlybrezel/botparty-client](https:
 ## Requirements
 
 - Node.js 24
-- pnpm 11.20 or later
+- pnpm 11.21 or later
 - Docker Engine with Docker Compose
 - Python 3.10 or later on machines running the robot client
 

@@ -7,7 +7,7 @@
 
 # ─── base: pnpm enabled ───────────────────────
 FROM node:24-alpine@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd AS base
-RUN corepack enable && corepack prepare pnpm@11.20.0 --activate
+RUN corepack enable && corepack prepare pnpm@11.21.0 --activate
 
 # ─── deps: install ALL workspace deps ─────────
 # python3/make/g++ compile native modules (argon2)

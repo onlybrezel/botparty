@@ -96,6 +96,10 @@ describe('API session restore', () => {
 });
 
 describe('API request errors', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('normalizes browser-specific network failures', async () => {
     vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new TypeError('NetworkError'));
 

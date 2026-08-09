@@ -2,7 +2,7 @@
 
 ## Setup
 
-1. Install Docker Engine, the Docker Compose plugin, Node 24, and pnpm 11.20.
+1. Install Docker Engine, the Docker Compose plugin, Node 24, and pnpm 11.21.
 2. Run `pnpm install` for editor tooling and the containerized browser runner.
 3. Run `bash setup-env.sh` and choose the local development configuration.
 4. Start the Docker development stack:

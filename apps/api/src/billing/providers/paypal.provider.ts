@@ -190,8 +190,7 @@ export class PaypalProvider implements PaymentProvider {
     event_type: string;
     resource: Record<string, unknown>;
   }): VerifiedWebhookEvent {
-    let type: VerifiedWebhookEvent['type'] = 'unknown';
-    let intentId: string | null = null;
+    let type: VerifiedWebhookEvent['type'];
     let providerRef = (event.resource as { id?: string }).id ?? event.id;
     let paymentRef: string | null = null;
     let relatedProviderRef: string | null = null;
@@ -202,7 +201,7 @@ export class PaypalProvider implements PaymentProvider {
     const customId =
       (resource as { custom_id?: string }).custom_id ??
       (((resource as { purchase_units?: Array<{ custom_id?: string }> }).purchase_units ?? [])[0]?.custom_id ?? null);
-    intentId = customId ?? null;
+    const intentId = customId ?? null;
 
     const amountObj =
       (resource as { amount?: { value?: string; currency_code?: string } }).amount ??

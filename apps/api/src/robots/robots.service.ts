@@ -644,13 +644,14 @@ export class RobotsService {
       this.redis.get(`robot:telemetry:${robotId}:latest`),
       this.prisma.controlButton.count({ where: { robotId, isEnabled: true } }),
     ]);
-    let telemetry: Record<string, unknown> = {};
-    try {
-      const parsed: unknown = rawTelemetry ? JSON.parse(rawTelemetry) : {};
-      telemetry = isRecord(parsed) ? parsed : {};
-    } catch {
-      telemetry = {};
-    }
+    const telemetry: Record<string, unknown> = (() => {
+      try {
+        const parsed: unknown = rawTelemetry ? JSON.parse(rawTelemetry) : {};
+        return isRecord(parsed) ? parsed : {};
+      } catch {
+        return {};
+      }
+    })();
     const fresh = typeof telemetry['ts'] === 'number' && Date.now() - telemetry['ts'] < 180_000;
     const access = await this.getAccessPolicy(robotId);
     const videoRequired = access.video !== 'DISABLED';

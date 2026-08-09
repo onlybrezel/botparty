@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { NextRequest } from 'next/server';
-import { middleware } from './middleware';
+import { proxy } from './proxy';
 
-describe('middleware', () => {
+describe('proxy', () => {
   it('keeps the unfiltered Explore route static', () => {
-    const response = middleware(new NextRequest('https://botparty.test/explore'));
+    const response = proxy(new NextRequest('https://botparty.test/explore'));
 
     expect(response.status).toBe(200);
     expect(response.headers.get('location')).toBeNull();
@@ -12,7 +12,7 @@ describe('middleware', () => {
   });
 
   it('redirects legacy Explore filter URLs to the search route', () => {
-    const response = middleware(
+    const response = proxy(
       new NextRequest('https://botparty.test/explore?tag=warehouse&sort=popular'),
     );
 
@@ -23,7 +23,7 @@ describe('middleware', () => {
   });
 
   it('does not redirect unrelated campaign parameters', () => {
-    const response = middleware(new NextRequest('https://botparty.test/explore?utm_source=release'));
+    const response = proxy(new NextRequest('https://botparty.test/explore?utm_source=release'));
 
     expect(response.status).toBe(200);
     expect(response.headers.get('location')).toBeNull();

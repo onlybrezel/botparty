@@ -27,13 +27,12 @@ overrides:
   'js-yaml@>=5.0.0 <5.2.2': '5.2.2'
   'lodash': '4.18.1'
   'path-to-regexp': '8.4.2'
-  'picomatch@>=4.0.0 <4.0.4': '4.0.4'
+  'picomatch@>=4.0.0 <4.0.5': '4.0.5'
   'postcss@<8.5.18': '8.5.26'
   'sharp@<0.35.0': '0.35.3'
   'protobufjs@<8': '7.6.5'
   'protobufjs@>=8': '8.7.1'
   'tmp@<0.2.6': '0.2.7'
-  'vite@>=7.0.0 <=7.3.4': '7.3.5'
   'ws@>=7.0.0 <7.5.11': '7.5.11'
 
 allowBuilds:
@@ -48,3 +47,4 @@ allowBuilds:
   'protobufjs': true
   'sharp': true
   'ssh2': false
+  unrs-resolver: false

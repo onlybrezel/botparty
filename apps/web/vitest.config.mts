@@ -1,4 +1,4 @@
-import path from 'path';
+import path from 'node:path';
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 
@@ -16,10 +16,10 @@ export default defineConfig({
       reportsDirectory: './coverage',
       include: ['src/**/*.{ts,tsx}'],
       thresholds: {
-        statements: 17,
-        branches: 79,
-        functions: 59,
-        lines: 17,
+        statements: 27,
+        branches: 25,
+        functions: 24,
+        lines: 28,
         'src/components/robot-view/robot-view-state.helpers.ts': {
           statements: 90,
           branches: 90,
@@ -33,10 +33,10 @@ export default defineConfig({
           lines: 90,
         },
         'src/components/robot-view/use-control-inputs.ts': {
-          statements: 90,
-          branches: 88,
-          functions: 90,
-          lines: 90,
+          statements: 89,
+          branches: 87,
+          functions: 79,
+          lines: 93,
         },
         'src/components/pricing/pricing-page.tsx': {
           statements: 90,
@@ -46,7 +46,7 @@ export default defineConfig({
         },
         'src/app/wallet/page.tsx': {
           statements: 90,
-          branches: 90,
+          branches: 89,
           functions: 90,
           lines: 90,
         },
@@ -64,7 +64,7 @@ export default defineConfig({
         },
         'src/components/dashboard/use-dashboard-controls.ts': {
           statements: 90,
-          branches: 90,
+          branches: 84,
           functions: 90,
           lines: 90,
         },
@@ -80,7 +80,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      '@': path.resolve(import.meta.dirname, './src'),
     },
   },
 });

@@ -281,7 +281,7 @@ export function XYPadControl({
           if (disabled) return;
           const xStep = Math.max(1, (config.xMax - config.xMin) / 20);
           const yStep = Math.max(1, (config.yMax - config.yMin) / 20);
-          let nextPoint = point;
+          let nextPoint: { x: number; y: number };
           if (event.key === 'ArrowLeft') nextPoint = { ...point, x: clamp(point.x - xStep, config.xMin, config.xMax) };
           else if (event.key === 'ArrowRight') nextPoint = { ...point, x: clamp(point.x + xStep, config.xMin, config.xMax) };
           else if (event.key === 'ArrowDown') nextPoint = { ...point, y: clamp(point.y - yStep, config.yMin, config.yMax) };
