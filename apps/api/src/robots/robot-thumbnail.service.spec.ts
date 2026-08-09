@@ -8,7 +8,7 @@ import { NotFoundException } from '@nestjs/common';
 import { RobotThumbnailService } from './robot-thumbnail.service';
 
 const VALID_PNG_DATA_URL =
-  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO8B9pUAAAAASUVORK5CYII=';
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==';
 
 describe('RobotThumbnailService', () => {
   let service: RobotThumbnailService;

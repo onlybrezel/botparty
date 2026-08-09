@@ -73,7 +73,7 @@ export class StripeProvider implements PaymentProvider {
   constructor(@Inject(ConfigService) private readonly config: StripeConfig) {
     const key = this.config.get('STRIPE_SECRET_KEY');
     this.client = key
-      ? new StripeSDK(key, { apiVersion: '2026-04-22.dahlia' })
+      ? new StripeSDK(key, { apiVersion: '2026-07-29.dahlia' })
       : null;
     this.webhookSecret = this.config.get('STRIPE_WEBHOOK_SECRET') ?? null;
     if (!this.client) {

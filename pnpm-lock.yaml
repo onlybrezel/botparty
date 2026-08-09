@@ -120,8 +120,8 @@ importers:
         specifier: ^0.15.1
         version: 0.15.1
       fastify:
-        specifier: ^5.11.2
-        version: 5.11.2
+        specifier: 5.10.0
+        version: 5.10.0
       ioredis:
         specifier: ^5.4.2
         version: 5.10.1
@@ -5707,8 +5707,8 @@ packages:
     resolution: {integrity: sha512-WCtabS6t3c8SkpDBUlb1kjOs7l66xsGdKpIPZsg4wR+B3+u9UAum2odSsF9tnvxg80h4ZxLWMy4pRjOsFIqQpw==}
     engines: {node: '>=4.0.0'}
 
-  pg-protocol@1.16.0:
-    resolution: {integrity: sha512-sILXutLVjCLjcDuOmvhX5e2Z4cS5qG/6Bu3VkpFwdf/633ElGLpEh9bgmuI5I4sqKqkifQiGyiCcx1HdtrK7tg==}
+  pg-protocol@1.13.0:
+    resolution: {integrity: sha512-zzdvXfS6v89r6v7OcFCHfHlyG/wvry1ALxZo4LqgUoy7W9xhBDMaqOuMiF3qEV45VqsN6rdlcehHrfDtlCPc8w==}
 
   pg-types@2.2.0:
     resolution: {integrity: sha512-qTAAlrEsl8s4OiEQY69wDvcMIdQN6wdz5ojQiOy6YRMuynxenON0O5oCpJI6lshc6scgAY8qvJ2On/p+CXY0GA==}
@@ -10006,7 +10006,7 @@ snapshots:
   '@types/pg@8.15.6':
     dependencies:
       '@types/node': 22.20.1
-      pg-protocol: 1.16.0
+      pg-protocol: 1.13.0
       pg-types: 2.2.0
 
   '@types/qs@6.15.0': {}
@@ -13171,7 +13171,7 @@ snapshots:
 
   pg-int8@1.0.1: {}
 
-  pg-protocol@1.16.0: {}
+  pg-protocol@1.13.0: {}
 
   pg-types@2.2.0:
     dependencies:
