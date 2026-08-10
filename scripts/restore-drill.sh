@@ -135,7 +135,7 @@ docker run --rm --network "${NETWORK}" --user 1001:1001 \
   --read-only --security-opt no-new-privileges:true --cap-drop ALL \
   --tmpfs /tmp:rw,noexec,nosuid,size=64m -e DATABASE_URL="${RESTORE_DATABASE_URL_INTERNAL}" \
   --entrypoint /bin/sh "${RESTORE_API_IMAGE}" -ec \
-  './node_modules/.bin/prisma migrate deploy --schema packages/prisma/prisma/schema.prisma && ./node_modules/.bin/prisma migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel packages/prisma/prisma/schema.prisma --exit-code'
+  './node_modules/.bin/prisma migrate deploy --config packages/prisma/prisma.config.ts --schema packages/prisma/prisma/schema.prisma && ./node_modules/.bin/prisma migrate diff --config packages/prisma/prisma.config.ts --from-config-datasource --to-schema packages/prisma/prisma/schema.prisma --exit-code'
 docker exec "${PG_CONTAINER}" psql -v ON_ERROR_STOP=1 -U postgres -d botparty_restore -c \
   'SELECT COUNT(*) AS migration_count FROM _prisma_migrations WHERE finished_at IS NOT NULL; SELECT COUNT(*) AS user_count FROM users;' >/dev/null
 

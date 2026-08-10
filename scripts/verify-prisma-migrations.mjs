@@ -10,6 +10,7 @@ if (!['localhost', '127.0.0.1', '::1'].includes(parsed.hostname)) {
 if (!parsed.pathname.toLowerCase().includes('migration_test')) {
   throw new Error('The disposable database name must contain migration_test');
 }
+process.env.DATABASE_URL = url;
 
 const schema = 'packages/prisma/prisma/schema.prisma';
 const legacySchema = 'packages/prisma/prisma/fixtures/legacy-20260501.prisma';
@@ -43,28 +44,62 @@ function assertNoDrift(label) {
     'migrate',
     'diff',
     '--exit-code',
-    '--from-url',
-    url,
-    '--to-schema-datamodel',
+    '--config=packages/prisma/prisma.config.ts',
+    '--from-config-datasource',
+    '--to-schema',
     schema,
   ]);
 }
 
 console.log('\n[fresh] rebuilding from immutable migrations');
-run('./node_modules/.bin/prisma', ['migrate', 'reset', '--force', '--skip-seed', `--schema=${schema}`]);
+run('./node_modules/.bin/prisma', [
+  'migrate',
+  'reset',
+  '--force',
+  '--config=packages/prisma/prisma.config.ts',
+  `--schema=${schema}`,
+]);
 assertNoDrift('fresh');
 console.log('\n[fresh] verifying idempotent deploy');
-run('./node_modules/.bin/prisma', ['migrate', 'deploy', `--schema=${schema}`]);
+run('./node_modules/.bin/prisma', [
+  'migrate',
+  'deploy',
+  '--config=packages/prisma/prisma.config.ts',
+  `--schema=${schema}`,
+]);
 
 console.log('\n[upgrade] provisioning the anonymized 2026-05-01 schema fixture');
-run('./node_modules/.bin/prisma', ['db', 'push', '--force-reset', '--skip-generate', `--schema=${legacySchema}`]);
+run('./node_modules/.bin/prisma', [
+  'db',
+  'push',
+  '--force-reset',
+  '--config=packages/prisma/prisma.config.ts',
+  `--schema=${legacySchema}`,
+]);
 for (const migration of legacyMigrations) {
-  run('./node_modules/.bin/prisma', ['migrate', 'resolve', `--schema=${schema}`, '--applied', migration]);
+  run('./node_modules/.bin/prisma', [
+    'migrate',
+    'resolve',
+    '--config=packages/prisma/prisma.config.ts',
+    `--schema=${schema}`,
+    '--applied',
+    migration,
+  ]);
 }
 run(execPath, ['scripts/prepare-prisma-baseline.mjs']);
-run('./node_modules/.bin/prisma', ['migrate', 'deploy', `--schema=${schema}`]);
+run('./node_modules/.bin/prisma', [
+  'migrate',
+  'deploy',
+  '--config=packages/prisma/prisma.config.ts',
+  `--schema=${schema}`,
+]);
 assertNoDrift('upgrade');
 console.log('\n[upgrade] verifying idempotent deploy');
-run('./node_modules/.bin/prisma', ['migrate', 'deploy', `--schema=${schema}`]);
+run('./node_modules/.bin/prisma', [
+  'migrate',
+  'deploy',
+  '--config=packages/prisma/prisma.config.ts',
+  `--schema=${schema}`,
+]);
 
 console.log('\nPrisma fresh, upgrade, drift, and idempotency verification passed.');

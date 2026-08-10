@@ -47,7 +47,8 @@ if (!/\/botparty_performance(?:\?|$)/.test(databaseUrl)) {
 const clientPath =
   process.env.PERFORMANCE_PRISMA_CLIENT_PATH ?? '/app/packages/prisma/generated/client/index.js';
 const { PrismaClient } = await import(pathToFileURL(clientPath).href);
-const prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
+const { createPrismaAdapter } = await import('../packages/prisma/client.js');
+const prisma = new PrismaClient({ adapter: createPrismaAdapter(databaseUrl) });
 const disabledPasswordHash =
   '$argon2id$v=19$m=65536,t=3,p=4$disabled-disabled-disabled-disabled$disabled-disabled-disabled-disabled-disabled-disabled-disabled';
 

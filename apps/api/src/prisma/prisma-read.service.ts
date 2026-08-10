@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaClient } from '@botparty/prisma';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaService } from './prisma.service';
 
 @Injectable()
@@ -11,7 +12,7 @@ export class PrismaReadService implements OnModuleInit, OnModuleDestroy {
     const readUrl = process.env['DATABASE_READ_URL']?.trim();
     const writeUrl = (process.env['DATABASE_WRITE_URL'] ?? process.env['DATABASE_URL'])?.trim();
     this.replica = readUrl && readUrl !== writeUrl
-      ? new PrismaClient({ datasources: { db: { url: readUrl } } })
+      ? new PrismaClient({ adapter: new PrismaPg({ connectionString: readUrl }) })
       : null;
   }
 
