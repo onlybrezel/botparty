@@ -126,7 +126,7 @@ jobs:
 
       - name: Extract API image metadata
         id: api-meta
-        uses: docker/metadata-action@c1e51972afc2121e065aed6d45c65596fe445f3f # v5.8.0
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.API_IMAGE }}
           tags: |
@@ -140,7 +140,7 @@ jobs:
 
       - name: Extract Web image metadata
         id: web-meta
-        uses: docker/metadata-action@c1e51972afc2121e065aed6d45c65596fe445f3f # v5.8.0
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.WEB_IMAGE }}
           tags: |
