@@ -77,7 +77,7 @@
     "@opentelemetry/resources": "^2.10.0",
     "@opentelemetry/sdk-node": "^0.221.0",
     "@opentelemetry/semantic-conventions": "^1.43.0",
-    "@prisma/instrumentation": "6.19.2",
+    "@prisma/instrumentation": "7.9.1",
     "argon2": "^0.45.1",
     "bullmq": "^6.0.9",
     "class-transformer": "^0.5.1",
