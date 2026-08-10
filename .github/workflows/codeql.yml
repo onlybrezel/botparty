@@ -61,4 +61,4 @@ jobs:
           API_URL: http://localhost:4000
 
       - name: Perform CodeQL analysis
-        uses: github/codeql-action/analyze@3c3833e0f8c1c83d449a7478aa59c036a9165498 # v3.29.11
+        uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
