@@ -1,5 +1,5 @@
 import { createCipheriv, createHash, createHmac, randomBytes } from 'node:crypto';
-import { PrismaClient } from '../packages/prisma/generated/client/index.js';
+import { createPrismaClient } from '../packages/prisma/client.js';
 
 const activeSecret = process.env.WEBHOOK_SECRET_ENCRYPTION_KEY?.trim();
 if (!activeSecret || activeSecret.length < 32) {
@@ -8,7 +8,7 @@ if (!activeSecret || activeSecret.length < 32) {
 const legacySecret = process.env.WEBHOOK_SECRET_LEGACY_KEY?.trim() || activeSecret;
 const activeKey = createHash('sha256').update(activeSecret, 'utf8').digest();
 const activeKeyId = createHash('sha256').update(activeKey).digest('hex').slice(0, 12);
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 function decodeLegacy(webhookId, stored) {
   if (/^[a-f0-9]{64}$/i.test(stored)) return stored.toLowerCase();

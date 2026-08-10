@@ -1,8 +1,8 @@
-import { PrismaClient } from './generated/client/index.js';
 import { hash } from 'argon2';
 import { createHash, randomBytes } from 'crypto';
+import { createPrismaClient } from './client.js';
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 const PLATFORM_USER_ID = '00000000-0000-0000-0000-00000000fee5';
 const DISABLED_PASSWORD_HASH =
   '$argon2id$v=19$m=65536,t=3,p=4$disabled-disabled-disabled-disabled$disabled-disabled-disabled-disabled-disabled-disabled-disabled';

@@ -1,7 +1,6 @@
 {
   "extends": "@botparty/tsconfig/nextjs.json",
   "compilerOptions": {
-    "baseUrl": ".",
     "noPropertyAccessFromIndexSignature": true,
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,

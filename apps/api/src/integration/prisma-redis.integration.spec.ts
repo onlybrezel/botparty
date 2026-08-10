@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 
 import { PrismaClient } from '@botparty/prisma';
+import { PrismaPg } from '@prisma/adapter-pg';
 import Redis from 'ioredis';
 import { PostgreSqlContainer } from '@testcontainers/postgresql';
 import { GenericContainer } from 'testcontainers';
@@ -37,11 +38,7 @@ describe('Prisma + Redis integration (testcontainers)', () => {
       },
     );
 
-    prisma = new PrismaClient({
-      datasources: {
-        db: { url: databaseUrl },
-      },
-    });
+    prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });
     await prisma.$connect();
 
     redis = new Redis(redisContainer.getMappedPort(6379), redisContainer.getHost());

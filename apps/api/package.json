@@ -25,9 +25,21 @@
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
       "^.+\\.ts$": [
-        "ts-jest",
+        "@swc/jest",
         {
-          "tsconfig": "<rootDir>/../tsconfig.json"
+          "jsc": {
+            "parser": {
+              "syntax": "typescript",
+              "decorators": true
+            },
+            "transform": {
+              "legacyDecorator": true,
+              "decoratorMetadata": true
+            }
+          },
+          "module": {
+            "type": "commonjs"
+          }
         }
       ]
     },
@@ -59,7 +71,7 @@
     "@botparty/prisma": "workspace:*",
     "@botparty/shared": "workspace:*",
     "@fastify/helmet": "^13.1.0",
-    "@fastify/static": "10.1.2",
+    "@fastify/static": "10.1.3",
     "@livekit/protocol": "^1.50.4",
     "@nestjs/bullmq": "^11.0.5",
     "@nestjs/common": "^11.1.28",
@@ -77,12 +89,13 @@
     "@opentelemetry/resources": "^2.10.0",
     "@opentelemetry/sdk-node": "^0.221.0",
     "@opentelemetry/semantic-conventions": "^1.43.0",
-    "@prisma/instrumentation": "6.19.2",
+    "@prisma/adapter-pg": "7.9.1",
+    "@prisma/instrumentation": "7.9.1",
     "argon2": "^0.45.1",
     "bullmq": "^6.0.9",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
-    "fastify": "5.10.0",
+    "fastify": "5.11.2",
     "ioredis": "^6.0.0",
     "livekit-server-sdk": "^2.17.0",
     "nodemailer": "^9.0.5",
@@ -103,16 +116,17 @@
     "@nestjs/cli": "^11.0.24",
     "@nestjs/schematics": "^11.1.0",
     "@nestjs/testing": "^11.1.28",
+    "@swc/core": "1.15.47",
+    "@swc/jest": "0.2.39",
     "@testcontainers/postgresql": "^12.1.0",
     "@types/jest": "^30.0.0",
-    "@types/node": "^24.13.3",
+    "@types/node": "^26.1.2",
     "@types/nodemailer": "^8.0.1",
     "@types/passport-jwt": "^4.0.1",
     "@types/ws": "^8.5.0",
     "eslint": "^10.8.1",
     "jest": "^30.4.2",
     "testcontainers": "^12.1.0",
-    "ts-jest": "^29.4.12",
-    "typescript": "^5.7.3"
+    "typescript": "^7.0.2"
   }
 }

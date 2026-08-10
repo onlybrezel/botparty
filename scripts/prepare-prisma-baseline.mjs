@@ -1,9 +1,9 @@
 import { spawnSync } from 'node:child_process';
-import { PrismaClient } from '../packages/prisma/generated/client/index.js';
+import { createPrismaClient } from '../packages/prisma/client.js';
 
 const BASELINE = '20260413_initial_baseline';
 const FIRST_LEGACY_MIGRATION = '20260414_add_robot_slug_aliases';
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 async function migrationWasApplied(name) {
   const table = await prisma.$queryRaw`
@@ -29,7 +29,14 @@ try {
   if (!hasBaseline && hasLegacyHistory) {
     const result = spawnSync(
       './node_modules/.bin/prisma',
-      ['migrate', 'resolve', '--schema=packages/prisma/prisma/schema.prisma', '--applied', BASELINE],
+      [
+        'migrate',
+        'resolve',
+        '--config=packages/prisma/prisma.config.ts',
+        '--schema=packages/prisma/prisma/schema.prisma',
+        '--applied',
+        BASELINE,
+      ],
       { stdio: 'inherit' },
     );
     if (result.status !== 0) {

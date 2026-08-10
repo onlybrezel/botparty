@@ -29,7 +29,7 @@ echo 'Preparing migration baseline state...'
 run_as_app node scripts/prepare-prisma-baseline.mjs
 
 echo 'Applying Prisma migrations...'
-run_as_app ./node_modules/.bin/prisma migrate deploy --schema="${SCHEMA}"
+run_as_app ./node_modules/.bin/prisma migrate deploy --config=packages/prisma/prisma.config.ts --schema="${SCHEMA}"
 
 echo 'Migrating encrypted webhook secrets...'
 run_as_app node scripts/migrate-webhook-secrets.mjs

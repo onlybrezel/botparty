@@ -9,9 +9,9 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true,
     "noPropertyAccessFromIndexSignature": true,
-    "baseUrl": "./",
+    "types": ["node", "jest"],
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["./src/*"]
     }
   },
   "include": ["src"],

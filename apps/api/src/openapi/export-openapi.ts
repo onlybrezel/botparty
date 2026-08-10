@@ -18,7 +18,7 @@ async function main() {
   // AppModule validates environment variables as it is imported. Keep this
   // import after the metadata-only defaults so schema generation neither
   // depends on a developer .env file nor needs production credentials.
-  const { AppModule } = await import('../bootstrap/app.module');
+  const { AppModule } = await import('../bootstrap/app.module.js');
   const outputArg = process.argv[2] ?? 'docs/openapi.json';
   const outputPath = path.resolve(outputArg);
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter(), {

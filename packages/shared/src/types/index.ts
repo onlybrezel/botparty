@@ -39,7 +39,21 @@ export type CheckoutRequest = z.infer<typeof checkoutRequestSchema>;
 export type SubscriptionCheckoutRequest = z.infer<typeof subscriptionCheckoutRequestSchema>;
 export type PayoutRequestInput = z.infer<typeof payoutRequestSchema>;
 export type UpdateNotificationPreferencesInput = z.infer<typeof updateNotificationPreferencesSchema>;
-export type AnalyticsEventInput = z.infer<typeof analyticsEventSchema>;
+export type AnalyticsEventInput =
+  | {
+      event: 'DISCOVERY_ROBOT_VIEW' | 'HOST_ONBOARDING_VIEW' | 'WALLET_VIEW';
+      robotId?: string;
+    }
+  | {
+      event: 'PERFORMANCE_WEB_VITAL';
+      payload: {
+        metric: 'CLS' | 'FCP' | 'FID' | 'INP' | 'LCP' | 'TTFB';
+        value: number;
+        rating: 'good' | 'needs-improvement' | 'poor';
+        path: string;
+        navigationType?: string;
+      };
+    };
 
 export interface WalletTransactionRecord {
   id: string;

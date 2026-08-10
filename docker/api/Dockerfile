@@ -91,6 +91,8 @@ COPY --from=prod-deps --chown=botparty:botparty /app/apps/api/package.json      
 COPY --from=build-api --chown=botparty:botparty /app/packages/prisma/generated  ./packages/prisma/generated
 COPY --from=build-api --chown=botparty:botparty /app/packages/prisma/prisma     ./packages/prisma/prisma
 COPY --from=build-api --chown=botparty:botparty /app/packages/prisma/seed.ts    ./packages/prisma/seed.ts
+COPY --from=build-api --chown=botparty:botparty /app/packages/prisma/client.js   ./packages/prisma/client.js
+COPY --from=build-api --chown=botparty:botparty /app/packages/prisma/prisma.config.ts ./packages/prisma/prisma.config.ts
 COPY --chown=botparty:botparty scripts/prepare-prisma-baseline.mjs              ./scripts/prepare-prisma-baseline.mjs
 COPY --chown=botparty:botparty scripts/migrate-webhook-secrets.mjs              ./scripts/migrate-webhook-secrets.mjs
 COPY --chown=botparty:botparty scripts/api-cluster.mjs                          ./scripts/api-cluster.mjs

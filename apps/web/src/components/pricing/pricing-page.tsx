@@ -110,7 +110,7 @@ export function PricingPage() {
               {packages.map((creditPackage) => (
                 <article key={creditPackage.id} className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-5">
                   <div className="flex items-start justify-between gap-4">
-                    <div><h3 className="font-bold">{creditPackage.label}</h3><p className="text-sm text-[var(--muted-foreground)]">{creditPackage.credits.toLocaleString()} credits</p></div>
+                    <div><h3 className="font-bold">{creditPackage.label}</h3><p className="text-sm text-[var(--muted-foreground)]">{creditPackage.credits.toLocaleString('en-US')} credits</p></div>
                     <strong>{formatMoney(creditPackage.amountCents, creditPackage.currency)}</strong>
                   </div>
                   {accessToken ? (

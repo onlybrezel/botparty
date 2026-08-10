@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import Redis from 'ioredis';
-import { PrismaClient } from '../packages/prisma/generated/client/index.js';
+import { createPrismaClient } from '../packages/prisma/client.js';
 import { QueueService } from '../apps/api/src/queue/queue.service.js';
 
 type QueueServiceDependencies = ConstructorParameters<typeof QueueService>;
@@ -12,7 +12,7 @@ if (process.env['QUEUE_BENCHMARK_ALLOW_WRITES'] !== 'true' || !/benchmark/.test(
     'Queue benchmark requires QUEUE_BENCHMARK_ALLOW_WRITES=true and a database name containing benchmark',
   );
 }
-const prisma = new PrismaClient();
+const prisma = createPrismaClient(databaseUrl);
 const redis = new Redis({
   host: process.env['REDIS_HOST'] ?? '127.0.0.1',
   port: Number(process.env['REDIS_PORT'] ?? 6379),
