@@ -3,8 +3,8 @@
   "extends": "./base.json",
   "compilerOptions": {
     "target": "ES2024",
-    "module": "Node16",
-    "moduleResolution": "Node16",
+    "module": "CommonJS",
+    "moduleResolution": "Node10",
     "outDir": "./dist",
     "rootDir": "./src",
     "emitDecoratorMetadata": true,

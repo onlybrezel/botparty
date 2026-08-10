@@ -1,11 +1,5 @@
 import { BadRequestException, Injectable, PipeTransform } from '@nestjs/common';
-import type { ZodIssue } from 'zod';
-
-type ParseResult =
-  | { success: true; data: unknown }
-  | { success: false; error: { issues: ZodIssue[] } };
-
-type SchemaLike = { safeParse(value: unknown): ParseResult };
+import type { ZodIssue, ZodTypeAny } from 'zod';
 
 function formatIssues(issues: ZodIssue[]) {
   return issues.map((issue) => ({
@@ -16,7 +10,7 @@ function formatIssues(issues: ZodIssue[]) {
 }
 
 @Injectable()
-export class ZodValidationPipe<TSchema extends SchemaLike> implements PipeTransform {
+export class ZodValidationPipe<TSchema extends ZodTypeAny> implements PipeTransform {
   constructor(private readonly schema: TSchema) {}
 
   transform(value: unknown) {
