@@ -16,11 +16,11 @@
     "clean": "rm -rf generated .turbo"
   },
   "dependencies": {
-    "@prisma/adapter-pg": "7.9.1",
-    "@prisma/client": "7.9.1",
+    "@prisma/adapter-pg": "7.10.0",
+    "@prisma/client": "7.10.0",
     "argon2": "^0.45.1",
-    "prisma": "7.9.1",
-    "tsx": "^4.23.11"
+    "prisma": "7.10.0",
+    "tsx": "^4.23.15"
   },
   "devDependencies": {
     "@botparty/tsconfig": "workspace:*",
