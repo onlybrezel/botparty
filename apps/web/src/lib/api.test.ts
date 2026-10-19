@@ -8,6 +8,31 @@ const jsonResponse = (body: unknown, status = 200) =>
   });
 
 describe('API session restore', () => {
+  it('starts a fresh bootstrap when an aborted generation is still pending', async () => {
+    useAuth.setState({ hasHydrated: false });
+    let rejectOld!: (reason: unknown) => void;
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectOld = reject; }))
+      .mockResolvedValueOnce(jsonResponse({ csrfToken: 'fresh-csrf' }))
+      .mockResolvedValueOnce(jsonResponse({
+        accessToken: 'fresh-access',
+        user: { id: 'user-1', username: 'persisted-user', displayName: null,
+          avatarUrl: null, role: 'USER', createdAt: '2026-07-18T00:00:00.000Z' },
+      }));
+    const client = createApiClient(window.location.origin);
+    const oldController = new AbortController();
+    const oldRestoration = client.restoreSession(oldController.signal);
+    oldController.abort();
+    const newRestoration = client.restoreSession(new AbortController().signal);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    rejectOld(new DOMException('Old document left', 'AbortError'));
+    await expect(oldRestoration).resolves.toBe(false);
+    await expect(newRestoration).resolves.toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls[2]?.[1]?.headers).toMatchObject({ 'X-CSRF-Token': 'fresh-csrf' });
+    expect(useAuth.getState().accessToken).toBe('fresh-access');
+  });
+
   beforeEach(() => {
     sessionStorage.clear();
     useAuth.setState({
@@ -19,6 +44,21 @@ describe('API session restore', () => {
       hasHydrated: false,
     });
     vi.restoreAllMocks();
+  });
+
+  it('aborts CSRF bootstrap without retrying or changing authentication when the page leaves', async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementationOnce((_url, init) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('Page left', 'AbortError')));
+      }),
+    );
+    const restoration = createApiClient(window.location.origin).restoreSession(controller.signal);
+    expect(fetchMock.mock.calls[0]?.[1]?.signal).toBe(controller.signal);
+    controller.abort();
+    await expect(restoration).resolves.toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(useAuth.getState()).toMatchObject({ username: 'persisted-user', hasHydrated: false });
   });
 
   it('recovers from a transient proxy failure during CSRF bootstrap', async () => {

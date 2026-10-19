@@ -275,7 +275,7 @@ export class RuntimeTelemetryCadvisorService implements OnModuleInit, OnModuleDe
     }
 
     const labels: Record<string, string> = {};
-    const labelPattern = /([a-zA-Z_][a-zA-Z0-9_]*)="((?:\\.|[^"])*)"/g;
+    const labelPattern = /([a-zA-Z_][a-zA-Z0-9_]*)="((?:\\.|[^"\\])*)"/g;
     let labelMatch: RegExpExecArray | null;
     while ((labelMatch = labelPattern.exec(labelsRaw)) !== null) {
       const labelKey = labelMatch[1];

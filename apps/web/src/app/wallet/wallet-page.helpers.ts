@@ -1,5 +1,5 @@
 import type { WalletTransactionRecord } from '@/lib/api/wallet';
-import { TransactionType } from '@botparty/shared';
+import { TransactionType } from '@botparty/shared/constants';
 
 export const TRANSACTION_TYPES = [
   TransactionType.DEPOSIT,

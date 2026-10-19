@@ -41,6 +41,7 @@ LIVEKIT_RESTORE_IMAGE="livekit/livekit-server:v1.8@sha256:621fd87bd64a0c83e1f241
 MAIL_RESTORE_IMAGE="axllent/mailpit:v1.27.8@sha256:6abc8e633df15eaf785cfcf38bae48e66f64beecdc03121e249d0f9ec15f0707"
 RESTORE_API_IMAGE="${RESTORE_API_IMAGE:-${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-onlybrezel}/botparty-api:${APP_VERSION:-0.1.3}}"
 RESTORE_TEST_EMAIL="${RESTORE_TEST_EMAIL:-admin@botparty.test}"
+RESTORE_DOCKER_HOST="${RESTORE_DOCKER_HOST:-127.0.0.1}"
 RESTORE_TEST_PASSWORD_FILE="${RESTORE_TEST_PASSWORD_FILE:-${SECRET_DIR}/seed_admin_password}"
 
 cleanup() {
@@ -141,8 +142,8 @@ docker exec "${PG_CONTAINER}" psql -v ON_ERROR_STOP=1 -U postgres -d botparty_re
 
 SEAWEED_READY=false
 for _ in $(seq 1 60); do
-  if curl -fsS "http://127.0.0.1:${SEAWEED_PORT}/status" >/dev/null 2>&1 \
-    || curl -fsS -o /dev/null -w '%{http_code}' "http://127.0.0.1:${SEAWEED_PORT}/" | grep -Eq '^(200|403)$'; then
+  if curl -fsS "http://${RESTORE_DOCKER_HOST}:${SEAWEED_PORT}/status" >/dev/null 2>&1 \
+    || curl -fsS -o /dev/null -w '%{http_code}' "http://${RESTORE_DOCKER_HOST}:${SEAWEED_PORT}/" | grep -Eq '^(200|403)$'; then
     SEAWEED_READY=true
     break
   fi
@@ -163,14 +164,14 @@ for bucket_dir in "${WORK}"/objects/*; do
     -e AWS_ACCESS_KEY_ID=drill_access -e AWS_SECRET_ACCESS_KEY=drill_secret_123 -e AWS_DEFAULT_REGION=us-east-1 \
     -v "${WORK}:/backup" "${AWS_CLI_IMAGE}" -c \
     'endpoint="$1"; bucket="$2"; aws --endpoint-url "$endpoint" s3 mb "s3://$bucket" 2>/dev/null || true; aws --endpoint-url "$endpoint" s3 sync "/backup/objects/$bucket" "s3://$bucket"' \
-    sh "http://127.0.0.1:${SEAWEED_PORT}" "${bucket}"
+    sh "http://${RESTORE_DOCKER_HOST}:${SEAWEED_PORT}" "${bucket}"
   docker run --rm --network host --entrypoint /bin/sh \
     --user "$(id -u):$(id -g)" --security-opt no-new-privileges:true --cap-drop ALL \
     --env HOME=/tmp --tmpfs /tmp:rw,noexec,nosuid,size=64m \
     -e AWS_ACCESS_KEY_ID=drill_access -e AWS_SECRET_ACCESS_KEY=drill_secret_123 -e AWS_DEFAULT_REGION=us-east-1 \
     -v "${WORK}:/backup" "${AWS_CLI_IMAGE}" -c \
     'aws --endpoint-url "$1" s3 sync "s3://$2" "/backup/restored/$2"' \
-    sh "http://127.0.0.1:${SEAWEED_PORT}" "${bucket}"
+    sh "http://${RESTORE_DOCKER_HOST}:${SEAWEED_PORT}" "${bucket}"
   diff -qr "${WORK}/objects/${bucket}" "${WORK}/restored/${bucket}"
 done
 
@@ -262,7 +263,7 @@ docker run -d --name "${API_CONTAINER}" --network "${NETWORK}" --network-alias a
 API_PORT="$(docker port "${API_CONTAINER}" 4000/tcp | sed 's/.*://')"
 API_READY=false
 for _ in $(seq 1 90); do
-  if curl -fsS "http://127.0.0.1:${API_PORT}/api/v1/health/ready" >"${WORK}/readiness.json" 2>/dev/null; then
+  if curl -fsS "http://${RESTORE_DOCKER_HOST}:${API_PORT}/api/v1/health/ready" >"${WORK}/readiness.json" 2>/dev/null; then
     API_READY=true
     break
   fi
@@ -304,7 +305,7 @@ docker run --rm --network none --user "$(id -u):$(id -g)" \
     }), { mode: 0o600 });
   ' /restore/login.json
 curl -fsS -H 'content-type: application/json' --data-binary "@${WORK}/login.json" \
-  "http://127.0.0.1:${API_PORT}/api/v1/auth/login" >"${WORK}/login-response.json"
+  "http://${RESTORE_DOCKER_HOST}:${API_PORT}/api/v1/auth/login" >"${WORK}/login-response.json"
 docker run --rm --network none --user "$(id -u):$(id -g)" \
   --security-opt no-new-privileges:true --cap-drop ALL \
   -e RESTORE_TEST_USER_ID="${RESTORE_TEST_USER_ID}" -v "${WORK}:/restore" \
@@ -317,7 +318,7 @@ docker run --rm --network none --user "$(id -u):$(id -g)" \
   fs.writeFileSync(process.argv[2], `header = "Authorization: Bearer ${response.accessToken}"\n`, { mode: 0o600 });
 ' /restore/login-response.json /restore/curl-auth.conf
 curl -fsS --config "${WORK}/curl-auth.conf" \
-  "http://127.0.0.1:${API_PORT}/api/v1/moderation/admin/overview" >"${WORK}/moderation-overview.json"
+  "http://${RESTORE_DOCKER_HOST}:${API_PORT}/api/v1/moderation/admin/overview" >"${WORK}/moderation-overview.json"
 docker run --rm --network none --user "$(id -u):$(id -g)" \
   --security-opt no-new-privileges:true --cap-drop ALL -v "${WORK}:/restore:ro" \
   "${NODE_BACKUP_IMAGE}" node -e '
@@ -336,7 +337,7 @@ if [[ -z "${RECORDING_ID}" || -z "${RECORDING_KEY}" || "${RECORDING_ROW}" == "${
   exit 1
 fi
 curl -fsS --config "${WORK}/curl-auth.conf" \
-  "http://127.0.0.1:${API_PORT}/api/v1/moderation/admin/recordings/${RECORDING_ID}" \
+  "http://${RESTORE_DOCKER_HOST}:${API_PORT}/api/v1/moderation/admin/recordings/${RECORDING_ID}" \
   -o "${WORK}/api-recording.bin"
 cmp "${WORK}/objects/botparty-recordings/${RECORDING_KEY}" "${WORK}/api-recording.bin"
 

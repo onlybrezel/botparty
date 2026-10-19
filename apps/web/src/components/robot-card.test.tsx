@@ -1,7 +1,7 @@
 import { createElement } from 'react';
 import type { AnchorHTMLAttributes, ImgHTMLAttributes } from 'react';
 import { render, screen } from '@testing-library/react';
-import { QueueMode, RobotAccessMode, RobotStatus, RobotVisibility, Role } from '@botparty/shared';
+import { QueueMode, RobotAccessMode, RobotStatus, RobotVisibility } from '@botparty/shared';
 import RobotCard from './robot-card';
 
 vi.mock('next/link', () => ({
@@ -43,8 +43,6 @@ describe('RobotCard', () => {
             username: 'julien',
             displayName: 'Julien',
             avatarUrl: null,
-            role: Role.USER,
-            createdAt: new Date().toISOString(),
           },
           createdAt: new Date().toISOString(),
         }}

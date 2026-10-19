@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROJECT="botparty-performance-smoke-$$"
+PROJECT="${LOCAL_CI_RUN_ID:-botparty}-performance-smoke-$$"
 SECRET_DIR="$(mktemp -d)"
 REPORT_DIR="${PERFORMANCE_REPORT_DIR:-data/performance-smoke}"
 COMPOSE=(
@@ -117,7 +117,7 @@ wait_for_health api
 "${COMPOSE[@]}" exec -T \
   -e PERFORMANCE_FIXTURE_ALLOW_WRITES=true \
   -e PERFORMANCE_DATASET=small \
-  api sh -c '. /load-file-secrets.sh; node /performance/seed-performance.mjs'
+  api sh -c '. /load-file-secrets.sh; node /app/scripts/seed-performance.mjs'
 
 "${COMPOSE[@]}" --profile performance run --rm \
   -e PERFORMANCE_BASE_URL=http://api:4000 \

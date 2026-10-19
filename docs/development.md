@@ -96,6 +96,37 @@ runbook for preconditions, verification, and rollback.
 
 ## Tests
 
+On Windows with Docker Desktop using Linux containers, run the local CI runner
+from a clean, committed checkout:
+
+```powershell
+pwsh -NoProfile -File scripts/test-local-docker.ps1 -Phase all
+```
+
+The runner tests an exact Git snapshot in a disposable Linux volume, with Node,
+pnpm, Playwright and the Docker CLI supplied by the pinned runner image. This
+avoids Windows package-wrapper, file-mode and line-ending differences. It uses
+the local Docker socket to start isolated test services; no GitHub Actions run or
+registry push is involved. Logs and the source commit are saved under
+`data/local-ci/<run-id>/`; the run's containers and source volume are removed.
+
+Use `-Phase checks`, `-Phase compose`, `-Phase lighthouse` or `-Phase performance` for a focused rerun.
+`-Phase database` reruns migration, upgrade, queue and backup checks; `-Phase build`
+reruns compilation, bundle budgets and generated contract parity.
+The checks phase includes audit, lint, types, unit/integration tests, coverage,
+database upgrade and migration checks, backups, queue and bundle budgets, and
+generated API contract parity. Compose runs development hot reload and the
+production browser and API failover suites. Lighthouse runs the mobile page
+budgets. Performance runs the isolated API load scenario.
+
+Bundle budgets count unique uncompressed JavaScript for the page entrypoint and
+framework runtime. Production builds use webpack. Next 16 no longer emits the
+old app build manifest, so the checker also reads page client references.
+The home, explore and robot baselines were remeasured against unchanged main
+`e9c5fc1` (Next 16.3) in Docker with the same build environment as the candidate;
+their original values dated from Next 15. The 110% regression rule, every
+absolute size ceiling, and the remaining four baselines are unchanged.
+
 Fast local feedback uses the repository's pinned Node runtime:
 
 ```bash

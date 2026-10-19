@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Coins, Loader2, ShieldCheck } from 'lucide-react';
-import { LEGAL_POLICY_VERSIONS } from '@botparty/shared';
+import { LEGAL_POLICY_VERSIONS } from '@botparty/shared/constants';
 import { api } from '@/lib/api';
 import type { CreditPackage } from '@/lib/api/wallet';
 import { releaseFeatures } from '@/lib/release-features';

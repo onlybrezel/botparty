@@ -554,6 +554,21 @@ describe('LivekitService', () => {
   });
 
   describe('pure mapping and timeout behavior', () => {
+    it('treats robot identifiers as literal prefixes rather than regular expressions', () => {
+      expect(service.cameraIdFromParticipantIdentityForRobot('robot.a+', 'robot-media:robotXa:front')).toBeNull();
+      expect(service.cameraIdFromParticipantIdentityForRobot('robot.a+', 'ROBOT-MEDIA:ROBOT.A+:Front')).toBe('Front');
+      expect(service.cameraIdFromParticipantIdentityForRobot(robotId, `robot-media:${robotId}:`)).toBeNull();
+      expect(service.cameraIdFromParticipantIdentityForRobot(robotId, `robot-media:${robotId}:front\nother`)).toBeNull();
+    });
+
+    it('normalizes long invalid camera identifiers without repeated suffix scans', () => {
+      const started = performance.now();
+      expect(service.sanitizeCameraId(`---FRONT${'-'.repeat(100_000)}`)).toBe('front');
+      expect(service.sanitizeCameraId('-'.repeat(100_000))).toBe('');
+      expect(service.sanitizeCameraId('__front__')).toBe('__front__');
+      expect(performance.now() - started).toBeLessThan(1000);
+    });
+
     it('maps endpoint, identity, and sanitized camera/path variants', () => {
       const internal = service;
       expect(internal.buildIngressEndpointUrl('https://host/path/', '/key')).toBe(

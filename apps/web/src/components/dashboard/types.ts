@@ -1,7 +1,8 @@
 import type { ControlButtonRecord } from '@/lib/api';
 import type { RobotManaged } from '@/lib/api';
 import type { ControlButtonAccess } from '@botparty/shared';
-import { ControlButtonAccess as ControlButtonAccessEnum, isValidTimezone } from '@botparty/shared';
+import { ControlButtonAccess as ControlButtonAccessEnum } from '@botparty/shared/constants';
+import { isValidTimezone } from '@botparty/shared/validation';
 
 export type RemoteActionType =
   | 'restart_video'

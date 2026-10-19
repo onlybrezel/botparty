@@ -74,7 +74,7 @@ services:
       MAX_CONCURRENT_REQUESTS: ${PERFORMANCE_MAX_CONCURRENT_REQUESTS:-32}
       MAX_CONCURRENT_LOGIN_REQUESTS: ${PERFORMANCE_MAX_CONCURRENT_LOGIN_REQUESTS:-1}
     volumes:
-      - ./scripts/seed-performance.mjs:/performance/seed-performance.mjs:ro
+      - ./scripts/seed-performance.mjs:/app/scripts/seed-performance.mjs:ro
     depends_on:
       mail-test:
         condition: service_healthy

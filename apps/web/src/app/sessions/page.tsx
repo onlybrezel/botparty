@@ -222,12 +222,12 @@ export default function SessionsPage() {
                     >
                       View replay
                     </Link>
-                    <Link
+                    <a
                       href={`/robot/${session.robot.slug}`}
                       className="inline-flex rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-medium"
                     >
                       Open robot
-                    </Link>
+                    </a>
                   </div>
                 </div>
 

@@ -89,7 +89,7 @@ export default function SessionReplayPage() {
           </Link>
           {session ? (
             <Link
-              href={`/robot/${session.robot.slug}`}
+              href={`/robot/${session.robot.owner.username}/${session.robot.slug}`}
               className="inline-flex rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white"
             >
               Open robot

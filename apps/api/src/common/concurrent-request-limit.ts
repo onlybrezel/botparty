@@ -50,6 +50,7 @@ export function installConcurrentRequestLimit(
   limits: ConcurrentRequestLimits,
 ): void {
   const admittedRequests = new WeakMap<FastifyRequest, boolean>();
+  const executingRequests = new WeakSet<FastifyRequest>();
   let admittedCount = 0;
   let admittedLoginCount = 0;
 
@@ -85,9 +86,17 @@ export function installConcurrentRequestLimit(
     activeRequests.inc();
   });
 
+  server.addHook('preHandler', async (request) => {
+    executingRequests.add(request);
+  });
+
   server.addHook('onSend', async (request, reply) => {
     if (request.raw.destroyed || reply.raw.destroyed) release(request);
   });
   server.addHook('onResponse', async (request) => release(request));
-  server.addHook('onRequestAbort', async (request) => release(request));
+  server.addHook('onRequestAbort', async (request) => {
+    // A disconnected client does not cancel an already running handler (for
+    // example password verification). Keep that work counted until onSend.
+    if (!executingRequests.has(request)) release(request);
+  });
 }

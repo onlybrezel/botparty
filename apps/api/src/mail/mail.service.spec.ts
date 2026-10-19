@@ -68,7 +68,7 @@ describe('MailService', () => {
     const transport = nodemailer.createTransport({ jsonTransport: true });
     jest.spyOn(transport, 'verify').mockRejectedValue(new Error('connection refused'));
     jest.spyOn(transport, 'sendMail')
-      .mockResolvedValueOnce({
+      .mockImplementationOnce(async () => ({
         messageId: 'one',
         envelope: { from: 'sender@example.com', to: ['user@example.com'] },
         accepted: ['user@example.com'],
@@ -76,8 +76,8 @@ describe('MailService', () => {
         pending: [],
         response: 'queued',
         message: 'queued',
-      })
-      .mockRejectedValueOnce(new Error('timeout'));
+      }))
+      .mockImplementationOnce(async () => { throw new Error('timeout'); });
     jest.spyOn(nodemailer, 'createTransport').mockReturnValue(transport);
     const service = createMailService(config({ NODE_ENV: 'production', SMTP_HOST: 'smtp.example.com' }));
 

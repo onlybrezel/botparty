@@ -51,9 +51,9 @@ function requireReadableFile(env, failures, envName, fallbackName, rootDirectory
   const path = resolveHostSecret(env, envName, fallbackName, rootDirectory);
   try {
     accessSync(path, constants.R_OK);
-    if (!readFileSync(path).toString().trim()) failures.push(`${envName}: ${path} is empty`);
+    if (!readFileSync(path).toString().trim()) failures.push(`${envName}: host secret file is empty`);
   } catch {
-    failures.push(`${envName}: ${path} is not a readable host secret file`);
+    failures.push(`${envName}: is not a readable host secret file`);
   }
 }
 

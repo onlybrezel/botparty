@@ -113,6 +113,7 @@ logs/
 
 # Runtime backup and restore artifacts
 /data/
+/.local-ci-tmp/
 
 # Coverage
 coverage/

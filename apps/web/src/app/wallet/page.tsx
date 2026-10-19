@@ -10,7 +10,7 @@ import type {
   WalletSummary,
   WalletTransactionRecord,
 } from '@/lib/api/wallet';
-import { LEGAL_POLICY_VERSIONS } from '@botparty/shared';
+import { LEGAL_POLICY_VERSIONS } from '@botparty/shared/constants';
 import { releaseFeatures } from '@/lib/release-features';
 import {
   buildWalletExportContent,

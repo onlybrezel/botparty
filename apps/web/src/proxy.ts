@@ -1,5 +1,8 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
+import { isRobotPublic } from './lib/api-response-guards';
+import { buildRobotLookupUrl, canonicalRobotPath } from './lib/robot-route';
+import { getServerApiUrl } from './lib/server-api-url';
 function parseOrigins(raw: string | undefined): string[] {
   const origins = new Set<string>();
   for (const value of raw?.split(',') ?? []) {
@@ -45,7 +48,25 @@ function buildCsp(nonce: string, pathname: string): string {
   ].join('; ');
 }
 
-export function proxy(request: NextRequest) {
+export async function proxy(request: NextRequest) {
+  const legacyRobot = /^\/robot\/([^/]+)\/?$/.exec(request.nextUrl.pathname);
+  const isRouterRequest = request.headers.get('rsc') === '1'
+    || request.headers.has('next-router-prefetch');
+  if (legacyRobot?.[1] && !isRouterRequest) {
+    try {
+      const response = await fetch(buildRobotLookupUrl(getServerApiUrl(), {
+        username: null, slug: decodeURIComponent(legacyRobot[1]),
+      }), { cache: 'no-store', signal: AbortSignal.timeout(3000) });
+      const robot: unknown = response.ok ? await response.json() : null;
+      if (isRobotPublic(robot)) {
+        const canonical = request.nextUrl.clone();
+        canonical.pathname = canonicalRobotPath(robot);
+        return NextResponse.redirect(canonical, 308);
+      }
+    } catch {
+      // Unknown/private rooms and temporary API failures retain the normal page handling.
+    }
+  }
   if (request.nextUrl.pathname === '/dashboard/robots/new') {
     const dashboard = request.nextUrl.clone();
     dashboard.pathname = '/dashboard';

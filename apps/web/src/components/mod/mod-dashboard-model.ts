@@ -1,4 +1,4 @@
-import { isValidTimezone } from '@botparty/shared';
+import { isValidTimezone } from '@botparty/shared/validation';
 import type { api } from '@/lib/api';
 import { detectRoomMode } from './utils';
 

@@ -2,11 +2,11 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PROJECT="botparty-e2e-${$}"
+PROJECT="${LOCAL_CI_RUN_ID:-botparty}-e2e-${$}"
 SECRET_DIR="$(mktemp -d)"
 RESULT_DIR="${E2E_RESULT_DIR:-$(mktemp -d)}"
 FAILOVER_SIGNAL_DIR="${RESULT_DIR}/failover-signals"
-RUNNER_IMAGE="mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e"
+RUNNER_IMAGE="mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27"
 RESULT_DIR_IS_TEMP=true
 if [[ -n "${E2E_RESULT_DIR:-}" ]]; then
   RESULT_DIR_IS_TEMP=false
@@ -55,8 +55,17 @@ export NEXT_PUBLIC_LEGAL_OPERATOR_ADDRESS="Isolated Docker test environment"
 export NEXT_PUBLIC_LEGAL_OPERATOR_COUNTRY="Germany"
 export NEXT_PUBLIC_LEGAL_GOVERNING_LAW="Germany"
 
+FAILOVER_ORCHESTRATOR_PID=''
+
 cleanup() {
   local exit_code=$?
+  if [[ -n "${FAILOVER_ORCHESTRATOR_PID}" ]]; then
+    if kill -0 "${FAILOVER_ORCHESTRATOR_PID}" 2>/dev/null; then
+      kill "${FAILOVER_ORCHESTRATOR_PID}" 2>/dev/null || true
+    fi
+    wait "${FAILOVER_ORCHESTRATOR_PID}" 2>/dev/null || true
+    FAILOVER_ORCHESTRATOR_PID=''
+  fi
   if (( exit_code != 0 )); then
     echo "E2E environment failed; recent container logs follow." >&2
     "${COMPOSE[@]}" ps >&2 || echo "Warning: failed to inspect ${PROJECT}." >&2
@@ -79,6 +88,8 @@ cleanup() {
   return "${exit_code}"
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 write_secret() {
   printf '%s' "$2" > "${SECRET_DIR}/$1"
@@ -177,7 +188,6 @@ wait_for_replicas api 2
 wait_for_replicas web 2
 wait_for_replicas nginx 1
 
-FAILOVER_ORCHESTRATOR_PID=''
 if [[ "${E2E_RUN_FAILOVER:-false}" == true ]]; then
   mkdir -p "${FAILOVER_SIGNAL_DIR}"
   chmod a+rwx "${FAILOVER_SIGNAL_DIR}"
@@ -223,6 +233,7 @@ if [[ -n "${FAILOVER_ORCHESTRATOR_PID}" ]]; then
   set +e
   wait "${FAILOVER_ORCHESTRATOR_PID}"
   FAILOVER_STATUS=$?
+  FAILOVER_ORCHESTRATOR_PID=''
   set -e
   if (( RUNNER_STATUS == 0 && FAILOVER_STATUS != 0 )); then
     RUNNER_STATUS=${FAILOVER_STATUS}

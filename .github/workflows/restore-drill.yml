@@ -28,7 +28,7 @@ jobs:
       - name: Start isolated backup sources
         run: |
           docker run -d --name drill-source-pg -e POSTGRES_PASSWORD=source_password -e POSTGRES_DB=botparty -p 127.0.0.1:35432:5432 postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
-          docker run -d --name drill-source-minio -e MINIO_ROOT_USER=source_access -e MINIO_ROOT_PASSWORD=source_secret_123 -p 127.0.0.1:39000:9000 minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e server /data
+          docker run -d --name drill-source-storage --hostname drill-source-storage -e AWS_ACCESS_KEY_ID=source_access -e AWS_SECRET_ACCESS_KEY=source_secret_123 -p 127.0.0.1:39000:8333 chrislusf/seaweedfs:4.40@sha256:52194fba4fecd0083c842158b3a902ba6e04a63619b2b0efcd08007bdb6a4602 mini -dir=/data -ip=drill-source-storage -master.telemetry=false -webdav=false -admin.ui=false
           wait_for_postgres() {
             for ((attempt = 1; attempt <= 60; attempt++)); do
               if docker exec drill-source-pg pg_isready -U postgres -d botparty; then
@@ -39,18 +39,18 @@ jobs:
             echo 'PostgreSQL source did not become ready within 60 seconds.' >&2
             return 1
           }
-          wait_for_minio() {
+          wait_for_storage() {
             for ((attempt = 1; attempt <= 60; attempt++)); do
-              if curl -fsS http://127.0.0.1:39000/minio/health/live; then
+              if docker run --rm --network host -e AWS_ACCESS_KEY_ID=source_access -e AWS_SECRET_ACCESS_KEY=source_secret_123 -e AWS_DEFAULT_REGION=us-east-1 amazon/aws-cli:2.27.50@sha256:48c3d4212e2f5b0e24bdc6af7708f9412ce65425a79575e0f78b8f8c0dcd70ab --endpoint-url http://127.0.0.1:39000 s3api list-buckets >/dev/null 2>&1; then
                 return 0
               fi
               sleep 1
             done
-            echo 'MinIO source did not become ready within 60 seconds.' >&2
+            echo 'Object-storage source did not become ready within 60 seconds.' >&2
             return 1
           }
           wait_for_postgres
-          wait_for_minio
+          wait_for_storage
       - name: Provision deterministic database and objects
         env:
           DATABASE_URL: postgresql://postgres:source_password@127.0.0.1:35432/botparty?schema=public
@@ -65,7 +65,7 @@ jobs:
           pnpm --filter @botparty/prisma db:seed
           mkdir -p data/drill-object data/drill-secrets
           printf fixture > data/drill-object/fixture.txt
-          docker run --rm --network host --entrypoint /bin/sh --security-opt no-new-privileges:true --cap-drop ALL -v "$PWD/data/drill-object:/fixture:ro" minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727 -c 'mc alias set source http://127.0.0.1:39000 source_access source_secret_123 >/dev/null; for b in botparty-thumbnails botparty-recordings; do mc mb --ignore-existing source/$b; mc cp /fixture/fixture.txt source/$b/fixture.txt; done'
+          docker run --rm --network host --entrypoint /bin/sh --security-opt no-new-privileges:true --cap-drop ALL -e AWS_ACCESS_KEY_ID=source_access -e AWS_SECRET_ACCESS_KEY=source_secret_123 -e AWS_DEFAULT_REGION=us-east-1 -v "$PWD/data/drill-object:/fixture:ro" amazon/aws-cli:2.27.50@sha256:48c3d4212e2f5b0e24bdc6af7708f9412ce65425a79575e0f78b8f8c0dcd70ab -ec 'for b in botparty-thumbnails botparty-recordings; do aws --endpoint-url http://127.0.0.1:39000 s3 mb "s3://$b"; aws --endpoint-url http://127.0.0.1:39000 s3 cp /fixture/fixture.txt "s3://$b/fixture.txt"; done'
           docker exec -i drill-source-pg psql -U postgres -d botparty -v ON_ERROR_STOP=1 <<'SQL'
           INSERT INTO sessions (id, "robotId", "userId", status, "startedAt", "endedAt", "createdAt")
           SELECT '10000000-0000-0000-0000-000000000001', r.id, r."ownerId", 'ENDED', now() - interval '1 minute', now(), now()
@@ -77,7 +77,7 @@ jobs:
           for name in jwt_secret jwt_refresh_secret robot_jwt_secret webhook_secret_encryption_key payout_destination_encryption_key livekit_api_secret; do printf 'restore-drill-%s-at-least-32-characters' "$name" > "data/drill-secrets/$name"; done
           printf 'postgresql://postgres:source_password@127.0.0.1:35432/botparty?schema=public' > data/drill-secrets/api_database_url
           printf 'restore-drill-redis-password' > data/drill-secrets/redis_password
-          printf 'source_secret_123' > data/drill-secrets/minio_root_password
+          printf 'source_secret_123' > data/drill-secrets/object_storage_secret_access_key
           printf 'restore-drill-metrics-password' > data/drill-secrets/metrics_password
           printf 'restore-admin-password-at-least-16' > data/drill-secrets/seed_admin_password
           : > data/drill-secrets/smtp_password

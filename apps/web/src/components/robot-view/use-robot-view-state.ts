@@ -1,8 +1,8 @@
 'use client';
-
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { WS_PROTOCOL_VERSION, type RobotPublic } from '@botparty/shared';
+import { WS_PROTOCOL_VERSION } from '@botparty/shared/constants';
+import type { RobotPublic } from '@botparty/shared/types';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/store';
 import { pushToast } from '@/lib/toast';

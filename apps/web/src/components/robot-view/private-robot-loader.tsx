@@ -76,7 +76,7 @@ export function PrivateRobotLoader({ slug, username = null }: Props) {
 
   if (!robot) {
     return (
-      <div className="mx-auto max-w-3xl px-4 py-10">
+      <div className="mx-auto min-h-[calc(100svh-4rem)] max-w-3xl px-4 py-10">
         <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-6">
           <h1 className="text-xl font-bold">Private robot</h1>
           <p className="mt-2 text-sm text-[var(--muted-foreground)]">

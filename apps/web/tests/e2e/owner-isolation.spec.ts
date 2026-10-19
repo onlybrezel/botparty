@@ -1,9 +1,10 @@
 import { expect, test, type APIRequestContext } from '@playwright/test';
+import { randomBytes } from 'node:crypto';
 import { LEGAL_POLICY_VERSIONS } from '@botparty/shared';
 
 const API_PREFIX = '/api/v1';
 const PRIVATE_THUMBNAIL =
-  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO8B9pUAAAAASUVORK5CYII=';
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAEUlEQVQImWPQSDnxH4QZYAwATewJTUPIsxsAAAAASUVORK5CYII=';
 
 type RegisteredAccount = {
   context: APIRequestContext;
@@ -41,7 +42,7 @@ test('private robot data and files remain isolated between owners', async ({
   playwright,
 }, testInfo) => {
   const baseURL = String(testInfo.project.use.baseURL);
-  const suffix = `${Date.now().toString(36)}_${Math.random().toString(16).slice(2, 8)}`;
+  const suffix = `${Date.now().toString(36)}_${randomBytes(3).toString('hex')}`;
   const ownerContext = await playwright.request.newContext({ baseURL });
   const foreignContext = await playwright.request.newContext({ baseURL });
   const anonymousContext = await playwright.request.newContext({ baseURL });

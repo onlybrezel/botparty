@@ -3,16 +3,23 @@
 import dynamic from 'next/dynamic';
 import { useEffect, useState } from 'react';
 import { Plus, Save, Trash2 } from 'lucide-react';
-import { CreateRobotPanel } from '@/components/dashboard/create-robot-panel';
 import { DashboardAllowlistSection } from '@/components/dashboard/dashboard-allowlist-section';
 import { DashboardFleetSummary } from '@/components/dashboard/dashboard-fleet-summary';
-import { DashboardOperationsSection } from '@/components/dashboard/dashboard-operations-section';
-import { DashboardSettingsSection } from '@/components/dashboard/dashboard-settings-section';
 import { DashboardSidebar } from '@/components/dashboard/dashboard-sidebar';
 import { DashboardTokenSection } from '@/components/dashboard/dashboard-token-section';
 import { RobotCardGrid } from '@/components/dashboard/robot-card-grid';
 import { RobotCardGridSkeleton } from '@/components/dashboard/robot-card-grid-skeleton';
 import { useDashboardPage } from '@/components/dashboard/use-dashboard-page';
+
+const CreateRobotPanel = dynamic(() =>
+  import('@/components/dashboard/create-robot-panel').then((module) => module.CreateRobotPanel),
+);
+const DashboardOperationsSection = dynamic(() =>
+  import('@/components/dashboard/dashboard-operations-section').then((module) => module.DashboardOperationsSection),
+);
+const DashboardSettingsSection = dynamic(() =>
+  import('@/components/dashboard/dashboard-settings-section').then((module) => module.DashboardSettingsSection),
+);
 
 const DashboardPreview = dynamic(
   () =>
@@ -191,10 +198,11 @@ export default function DashboardPage() {
     createSlugOwner,
   } = useDashboardPage();
 
-  if (!hasHydrated || !accessToken) {
-    return null;
-  }
+  const awaitingSession = !hasHydrated || !accessToken;
+  const showingLoadingState = loading || awaitingSession;
 
+  // Keep the public shell visible during hydration; robot data stays behind
+  // the loading state until the authenticated session is available.
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
       <header className="mb-6 flex flex-col gap-4 border-b border-[var(--border)] pb-5 sm:flex-row sm:items-end sm:justify-between">
@@ -204,10 +212,11 @@ export default function DashboardPage() {
             Create robots, manage access and operate connected clients.
           </p>
         </div>
-        {!loading && robots.length > 0 ? (
+        {showingLoadingState || robots.length > 0 ? (
           <button
             type="button"
             onClick={() => setCreatePanelOpen((open) => !open)}
+            disabled={showingLoadingState}
             aria-expanded={createPanelOpen}
             className="inline-flex w-fit items-center gap-2 rounded-lg border border-[var(--border)] px-4 py-2 text-sm font-semibold hover:bg-[var(--muted)]"
           >
@@ -228,7 +237,7 @@ export default function DashboardPage() {
         </p>
       )}
 
-      {createPanelOpen || (!loading && robots.length === 0) ? (
+      {!awaitingSession && (createPanelOpen || (!loading && robots.length === 0)) ? (
         <CreateRobotPanel
           createForm={createForm}
           setCreateForm={setCreateForm}
@@ -242,8 +251,11 @@ export default function DashboardPage() {
       <section className="mt-8 border-t border-[var(--border)] pt-6">
         <h2 className="mb-4 text-lg font-bold">Your robots</h2>
 
-        {loading ? (
-          <RobotCardGridSkeleton />
+        {showingLoadingState ? (
+          <>
+            <DashboardFleetSummary robots={[]} selectedId={null} loading />
+            <RobotCardGridSkeleton />
+          </>
         ) : robots.length === 0 ? (
           <div className="border border-dashed border-[var(--border)] p-8 text-center">
             <p className="text-base font-semibold">No robots yet</p>

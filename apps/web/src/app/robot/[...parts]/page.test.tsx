@@ -1,6 +1,6 @@
 import { isValidElement } from 'react';
 import type { RobotPublic } from '@botparty/shared';
-import { RobotStatus, Role } from '@botparty/shared';
+import { RobotStatus } from '@botparty/shared';
 import { createRobotPublic } from '@/test/robot-fixtures';
 
 const notFound = vi.fn(() => {
@@ -60,8 +60,6 @@ describe('robot catch-all route', () => {
               username: 'julien',
               displayName: 'Julien',
               avatarUrl: null,
-              role: Role.USER,
-              createdAt: '2026-01-01T00:00:00.000Z',
             },
           })),
         ),
@@ -106,8 +104,6 @@ describe('robot catch-all route', () => {
             username: 'julien',
             displayName: 'Julien',
             avatarUrl: null,
-            role: Role.USER,
-            createdAt: '2026-01-01T00:00:00.000Z',
           },
         }))),
     );
@@ -137,8 +133,6 @@ describe('robot catch-all route', () => {
             username: 'julien',
             displayName: 'Julien',
             avatarUrl: null,
-            role: Role.USER,
-            createdAt: '2026-01-01T00:00:00.000Z',
           },
         }))),
     );
