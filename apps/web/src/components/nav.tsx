@@ -246,14 +246,14 @@ export default function Nav() {
               <Link
                 href={localized('/wallet')}
                 prefetch={false}
-                className="hidden items-center gap-1 border-r border-[var(--border)] pr-3 text-xs font-semibold text-amber-300 transition hover:text-amber-200 lg:inline-flex"
+                className="hidden items-center gap-1 border-r border-[var(--border)] pr-3 text-xs font-semibold text-amber-800 transition hover:text-amber-900 dark:text-amber-300 dark:hover:text-amber-200 lg:inline-flex"
                 title="Wallet"
               >
                 <span aria-hidden>◈</span>
                 <span className="tabular-nums">
                   {balance === null ? '—' : balance.toLocaleString()}
                 </span>
-                <span className="text-[10px] uppercase tracking-wide opacity-70">cr</span>
+                <span className="text-[10px] uppercase tracking-wide">cr</span>
               </Link>
               <button
                 ref={userMenuButtonRef}
@@ -427,7 +427,7 @@ export default function Nav() {
                   <Link href={localized('/dashboard')} prefetch={false} className="block px-1 py-3 text-sm text-[var(--foreground)]">
                     Robots
                   </Link>
-                  <Link href={localized('/wallet')} prefetch={false} className="block px-1 py-3 text-sm font-medium text-amber-300">
+                  <Link href={localized('/wallet')} prefetch={false} className="block px-1 py-3 text-sm font-medium text-amber-800 dark:text-amber-300">
                     Wallet{balance !== null ? ` · ${balance.toLocaleString()} cr` : ''}
                   </Link>
                   {(role === 'ADMIN' || role === 'MOD') && (
