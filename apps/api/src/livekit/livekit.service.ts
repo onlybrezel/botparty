@@ -544,7 +544,7 @@ export class LivekitService {
     if (!normalized) {
       return '';
     }
-    return normalized.replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64);
+    return normalized.replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 64);
   }
 
   cameraIdFromParticipantIdentityForRobot(robotId: string, identity?: string): string | null {
@@ -553,9 +553,12 @@ export class LivekitService {
       return null;
     }
 
-    const prefixed = normalized.match(new RegExp(`^robot-media:${robotId}:(.+)$`, 'i'));
-    if (prefixed?.[1]) {
-      return prefixed[1];
+    const prefix = `robot-media:${robotId}:`;
+    if (normalized.toLowerCase().startsWith(prefix.toLowerCase())) {
+      const cameraId = normalized.slice(prefix.length);
+      if (cameraId && !/[\r\n\u2028\u2029]/.test(cameraId)) {
+        return cameraId;
+      }
     }
 
     if (normalized === `robot-media-${robotId}`) {
