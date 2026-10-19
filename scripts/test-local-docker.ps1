@@ -31,7 +31,7 @@ New-Item -ItemType Directory -Path $resultDir -Force | Out-Null
 try {
     $dirty = git status --porcelain --untracked-files=no
     if ($dirty) { throw 'Commit tracked changes first so the exact tested source is recorded.' }
-    Invoke-Checked git @('archive', '--format=tar', "--output=$snapshot", 'HEAD')
+    Invoke-Checked git @('-c', 'core.autocrlf=false', 'archive', '--format=tar', "--output=$snapshot", 'HEAD')
     git rev-parse HEAD | Set-Content (Join-Path $resultDir 'source-commit.txt')
     Invoke-Checked docker @('build', '-f', 'docker/ci/Dockerfile', '-t', 'botparty-local-ci-runner:latest', '.')
     Invoke-Checked docker @('volume', 'create', $volume)
