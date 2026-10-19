@@ -1,23 +1,9 @@
 import { z } from 'zod';
+import './zod.js';
 import { LEGAL_POLICY_VERSIONS, LIMITS } from '../constants/index.js';
+import { isValidTimezone } from '../validation.js';
 
-if ('window' in globalThis) {
-  z.config({ jitless: true });
-}
-
-export function isValidTimezone(value: string): boolean {
-  const timezone = value.trim();
-  if (!timezone) {
-    return false;
-  }
-
-  try {
-    Intl.DateTimeFormat('en-US', { timeZone: timezone });
-    return true;
-  } catch {
-    return false;
-  }
-}
+export { isValidTimezone } from '../validation.js';
 
 const robotStreamCameraSchema = z.object({
   id: z.string().min(1).max(64),
@@ -71,38 +57,7 @@ function validateRobotScheduleRange(
 }
 
 // ─── Auth Schemas ────────────────────────────────────
-export const usernameSchema = z
-  .string()
-  .min(3)
-  .max(32)
-  .regex(/^[a-zA-Z0-9_-]+$/, 'Only alphanumeric, hyphens, and underscores');
-
-export const emailSchema = z.string().email();
-
-export const passwordSchema = z.string().min(8).max(128);
-
-export const registerSchema = z.object({
-  username: usernameSchema,
-  email: emailSchema,
-  password: passwordSchema,
-  displayName: z.string().min(1).max(64).optional(),
-  acceptedTermsVersion: z.literal(LEGAL_POLICY_VERSIONS.TERMS),
-  acceptedPrivacyVersion: z.literal(LEGAL_POLICY_VERSIONS.PRIVACY),
-});
-
-export const loginSchema = z.object({
-  email: emailSchema,
-  password: z.string().min(1),
-});
-
-export const forgotPasswordSchema = z.object({
-  email: emailSchema,
-});
-
-export const resetPasswordSchema = z.object({
-  token: z.string().min(16).max(256),
-  password: passwordSchema,
-});
+export * from './auth.js';
 
 // ─── Robot Schemas ───────────────────────────────────
 const robotWriteSchema = z.object({

@@ -6,14 +6,34 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./dist/index.js",
-    "./schemas": "./dist/schemas/index.js",
-    "./types": "./dist/types/index.js",
-    "./constants": "./dist/constants/index.js"
+    ".": {
+      "browser": "./dist/browser/index.js",
+      "default": "./dist/index.js"
+    },
+    "./schemas": {
+      "browser": "./dist/browser/schemas/index.js",
+      "default": "./dist/schemas/index.js"
+    },
+    "./schemas/auth": {
+      "browser": "./dist/browser/schemas/auth.js",
+      "default": "./dist/schemas/auth.js"
+    },
+    "./types": {
+      "browser": "./dist/browser/types/index.js",
+      "default": "./dist/types/index.js"
+    },
+    "./constants": {
+      "browser": "./dist/browser/constants/index.js",
+      "default": "./dist/constants/index.js"
+    },
+    "./validation": {
+      "browser": "./dist/browser/validation.js",
+      "default": "./dist/validation.js"
+    }
   },
   "scripts": {
-    "build": "tsc",
-    "dev": "tsc --watch",
+    "build": "tsc && tsc -p tsconfig.browser.json && node prepare-browser.mjs",
+    "dev": "node watch.mjs",
     "clean": "rm -rf dist .turbo",
     "typecheck": "tsc --noEmit"
   },

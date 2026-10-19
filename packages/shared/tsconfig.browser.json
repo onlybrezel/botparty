@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "outDir": "./dist/browser",
+    "tsBuildInfoFile": "./dist/browser/tsconfig.tsbuildinfo"
+  }
+}

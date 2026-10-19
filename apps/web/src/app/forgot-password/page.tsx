@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { emailSchema } from '@botparty/shared';
+import { emailSchema } from '@botparty/shared/schemas/auth';
 import { api } from '@/lib/api';
 
 export default function ForgotPasswordPage() {

@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { LEGAL_POLICY_VERSIONS, loginSchema, registerSchema } from '@botparty/shared';
+import { LEGAL_POLICY_VERSIONS } from '@botparty/shared/constants';
+import { loginSchema, registerSchema } from '@botparty/shared/schemas/auth';
 import { api } from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/store';

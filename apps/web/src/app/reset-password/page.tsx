@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { passwordSchema } from '@botparty/shared';
+import { passwordSchema } from '@botparty/shared/schemas/auth';
 import { api } from '@/lib/api';
 
 export default function ResetPasswordPage() {
