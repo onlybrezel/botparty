@@ -201,7 +201,7 @@ export interface RobotPublic {
   } | null;
   tags: string[];
   viewerCount: number;
-  owner: UserPublic;
+  owner: Pick<UserPublic, 'id' | 'username' | 'displayName' | 'avatarUrl'>;
   createdAt: string;
 }
 

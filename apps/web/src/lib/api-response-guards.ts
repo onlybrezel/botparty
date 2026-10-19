@@ -18,9 +18,7 @@ function isOwner(value: unknown): value is RobotPublic['owner'] {
     && typeof value['id'] === 'string'
     && typeof value['username'] === 'string'
     && (value['displayName'] === null || typeof value['displayName'] === 'string')
-    && (value['avatarUrl'] === null || typeof value['avatarUrl'] === 'string')
-    && (value['role'] === 'USER' || value['role'] === 'MOD' || value['role'] === 'ADMIN')
-    && typeof value['createdAt'] === 'string';
+    && (value['avatarUrl'] === null || typeof value['avatarUrl'] === 'string');
 }
 
 export function isRobotPublic(value: unknown): value is RobotPublic {
