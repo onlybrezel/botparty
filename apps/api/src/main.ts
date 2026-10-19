@@ -14,6 +14,7 @@ import { AllExceptionsFilter } from './filters/all-exceptions.filter';
 import { createSwaggerDocumentConfig } from './openapi/swagger-config';
 import { installPaymentRawBodyCapture } from './billing/payment-raw-body';
 import { normalizeCorrelationId } from './common/request-context';
+import { installCspReportContentParser } from './common/csp-report-content-parser';
 import {
   installConcurrentRequestLimit,
   parseMaxConcurrentLoginRequests,
@@ -165,6 +166,8 @@ async function bootstrap() {
       ? { logger: new ConsoleLogger({ json: true, colors: false, compact: true }) }
       : {},
   );
+
+  installCspReportContentParser(app.getHttpAdapter().getInstance());
 
   installPaymentRawBodyCapture(
     app.getHttpAdapter().getInstance(),
