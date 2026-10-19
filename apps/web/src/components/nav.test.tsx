@@ -50,6 +50,20 @@ vi.mock('@/lib/i18n', () => ({
 }));
 
 describe('Nav', () => {
+  it('does not let an old bootstrap complete a pending BFCache restoration', async () => {
+    let finishOld!: () => void;
+    let finishCurrent!: () => void;
+    restoreSessionMock.mockImplementationOnce(() => new Promise<void>((resolve) => { finishOld = resolve; }));
+    restoreSessionMock.mockImplementationOnce(() => new Promise<void>((resolve) => { finishCurrent = resolve; }));
+    render(<Nav />);
+    await act(async () => window.dispatchEvent(new PageTransitionEvent('pagehide')));
+    await act(async () => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+    await act(async () => finishOld());
+    expect(screen.queryByRole('link', { name: 'Sign in' })).not.toBeInTheDocument();
+    await act(async () => finishCurrent());
+    expect(screen.getByRole('link', { name: 'Sign in' })).toBeInTheDocument();
+  });
+
   it('cancels document bootstrap on pagehide and restarts after a back-forward cache restore', async () => {
     restoreSessionMock.mockClear();
     const view = render(<Nav />);

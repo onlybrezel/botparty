@@ -56,16 +56,17 @@ export default function Nav() {
     window.addEventListener('pagehide', cancelPendingBootstrap);
 
     const bootstrap = async () => {
+      const signal = bootstrapController.signal;
       api.syncTokenFromStore();
-      const restored = await api.restoreSession(bootstrapController.signal).catch(() => false);
-      if (cancelled) return;
+      const restored = await api.restoreSession(signal).catch(() => false);
+      if (cancelled || signal.aborted) return;
       if (restored) {
         // Analytics is opt-in. If consent cannot be restored, keep tracking
         // disabled until the settings page can load the authoritative value.
         const consent = await api.analytics.consent().catch(() => null);
         updatePreference('productAnalyticsEnabled', Boolean(consent?.productAnalyticsEnabled));
       }
-      if (!cancelled) {
+      if (!cancelled && !signal.aborted) {
         setMounted(true);
       }
     };
