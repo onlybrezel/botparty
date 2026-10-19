@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { LEGAL_POLICY_VERSIONS } from '@botparty/shared/constants';
-import { loginSchema, registerSchema } from '@botparty/shared/schemas/auth';
+import { loadAuthSchemas, type AuthSchemas } from './auth-schemas';
 import { api } from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/store';
@@ -22,8 +22,8 @@ type AuthDraft = {
   password: string;
 };
 
-function collectFieldErrors(mode: Mode, draft: AuthDraft, legalAccepted: boolean) {
-  const result = (mode === 'login' ? loginSchema : registerSchema).safeParse({
+function parseAuthDraft(schemas: AuthSchemas, mode: Mode, draft: AuthDraft, legalAccepted: boolean) {
+  return (mode === 'login' ? schemas.loginSchema : schemas.registerSchema).safeParse({
     ...(mode === 'register' ? {
       username: draft.username,
       acceptedTermsVersion: legalAccepted ? LEGAL_POLICY_VERSIONS.TERMS : undefined,
@@ -33,6 +33,10 @@ function collectFieldErrors(mode: Mode, draft: AuthDraft, legalAccepted: boolean
     password: draft.password,
   });
 
+}
+
+function collectFieldErrors(schemas: AuthSchemas, mode: Mode, draft: AuthDraft, legalAccepted: boolean) {
+  const result = parseAuthDraft(schemas, mode, draft, legalAccepted);
   if (result.success) {
     return {} as Partial<Record<AuthField, string>>;
   }
@@ -51,6 +55,11 @@ export default function LoginPage() {
   const { login } = useAuth();
 
   const [mode, setMode] = useState<Mode>('login');
+  const [schemas, setSchemas] = useState<AuthSchemas | null>(null);
+  const [schemaError, setSchemaError] = useState(false);
+  const [schemaLoading, setSchemaLoading] = useState(false);
+  const schemaLoad = useRef<Promise<AuthSchemas | null> | null>(null);
+  const submitPending = useRef(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resetSucceeded, setResetSucceeded] = useState(false);
@@ -64,7 +73,10 @@ export default function LoginPage() {
   useEffect(() => {
     setResetSucceeded(new URLSearchParams(window.location.search).get('reset') === 'success');
   }, []);
-  const fieldErrors = useMemo(() => collectFieldErrors(mode, draft, legalAccepted), [draft, legalAccepted, mode]);
+  const fieldErrors = useMemo(
+    () => schemas ? collectFieldErrors(schemas, mode, draft, legalAccepted) : {},
+    [draft, legalAccepted, mode, schemas],
+  );
   const visibleFieldErrors = useMemo(
     () =>
       Object.entries(fieldErrors).reduce<Partial<Record<AuthField, string>>>((acc, [field, message]) => {
@@ -76,7 +88,7 @@ export default function LoginPage() {
     [fieldErrors, loading, touched],
   );
   const canSubmit = useMemo(() => {
-    if (loading) {
+    if (loading || !schemas) {
       return false;
     }
     if (!draft.email.trim() || !draft.password) {
@@ -86,9 +98,32 @@ export default function LoginPage() {
       return false;
     }
     return Object.keys(fieldErrors).length === 0;
-  }, [draft.email, draft.password, draft.username, fieldErrors, legalAccepted, loading, mode]);
+  }, [draft.email, draft.password, draft.username, fieldErrors, legalAccepted, loading, mode, schemas]);
+
+  async function ensureAuthSchemas(): Promise<AuthSchemas | null> {
+    if (schemas) return schemas;
+    if (!schemaLoad.current) {
+      setSchemaError(false);
+      setSchemaLoading(true);
+      schemaLoad.current = loadAuthSchemas()
+        .then((loaded) => {
+          setSchemas(loaded);
+          return loaded;
+        })
+        .catch(() => {
+          setSchemaError(true);
+          return null;
+        })
+        .finally(() => {
+          schemaLoad.current = null;
+          setSchemaLoading(false);
+        });
+    }
+    return schemaLoad.current;
+  }
 
   function updateField(field: AuthField, value: string) {
+    void ensureAuthSchemas();
     setDraft((current) => ({ ...current, [field]: value }));
   }
 
@@ -98,9 +133,13 @@ export default function LoginPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (submitPending.current) return;
+    submitPending.current = true;
     setTouched({ username: true, email: true, password: true });
     setError(null);
-    if (Object.keys(fieldErrors).length > 0) {
+    const readySchemas = await ensureAuthSchemas();
+    if (!readySchemas || !parseAuthDraft(readySchemas, mode, draft, legalAccepted).success) {
+      submitPending.current = false;
       return;
     }
     setLoading(true);
@@ -160,6 +199,7 @@ export default function LoginPage() {
       }
       setError(err instanceof Error ? err.message : 'Something went wrong');
     } finally {
+      submitPending.current = false;
       setLoading(false);
     }
   }
@@ -242,7 +282,7 @@ export default function LoginPage() {
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} onFocusCapture={() => { void ensureAuthSchemas(); }} className="space-y-4">
               {resetSucceeded && mode === 'login' && !error && (
                 <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300">
                   Password updated. Sign in with your new password.
@@ -333,6 +373,16 @@ export default function LoginPage() {
                   <p className="text-xs text-[var(--muted-foreground)]">Use at least 8 characters.</p>
                 ) : null}
               </div>
+
+              {schemaLoading && <p role="status" className="text-sm text-[var(--muted-foreground)]">Preparing form validation...</p>}
+              {schemaError && (
+                <div role="alert" className="text-sm text-[var(--destructive)]">
+                  Form validation could not be loaded. Your details have not been submitted.
+                  <button type="button" className="ml-2 underline" onClick={() => { void ensureAuthSchemas(); }}>
+                    Retry validation
+                  </button>
+                </div>
+              )}
 
               {error && (
                 <div role="alert" className="rounded-lg border border-[var(--destructive)]/40 bg-[var(--destructive)]/10 px-3 py-2 text-sm text-[var(--destructive)]">
