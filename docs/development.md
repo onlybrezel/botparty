@@ -111,6 +111,8 @@ registry push is involved. Logs and the source commit are saved under
 `data/local-ci/<run-id>/`; the run's containers and source volume are removed.
 
 Use `-Phase checks`, `-Phase compose`, `-Phase lighthouse` or `-Phase performance` for a focused rerun.
+`-Phase database` reruns migration, upgrade, queue and backup checks; `-Phase build`
+reruns compilation, bundle budgets and generated contract parity.
 The checks phase includes audit, lint, types, unit/integration tests, coverage,
 database upgrade and migration checks, backups, queue and bundle budgets, and
 generated API contract parity. Compose runs development hot reload and the

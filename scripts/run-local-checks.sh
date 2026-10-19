@@ -34,11 +34,19 @@ if [[ "$phase" == checks || "$phase" == all ]]; then
   pnpm test
   pnpm --filter @botparty/api test:coverage
   pnpm --filter @botparty/web test:coverage
+fi
+
+if [[ "$phase" == database || "$phase" == checks || "$phase" == all ]]; then
   pnpm db:verify-migrations
   pnpm db:upgrade:postgres18:test
-  pnpm --filter @botparty/prisma db:migrate:prod
-  QUEUE_BENCHMARK_ALLOW_WRITES=true pnpm benchmark:queue
+  docker exec "${LOCAL_CI_RUN_ID:?local CI run ID is required}-postgres" createdb -U botparty queue_benchmark
+  queue_database_url="${DATABASE_URL/migration_test/queue_benchmark}"
+  DATABASE_URL="$queue_database_url" pnpm --filter @botparty/prisma db:migrate:prod
+  DATABASE_URL="$queue_database_url" QUEUE_BENCHMARK_ALLOW_WRITES=true pnpm benchmark:queue
   pnpm test:backup
+fi
+
+if [[ "$phase" == build || "$phase" == checks || "$phase" == all ]]; then
   pnpm build
   pnpm --filter @botparty/web performance:budget
   node apps/api/dist/openapi/export-openapi.js docs/openapi.json
