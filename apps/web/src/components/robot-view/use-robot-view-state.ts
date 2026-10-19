@@ -1,5 +1,4 @@
 'use client';
-
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { WS_PROTOCOL_VERSION } from '@botparty/shared/constants';
