@@ -224,6 +224,7 @@ export default function SessionsPage() {
                     </Link>
                     <Link
                       href={`/robot/${session.robot.slug}`}
+                      prefetch={false}
                       className="inline-flex rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-medium"
                     >
                       Open robot
