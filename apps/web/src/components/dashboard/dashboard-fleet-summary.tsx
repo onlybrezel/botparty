@@ -5,9 +5,10 @@ import type { RobotManaged } from '@/lib/api';
 type Props = {
   robots: RobotManaged[];
   selectedId: string | null;
+  loading?: boolean;
 };
 
-export function DashboardFleetSummary({ robots, selectedId }: Props) {
+export function DashboardFleetSummary({ robots, selectedId, loading = false }: Props) {
   const liveCount = robots.filter((robot) => robot.status === 'ONLINE' || robot.status === 'BUSY').length;
   const busyCount = robots.filter((robot) => robot.status === 'BUSY').length;
   const offlineCount = robots.filter((robot) => robot.status === 'OFFLINE').length;
@@ -24,13 +25,13 @@ export function DashboardFleetSummary({ robots, selectedId }: Props) {
   ];
 
   return (
-    <div className="mb-5 grid grid-cols-2 border-y border-[var(--border)] sm:grid-cols-3 xl:grid-cols-6">
+    <div aria-busy={loading} className="mb-5 grid grid-cols-2 border-y border-[var(--border)] sm:grid-cols-3 xl:grid-cols-6">
       {stats.map((stat) => (
         <div key={stat.label} className="border-b border-[var(--border)] px-3 py-3 last:border-b-0 sm:border-b-0 sm:border-r sm:last:border-r-0">
           <p className="text-xs text-[var(--muted-foreground)]">
             {stat.label}
           </p>
-          <p className="mt-1 truncate text-base font-semibold text-[var(--foreground)]">{stat.value}</p>
+          <p className="mt-1 truncate text-base font-semibold text-[var(--foreground)]">{loading ? '—' : stat.value}</p>
         </div>
       ))}
     </div>
