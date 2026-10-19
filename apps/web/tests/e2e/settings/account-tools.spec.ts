@@ -22,9 +22,18 @@ test('session history supports large lists, filtering, replay details, and brows
   await expect(page).toHaveURL(/\/sessions\/10000000-/);
   await expect(page.getByRole('heading', { name: 'Session details' })).toBeVisible();
   await expect(page.getByText('No replay file matched this session yet.')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Open robot' })).toHaveAttribute('href', '/robot/e2e_owner/owner-test-robot');
+  await page.getByRole('link', { name: 'Open robot' }).click();
+  await expect(page).toHaveURL(/\/robot\/e2e_owner\/owner-test-robot$/);
+  await expect(page.getByRole('heading', { name: 'Owner Test Robot', exact: true })).toBeVisible();
+  await page.goBack();
+  await expect(page.getByRole('heading', { name: 'Session details' })).toBeVisible();
   await page.getByRole('link', { name: 'Back to sessions' }).click();
   await expect(page).toHaveURL(/\/sessions$/);
   await expect(page.getByRole('heading', { name: 'Sessions', exact: true })).toBeVisible();
+  await page.getByRole('link', { name: 'Open robot' }).first().click();
+  await expect(page).toHaveURL(/\/robot\/e2e_owner\/owner-test-robot$/);
+  await expect(page.getByRole('heading', { name: 'Owner Test Robot', exact: true })).toBeVisible();
 });
 
 test('notifications and wallet exports remain usable with empty activity', async ({ page }) => {
