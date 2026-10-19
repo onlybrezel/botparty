@@ -2,9 +2,11 @@ import { createElement } from 'react';
 import type { AnchorHTMLAttributes, ImgHTMLAttributes } from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import Nav from './nav';
+import { usePreferences } from '@/lib/preferences';
 
 const usePathnameMock = vi.fn(() => '/');
-const restoreSessionMock = vi.fn((_signal?: AbortSignal) => Promise.resolve());
+const restoreSessionMock = vi.fn((_signal?: AbortSignal): Promise<boolean | void> => Promise.resolve());
+const consentMock = vi.fn<() => Promise<{ productAnalyticsEnabled: boolean }>>();
 const syncTokenFromStoreMock = vi.fn();
 
 vi.mock('next/navigation', () => ({
@@ -32,6 +34,7 @@ vi.mock('@/lib/api', () => ({
     restoreSession: (signal?: AbortSignal) => restoreSessionMock(signal),
     logout: () => Promise.resolve(),
     setToken: () => undefined,
+    analytics: { consent: () => consentMock() },
   },
 }));
 
@@ -50,6 +53,18 @@ vi.mock('@/lib/i18n', () => ({
 }));
 
 describe('Nav', () => {
+  it('does not apply delayed analytics consent after its document leaves', async () => {
+    let finishConsent!: (value: { productAnalyticsEnabled: boolean }) => void;
+    usePreferences.setState({ productAnalyticsEnabled: false });
+    restoreSessionMock.mockResolvedValueOnce(true);
+    consentMock.mockImplementationOnce(() => new Promise((resolve) => { finishConsent = resolve; }));
+    render(<Nav />);
+    await waitFor(() => expect(consentMock).toHaveBeenCalled());
+    await act(async () => window.dispatchEvent(new PageTransitionEvent('pagehide')));
+    await act(async () => finishConsent({ productAnalyticsEnabled: true }));
+    expect(usePreferences.getState().productAnalyticsEnabled).toBe(false);
+  });
+
   it('does not let an old bootstrap complete a pending BFCache restoration', async () => {
     let finishOld!: () => void;
     let finishCurrent!: () => void;
