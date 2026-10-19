@@ -15,7 +15,7 @@ test('core pages run under the enforced content security policy', async ({ page 
     const nonce = csp?.match(/'nonce-([^']+)'/)?.[1];
     expect(nonce).toBeTruthy();
     await expect(page.locator('main')).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Sign in' })).toBeVisible();
+    await expect(page.getByRole('banner').getByRole('link', { name: 'Sign in' })).toBeVisible();
 
     const frameworkNonces = await page
       .locator('script[src]')
@@ -34,7 +34,7 @@ test('core pages run under the enforced content security policy', async ({ page 
 test('Tab keeps normal browser focus movement in the robot room', async ({ page }) => {
   await page.goto('/robot/test-robot');
   await expect(page.locator('main')).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Sign in' })).toBeVisible();
+  await expect(page.getByRole('banner').getByRole('link', { name: 'Sign in' })).toBeVisible();
   await page.waitForLoadState('networkidle');
 
   await page.keyboard.press('Tab');

@@ -134,7 +134,7 @@ test('sign out of all devices revokes the visible browser session', async ({ pag
   await expect(page).toHaveURL(/\/login$/);
   await page.goBack();
   await expect(page).toHaveURL(/\/explore$/);
-  await expect(page.getByRole('link', { name: 'Sign in' })).toBeVisible();
+  await expect(page.getByRole('banner').getByRole('link', { name: 'Sign in' })).toBeVisible();
   await page.goto('/settings');
   await expect(page).toHaveURL(/\/login$/);
   // Let Firefox finish the login page's legal-link prefetches before the
