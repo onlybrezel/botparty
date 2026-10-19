@@ -64,6 +64,7 @@ export default function Nav() {
         // Analytics is opt-in. If consent cannot be restored, keep tracking
         // disabled until the settings page can load the authoritative value.
         const consent = await api.analytics.consent().catch(() => null);
+        if (cancelled || signal.aborted) return;
         updatePreference('productAnalyticsEnabled', Boolean(consent?.productAnalyticsEnabled));
       }
       if (!cancelled && !signal.aborted) {
