@@ -66,7 +66,7 @@ if [[ "$phase" == lighthouse || "$phase" == all ]]; then
   pnpm --filter @botparty/prisma db:seed
   pnpm build
   export CHROME_PATH="$(pnpm --filter @botparty/web exec node -e 'process.stdout.write(require("@playwright/test").chromium.executablePath())')"
-  pnpm --filter @botparty/web performance:lighthouse
+  TMPDIR=/tmp pnpm --filter @botparty/web performance:lighthouse
   cp -a apps/web/.lighthouseci data/local-ci/lighthouse
 fi
 
