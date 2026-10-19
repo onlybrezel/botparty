@@ -96,6 +96,26 @@ runbook for preconditions, verification, and rollback.
 
 ## Tests
 
+On Windows with Docker Desktop using Linux containers, run the local CI runner
+from a clean, committed checkout:
+
+```powershell
+pwsh -NoProfile -File scripts/test-local-docker.ps1 -Phase all
+```
+
+The runner tests an exact Git snapshot in a disposable Linux volume, with Node,
+pnpm, Playwright and the Docker CLI supplied by the pinned runner image. This
+avoids Windows package-wrapper, file-mode and line-ending differences. It uses
+the local Docker socket to start isolated test services; no GitHub Actions run or
+registry push is involved. Logs and the source commit are saved under
+`data/local-ci/<run-id>/`; the run's containers and source volume are removed.
+
+Use `-Phase checks`, `-Phase compose` or `-Phase performance` for a focused rerun.
+The checks phase includes audit, lint, types, unit/integration tests, coverage,
+database upgrade and migration checks, backups, queue and bundle budgets, and
+generated API contract parity. Compose runs development hot reload and the
+production browser suite. Performance runs the isolated API load scenario.
+
 Fast local feedback uses the repository's pinned Node runtime:
 
 ```bash

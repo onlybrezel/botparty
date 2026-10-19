@@ -24,6 +24,7 @@ playwright-report
 docker/secrets/*
 !docker/secrets/.gitkeep
 data
+.local-ci-tmp
 
 AUDIT.md
 assets

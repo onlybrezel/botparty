@@ -2,11 +2,11 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PROJECT="botparty-e2e-${$}"
+PROJECT="${LOCAL_CI_RUN_ID:-botparty}-e2e-${$}"
 SECRET_DIR="$(mktemp -d)"
 RESULT_DIR="${E2E_RESULT_DIR:-$(mktemp -d)}"
 FAILOVER_SIGNAL_DIR="${RESULT_DIR}/failover-signals"
-RUNNER_IMAGE="mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e"
+RUNNER_IMAGE="mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27"
 RESULT_DIR_IS_TEMP=true
 if [[ -n "${E2E_RESULT_DIR:-}" ]]; then
   RESULT_DIR_IS_TEMP=false

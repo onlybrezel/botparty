@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RUN_ID="postgres-upgrade-test-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+RUN_ID="${LOCAL_CI_RUN_ID:-postgres-upgrade-test}-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 SOURCE_VOLUME="${RUN_ID}-source"
 TARGET_VOLUME="${RUN_ID}-target"
 SOURCE_CONTAINER="${RUN_ID}-seed"

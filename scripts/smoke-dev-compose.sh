@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROJECT="botparty-dev-smoke-$$"
+PROJECT="${LOCAL_CI_RUN_ID:-botparty}-dev-smoke-$$"
+DOCKER_HOST_ADDRESS="${DOCKER_HOST_ADDRESS:-127.0.0.1}"
 SECRET_DIR="$(mktemp -d)"
 SOURCE_DIR="$(mktemp -d)"
 COMPOSE=(
@@ -138,8 +139,8 @@ wait_for_health web
 
 api_port="$("${COMPOSE[@]}" port api 4000 | awk -F: 'END { print $NF }')"
 web_port="$("${COMPOSE[@]}" port web 3000 | awk -F: 'END { print $NF }')"
-curl --fail --silent --show-error "http://127.0.0.1:${api_port}/api/v1/health/live" >/dev/null
-curl --fail --silent --show-error "http://127.0.0.1:${web_port}/" >/dev/null
+curl --fail --silent --show-error "http://${DOCKER_HOST_ADDRESS}:${api_port}/api/v1/health/live" >/dev/null
+curl --fail --silent --show-error "http://${DOCKER_HOST_ADDRESS}:${web_port}/" >/dev/null
 
 api_mounts="$(docker inspect -f '{{range .Mounts}}{{println .Destination}}{{end}}' "${PROJECT}-api-1")"
 web_mounts="$(docker inspect -f '{{range .Mounts}}{{println .Destination}}{{end}}' "${PROJECT}-web-1")"
@@ -150,7 +151,7 @@ grep -q '"dev"' <<<"$(docker inspect -f '{{json .Config.Cmd}}' "${PROJECT}-web-1
 
 wait_for_reload api "${API_SOURCE_DIR}/main.ts" 'File change detected|Starting incremental compilation'
 wait_for_health api
-wait_for_reload web "${WEB_SOURCE_DIR}/app/page.tsx" 'Compiled' "http://127.0.0.1:${web_port}/"
+wait_for_reload web "${WEB_SOURCE_DIR}/app/page.tsx" 'Compiled' "http://${DOCKER_HOST_ADDRESS}:${web_port}/"
 wait_for_health web
 
 echo 'Development Compose runtime smoke passed.'

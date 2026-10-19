@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROJECT="botparty-performance-smoke-$$"
+PROJECT="${LOCAL_CI_RUN_ID:-botparty}-performance-smoke-$$"
 SECRET_DIR="$(mktemp -d)"
 REPORT_DIR="${PERFORMANCE_REPORT_DIR:-data/performance-smoke}"
 COMPOSE=(
