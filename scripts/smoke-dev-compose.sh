@@ -118,6 +118,25 @@ wait_for_reload() {
   return 1
 }
 
+wait_for_rendered_reload() {
+  local source_file="$1"
+  local probe_url="$2"
+  local marker="${PROJECT}-rendered-update"
+  node --input-type=module - "${source_file}" "${marker}" <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs';
+const [sourceFile, marker] = process.argv.slice(2);
+const source = readFileSync(sourceFile, 'utf8');
+if (!source.includes('<section ')) throw new Error('Home page smoke fixture needs a section element');
+writeFileSync(sourceFile, source.replace('<section ', `<section data-dev-smoke="${marker}" `));
+NODE
+  for _ in $(seq 1 30); do
+    if curl --fail --silent "${probe_url}" | grep -Fq "${marker}"; then return 0; fi
+    sleep 1
+  done
+  echo 'Web did not serve the updated mounted source.' >&2
+  return 1
+}
+
 "${COMPOSE[@]}" config --quiet
 if [[ "${DEV_COMPOSE_SKIP_BUILD:-false}" != true ]]; then
   "${COMPOSE[@]}" build api web
@@ -151,7 +170,7 @@ grep -q '"dev"' <<<"$(docker inspect -f '{{json .Config.Cmd}}' "${PROJECT}-web-1
 
 wait_for_reload api "${API_SOURCE_DIR}/main.ts" 'File change detected|Starting incremental compilation'
 wait_for_health api
-wait_for_reload web "${WEB_SOURCE_DIR}/app/page.tsx" 'Compiled' "http://${DOCKER_HOST_ADDRESS}:${web_port}/"
+wait_for_rendered_reload "${WEB_SOURCE_DIR}/app/page.tsx" "http://${DOCKER_HOST_ADDRESS}:${web_port}/"
 wait_for_health web
 
 echo 'Development Compose runtime smoke passed.'
