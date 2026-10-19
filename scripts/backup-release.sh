@@ -162,7 +162,7 @@ docker run --rm --user "$(id -u):$(id -g)" \
   /run/secrets/backup_encryption_key
 mv "${STAGING}/$(basename "${ARCHIVE}")" "${ARCHIVE}"
 chmod 600 "${ARCHIVE}"
-sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
+(cd "$(dirname "${ARCHIVE}")" && sha256sum "$(basename "${ARCHIVE}")") > "${ARCHIVE}.sha256"
 find "${OUTPUT_DIR}" -name 'botparty-release-*.tar.gz.enc*' -mtime "+${BACKUP_RETENTION_DAYS}" -delete
 SUCCESS_METRIC_TMP="${BACKUP_METRICS_DIR}/.backup-last-success.prom.$$"
 mkdir -p "${BACKUP_METRICS_DIR}"
