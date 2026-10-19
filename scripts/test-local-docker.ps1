@@ -44,6 +44,8 @@ try {
 } finally {
     # Copy results before removing only this run's explicitly named resources.
     docker cp "${runner}:${mountpoint}/data/local-ci/." $resultDir 2>$null
+    docker cp "${runner}:${mountpoint}/apps/api/coverage" (Join-Path $resultDir 'api-coverage') 2>$null
+    docker cp "${runner}:${mountpoint}/apps/web/coverage" (Join-Path $resultDir 'web-coverage') 2>$null
     # Nested Compose/upgrade resources carry this invocation's unique prefix.
     # Also clean these on interruption, when child-shell EXIT traps cannot run.
     $ownedContainers = docker ps -a --format '{{.ID}} {{.Names}}' | ForEach-Object { if (($_ -split ' ', 2)[1].StartsWith("$runId-")) { ($_ -split ' ', 2)[0] } }

@@ -48,7 +48,7 @@ fi
 
 if [[ "$phase" == compose || "$phase" == all ]]; then
   ./scripts/smoke-dev-compose.sh
-  E2E_RUN_FAILOVER=true ./scripts/test-e2e-docker.sh
+  E2E_RUN_FAILOVER=true E2E_RESULT_DIR="$PWD/data/local-ci/browser" ./scripts/test-e2e-docker.sh
 fi
 
 if [[ "$phase" == lighthouse || "$phase" == all ]]; then
