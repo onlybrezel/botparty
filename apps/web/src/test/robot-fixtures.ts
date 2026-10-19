@@ -3,7 +3,6 @@ import {
   RobotAccessMode,
   RobotStatus,
   RobotVisibility,
-  Role,
 } from '@botparty/shared';
 import type { RobotManaged } from '@/lib/api';
 import type { RobotPublic } from '@botparty/shared';
@@ -29,8 +28,6 @@ export function createRobotPublic(overrides: Partial<RobotPublic> = {}): RobotPu
       username: 'owner',
       displayName: 'Owner',
       avatarUrl: null,
-      role: Role.USER,
-      createdAt: '2026-01-01T00:00:00.000Z',
     },
     createdAt: '2026-01-01T00:00:00.000Z',
     ...overrides,
@@ -58,8 +55,6 @@ export function createRobotManaged(overrides: Partial<RobotManaged> = {}): Robot
       username: 'owner',
       displayName: 'Owner',
       avatarUrl: null,
-      role: Role.USER,
-      createdAt: '2026-01-01T00:00:00.000Z',
     },
     createdAt: '2026-01-01T00:00:00.000Z',
     claimToken: null,
