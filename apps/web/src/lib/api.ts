@@ -78,8 +78,10 @@ class ApiClient {
   private readonly baseUrl: string;
   private accessToken: string | null = null;
   private refreshPromise: Promise<RefreshSessionResult> | null = null;
+  private refreshSignal: AbortSignal | undefined;
   private csrfToken: string | null = null;
   private csrfPromise: Promise<string> | null = null;
+  private csrfSignal: AbortSignal | undefined;
 
   readonly auth: AuthApi;
   readonly users: UsersApi;
@@ -128,9 +130,9 @@ class ApiClient {
 
   private async refreshSession(signal?: AbortSignal): Promise<RefreshSessionResult> {
     if (typeof window === 'undefined') return { token: null, retryable: false };
-    if (this.refreshPromise) return this.refreshPromise;
+    if (this.refreshPromise && !this.refreshSignal?.aborted) return this.refreshPromise;
 
-    this.refreshPromise = (async () => {
+    const refreshPromise = (async () => {
       try {
         const csrfToken = await this.ensureCsrfToken(signal);
         if (signal?.aborted) return { token: null, retryable: false };
@@ -181,10 +183,15 @@ class ApiClient {
         return { token: null, retryable: !signal?.aborted };
       }
     })().finally(() => {
-      this.refreshPromise = null;
+      if (this.refreshPromise === refreshPromise) {
+        this.refreshPromise = null;
+        this.refreshSignal = undefined;
+      }
     });
 
-    return this.refreshPromise;
+    this.refreshPromise = refreshPromise;
+    this.refreshSignal = signal;
+    return refreshPromise;
   }
 
   async restoreSession(signal?: AbortSignal): Promise<boolean> {
@@ -284,11 +291,11 @@ class ApiClient {
     if (this.csrfToken) {
       return this.csrfToken;
     }
-    if (this.csrfPromise) {
+    if (this.csrfPromise && !this.csrfSignal?.aborted) {
       return this.csrfPromise;
     }
 
-    this.csrfPromise = (async () => {
+    const csrfPromise = (async () => {
       const csrfUrl = `${this.baseUrl}/auth/csrf`;
       const requestMode = new URL(csrfUrl).origin === window.location.origin ? 'same-origin' : 'cors';
       const response = await fetch(csrfUrl, {
@@ -297,11 +304,13 @@ class ApiClient {
         mode: requestMode,
         ...(signal ? { signal } : {}),
       });
+      signal?.throwIfAborted();
       if (!response.ok) {
         throw new ApiError('Could not establish a secure session. Try again.', response.status);
       }
 
       const payload: unknown = await response.json().catch(() => null);
+      signal?.throwIfAborted();
       const csrfToken = isRecord(payload) && typeof payload['csrfToken'] === 'string'
         ? payload['csrfToken'].trim()
         : '';
@@ -312,10 +321,15 @@ class ApiClient {
       this.csrfToken = csrfToken;
       return this.csrfToken;
     })().finally(() => {
-      this.csrfPromise = null;
+      if (this.csrfPromise === csrfPromise) {
+        this.csrfPromise = null;
+        this.csrfSignal = undefined;
+      }
     });
 
-    return this.csrfPromise;
+    this.csrfPromise = csrfPromise;
+    this.csrfSignal = signal;
+    return csrfPromise;
   }
 
   // ─── Health ──────────────────────────────────────────────────────────────
