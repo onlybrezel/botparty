@@ -48,14 +48,17 @@ export default function Nav() {
 
   useEffect(() => {
     let cancelled = false;
+    let bootstrapController = new AbortController();
     const cancelPendingBootstrap = () => {
       cancelled = true;
+      bootstrapController.abort();
     };
     window.addEventListener('pagehide', cancelPendingBootstrap);
 
     const bootstrap = async () => {
       api.syncTokenFromStore();
-      const restored = await api.restoreSession().catch(() => false);
+      const restored = await api.restoreSession(bootstrapController.signal).catch(() => false);
+      if (cancelled) return;
       if (restored) {
         // Analytics is opt-in. If consent cannot be restored, keep tracking
         // disabled until the settings page can load the authoritative value.
@@ -67,11 +70,19 @@ export default function Nav() {
       }
     };
 
+    const resumeBootstrap = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
+      cancelled = false;
+      bootstrapController = new AbortController();
+      void bootstrap();
+    };
+    window.addEventListener('pageshow', resumeBootstrap);
     void bootstrap();
 
     return () => {
       cancelled = true;
       window.removeEventListener('pagehide', cancelPendingBootstrap);
+      window.removeEventListener('pageshow', resumeBootstrap);
     };
   }, [updatePreference]);
 

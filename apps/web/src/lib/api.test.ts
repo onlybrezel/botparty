@@ -21,6 +21,21 @@ describe('API session restore', () => {
     vi.restoreAllMocks();
   });
 
+  it('aborts CSRF bootstrap without retrying or changing authentication when the page leaves', async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementationOnce((_url, init) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('Page left', 'AbortError')));
+      }),
+    );
+    const restoration = createApiClient(window.location.origin).restoreSession(controller.signal);
+    expect(fetchMock.mock.calls[0]?.[1]?.signal).toBe(controller.signal);
+    controller.abort();
+    await expect(restoration).resolves.toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(useAuth.getState()).toMatchObject({ username: 'persisted-user', hasHydrated: false });
+  });
+
   it('recovers from a transient proxy failure during CSRF bootstrap', async () => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')

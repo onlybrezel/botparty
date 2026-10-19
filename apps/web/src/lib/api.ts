@@ -126,13 +126,14 @@ class ApiClient {
     );
   }
 
-  private async refreshSession(): Promise<RefreshSessionResult> {
+  private async refreshSession(signal?: AbortSignal): Promise<RefreshSessionResult> {
     if (typeof window === 'undefined') return { token: null, retryable: false };
     if (this.refreshPromise) return this.refreshPromise;
 
     this.refreshPromise = (async () => {
       try {
-        const csrfToken = await this.ensureCsrfToken();
+        const csrfToken = await this.ensureCsrfToken(signal);
+        if (signal?.aborted) return { token: null, retryable: false };
         const refreshRes = await fetch(`${this.baseUrl}/auth/refresh`, {
           method: 'POST',
           headers: {
@@ -141,8 +142,10 @@ class ApiClient {
           },
           body: '{}',
           credentials: 'include',
+          ...(signal ? { signal } : {}),
         });
 
+        if (signal?.aborted) return { token: null, retryable: false };
         if (!refreshRes.ok) {
           if (refreshRes.status === 401 || refreshRes.status === 403) {
             useAuth.getState().logout();
@@ -156,6 +159,7 @@ class ApiClient {
         }
 
         const refreshed: unknown = await refreshRes.json();
+        if (signal?.aborted) return { token: null, retryable: false };
         if (!isAuthSessionResponse(refreshed) || !refreshed.accessToken) {
           useAuth.getState().logout();
           this.setToken(null);
@@ -174,7 +178,7 @@ class ApiClient {
       } catch {
         // Temporary network / proxy / CSRF bootstrap issues should not look
         // like an explicit sign-out. A later retry can still recover cleanly.
-        return { token: null, retryable: true };
+        return { token: null, retryable: !signal?.aborted };
       }
     })().finally(() => {
       this.refreshPromise = null;
@@ -183,11 +187,13 @@ class ApiClient {
     return this.refreshPromise;
   }
 
-  async restoreSession(): Promise<boolean> {
+  async restoreSession(signal?: AbortSignal): Promise<boolean> {
     let restored = false;
 
     for (let attempt = 0; attempt <= RESTORE_RETRY_DELAYS_MS.length; attempt += 1) {
-      const result = await this.refreshSession();
+      if (signal?.aborted) return false;
+      const result = await this.refreshSession(signal);
+      if (signal?.aborted) return false;
       if (result.token) {
         restored = true;
         break;
@@ -202,6 +208,7 @@ class ApiClient {
       await wait(retryDelayMs);
     }
 
+    if (signal?.aborted) return false;
     useAuth.getState().setHasHydrated(true);
     return restored;
   }
@@ -270,7 +277,7 @@ class ApiClient {
     return res.json() as Promise<T>;
   }
 
-  private async ensureCsrfToken(): Promise<string> {
+  private async ensureCsrfToken(signal?: AbortSignal): Promise<string> {
     if (typeof window === 'undefined') {
       throw new ApiError('A security token can only be requested in the browser.', 503);
     }
@@ -288,6 +295,7 @@ class ApiClient {
         method: 'GET',
         credentials: 'include',
         mode: requestMode,
+        ...(signal ? { signal } : {}),
       });
       if (!response.ok) {
         throw new ApiError('Could not establish a secure session. Try again.', response.status);

@@ -1,10 +1,10 @@
 import { createElement } from 'react';
 import type { AnchorHTMLAttributes, ImgHTMLAttributes } from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import Nav from './nav';
 
 const usePathnameMock = vi.fn(() => '/');
-const restoreSessionMock = vi.fn(() => Promise.resolve());
+const restoreSessionMock = vi.fn((_signal?: AbortSignal) => Promise.resolve());
 const syncTokenFromStoreMock = vi.fn();
 
 vi.mock('next/navigation', () => ({
@@ -29,7 +29,7 @@ vi.mock('next/image', () => ({
 vi.mock('@/lib/api', () => ({
   api: {
     syncTokenFromStore: () => syncTokenFromStoreMock(),
-    restoreSession: () => restoreSessionMock(),
+    restoreSession: (signal?: AbortSignal) => restoreSessionMock(signal),
     logout: () => Promise.resolve(),
     setToken: () => undefined,
   },
@@ -50,6 +50,22 @@ vi.mock('@/lib/i18n', () => ({
 }));
 
 describe('Nav', () => {
+  it('cancels document bootstrap on pagehide and restarts after a back-forward cache restore', async () => {
+    restoreSessionMock.mockClear();
+    const view = render(<Nav />);
+    const originalSignal = restoreSessionMock.mock.calls[0]?.[0];
+    expect(originalSignal?.aborted).toBe(false);
+    await act(async () => window.dispatchEvent(new PageTransitionEvent('pagehide')));
+    expect(originalSignal?.aborted).toBe(true);
+    await act(async () => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+    expect(restoreSessionMock).toHaveBeenCalledTimes(2);
+    const resumedSignal = restoreSessionMock.mock.calls[1]?.[0];
+    expect(resumedSignal?.aborted).toBe(false);
+    expect(resumedSignal).not.toBe(originalSignal);
+    view.unmount();
+    expect(resumedSignal?.aborted).toBe(false);
+  });
+
   it('renders public navigation and sign-in entry', async () => {
     render(<Nav />);
 
