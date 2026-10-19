@@ -115,7 +115,7 @@ run_pg_dump() {
     --entrypoint /bin/sh \
     -v "${STAGING}:/backup" \
     "${POSTGRES_BACKUP_IMAGE}" \
-    -c 'pg_dump --format=custom --no-owner --no-privileges --file=/backup/database.dump "$(cat /backup/database-url)"'
+    -c 'set -eu; database_url="$(cat /backup/database-url)"; psql --no-psqlrc --tuples-only --no-align --dbname="$database_url" --command="SHOW server_version_num" > /backup/postgres-version-num; pg_dump --format=custom --no-owner --no-privileges --file=/backup/database.dump "$database_url"'
 }
 
 echo "Creating PostgreSQL backup"
@@ -147,6 +147,7 @@ docker run --rm --network none --user "$(id -u):$(id -g)" \
   -e BACKUP_CREATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   -e BACKUP_GIT_COMMIT="$(git -C "${PROJECT_ROOT}" rev-parse HEAD 2>/dev/null || printf unknown)" \
   -e BACKUP_APP_VERSION="${BACKUP_APP_VERSION}" -e BACKUP_BUCKETS="${BACKUP_S3_BUCKETS}" \
+  -e BACKUP_POSTGRES_VERSION_NUM="$(<"${STAGING}/postgres-version-num")" \
   -v "${SCRIPT_DIR}:/scripts:ro" -v "${STAGING}:/backup" \
   "${NODE_BACKUP_IMAGE}" node /scripts/write-backup-manifest.mjs /backup/manifest.json
 

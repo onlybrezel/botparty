@@ -3,13 +3,19 @@ import { writeFileSync } from 'node:fs';
 const outputPath = process.argv[2];
 if (!outputPath) throw new Error('manifest output path is required');
 
+const versionNumText = process.env.BACKUP_POSTGRES_VERSION_NUM ?? '';
+const versionNum = Number(versionNumText);
+if (!/^\d+$/.test(versionNumText) || !Number.isSafeInteger(versionNum) || versionNum < 100000) {
+  throw new Error('A valid PostgreSQL source server_version_num is required');
+}
+
 const manifest = {
   formatVersion: 2,
   encryption: 'AES-256-GCM+scrypt',
   createdAt: process.env.BACKUP_CREATED_AT,
   appVersion: process.env.BACKUP_APP_VERSION,
   gitCommit: process.env.BACKUP_GIT_COMMIT,
-  postgresMajor: 16,
+  postgresMajor: Math.floor(versionNum / 10000),
   buckets: (process.env.BACKUP_BUCKETS ?? '').split(/\s+/).filter(Boolean),
   requiredSecretFiles: [
     'api_database_url',
