@@ -55,8 +55,17 @@ export NEXT_PUBLIC_LEGAL_OPERATOR_ADDRESS="Isolated Docker test environment"
 export NEXT_PUBLIC_LEGAL_OPERATOR_COUNTRY="Germany"
 export NEXT_PUBLIC_LEGAL_GOVERNING_LAW="Germany"
 
+FAILOVER_ORCHESTRATOR_PID=''
+
 cleanup() {
   local exit_code=$?
+  if [[ -n "${FAILOVER_ORCHESTRATOR_PID}" ]]; then
+    if kill -0 "${FAILOVER_ORCHESTRATOR_PID}" 2>/dev/null; then
+      kill "${FAILOVER_ORCHESTRATOR_PID}" 2>/dev/null || true
+    fi
+    wait "${FAILOVER_ORCHESTRATOR_PID}" 2>/dev/null || true
+    FAILOVER_ORCHESTRATOR_PID=''
+  fi
   if (( exit_code != 0 )); then
     echo "E2E environment failed; recent container logs follow." >&2
     "${COMPOSE[@]}" ps >&2 || echo "Warning: failed to inspect ${PROJECT}." >&2
@@ -79,6 +88,8 @@ cleanup() {
   return "${exit_code}"
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 write_secret() {
   printf '%s' "$2" > "${SECRET_DIR}/$1"
@@ -177,7 +188,6 @@ wait_for_replicas api 2
 wait_for_replicas web 2
 wait_for_replicas nginx 1
 
-FAILOVER_ORCHESTRATOR_PID=''
 if [[ "${E2E_RUN_FAILOVER:-false}" == true ]]; then
   mkdir -p "${FAILOVER_SIGNAL_DIR}"
   chmod a+rwx "${FAILOVER_SIGNAL_DIR}"
@@ -223,6 +233,7 @@ if [[ -n "${FAILOVER_ORCHESTRATOR_PID}" ]]; then
   set +e
   wait "${FAILOVER_ORCHESTRATOR_PID}"
   FAILOVER_STATUS=$?
+  FAILOVER_ORCHESTRATOR_PID=''
   set -e
   if (( RUNNER_STATUS == 0 && FAILOVER_STATUS != 0 )); then
     RUNNER_STATUS=${FAILOVER_STATUS}
