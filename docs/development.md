@@ -119,6 +119,14 @@ generated API contract parity. Compose runs development hot reload and the
 production browser and API failover suites. Lighthouse runs the mobile page
 budgets. Performance runs the isolated API load scenario.
 
+Bundle budgets count unique uncompressed JavaScript for the page entrypoint and
+framework runtime. Production builds use webpack. Next 16 no longer emits the
+old app build manifest, so the checker also reads page client references.
+The home, explore and robot baselines were remeasured against unchanged main
+`e9c5fc1` (Next 16.3) in Docker with the same build environment as the candidate;
+their original values dated from Next 15. The 110% regression rule, every
+absolute size ceiling, and the remaining four baselines are unchanged.
+
 Fast local feedback uses the repository's pinned Node runtime:
 
 ```bash
