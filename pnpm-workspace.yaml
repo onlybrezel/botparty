@@ -37,6 +37,7 @@ overrides:
   'ws@>=7.0.0 <7.5.11': '7.5.11'
 
 allowBuilds:
+  '@parcel/watcher': true
   '@prisma/client': true
   '@prisma/engines': true
   '@scarf/scarf': false

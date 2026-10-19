@@ -91,7 +91,7 @@ describe('concurrent request limit', () => {
     await server.close();
   });
 
-  it('releases capacity when a client disconnects before work completes', async () => {
+  it('retains capacity for active work after its client disconnects', async () => {
     const server = Fastify();
     installConcurrentRequestLimit(server, { all: 2, login: 1 });
 
@@ -108,6 +108,10 @@ describe('concurrent request limit', () => {
     const firstWorkComplete = new Promise<void>((resolve) => {
       markFirstWorkComplete = resolve;
     });
+    let markServerDisconnected: (() => void) | undefined;
+    const serverDisconnected = new Promise<void>((resolve) => {
+      markServerDisconnected = resolve;
+    });
     server.post('/api/v1/auth/login', async () => {
       loginCalls += 1;
       if (loginCalls === 1) {
@@ -116,6 +120,10 @@ describe('concurrent request limit', () => {
         markFirstWorkComplete?.();
       }
       return { ok: true };
+    });
+
+    server.addHook('onRequest', async (_request, reply) => {
+      reply.raw.once('close', () => markServerDisconnected?.());
     });
 
     await server.listen({ host: '127.0.0.1', port: 0 });
@@ -136,22 +144,27 @@ describe('concurrent request limit', () => {
     });
     abandonedRequest.destroy();
     await clientClosed;
+    // The client's close event can precede the server's abort handling.
+    await serverDisconnected;
 
-    expect((await server.inject({ method: 'POST', url: '/api/v1/auth/login' })).statusCode).toBe(
-      503,
-    );
+    try {
+      expect((await server.inject({ method: 'POST', url: '/api/v1/auth/login' })).statusCode).toBe(
+        503,
+      );
 
-    completeFirstRequest?.();
-    await firstWorkComplete;
-    let acceptedStatus = 503;
-    for (let attempt = 0; attempt < 100 && acceptedStatus === 503; attempt += 1) {
-      acceptedStatus = (await server.inject({ method: 'POST', url: '/api/v1/auth/login' }))
-        .statusCode;
-      if (acceptedStatus === 503) await new Promise<void>((resolve) => setImmediate(resolve));
+      completeFirstRequest?.();
+      await firstWorkComplete;
+      let acceptedStatus = 503;
+      for (let attempt = 0; attempt < 100 && acceptedStatus === 503; attempt += 1) {
+        acceptedStatus = (await server.inject({ method: 'POST', url: '/api/v1/auth/login' }))
+          .statusCode;
+        if (acceptedStatus === 503) await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+      expect(acceptedStatus).toBe(200);
+    } finally {
+      completeFirstRequest?.();
+      server.server.closeAllConnections();
+      await server.close();
     }
-    expect(acceptedStatus).toBe(200);
-
-    server.server.closeAllConnections();
-    await server.close();
   });
 });
