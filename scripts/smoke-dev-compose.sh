@@ -122,6 +122,7 @@ wait_for_rendered_reload() {
   local source_file="$1"
   local probe_url="$2"
   local marker="${PROJECT}-rendered-update"
+  local response
   node --input-type=module - "${source_file}" "${marker}" <<'NODE'
 import { readFileSync, writeFileSync } from 'node:fs';
 const [sourceFile, marker] = process.argv.slice(2);
@@ -130,7 +131,7 @@ if (!source.includes('<section ')) throw new Error('Home page smoke fixture need
 writeFileSync(sourceFile, source.replace('<section ', `<section data-dev-smoke="${marker}" `));
 NODE
   for _ in $(seq 1 30); do
-    if curl --fail --silent "${probe_url}" | grep -Fq "${marker}"; then return 0; fi
+    if response="$(curl --fail --silent "${probe_url}")" && [[ "$response" == *"$marker"* ]]; then return 0; fi
     sleep 1
   done
   echo 'Web did not serve the updated mounted source.' >&2
