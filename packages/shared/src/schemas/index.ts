@@ -1,6 +1,10 @@
 import { z } from 'zod';
 import { LEGAL_POLICY_VERSIONS, LIMITS } from '../constants/index.js';
 
+if ('window' in globalThis) {
+  z.config({ jitless: true });
+}
+
 export function isValidTimezone(value: string): boolean {
   const timezone = value.trim();
   if (!timezone) {
