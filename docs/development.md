@@ -110,11 +110,12 @@ the local Docker socket to start isolated test services; no GitHub Actions run o
 registry push is involved. Logs and the source commit are saved under
 `data/local-ci/<run-id>/`; the run's containers and source volume are removed.
 
-Use `-Phase checks`, `-Phase compose` or `-Phase performance` for a focused rerun.
+Use `-Phase checks`, `-Phase compose`, `-Phase lighthouse` or `-Phase performance` for a focused rerun.
 The checks phase includes audit, lint, types, unit/integration tests, coverage,
 database upgrade and migration checks, backups, queue and bundle budgets, and
 generated API contract parity. Compose runs development hot reload and the
-production browser suite. Performance runs the isolated API load scenario.
+production browser and API failover suites. Lighthouse runs the mobile page
+budgets. Performance runs the isolated API load scenario.
 
 Fast local feedback uses the repository's pinned Node runtime:
 

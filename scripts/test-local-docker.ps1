@@ -52,8 +52,6 @@ try {
     if ($ownedNetworks) { docker network rm @ownedNetworks 2>$null | Out-Null }
     $ownedVolumes = docker volume ls --format '{{.Name}}' | Where-Object { $_.StartsWith("$runId-") }
     if ($ownedVolumes) { docker volume rm @ownedVolumes 2>$null | Out-Null }
-    docker rm -f $runner $redis $postgres 2>$null | Out-Null
-    docker volume rm $volume 2>$null | Out-Null
     Remove-Item -LiteralPath $snapshot -ErrorAction SilentlyContinue
     Pop-Location
 }

@@ -35,6 +35,17 @@ const completeEnvironment = {
 };
 
 describe('production readiness preflight', () => {
+  it('does not expose configured secret paths in printable diagnostics', () => {
+    const result = evaluateProductionReadiness({
+      ...completeEnvironment,
+      DATABASE_URL_FILE: '/missing/private-database-credential',
+      BOTPARTY_SECRET_DIR: '/missing/private-secret-directory',
+    });
+    const diagnostics = JSON.stringify(result);
+    assert.match(diagnostics, /DATABASE_URL_FILE/);
+    assert.doesNotMatch(diagnostics, /private-database-credential|private-secret-directory/);
+  });
+
   it('accepts a reviewed deployment while high-risk features remain disabled', () => {
     const result = evaluateProductionReadiness(completeEnvironment, { checkFiles: false });
     assert.deepEqual(result.failures, []);
