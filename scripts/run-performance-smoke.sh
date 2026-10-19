@@ -117,7 +117,7 @@ wait_for_health api
 "${COMPOSE[@]}" exec -T \
   -e PERFORMANCE_FIXTURE_ALLOW_WRITES=true \
   -e PERFORMANCE_DATASET=small \
-  api sh -c '. /load-file-secrets.sh; node /performance/seed-performance.mjs'
+  api sh -c '. /load-file-secrets.sh; node /app/scripts/seed-performance.mjs'
 
 "${COMPOSE[@]}" --profile performance run --rm \
   -e PERFORMANCE_BASE_URL=http://api:4000 \

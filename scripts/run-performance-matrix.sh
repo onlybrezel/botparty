@@ -275,7 +275,7 @@ NODE
   docker exec \
     -e PERFORMANCE_FIXTURE_ALLOW_WRITES=true \
     -e PERFORMANCE_DATASET="${PROFILE_DATASET}" \
-    "${first_api}" sh -c '. /load-file-secrets.sh; node /performance/seed-performance.mjs' \
+    "${first_api}" sh -c '. /load-file-secrets.sh; node /app/scripts/seed-performance.mjs' \
     | tee "${report_dir}/seed.log"
 
   "${COMPOSE[@]}" up -d --no-deps performance-gateway
