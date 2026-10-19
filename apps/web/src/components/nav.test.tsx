@@ -103,6 +103,6 @@ describe('Nav', () => {
     });
 
     expect(screen.getByText('Leaderboard')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/login');
+    expect(await screen.findByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/login');
   });
 });
