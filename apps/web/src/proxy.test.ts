@@ -37,6 +37,14 @@ describe('proxy', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it.each([{ rsc: '1' }, { 'next-router-prefetch': '1' }])('keeps router requests in the Next.js redirect protocol: %j', async (headers) => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    const response = await proxy(new NextRequest('https://botparty.test/robot/test-robot?_rsc=payload', { headers }));
+    expect(response.status).toBe(200);
+    expect(response.headers.get('location')).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('keeps the unfiltered Explore route static', async () => {
     const response = await proxy(new NextRequest('https://botparty.test/explore'));
 

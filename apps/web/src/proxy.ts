@@ -50,7 +50,9 @@ function buildCsp(nonce: string, pathname: string): string {
 
 export async function proxy(request: NextRequest) {
   const legacyRobot = /^\/robot\/([^/]+)\/?$/.exec(request.nextUrl.pathname);
-  if (legacyRobot?.[1]) {
+  const isRouterRequest = request.headers.get('rsc') === '1'
+    || request.headers.has('next-router-prefetch');
+  if (legacyRobot?.[1] && !isRouterRequest) {
     try {
       const response = await fetch(buildRobotLookupUrl(getServerApiUrl(), {
         username: null, slug: decodeURIComponent(legacyRobot[1]),
