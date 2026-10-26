@@ -311,8 +311,8 @@ importers:
         specifier: ^6.1.1
         version: 6.1.2(vite@8.3.4(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.46.1)(tsx@4.23.15)(yaml@2.9.0))
       '@vitest/coverage-v8':
-        specifier: ^4.1.10
-        version: 4.1.10(vitest@4.1.10)
+        specifier: ^5.0.5
+        version: 5.0.5(vitest@4.1.10)
       eslint:
         specifier: ^10.12.0
         version: 10.12.0(jiti@2.7.0)(supports-color@8.1.1)
@@ -333,7 +333,7 @@ importers:
         version: 8.3.4(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.46.1)(tsx@4.23.15)(yaml@2.9.0)
       vitest:
         specifier: ^4.1.10
-        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/coverage-v8@4.1.10)(jsdom@30.1.3)(vite@8.3.4(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.46.1)(tsx@4.23.15)(yaml@2.9.0))
+        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/coverage-v8@5.0.5)(jsdom@30.1.3)(vite@8.3.4(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.46.1)(tsx@4.23.15)(yaml@2.9.0))
 
   packages/eslint-config:
     dependencies:
@@ -360,13 +360,13 @@ importers:
         version: 7.10.1
       '@prisma/client':
         specifier: 7.10.1
-        version: 7.10.1(prisma@7.10.1(@types/node@24.13.3)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(magicast@0.5.4)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@5.9.3))(typescript@5.9.3)
+        version: 7.10.1(prisma@7.10.1(@types/node@24.13.3)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(magicast@0.5.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@5.9.3))(typescript@5.9.3)
       argon2:
         specifier: ^0.45.1
         version: 0.45.1
       prisma:
         specifier: 7.10.1
-        version: 7.10.1(@types/node@24.13.3)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(magicast@0.5.4)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@5.9.3)
+        version: 7.10.1(@types/node@24.13.3)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(magicast@0.5.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@5.9.3)
       tsx:
         specifier: ^4.23.15
         version: 4.23.15
@@ -2307,6 +2307,7 @@ packages:
   '@opentelemetry/propagator-jaeger@2.12.0':
     resolution: {integrity: sha512-Kz2Vz+NILW7S1WtN4rV1wr76fMtT/RRWvAMFBc91uTIi2dDMXxrfBKNe2KH7yaCfFp1X0xfAuabzuFczvoPB6A==}
     engines: {node: ^18.19.0 || >=20.6.0}
+    deprecated: Package no longer supported. See https://github.com/open-telemetry/opentelemetry-js/pull/7077
     peerDependencies:
       '@opentelemetry/api': '>=1.0.0 <1.10.0'
 
@@ -2371,12 +2372,14 @@ packages:
   '@opentelemetry/sdk-trace-base@2.12.0':
     resolution: {integrity: sha512-JOERgZCxRM06FEJ5kEWxlSRChah6MmXDx3KwCruqEv/iEyLkTokCSemf2y1w8oIHtfrr8EVTpzebq/31vn2Cpg==}
     engines: {node: ^18.19.0 || >=20.6.0}
+    deprecated: Use @opentelemetry/sdk-trace package
     peerDependencies:
       '@opentelemetry/api': '>=1.3.0 <1.10.0'
 
   '@opentelemetry/sdk-trace-node@2.12.0':
     resolution: {integrity: sha512-9DufH1IlmQMoKAfot5y/FhTP1RnmhLb5K6eKmJO/bvzPjYwPAazoiAUbTZFdPbqxOXN0FEbhZx/e6SB1Og4jmg==}
     engines: {node: ^18.19.0 || >=20.6.0}
+    deprecated: Use @opentelemetry/sdk-trace package
     peerDependencies:
       '@opentelemetry/api': '>=1.0.0 <1.10.0'
 
@@ -3455,17 +3458,25 @@ packages:
       oxc-transform-react:
         optional: true
 
-  '@vitest/coverage-v8@4.1.10':
-    resolution: {integrity: sha512-IM49HmthevbgAO4anp1hwtoT9wYe59w0LR00gr+eagHE+ZJ5lK4sLPeO0ubgoJcwLk6dehU3R24N+FbEEKDc8g==}
+  '@vitest/coverage-v8@5.0.5':
+    resolution: {integrity: sha512-4KpkGdIrSqBihx/JyP/e+S+IKB98etg1XDQiLAxksLfcShnwi1VReGeOT9NI43hLHbknosKp/1CCLn9Zgcs8mg==}
     peerDependencies:
-      '@vitest/browser': 4.1.10
-      vitest: 4.1.10
+      '@vitest/browser': 5.0.5
+      vitest: 5.0.5
     peerDependenciesMeta:
       '@vitest/browser':
         optional: true
 
   '@vitest/expect@4.1.10':
     resolution: {integrity: sha512-YsCn+qAk1GWjQOWFEsEcL2gNQ0zmVmQu3T03qP6UyjhtmdtwtbuI+DASn/7iQB3HGTXkdBwGddzxPlmiql5vlA==}
+
+  '@vitest/istanbul-lib-coverage@1.0.2':
+    resolution: {integrity: sha512-9J/JMwOf9AoJhAywhrn7ScKTL38hsWQP/qPG60OtaAFcQ5OXPwKsxZFlbnuCKmZ61m8/lGgHYnFpdyQZUvG/iA==}
+    engines: {node: '>=22'}
+
+  '@vitest/istanbul-lib-report@1.0.2':
+    resolution: {integrity: sha512-gUsfXZJbzPamoIY5TvHFiMMoXESBrUMo+xqaj+rYrWI69+EnvRlYBlP96ZnHPY4vX8kyUpgAnFUCg5wZG/HkDQ==}
+    engines: {node: '>=22'}
 
   '@vitest/mocker@4.1.10':
     resolution: {integrity: sha512-v0xaezt+DKEmKfaxg133ldzADrwLGd7Ze1MfQQTYfvs8OqZIwbxyxaYURivwV7sWy5fqn3rH5uOrSp07bp44Ow==}
@@ -3718,8 +3729,8 @@ packages:
     resolution: {integrity: sha512-x1FCFnFifvYDDzTaLII71vG5uvDwgtmDTEVWAxrgeiR8VjMONcCXJx7E+USjDtHlwFmt9MysbqgF9b9Vjr6w+w==}
     engines: {node: '>=4'}
 
-  ast-v8-to-istanbul@1.0.5:
-    resolution: {integrity: sha512-UPAgKJFSEGMWSDr3LX4tqnAb4f7KGT8O40Tyx8wbYmmZ/yn58lNCm8h3svs3eXgiGd5AXxz8NDOvXWvicq+rJA==}
+  ast-v8-to-istanbul@1.0.7:
+    resolution: {integrity: sha512-kFL68AG6ajd8fg248zwM9GQrUWEp79gsmjum34OEXjs4yHuUMZfYKwOLW9GMmB4oNvVrj+EAGxsP7ye2UR9UlA==}
 
   async-lock@1.4.1:
     resolution: {integrity: sha512-Az2ZTpuytrtqENulXwO3GGv1Bztugx6TT37NIo7imr/Qo0gsYiGtSdBa2B6fsXhTpVZDNfu1Qn3pk531e3q+nQ==}
@@ -5731,8 +5742,8 @@ packages:
   magic-string@0.30.21:
     resolution: {integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==}
 
-  magicast@0.5.4:
-    resolution: {integrity: sha512-llBEhWm1SacoRwgHUoQJYtwp4PBLF4faQi5TCpIGyGs9n4y5+juI0tDgyKIfpqxckRHaHzouUEph3THklWh03w==}
+  magicast@0.5.5:
+    resolution: {integrity: sha512-UicdXN8zQ3JHlxVq+28afMXPr1z7WNY6+7EJnzTdQWkTAlMLF5fNCCKxJHBQwGaNGR11581EiQmQzx73+MvszA==}
 
   make-dir@3.1.0:
     resolution: {integrity: sha512-g3FeP20LNwhALb/6Cz6Dd4F2ngze0jz7tbzrD2wAV+o9FeNHe4rL+yK2md0J/fiSf1sa1ADhXqi5+oVwOM/eGw==}
@@ -6012,6 +6023,10 @@ packages:
 
   obug@2.1.4:
     resolution: {integrity: sha512-4a+OsYv9UktOJKE+l1A4OufDgdRF9PifWj+tJnHURo/P+WOxpG4GzUFL9qCalmWauao6ogiG+QvnCovwPoyAWA==}
+    engines: {node: '>=12.20.0'}
+
+  obug@3.0.0:
+    resolution: {integrity: sha512-5vvB5+W7ePv+p3uqxi+RcW1XAzLW0/hxt3/4X4Lc4qHudzOhmBiBwOY6DRob4WnanAEGvNcLjF+KNOufrUoEQw==}
     engines: {node: '>=12.20.0'}
 
   ohash@2.0.11:
@@ -6753,6 +6768,9 @@ packages:
   std-env@4.2.0:
     resolution: {integrity: sha512-oCUKSupKTHX53EyjDtuZQ64pjLJ6yYCtpmEw0goYxtjG9KpbRe8KAsl2tBUGU9DyMcJ0RwJ8GqJAFzMXcXW1Rw==}
 
+  std-env@4.3.0:
+    resolution: {integrity: sha512-OtU/EgQ1kIm5KwqQpBC6ZEMXrZRui11w8zgfTWp8cdO9B8OaPsbA8bTHO2P+HNo1VlUTGMVBwPhydu6poeXiag==}
+
   streamx@2.25.0:
     resolution: {integrity: sha512-0nQuG6jf1w+wddNEEXCF4nTg3LtufWINB5eFEN+5TNZW7KWJp6x87+JFL43vaAUPyCfH1wID+mNVyW6OHtFamg==}
 
@@ -6964,6 +6982,10 @@ packages:
 
   tinyrainbow@3.1.1:
     resolution: {integrity: sha512-yau8yJdTt989Mm0Bd/236QnzEiPf2xLLTqUZRUJOo/3CB078LSwzei343DgtJVmfJKJE3TMINY1u42SQsP6mXw==}
+    engines: {node: '>=14.0.0'}
+
+  tinyrainbow@3.2.0:
+    resolution: {integrity: sha512-LgO3D9yZJjApUiuUfl9iFAwrtaX4+lok3wJIqttGoKCHlWUqHqbQpnxCf82L8FjgKsh4iGo78hqJwgL8F6To2A==}
     engines: {node: '>=14.0.0'}
 
   tldts-core@6.1.86:
@@ -9955,16 +9977,16 @@ snapshots:
 
   '@prisma/client-runtime-utils@7.10.1': {}
 
-  '@prisma/client@7.10.1(prisma@7.10.1(@types/node@24.13.3)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(magicast@0.5.4)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@5.9.3))(typescript@5.9.3)':
+  '@prisma/client@7.10.1(prisma@7.10.1(@types/node@24.13.3)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(magicast@0.5.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@5.9.3))(typescript@5.9.3)':
     dependencies:
       '@prisma/client-runtime-utils': 7.10.1
     optionalDependencies:
-      prisma: 7.10.1(@types/node@24.13.3)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(magicast@0.5.4)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@5.9.3)
+      prisma: 7.10.1(@types/node@24.13.3)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(magicast@0.5.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@5.9.3)
       typescript: 5.9.3
 
-  '@prisma/config@7.10.1(magicast@0.5.4)':
+  '@prisma/config@7.10.1(magicast@0.5.5)':
     dependencies:
-      c12: 3.3.4(magicast@0.5.4)
+      c12: 3.3.4(magicast@0.5.5)
       deepmerge-ts: 8.0.2
       effect: 3.22.0
       empathic: 2.0.0
@@ -10377,7 +10399,7 @@ snapshots:
       picocolors: 1.1.1
       redent: 3.0.0
     optionalDependencies:
-      vitest: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/coverage-v8@4.1.10)(jsdom@30.1.3)(vite@8.3.4(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.46.1)(tsx@4.23.15)(yaml@2.9.0))
+      vitest: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/coverage-v8@5.0.5)(jsdom@30.1.3)(vite@8.3.4(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.46.1)(tsx@4.23.15)(yaml@2.9.0))
 
   '@testing-library/react@16.3.3(@testing-library/dom@10.4.1)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
     dependencies:
@@ -10518,7 +10540,7 @@ snapshots:
 
   '@types/eslint@9.6.1':
     dependencies:
-      '@types/estree': 1.0.8
+      '@types/estree': 1.0.9
       '@types/json-schema': 7.0.15
 
   '@types/esrecurse@4.3.1': {}
@@ -10918,19 +10940,17 @@ snapshots:
       '@rolldown/pluginutils': 1.0.1
       vite: 8.3.4(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.46.1)(tsx@4.23.15)(yaml@2.9.0)
 
-  '@vitest/coverage-v8@4.1.10(vitest@4.1.10)':
+  '@vitest/coverage-v8@5.0.5(vitest@4.1.10)':
     dependencies:
       '@bcoe/v8-coverage': 1.0.2
-      '@vitest/utils': 4.1.10
-      ast-v8-to-istanbul: 1.0.5
-      istanbul-lib-coverage: 3.2.2
-      istanbul-lib-report: 3.0.1
-      istanbul-reports: 3.2.0
-      magicast: 0.5.4
-      obug: 2.1.4
-      std-env: 4.2.0
-      tinyrainbow: 3.1.1
-      vitest: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/coverage-v8@4.1.10)(jsdom@30.1.3)(vite@8.3.4(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.46.1)(tsx@4.23.15)(yaml@2.9.0))
+      '@vitest/istanbul-lib-coverage': 1.0.2
+      '@vitest/istanbul-lib-report': 1.0.2
+      ast-v8-to-istanbul: 1.0.7
+      magicast: 0.5.5
+      obug: 3.0.0
+      std-env: 4.3.0
+      tinyrainbow: 3.2.0
+      vitest: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/coverage-v8@5.0.5)(jsdom@30.1.3)(vite@8.3.4(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.46.1)(tsx@4.23.15)(yaml@2.9.0))
 
   '@vitest/expect@4.1.10':
     dependencies:
@@ -10940,6 +10960,12 @@ snapshots:
       '@vitest/utils': 4.1.10
       chai: 6.2.2
       tinyrainbow: 3.1.1
+
+  '@vitest/istanbul-lib-coverage@1.0.2': {}
+
+  '@vitest/istanbul-lib-report@1.0.2':
+    dependencies:
+      '@vitest/istanbul-lib-coverage': 1.0.2
 
   '@vitest/mocker@4.1.10(vite@8.3.4(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.46.1)(tsx@4.23.15)(yaml@2.9.0))':
     dependencies:
@@ -11220,7 +11246,7 @@ snapshots:
     dependencies:
       tslib: 2.8.1
 
-  ast-v8-to-istanbul@1.0.5:
+  ast-v8-to-istanbul@1.0.7:
     dependencies:
       '@jridgewell/trace-mapping': 0.3.31
       estree-walker: 3.0.3
@@ -11447,7 +11473,7 @@ snapshots:
 
   bytes@3.1.2: {}
 
-  c12@3.3.4(magicast@0.5.4):
+  c12@3.3.4(magicast@0.5.5):
     dependencies:
       chokidar: 5.0.0
       confbox: 0.2.4
@@ -11462,7 +11488,7 @@ snapshots:
       pkg-types: 2.3.0
       rc9: 3.0.1
     optionalDependencies:
-      magicast: 0.5.4
+      magicast: 0.5.5
 
   cacheable@2.5.0:
     dependencies:
@@ -12109,7 +12135,7 @@ snapshots:
 
   estree-walker@3.0.3:
     dependencies:
-      '@types/estree': 1.0.8
+      '@types/estree': 1.0.9
 
   esutils@2.0.3: {}
 
@@ -13560,7 +13586,7 @@ snapshots:
     dependencies:
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  magicast@0.5.4:
+  magicast@0.5.5:
     dependencies:
       '@babel/parser': 7.29.7
       '@babel/types': 7.29.7
@@ -13784,6 +13810,8 @@ snapshots:
   object-inspect@1.13.4: {}
 
   obug@2.1.4: {}
+
+  obug@3.0.0: {}
 
   ohash@2.0.11: {}
 
@@ -14094,9 +14122,9 @@ snapshots:
       '@jest/schemas': 30.5.0
       ansi-styles: 5.2.0
 
-  prisma@7.10.1(@types/node@24.13.3)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(magicast@0.5.4)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@5.9.3):
+  prisma@7.10.1(@types/node@24.13.3)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(magicast@0.5.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@5.9.3):
     dependencies:
-      '@prisma/config': 7.10.1(magicast@0.5.4)
+      '@prisma/config': 7.10.1(magicast@0.5.5)
       '@prisma/dev': 0.24.17(typescript@5.9.3)
       '@prisma/engines': 7.10.1
       '@prisma/studio-core': 0.33.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -14611,6 +14639,8 @@ snapshots:
 
   std-env@4.2.0: {}
 
+  std-env@4.3.0: {}
+
   streamx@2.25.0:
     dependencies:
       events-universal: 1.0.1
@@ -14850,6 +14880,8 @@ snapshots:
 
   tinyrainbow@3.1.1: {}
 
+  tinyrainbow@3.2.0: {}
+
   tldts-core@6.1.86: {}
 
   tldts-core@7.4.10: {}
@@ -15081,7 +15113,7 @@ snapshots:
       tsx: 4.23.15
       yaml: 2.9.0
 
-  vitest@4.1.10(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/coverage-v8@4.1.10)(jsdom@30.1.3)(vite@8.3.4(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.46.1)(tsx@4.23.15)(yaml@2.9.0)):
+  vitest@4.1.10(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(@vitest/coverage-v8@5.0.5)(jsdom@30.1.3)(vite@8.3.4(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.46.1)(tsx@4.23.15)(yaml@2.9.0)):
     dependencies:
       '@vitest/expect': 4.1.10
       '@vitest/mocker': 4.1.10(vite@8.3.4(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.46.1)(tsx@4.23.15)(yaml@2.9.0))
@@ -15106,7 +15138,7 @@ snapshots:
     optionalDependencies:
       '@opentelemetry/api': 1.9.1
       '@types/node': 24.13.3
-      '@vitest/coverage-v8': 4.1.10(vitest@4.1.10)
+      '@vitest/coverage-v8': 5.0.5(vitest@4.1.10)
       jsdom: 30.1.3
     transitivePeerDependencies:
       - msw
