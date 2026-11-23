@@ -104,7 +104,7 @@
     "@nestjs/cli": "^11.0.24",
     "@nestjs/schematics": "^11.1.0",
     "@nestjs/testing": "^11.2.7",
-    "@testcontainers/postgresql": "^12.2.0",
+    "@testcontainers/postgresql": "^12.2.2",
     "@types/jest": "^30.0.0",
     "@types/node": "^24.13.3",
     "@types/nodemailer": "^8.0.1",
@@ -112,7 +112,7 @@
     "@types/ws": "^8.18.2",
     "eslint": "^10.12.0",
     "jest": "^30.5.2",
-    "testcontainers": "^12.2.0",
+    "testcontainers": "^12.2.2",
     "ts-jest": "^29.4.14",
     "typescript": "^5.7.3"
   }
